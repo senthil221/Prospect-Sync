@@ -14,7 +14,7 @@ test("ships full-field preservation, filters, and configurable columns", async (
 
   assert.match(dashboard, /Field coverage/);
   assert.match(dashboard, /Choose columns/);
-  assert.match(dashboard, /Use multiple values in each rule/);
+  assert.match(dashboard, /Build precise reusable segments/);
   assert.match(dashboard, /MultiValueSelect/);
   assert.match(dashboard, /matches any value/);
   assert.match(dashboard, /master-scroll-top/);

@@ -25,6 +25,25 @@ function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "CL";
 }
 
+type IconName = "home" | "database" | "company" | "clients" | "coverage" | "quality" | "upload" | "search" | "plus" | "filter" | "columns" | "check" | "arrow";
+
+function AppIcon({ name, size = 18 }: { name: IconName; size?: number }) {
+  const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+  if (name === "home") return <svg {...common}><path d="m3 11 9-8 9 8"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></svg>;
+  if (name === "database") return <svg {...common}><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7"/></svg>;
+  if (name === "company") return <svg {...common}><path d="M4 21V4h10v17"/><path d="M14 9h6v12"/><path d="M8 8h2M8 12h2M8 16h2M17 13h1M17 17h1"/></svg>;
+  if (name === "clients") return <svg {...common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
+  if (name === "coverage") return <svg {...common}><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4M8 11h6M11 8v6"/></svg>;
+  if (name === "quality") return <svg {...common}><path d="M12 3 4.5 6v5.5c0 4.7 3.2 8 7.5 9.5 4.3-1.5 7.5-4.8 7.5-9.5V6z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></svg>;
+  if (name === "upload") return <svg {...common}><path d="M12 16V3M7 8l5-5 5 5"/><path d="M5 14v6h14v-6"/></svg>;
+  if (name === "search") return <svg {...common}><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>;
+  if (name === "plus") return <svg {...common}><path d="M12 5v14M5 12h14"/></svg>;
+  if (name === "filter") return <svg {...common}><path d="M4 6h16M7 12h10M10 18h4"/></svg>;
+  if (name === "columns") return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/></svg>;
+  if (name === "check") return <svg {...common}><path d="m5 12 4 4L19 6"/></svg>;
+  return <svg {...common}><path d="M5 12h14M13 6l6 6-6 6"/></svg>;
+}
+
 function uniqueHeaders(headers: string[]) {
   const used = new Map<string, number>();
   return headers.map((header, index) => {
@@ -93,14 +112,14 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
   return data;
 }
 
-const navItems: Array<{ id: Section; label: string; mark: string }> = [
-  { id: "overview", label: "Overview", mark: "⌂" },
-  { id: "prospects", label: "Master database", mark: "◉" },
-  { id: "companies", label: "Companies", mark: "▦" },
-  { id: "clients", label: "Clients & lists", mark: "◇" },
-  { id: "coverage", label: "Coverage checker", mark: "◫" },
-  { id: "quality", label: "Data quality", mark: "✓" },
-  { id: "imports", label: "Import CSV", mark: "↑" },
+const navItems: Array<{ id: Section; label: string; mark: IconName }> = [
+  { id: "overview", label: "Overview", mark: "home" },
+  { id: "prospects", label: "Master database", mark: "database" },
+  { id: "companies", label: "Companies", mark: "company" },
+  { id: "clients", label: "Clients & lists", mark: "clients" },
+  { id: "coverage", label: "Coverage checker", mark: "coverage" },
+  { id: "quality", label: "Data quality", mark: "quality" },
+  { id: "imports", label: "Import CSV", mark: "upload" },
 ];
 
 export default function DashboardApp({ currentUserEmail }: { currentUserEmail: string }) {
@@ -211,9 +230,9 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">P</span><span>Prospect <span>Sync</span></span></div>
+        <div className="brand"><span className="brand-mark"><AppIcon name="database" size={17}/></span><span>Prospect <span>Sync</span></span></div>
         <div className="workspace"><span className="workspace-avatar">PA</span><div><strong>Prospect Agency</strong><small>Internal workspace</small></div><span className="chevron">⌄</span></div>
-        <nav aria-label="Primary navigation">{navItems.map((item) => <button key={item.id} aria-current={section === item.id ? "page" : undefined} className={section === item.id ? "active" : ""} onClick={() => navigate(item.id)}><span aria-hidden="true">{item.mark}</span>{item.label}</button>)}</nav>
+        <nav aria-label="Primary navigation">{navItems.map((item) => <button key={item.id} aria-current={section === item.id ? "page" : undefined} className={section === item.id ? "active" : ""} onClick={() => navigate(item.id)}><span aria-hidden="true"><AppIcon name={item.mark} size={17}/></span>{item.label}</button>)}</nav>
         <div className="sidebar-note"><span className="pulse"/><div><strong>Master sync active</strong><small>Every import updates one source of truth</small></div></div>
         <a className="profile" href="/auth/signout"><span className="profile-avatar">{initials(currentUserEmail)}</span><div><strong>{currentUserEmail}</strong><small>Sign out</small></div></a>
       </aside>
@@ -222,8 +241,8 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
         <header className="topbar">
           <div><p className="eyebrow">DATABASE WORKSPACE</p><h1>{selectedClient ? selectedClient.name : title}</h1></div>
           <div className="top-actions">
-            {(section === "prospects" || section === "companies") && <label className="search"><span>⌕</span><input aria-label="Search" value={search} onChange={(event) => { setSearch(event.target.value); if (section === "prospects") setProspectPage(1); }} placeholder={`Search ${section}...`} /></label>}
-            <button className="primary" onClick={() => navigate("imports")}><span>＋</span> Import list</button>
+            {(section === "prospects" || section === "companies") && <label className="search"><span><AppIcon name="search" size={16}/></span><input aria-label="Search" value={search} onChange={(event) => { setSearch(event.target.value); if (section === "prospects") setProspectPage(1); }} placeholder={`Search ${section}...`} /></label>}
+            <button className="primary" onClick={() => navigate("imports")}><AppIcon name="plus" size={15}/> Import list</button>
           </div>
         </header>
 
@@ -253,16 +272,18 @@ function LoadingState() {
 
 function Overview({ stats, recentImports, clients, onImport, onViewMaster, onDeleteImport }: { stats: typeof emptyStats; recentImports: ImportRecord[]; clients: ClientRecord[]; onImport: () => void; onViewMaster: () => void; onDeleteImport: (item: ImportRecord) => void }) {
   const cards = [
-    ["Unique prospects", stats.prospects, "Master records", "violet"],
-    ["Known companies", stats.companies, "Matched by domain", "blue"],
-    ["Client lists", stats.lists, `${stats.clients} active clients`, "amber"],
-    ["Duplicates prevented", stats.duplicatesDetected, "Linked, not copied", "green"],
+    { label: "Unique prospects", value: stats.prospects, note: "Clean master records", color: "violet", icon: "database" as IconName },
+    { label: "Known companies", value: stats.companies, note: "Matched by name or domain", color: "blue", icon: "company" as IconName },
+    { label: "Client lists", value: stats.lists, note: `${stats.clients} active clients`, color: "amber", icon: "clients" as IconName },
+    { label: "Duplicates prevented", value: stats.duplicatesDetected, note: "Reused instead of copied", color: "green", icon: "quality" as IconName },
   ];
+  const uniqueRate = stats.rowsImported ? Math.round((stats.prospects / stats.rowsImported) * 100) : 0;
+  const reuseRate = stats.rowsImported ? Math.round((stats.duplicatesDetected / stats.rowsImported) * 100) : 0;
   return <>
-    <div className="welcome"><div><p className="eyebrow">MASTER DATABASE</p><h2>One clean source for every prospect.</h2><p>Upload a client list. Prospect Sync keeps the list intact, finds existing people, and syncs new data into your master database.</p><div className="welcome-actions"><button className="primary" onClick={onImport}>Import your first CSV</button><button className="secondary" onClick={onViewMaster}>View master database</button></div></div><div className="sync-visual"><div className="file-chip">CSV<span>Client list</span></div><div className="sync-line"><i/><i/><i/></div><div className="database-chip"><b>◉</b><span>Master database<small>Unique & synchronized</small></span></div></div></div>
-    <div className="metric-grid">{cards.map(([label, value, note, color]) => <article className={`metric-card ${color}`} key={String(label)}><div className="metric-icon">{color === "violet" ? "◉" : color === "blue" ? "▦" : color === "amber" ? "◇" : "✓"}</div><p>{label}</p><strong>{formatNumber(value)}</strong><small>{note}</small></article>)}</div>
+    <div className="welcome"><div><div className="hero-status"><span/><strong>Database healthy</strong><small>Live sync is active</small></div><p className="eyebrow">MASTER PROSPECT OPERATIONS</p><h2>Your agency’s prospect intelligence, in one place.</h2><p>Know what you already own, reuse clean data across clients, and stop paying to scrape the same prospects twice.</p><div className="welcome-actions"><button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import a client list</button><button className="secondary" onClick={onViewMaster}>Explore master database <AppIcon name="arrow" size={15}/></button></div></div><div className="sync-visual"><div className="file-chip"><AppIcon name="upload" size={20}/><span>Client CSV</span></div><div className="sync-line"><i/><i/><i/></div><div className="database-chip"><b><AppIcon name="database" size={19}/></b><span>Master database<small>{formatNumber(stats.prospects)} unique prospects</small></span></div></div></div>
+    <div className="metric-grid">{cards.map((card) => <article className={`metric-card ${card.color}`} key={card.label}><div className="metric-icon"><AppIcon name={card.icon} size={17}/></div><p>{card.label}</p><strong>{formatNumber(card.value)}</strong><small>{card.note}</small><span className="metric-arrow"><AppIcon name="arrow" size={14}/></span></article>)}</div>
     <div className="dashboard-grid"><article className="panel"><div className="panel-head"><div><h3>Recent imports</h3><p>Latest client lists synchronized with the master</p></div><button onClick={onImport}>Import CSV</button></div>{recentImports.length ? <div className="activity-list">{recentImports.map((item) => <div className="activity" key={item.id}><span className="csv-icon">CSV</span><div><strong>{item.file_name}</strong><small>{item.client_name} · {item.list_name}</small></div><div className="activity-result"><strong>{formatNumber(item.processed_rows)} rows</strong><small>{formatNumber(item.duplicates_linked)} duplicates found</small></div><div className="activity-actions"><span className="status">Complete</span><button className="text-danger" onClick={() => onDeleteImport(item)}>Undo</button></div></div>)}</div> : <EmptyCompact text="Your completed imports will appear here." action="Import a CSV" onAction={onImport} />}</article>
-      <article className="panel coverage"><div className="panel-head"><div><h3>Database coverage</h3><p>Current organization</p></div></div><div className="coverage-row"><span>Rows processed</span><strong>{formatNumber(stats.rowsImported)}</strong></div><div className="coverage-row"><span>Unique master records</span><strong>{formatNumber(stats.prospects)}</strong></div><div className="coverage-row"><span>Known companies</span><strong>{formatNumber(stats.companies)}</strong></div><div className="coverage-track"><i style={{ width: stats.rowsImported ? `${Math.min(100, Math.round((stats.prospects / stats.rowsImported) * 100))}%` : "0%" }}/></div><p className="coverage-note">{stats.rowsImported ? `${Math.round((stats.duplicatesDetected / stats.rowsImported) * 100)}% of imported rows matched existing prospects.` : "Import a list to calculate master database coverage."}</p><div className="client-mini"><span>Clients</span><div>{clients.slice(0, 4).map((client) => <i key={client.id}>{initials(client.name)}</i>)}{clients.length > 4 && <i>+{clients.length - 4}</i>}</div></div></article></div>
+      <article className="panel coverage"><div className="panel-head"><div><h3>Database efficiency</h3><p>How effectively your data is being reused</p></div><span className="health-badge"><i/> Healthy</span></div><div className="coverage-spotlight"><strong>{reuseRate}%</strong><span>of imported rows matched data you already owned</span></div><div className="coverage-row"><span>Rows processed</span><strong>{formatNumber(stats.rowsImported)}</strong></div><div className="coverage-row"><span>Unique-record ratio</span><strong>{uniqueRate}%</strong></div><div className="coverage-row"><span>Known companies</span><strong>{formatNumber(stats.companies)}</strong></div><div className="coverage-track"><i style={{ width: `${Math.min(100, reuseRate)}%` }}/></div><p className="coverage-note">Every match prevents another duplicate record and helps reduce future scraping.</p><div className="client-mini"><span>Active client workspaces</span><div>{clients.slice(0, 4).map((client) => <i key={client.id}>{initials(client.name)}</i>)}{clients.length > 4 && <i>+{clients.length - 4}</i>}</div></div></article></div>
   </>;
 }
 
@@ -306,6 +327,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
   const [bulkClientId, setBulkClientId] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(true);
   const allColumns = useMemo(() => [...standardProspectFields, ...fields.map((field) => ({ id: field, label: field }))], [fields]);
 
   useEffect(() => {
@@ -427,7 +449,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
   return <section className="people-workspace">
     <div className="people-heading">
       <div><p className="eyebrow">PROSPECT INTELLIGENCE</p><h2>Find people</h2><p>Search, segment and reuse every prospect in your master database.</p></div>
-      <button className="primary" onClick={onImport}>↑ Import prospects</button>
+      <button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import prospects</button>
     </div>
     <div className="people-tabs">
       <button className={tab === "records" ? "active" : ""} onClick={() => setTab("records")}>All prospects <span>{formatNumber(total)}</span></button>
@@ -436,7 +458,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
     {tab === "coverage" ? <article className="panel field-coverage">
       <div className="coverage-summary"><span className="coverage-symbol">✓</span><div><strong>{formatNumber(fields.length)} uploaded fields available</strong><p>Every detected CSV field is synchronized and available for filtering or display.</p></div></div>
       <div className="coverage-groups"><section><h3>Standard columns</h3><div>{standardProspectFields.map((field, index) => <span className={`field-chip tone-${index % 4}`} key={field.id}>{field.label}</span>)}</div></section><section><h3>Uploaded CSV fields</h3><div>{fields.map((field, index) => <span className={`field-chip tone-${index % 4}`} key={field}>{field}</span>)}</div></section></div>
-    </article> : <div className="people-layout">
+    </article> : <div className={`people-layout ${filtersOpen ? "" : "filters-collapsed"}`}>
       <article className="panel results-panel">
         <div className="results-toolbar">
           <div><strong>{formatNumber(total)} people</strong><span>{filters.length ? `${filters.length} active filter${filters.length === 1 ? "" : "s"}` : "Master database"}</span></div>
@@ -444,7 +466,8 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
             <label><span className="sr-only">Saved ICP view</span><select defaultValue="" onChange={(event) => applyView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label>
             <button className="outline-button" onClick={() => void saveCurrentView()}>☆ Save view</button>
             <label><span className="sr-only">Sort prospects</span><select value={`${sort}:${direction}`} onChange={(event) => { const [nextSort, nextDirection] = event.target.value.split(":"); onSortChange(nextSort, nextDirection as "asc" | "desc"); }}><option value="created_at:desc">Newest first</option><option value="name:asc">Name A–Z</option><option value="company:asc">Company A–Z</option><option value="title:asc">Title A–Z</option><option value="last_contacted:desc">Recently contacted</option></select></label>
-            <div className="column-control"><button className="outline-button" onClick={() => setColumnMenu((open) => !open)}>▥ Columns <span>{visibleDefinitions.length}</span></button>{columnMenu && <div className="column-menu"><div><strong>Choose columns</strong><button onClick={() => { setVisibleColumns(defaultProspectColumns); localStorage.setItem("prospecthub-visible-columns", JSON.stringify(defaultProspectColumns)); }}>Reset</button></div>{allColumns.map((field) => <label key={field.id}><input type="checkbox" checked={visibleColumns.includes(field.id)} onChange={() => toggleColumn(field.id)} />{field.label}</label>)}</div>}</div>
+            <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {filters.length ? <span>{filters.length}</span> : null}</button>
+            <div className="column-control"><button className="outline-button" onClick={() => setColumnMenu((open) => !open)}><AppIcon name="columns" size={14}/> Columns <span>{visibleDefinitions.length}</span></button>{columnMenu && <div className="column-menu"><div><strong>Choose columns</strong><button onClick={() => { setVisibleColumns(defaultProspectColumns); localStorage.setItem("prospecthub-visible-columns", JSON.stringify(defaultProspectColumns)); }}>Reset</button></div>{allColumns.map((field) => <label key={field.id}><input type="checkbox" checked={visibleColumns.includes(field.id)} onChange={() => toggleColumn(field.id)} />{field.label}</label>)}</div>}</div>
           </div>
         </div>
         {notice ? <div className="inline-notice" role="status">{notice}<button aria-label="Dismiss notification" onClick={() => setNotice("")}>×</button></div> : null}
@@ -456,8 +479,8 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
         })}<button className="clear-filter-chip" onClick={() => onFiltersChange([])}>Clear all</button></div> : null}
         {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => selectedIds.has(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr className={selectedIds.has(person.id) ? "selected" : ""} key={person.id} onClick={() => onSelect(person)}><td className="select-column" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${person.full_name || "prospect"}`} type="checkbox" checked={selectedIds.has(person.id)} onChange={() => toggleSelected(person.id)}/></td>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "—"}</span> : <span title={value}>{value || "—"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)}–{formatNumber(lastRecord)} of {formatNumber(total)}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={filters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and every unique prospect will be synchronized here."} action={filters.length ? "Clear filters" : "Import CSV"} onAction={filters.length ? () => onFiltersChange([]) : onImport} />}
       </article>
-      <aside className="panel filter-panel">
-        <div className="filter-panel-head"><div><span className="filter-icon">≡</span><div><strong>Filters</strong><small>Use multiple values in each rule</small></div></div>{filters.length ? <button onClick={() => onFiltersChange([])}>Clear all</button> : null}</div>
+      {filtersOpen ? <aside className="panel filter-panel">
+        <div className="filter-panel-head"><div><span className="filter-icon"><AppIcon name="filter" size={16}/></span><div><strong>Filters</strong><small>Build precise reusable segments</small></div></div>{filters.length ? <button onClick={() => onFiltersChange([])}>Clear all</button> : null}</div>
         <div className="filter-body">{filters.length ? filters.map((filter, index) => <div className="filter-rule" key={filter.id}>
           <div className="filter-rule-head"><span>{String(index + 1).padStart(2, "0")}</span><select aria-label={`Filter ${index + 1} field`} value={filter.field} onChange={(event) => updateFilter(filter.id, { field: event.target.value, values: [] })}>{allColumns.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}</select><button aria-label="Remove filter" onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>×</button></div>
           <select className="filter-condition" value={filter.operator} onChange={(event) => updateFilter(filter.id, { operator: event.target.value as ProspectFilter["operator"] })}><option value="contains">Includes any</option><option value="equals">Exactly matches any</option><option value="not_contains">Excludes any</option><option value="not_equals">Does not equal</option><option value="not_empty">Is not empty</option><option value="empty">Is empty</option></select>
@@ -466,7 +489,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
           <button className="add-filter-button" onClick={() => addFilter()}>＋ Add filter</button>
           <div className="quick-filters"><small>QUICK FILTERS</small><button onClick={() => addFilter("__country")}>＋ Country</button><button onClick={() => addFilter("__title")}>＋ Job title</button><button onClick={() => addFilter("__seniority")}>＋ Seniority</button><button onClick={() => addFilter("Industry")}>＋ Industry</button></div>
         </div>
-      </aside>
+      </aside> : null}
     </div>}
   </section>;
 }
@@ -506,7 +529,8 @@ function MultiValueSelect({ values, options, onChange }: { values: string[]; opt
 }
 
 function CompanyTable({ companies, onImport }: { companies: Company[]; onImport: () => void }) {
-  return <article className="panel table-panel"><div className="panel-head"><div><p className="eyebrow">COMPANY COVERAGE</p><h3>{formatNumber(companies.length)} known companies</h3><p>Companies are matched by normalized website domain, then by name when a domain is missing.</p></div><button onClick={onImport}>＋ Add from CSV</button></div>{companies.length ? <div className="company-grid">{companies.map((company) => <div className="company-card" key={company.id}><span className="company-logo">{initials(company.name)}</span><div><strong>{company.name || company.domain || "Unnamed company"}</strong><a href={company.domain ? `https://${company.domain}` : undefined}>{company.domain || "No domain"}</a></div><div className="company-numbers"><span><b>{formatNumber(company.prospect_count)}</b> prospects</span><span><b>{formatNumber(company.client_count)}</b> clients</span></div><span className="known">Known</span></div>)}</div> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article>;
+  const covered = companies.filter((company) => company.prospect_count > 0).length;
+  return <section className="companies-workspace"><div className="section-intro company-intro"><div><p className="eyebrow">COMPANY INTELLIGENCE</p><h2>Your known company universe.</h2><p>See where prospect coverage already exists before building another contact list.</p></div><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div><div className="company-summary"><div><span>Companies in database</span><strong>{formatNumber(companies.length)}</strong></div><div><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong></div><div><span>Total linked prospects</span><strong>{formatNumber(companies.reduce((sum, company) => sum + company.prospect_count, 0))}</strong></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div><article className="panel company-table-panel"><div className="panel-head"><div><h3>Company database</h3><p>{formatNumber(companies.length)} organizations available</p></div></div>{companies.length ? <div className="table-wrap"><table className="company-table"><thead><tr><th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th></tr></thead><tbody>{companies.map((company) => <tr key={company.id}><td><div className="company-identity"><span className="company-logo">{initials(company.name)}</span><div><strong>{company.name || company.domain || "Unnamed company"}</strong><small>{company.prospect_count ? `${formatNumber(company.prospect_count)} people available` : "No prospects linked"}</small></div></div></td><td>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain}</a> : <span className="missing-value">No domain</span>}</td><td><strong>{formatNumber(company.prospect_count)}</strong></td><td>{formatNumber(company.client_count)} {company.client_count === 1 ? "client" : "clients"}</td><td>{new Date(company.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><span className={`coverage-status ${company.prospect_count ? "known" : "new"}`}>{company.prospect_count ? "Covered" : "Needs prospects"}</span></td></tr>)}</tbody></table></div> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article></section>;
 }
 
 function ClientsView({ clients, onOpen, onImport }: { clients: ClientRecord[]; onOpen: (client: ClientRecord) => void; onImport: () => void }) {
