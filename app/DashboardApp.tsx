@@ -1,0 +1,254 @@
+"use client";
+
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+
+type Section = "overview" | "prospects" | "companies" | "clients" | "imports";
+type ClientRecord = { id: string; name: string; list_count: number; prospect_count: number };
+type ListRecord = { id: string; name: string; source_file_name: string; uploaded_rows: number; unique_added: number; duplicates_linked: number; prospect_count: number; created_at: string };
+type Prospect = Record<string, unknown> & { id: string; full_name: string; work_email: string; title: string; company_name: string; company_domain: string; client_count: number; list_count: number; all_data: string | Record<string, string> };
+type Company = { id: string; name: string; domain: string; prospect_count: number; client_count: number; created_at: string };
+type ImportRecord = { id: string; file_name: string; client_name: string; list_name: string; processed_rows: number; unique_added: number; duplicates_linked: number; status: string; created_at: string };
+
+const emptyStats = { prospects: 0, companies: 0, clients: 0, lists: 0, rowsImported: 0, duplicatesDetected: 0 };
+
+function formatNumber(value: unknown) {
+  return new Intl.NumberFormat("en-IN").format(Number(value ?? 0));
+}
+
+function initials(name: string) {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "CL";
+}
+
+function uniqueHeaders(headers: string[]) {
+  const used = new Map<string, number>();
+  return headers.map((header, index) => {
+    const base = header.trim() || `Column ${index + 1}`;
+    const normalized = base.toLowerCase();
+    const count = (used.get(normalized) ?? 0) + 1;
+    used.set(normalized, count);
+    return count === 1 ? base : `${base} (${count})`;
+  });
+}
+
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let value = "";
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') {
+      if (quoted && text[index + 1] === '"') { value += '"'; index += 1; }
+      else quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      row.push(value); value = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && text[index + 1] === "\n") index += 1;
+      row.push(value); value = "";
+      if (row.some((cell) => cell.trim())) rows.push(row);
+      row = [];
+    } else value += char;
+  }
+  row.push(value);
+  if (row.some((cell) => cell.trim())) rows.push(row);
+  if (!rows.length) throw new Error("The CSV is empty.");
+  return { headers: uniqueHeaders(rows[0]), rows: rows.slice(1) };
+}
+
+async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(path, options);
+  const data = await response.json() as T & { error?: string };
+  if (!response.ok) throw new Error(data.error || "Something went wrong.");
+  return data;
+}
+
+const navItems: Array<{ id: Section; label: string; mark: string }> = [
+  { id: "overview", label: "Overview", mark: "⌂" },
+  { id: "prospects", label: "Master database", mark: "◉" },
+  { id: "companies", label: "Companies", mark: "▦" },
+  { id: "clients", label: "Clients & lists", mark: "◇" },
+  { id: "imports", label: "Import CSV", mark: "↑" },
+];
+
+export default function DashboardApp() {
+  const [section, setSection] = useState<Section>("overview");
+  const [stats, setStats] = useState(emptyStats);
+  const [recentImports, setRecentImports] = useState<ImportRecord[]>([]);
+  const [clients, setClients] = useState<ClientRecord[]>([]);
+  const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [prospectTotal, setProspectTotal] = useState(0);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [lists, setLists] = useState<ListRecord[]>([]);
+  const [selectedClient, setSelectedClient] = useState<ClientRecord | null>(null);
+  const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const refreshDashboard = useCallback(async () => {
+    try {
+      const [dashboard, clientData] = await Promise.all([
+        api<{ stats: typeof emptyStats; recentImports: ImportRecord[] }>("/api/dashboard"),
+        api<{ clients: ClientRecord[] }>("/api/clients"),
+      ]);
+      setStats(dashboard.stats); setRecentImports(dashboard.recentImports); setClients(clientData.clients);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to load data."); }
+  }, []);
+
+  useEffect(() => { refreshDashboard().finally(() => setLoading(false)); }, [refreshDashboard]);
+
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (section === "prospects") {
+        const data = await api<{ prospects: Prospect[]; total: number }>(`/api/prospects?search=${encodeURIComponent(search)}`);
+        setProspects(data.prospects); setProspectTotal(data.total);
+      }
+      if (section === "companies") {
+        const data = await api<{ companies: Company[] }>(`/api/companies?search=${encodeURIComponent(search)}`);
+        setCompanies(data.companies);
+      }
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [section, search, stats.prospects]);
+
+  async function openClient(client: ClientRecord) {
+    setSelectedClient(client);
+    const data = await api<{ lists: ListRecord[] }>(`/api/lists?clientId=${client.id}`);
+    setLists(data.lists);
+  }
+
+  function navigate(next: Section) {
+    setSection(next); setSearch(""); setError("");
+    if (next !== "clients") setSelectedClient(null);
+  }
+
+  const title = navItems.find((item) => item.id === section)?.label ?? "Overview";
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand"><span className="brand-mark">P</span><span>Prospect<span>Hub</span></span></div>
+        <div className="workspace"><span className="workspace-avatar">PA</span><div><strong>Prospect Agency</strong><small>Internal workspace</small></div><span className="chevron">⌄</span></div>
+        <nav>{navItems.map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => navigate(item.id)}><span>{item.mark}</span>{item.label}</button>)}</nav>
+        <div className="sidebar-note"><span className="pulse"/><div><strong>Master sync active</strong><small>Every import updates one source of truth</small></div></div>
+        <div className="profile"><span className="profile-avatar">SN</span><div><strong>Agency Admin</strong><small>Full access</small></div></div>
+      </aside>
+
+      <main>
+        <header className="topbar">
+          <div><p className="eyebrow">DATABASE WORKSPACE</p><h1>{selectedClient ? selectedClient.name : title}</h1></div>
+          <div className="top-actions">
+            {(section === "prospects" || section === "companies") && <label className="search"><span>⌕</span><input aria-label="Search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${section}...`} /></label>}
+            <button className="primary" onClick={() => navigate("imports")}><span>＋</span> Import list</button>
+          </div>
+        </header>
+
+        {error && <div className="alert"><span>!</span>{error}<button onClick={() => setError("")}>×</button></div>}
+        <section className="content">
+          {loading ? <LoadingState /> : null}
+          {!loading && section === "overview" && <Overview stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} />}
+          {!loading && section === "prospects" && <ProspectTable prospects={prospects} total={prospectTotal} onSelect={setSelectedProspect} onImport={() => navigate("imports")} />}
+          {!loading && section === "companies" && <CompanyTable companies={companies} onImport={() => navigate("imports")} />}
+          {!loading && section === "clients" && !selectedClient && <ClientsView clients={clients} onOpen={openClient} onImport={() => navigate("imports")} />}
+          {!loading && section === "clients" && selectedClient && <ClientDetail client={selectedClient} lists={lists} onBack={() => setSelectedClient(null)} onImport={() => navigate("imports")} />}
+          {!loading && section === "imports" && <ImportView clients={clients} onComplete={async () => { await refreshDashboard(); navigate("overview"); }} />}
+        </section>
+      </main>
+      {selectedProspect && <ProspectDrawer prospect={selectedProspect} onClose={() => setSelectedProspect(null)} />}
+    </div>
+  );
+}
+
+function LoadingState() {
+  return <div className="loading-state"><div className="loading-bar"/><div className="loading-grid"><span/><span/><span/><span/></div></div>;
+}
+
+function Overview({ stats, recentImports, clients, onImport, onViewMaster }: { stats: typeof emptyStats; recentImports: ImportRecord[]; clients: ClientRecord[]; onImport: () => void; onViewMaster: () => void }) {
+  const cards = [
+    ["Unique prospects", stats.prospects, "Master records", "violet"],
+    ["Known companies", stats.companies, "Matched by domain", "blue"],
+    ["Client lists", stats.lists, `${stats.clients} active clients`, "amber"],
+    ["Duplicates prevented", stats.duplicatesDetected, "Linked, not copied", "green"],
+  ];
+  return <>
+    <div className="welcome"><div><p className="eyebrow">MASTER DATABASE</p><h2>One clean source for every prospect.</h2><p>Upload a client list. ProspectHub keeps the list intact, finds existing people, and syncs new data into your master database.</p><div className="welcome-actions"><button className="primary" onClick={onImport}>Import your first CSV</button><button className="secondary" onClick={onViewMaster}>View master database</button></div></div><div className="sync-visual"><div className="file-chip">CSV<span>Client list</span></div><div className="sync-line"><i/><i/><i/></div><div className="database-chip"><b>◉</b><span>Master database<small>Unique & synchronized</small></span></div></div></div>
+    <div className="metric-grid">{cards.map(([label, value, note, color]) => <article className={`metric-card ${color}`} key={String(label)}><div className="metric-icon">{color === "violet" ? "◉" : color === "blue" ? "▦" : color === "amber" ? "◇" : "✓"}</div><p>{label}</p><strong>{formatNumber(value)}</strong><small>{note}</small></article>)}</div>
+    <div className="dashboard-grid"><article className="panel"><div className="panel-head"><div><h3>Recent imports</h3><p>Latest client lists synchronized with the master</p></div><button onClick={onImport}>Import CSV</button></div>{recentImports.length ? <div className="activity-list">{recentImports.map((item) => <div className="activity" key={item.id}><span className="csv-icon">CSV</span><div><strong>{item.file_name}</strong><small>{item.client_name} · {item.list_name}</small></div><div className="activity-result"><strong>{formatNumber(item.processed_rows)} rows</strong><small>{formatNumber(item.duplicates_linked)} duplicates found</small></div><span className="status">Complete</span></div>)}</div> : <EmptyCompact text="Your completed imports will appear here." action="Import a CSV" onAction={onImport} />}</article>
+      <article className="panel coverage"><div className="panel-head"><div><h3>Database coverage</h3><p>Current organization</p></div></div><div className="coverage-row"><span>Rows processed</span><strong>{formatNumber(stats.rowsImported)}</strong></div><div className="coverage-row"><span>Unique master records</span><strong>{formatNumber(stats.prospects)}</strong></div><div className="coverage-row"><span>Known companies</span><strong>{formatNumber(stats.companies)}</strong></div><div className="coverage-track"><i style={{ width: stats.rowsImported ? `${Math.min(100, Math.round((stats.prospects / stats.rowsImported) * 100))}%` : "0%" }}/></div><p className="coverage-note">{stats.rowsImported ? `${Math.round((stats.duplicatesDetected / stats.rowsImported) * 100)}% of imported rows matched existing prospects.` : "Import a list to calculate master database coverage."}</p><div className="client-mini"><span>Clients</span><div>{clients.slice(0, 4).map((client) => <i key={client.id}>{initials(client.name)}</i>)}{clients.length > 4 && <i>+{clients.length - 4}</i>}</div></div></article></div>
+  </>;
+}
+
+function ProspectTable({ prospects, total, onSelect, onImport }: { prospects: Prospect[]; total: number; onSelect: (row: Prospect) => void; onImport: () => void }) {
+  return <article className="panel table-panel"><div className="panel-head"><div><p className="eyebrow">CANONICAL RECORDS</p><h3>{formatNumber(total)} unique prospects</h3><p>One person appears once here, even when used across several client lists.</p></div><button onClick={onImport}>＋ Add from CSV</button></div>{prospects.length ? <div className="table-wrap"><table><thead><tr><th>Prospect</th><th>Company</th><th>Title</th><th>Reach</th><th>Used in</th><th/></tr></thead><tbody>{prospects.map((person) => <tr key={person.id} onClick={() => onSelect(person)}><td><div className="person"><span>{initials(person.full_name || String(person.work_email))}</span><div><strong>{person.full_name || "Unnamed prospect"}</strong><small>{person.work_email || "No work email"}</small></div></div></td><td><strong>{person.company_name || "—"}</strong><small className="cell-note">{person.company_domain || "No domain"}</small></td><td>{person.title || "—"}</td><td><span className="data-pill">{Object.values(parseAllData(person.all_data)).filter(Boolean).length} fields</span></td><td>{formatNumber(person.client_count)} clients · {formatNumber(person.list_count)} lists</td><td className="arrow">›</td></tr>)}</tbody></table></div> : <EmptyState title="No master prospects yet" text="Import a CSV and every unique prospect will be synchronized here." action="Import CSV" onAction={onImport} />}</article>;
+}
+
+function CompanyTable({ companies, onImport }: { companies: Company[]; onImport: () => void }) {
+  return <article className="panel table-panel"><div className="panel-head"><div><p className="eyebrow">COMPANY COVERAGE</p><h3>{formatNumber(companies.length)} known companies</h3><p>Companies are matched by normalized website domain, then by name when a domain is missing.</p></div><button onClick={onImport}>＋ Add from CSV</button></div>{companies.length ? <div className="company-grid">{companies.map((company) => <div className="company-card" key={company.id}><span className="company-logo">{initials(company.name)}</span><div><strong>{company.name || company.domain || "Unnamed company"}</strong><a href={company.domain ? `https://${company.domain}` : undefined}>{company.domain || "No domain"}</a></div><div className="company-numbers"><span><b>{formatNumber(company.prospect_count)}</b> prospects</span><span><b>{formatNumber(company.client_count)}</b> clients</span></div><span className="known">Known</span></div>)}</div> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article>;
+}
+
+function ClientsView({ clients, onOpen, onImport }: { clients: ClientRecord[]; onOpen: (client: ClientRecord) => void; onImport: () => void }) {
+  return <><div className="section-intro"><div><p className="eyebrow">CLIENT WORKSPACES</p><h2>Keep every ICP list organized.</h2><p>Each client keeps its original lists while sharing clean prospect records with the master.</p></div><button className="primary" onClick={onImport}>＋ Import client list</button></div>{clients.length ? <div className="clients-grid">{clients.map((client, index) => <button className="client-card" key={client.id} onClick={() => onOpen(client)}><span className={`client-logo tone-${index % 4}`}>{initials(client.name)}</span><div className="client-title"><strong>{client.name}</strong><small>Active workspace</small></div><div className="client-stats"><span><b>{formatNumber(client.prospect_count)}</b>prospects</span><span><b>{formatNumber(client.list_count)}</b>lists</span></div><div className="client-link">Open client <span>→</span></div></button>)}</div> : <EmptyState title="Create your first client" text="Import a list and enter the client name. The workspace will be created automatically." action="Import client list" onAction={onImport} />}</>;
+}
+
+function ClientDetail({ client, lists, onBack, onImport }: { client: ClientRecord; lists: ListRecord[]; onBack: () => void; onImport: () => void }) {
+  return <><button className="back" onClick={onBack}>← All clients</button><div className="client-hero"><span className="client-logo tone-0">{initials(client.name)}</span><div><p className="eyebrow">CLIENT WORKSPACE</p><h2>{client.name}</h2><p>{formatNumber(client.prospect_count)} prospects across {formatNumber(client.list_count)} lists</p></div><button className="primary" onClick={onImport}>＋ Import another list</button></div><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Every list remains separate and synchronized with the master.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Source file</th><th>Rows</th><th>New to master</th><th>Existing prospects</th><th>Imported</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><strong>{list.name}</strong></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></>;
+}
+
+function ImportView({ clients, onComplete }: { clients: ClientRecord[]; onComplete: () => Promise<void> }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [clientId, setClientId] = useState("");
+  const [newClient, setNewClient] = useState("");
+  const [listName, setListName] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [phase, setPhase] = useState<"idle" | "reading" | "uploading" | "done">("idle");
+  const [message, setMessage] = useState("");
+  const [summary, setSummary] = useState<{ processed_rows: number; unique_added: number; duplicates_linked: number } | null>(null);
+  const canSubmit = file && listName.trim() && (clientId || newClient.trim()) && phase === "idle";
+
+  function pickFile(event: ChangeEvent<HTMLInputElement>) {
+    const next = event.target.files?.[0] ?? null;
+    setFile(next); setMessage("");
+    if (next && !listName) setListName(next.name.replace(/\.csv$/i, ""));
+  }
+
+  async function startImport() {
+    if (!file || !canSubmit) return;
+    try {
+      setPhase("reading"); setMessage("Reading CSV and checking the columns…");
+      const parsed = parseCsv(await file.text());
+      if (!parsed.headers.length || !parsed.rows.length) throw new Error("The CSV needs a header row and at least one data row.");
+      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: clientId || undefined, clientName: newClient || undefined, listName, fileName: file.name, totalRows: parsed.rows.length }) });
+      setPhase("uploading"); setMessage(`Synchronizing ${formatNumber(parsed.rows.length)} rows with the master database…`);
+      const chunkSize = 100;
+      for (let index = 0; index < parsed.rows.length; index += chunkSize) {
+        const chunk = parsed.rows.slice(index, index + chunkSize);
+        await api("/api/imports/chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId, listId: started.listId, headers: parsed.headers, rows: chunk }) });
+        setProgress(Math.round(((index + chunk.length) / parsed.rows.length) * 100));
+      }
+      const completed = await api<{ summary: { processed_rows: number; unique_added: number; duplicates_linked: number } }>("/api/imports/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId, listId: started.listId }) });
+      setSummary(completed.summary); setPhase("done"); setMessage("Import complete. Your client list and master database are synchronized.");
+    } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Import failed."); setPhase("idle"); }
+  }
+
+  if (phase === "done" && summary) return <div className="import-success"><span className="success-mark">✓</span><p className="eyebrow">IMPORT COMPLETE</p><h2>Your list is synchronized.</h2><p>{message}</p><div className="result-grid"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(summary.unique_added)}</strong><span>Added to master</span></div><div><strong>{formatNumber(summary.duplicates_linked)}</strong><span>Existing prospects linked</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
+
+  return <div className="import-layout"><div className="import-copy"><p className="eyebrow">CSV IMPORT</p><h2>Bring every list into one clean database.</h2><p>Download the Google Sheet as a CSV, choose the client, and upload it here. All columns are preserved. Existing prospects are linked; new prospects are added once.</p><ol><li><span>1</span><div><strong>Preserve the client list</strong><p>The original row and every uploaded field stay attached to the list.</p></div></li><li><span>2</span><div><strong>Match exact prospects</strong><p>Email, LinkedIn, or full name plus company domain are checked.</p></div></li><li><span>3</span><div><strong>Sync the master</strong><p>Missing fields are filled without overwriting existing master data.</p></div></li></ol></div><div className="import-card"><div className="form-field"><label>Client</label><select value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></div>{!clientId && <div className="form-field"><label>New client name</label><input value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}<div className="form-field"><label>List name</label><input value={listName} onChange={(event) => setListName(event.target.value)} placeholder="e.g. HR Leaders — India" /></div><label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={pickFile}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to import</small></> : <><strong>Choose a CSV file</strong><small>Download your Google Sheet as .csv</small></>}</label>{phase !== "idle" && <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div>}{message && phase === "idle" && <p className="form-error">{message}</p>}<button className="primary import-button" disabled={!canSubmit} onClick={startImport}>{phase === "idle" ? "Start import & sync" : "Processing…"}</button><p className="privacy-note">Your uploaded data is stored in your private database.</p></div></div>;
+}
+
+function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
+  const data = parseAllData(prospect.all_data);
+  return <div className="drawer-backdrop" onMouseDown={onClose}><aside className="drawer" onMouseDown={(event) => event.stopPropagation()}><button className="drawer-close" onClick={onClose}>×</button><div className="drawer-person"><span>{initials(prospect.full_name)}</span><div><p className="eyebrow">MASTER PROSPECT</p><h2>{prospect.full_name || "Unnamed prospect"}</h2><p>{prospect.title || "No title"} {prospect.company_name ? `at ${prospect.company_name}` : ""}</p></div></div><div className="drawer-summary"><span><b>{formatNumber(prospect.client_count)}</b>clients</span><span><b>{formatNumber(prospect.list_count)}</b>lists</span><span><b>{Object.keys(data).length}</b>data fields</span></div><h3>All synchronized data</h3><div className="field-list">{Object.entries(data).map(([field, value]) => <div key={field}><span>{field}</span><strong>{value || "—"}</strong></div>)}</div></aside></div>;
+}
+
+function parseAllData(data: Prospect["all_data"]) {
+  if (typeof data === "object" && data) return data as Record<string, string>;
+  try { return JSON.parse(String(data || "{}")) as Record<string, string>; } catch { return {}; }
+}
+
+function EmptyState({ title, text, action, onAction }: { title: string; text: string; action: string; onAction: () => void }) {
+  return <div className="empty"><span>◎</span><h3>{title}</h3><p>{text}</p><button className="primary" onClick={onAction}>{action}</button></div>;
+}
+
+function EmptyCompact({ text, action, onAction }: { text: string; action: string; onAction: () => void }) {
+  return <div className="empty compact"><span>↑</span><p>{text}</p><button onClick={onAction}>{action}</button></div>;
+}
