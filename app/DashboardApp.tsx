@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Section = "overview" | "prospects" | "companies" | "clients" | "imports";
 type ClientRecord = { id: string; name: string; list_count: number; prospect_count: number };
@@ -32,6 +32,15 @@ function uniqueHeaders(headers: string[]) {
     used.set(normalized, count);
     return count === 1 ? base : `${base} (${count})`;
   });
+}
+
+function deriveListName(fileName: string) {
+  return fileName
+    .replace(/^.*[\\/]/, "")
+    .replace(/\.csv$/i, "")
+    .replace(/[_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function parseCsv(text: string) {
@@ -253,6 +262,9 @@ function ProspectTable({ prospects, total, fields, filters, page, onFiltersChang
   const [visibleColumns, setVisibleColumns] = useState<string[]>(defaultProspectColumns);
   const [columnMenu, setColumnMenu] = useState(false);
   const [tab, setTab] = useState<"records" | "coverage">("records");
+  const [tableScrollWidth, setTableScrollWidth] = useState(0);
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const allColumns = useMemo(() => [...standardProspectFields, ...fields.map((field) => ({ id: field, label: field }))], [fields]);
 
   useEffect(() => {
@@ -288,6 +300,21 @@ function ProspectTable({ prospects, total, fields, filters, page, onFiltersChang
   const firstRecord = total ? (page - 1) * 50 + 1 : 0;
   const lastRecord = Math.min(page * 50, total);
 
+  useEffect(() => {
+    const scrollArea = tableScrollRef.current;
+    const table = scrollArea?.querySelector("table");
+    if (!scrollArea || !table) return;
+    const measure = () => setTableScrollWidth(table.scrollWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(table);
+    return () => observer.disconnect();
+  }, [prospects, visibleDefinitions.length]);
+
+  function syncHorizontalScroll(source: HTMLDivElement, target: HTMLDivElement | null) {
+    if (target && Math.abs(target.scrollLeft - source.scrollLeft) > 1) target.scrollLeft = source.scrollLeft;
+  }
+
   function addFilter(field = "__country") {
     onFiltersChange([...filters, { id: crypto.randomUUID(), field, operator: "contains", values: [] }]);
   }
@@ -315,7 +342,7 @@ function ProspectTable({ prospects, total, fields, filters, page, onFiltersChang
           if (filter.operator === "empty" || filter.operator === "not_empty") return [<button key={filter.id} onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>{label}: {filter.operator === "empty" ? "Empty" : "Not empty"} <span>×</span></button>];
           return filter.values.map((value) => <button key={`${filter.id}-${value}`} onClick={() => updateFilter(filter.id, { values: filter.values.filter((item) => item !== value) })}>{label}: {value} <span>×</span></button>);
         })}<button className="clear-filter-chip" onClick={() => onFiltersChange([])}>Clear all</button></div> : null}
-        {prospects.length ? <><div className="master-table-wrap"><table className="master-data-table"><thead><tr>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr key={person.id} onClick={() => onSelect(person)}>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "—"}</span> : <span title={value}>{value || "—"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)}–{formatNumber(lastRecord)} of {formatNumber(total)}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={filters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and every unique prospect will be synchronized here."} action={filters.length ? "Clear filters" : "Import CSV"} onAction={filters.length ? () => onFiltersChange([]) : onImport} />}
+        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr key={person.id} onClick={() => onSelect(person)}>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "—"}</span> : <span title={value}>{value || "—"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)}–{formatNumber(lastRecord)} of {formatNumber(total)}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={filters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and every unique prospect will be synchronized here."} action={filters.length ? "Clear filters" : "Import CSV"} onAction={filters.length ? () => onFiltersChange([]) : onImport} />}
       </article>
       <aside className="panel filter-panel">
         <div className="filter-panel-head"><div><span className="filter-icon">≡</span><div><strong>Filters</strong><small>Use multiple values in each rule</small></div></div>{filters.length ? <button onClick={() => onFiltersChange([])}>Clear all</button> : null}</div>
@@ -393,7 +420,7 @@ function ImportView({ clients, onComplete }: { clients: ClientRecord[]; onComple
   async function pickFile(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0] ?? null;
     setFile(next); setFileAudit(null); setMessage("");
-    if (next && !listName) setListName(next.name.replace(/\.csv$/i, ""));
+    if (next) setListName(deriveListName(next.name));
     if (!next) return;
     try {
       const parsed = parseCsv(await next.text());

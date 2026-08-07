@@ -17,6 +17,9 @@ test("ships full-field preservation, filters, and configurable columns", async (
   assert.match(dashboard, /Use multiple values in each rule/);
   assert.match(dashboard, /MultiValueSelect/);
   assert.match(dashboard, /matches any value/);
+  assert.match(dashboard, /master-scroll-top/);
+  assert.match(dashboard, /syncHorizontalScroll/);
+  assert.match(dashboard, /deriveListName\(next\.name\)/);
   assert.match(dashboard, /All .* fields will be preserved/);
   assert.match(dashboard, /__name.*__company.*__email.*__title/s);
   assert.match(prospectsRoute, /search_prospect_workspace/);
