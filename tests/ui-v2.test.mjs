@@ -13,6 +13,9 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
   assert.match(dashboard, /function AppIcon/);
   assert.match(dashboard, /company-table/);
   assert.match(dashboard, /company-prospect-list/);
+  assert.match(dashboard, /function CompanyDrawer/);
+  assert.match(dashboard, /company-drawer/);
+  assert.doesNotMatch(dashboard, /company-prospect-row/);
   assert.match(dashboard, /filtersOpen/);
   assert.match(dashboard, /aria-multiselectable/);
   assert.match(dashboard, /View all fields/);
@@ -22,6 +25,7 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
   assert.match(styles, /html, body[\s\S]*font-size: 14px/);
   assert.match(styles, /\.master-data-table td[\s\S]*font-size: 13px/);
   assert.match(styles, /\.company-table/);
+  assert.match(styles, /\.company-drawer/);
   assert.match(styles, /@media \(max-width: 760px\)/);
   assert.match(styles, /prefers-reduced-motion/);
   assert.doesNotMatch(styles, /font-size: 6(?:\.5)?px/);

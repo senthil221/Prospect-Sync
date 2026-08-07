@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { mapProspect } from "../db/normalize";
 
 type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" | "quality" | "imports";
@@ -545,14 +545,14 @@ function MultiValueSelect({ values, options, onChange }: { values: string[]; opt
 
 function CompanyTable({ companies, onImport }: { companies: Company[]; onImport: () => void }) {
   const covered = companies.filter((company) => company.prospect_count > 0).length;
-  const [expandedId, setExpandedId] = useState("");
+  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [prospectsByCompany, setProspectsByCompany] = useState<Record<string, Prospect[]>>({});
   const [loadingCompany, setLoadingCompany] = useState("");
   const [companyError, setCompanyError] = useState("");
 
-  async function toggleCompany(company: Company) {
-    if (expandedId === company.id) { setExpandedId(""); return; }
-    setExpandedId(company.id); setCompanyError("");
+  async function openCompany(company: Company) {
+    setSelectedCompany(company);
+    setCompanyError("");
     if (prospectsByCompany[company.id] || !company.prospect_count) return;
     setLoadingCompany(company.id);
     try {
@@ -562,7 +562,36 @@ function CompanyTable({ companies, onImport }: { companies: Company[]; onImport:
     finally { setLoadingCompany(""); }
   }
 
-  return <section className="companies-workspace"><div className="section-intro company-intro"><div><p className="eyebrow">COMPANIES</p><h2>Companies already in your database.</h2><p>Open a company to see the prospects linked to it.</p></div><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div><div className="company-summary"><div><span>Companies in database</span><strong>{formatNumber(companies.length)}</strong></div><div><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong></div><div><span>Total linked prospects</span><strong>{formatNumber(companies.reduce((sum, company) => sum + company.prospect_count, 0))}</strong></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div>{companyError ? <div className="inline-error" role="alert">{companyError}</div> : null}<article className="panel company-table-panel"><div className="panel-head"><div><h3>Company database</h3><p>{formatNumber(companies.length)} companies. Click any row to see its prospects.</p></div></div>{companies.length ? <div className="table-wrap"><table className="company-table"><thead><tr><th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th></tr></thead><tbody>{companies.map((company) => { const expanded = expandedId === company.id; const companyProspects = prospectsByCompany[company.id] ?? []; return <Fragment key={company.id}><tr className={`company-row ${expanded ? "expanded" : ""}`} onClick={() => void toggleCompany(company)}><td><div className="company-identity"><button className="company-expand" aria-label={`${expanded ? "Collapse" : "Expand"} ${company.name}`} aria-expanded={expanded}>{expanded ? "−" : "+"}</button><span className="company-logo">{initials(company.name)}</span><div><strong>{company.name || company.domain || "Unnamed company"}</strong><small>{company.prospect_count ? `${formatNumber(company.prospect_count)} people available` : "No prospects linked"}</small></div></div></td><td onClick={(event) => event.stopPropagation()}>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain}</a> : <span className="missing-value">No domain</span>}</td><td><strong>{formatNumber(company.prospect_count)}</strong></td><td>{formatNumber(company.client_count)} {company.client_count === 1 ? "client" : "clients"}</td><td>{new Date(company.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><span className={`coverage-status ${company.prospect_count ? "known" : "new"}`}>{company.prospect_count ? "Covered" : "Needs prospects"}</span></td></tr>{expanded ? <tr className="company-prospect-row"><td colSpan={6}>{loadingCompany === company.id ? <div className="company-prospect-loading">Loading prospects…</div> : companyProspects.length ? <div className="company-prospect-list"><div className="company-prospect-head"><strong>Prospects at {company.name}</strong><span>{formatNumber(companyProspects.length)} loaded</span></div><table><thead><tr><th>Name</th><th>Title</th><th>Email</th><th>Seniority</th><th>Location</th></tr></thead><tbody>{companyProspects.map((prospect) => <tr key={prospect.id}><td><div className="compact-person"><span>{initials(prospect.full_name)}</span><strong>{prospect.full_name || "Unnamed prospect"}</strong></div></td><td>{prospect.title || "-"}</td><td>{prospect.work_email || prospect.personal_email || "-"}</td><td>{String(prospect.seniority || "-")}</td><td>{[prospect.city, prospect.country].filter(Boolean).join(", ") || "-"}</td></tr>)}</tbody></table></div> : <div className="company-prospect-loading">No linked prospects found.</div>}</td></tr> : null}</Fragment>; })}</tbody></table></div> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article></section>;
+  return <section className="companies-workspace">
+    <div className="section-intro company-intro"><div><p className="eyebrow">COMPANIES</p><h2>Companies already in your database.</h2><p>Open a company to see its prospects in a separate panel.</p></div><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div>
+    <div className="company-summary"><div><span>Companies in database</span><strong>{formatNumber(companies.length)}</strong></div><div><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong></div><div><span>Total linked prospects</span><strong>{formatNumber(companies.reduce((sum, company) => sum + company.prospect_count, 0))}</strong></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div>
+    {companyError ? <div className="inline-error" role="alert">{companyError}</div> : null}
+    <article className="panel company-table-panel"><div className="panel-head"><div><h3>Company database</h3><p>{formatNumber(companies.length)} companies. Click any row to open its details.</p></div></div>{companies.length ? <div className="table-wrap"><table className="company-table"><thead><tr><th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th></tr></thead><tbody>{companies.map((company) => <tr className="company-row" key={company.id} onClick={() => void openCompany(company)}><td><div className="company-identity"><button className="company-open" aria-label={`Open ${company.name || company.domain || "company"} details`} onClick={(event) => { event.stopPropagation(); void openCompany(company); }}><AppIcon name="arrow" size={15}/></button><span className="company-logo">{initials(company.name)}</span><div><strong>{company.name || company.domain || "Unnamed company"}</strong><small>{company.prospect_count ? `${formatNumber(company.prospect_count)} people available` : "No prospects linked"}</small></div></div></td><td onClick={(event) => event.stopPropagation()}>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain}</a> : <span className="missing-value">No domain</span>}</td><td><strong>{formatNumber(company.prospect_count)}</strong></td><td>{formatNumber(company.client_count)} {company.client_count === 1 ? "client" : "clients"}</td><td>{new Date(company.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><span className={`coverage-status ${company.prospect_count ? "known" : "new"}`}>{company.prospect_count ? "Covered" : "Needs prospects"}</span></td></tr>)}</tbody></table></div> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article>
+    {selectedCompany ? <CompanyDrawer company={selectedCompany} prospects={prospectsByCompany[selectedCompany.id] ?? []} loading={loadingCompany === selectedCompany.id} error={companyError} onClose={() => { setSelectedCompany(null); setCompanyError(""); }} /> : null}
+  </section>;
+}
+
+function CompanyDrawer({ company, prospects, loading, error, onClose }: { company: Company; prospects: Prospect[]; loading: boolean; error: string; onClose: () => void }) {
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) { if (event.key === "Escape") onClose(); }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return <div className="drawer-backdrop">
+    <button className="drawer-dismiss" aria-label="Close company details" onClick={onClose}/>
+    <aside className="drawer company-drawer" role="dialog" aria-modal="true" aria-labelledby="company-drawer-title">
+      <div className="company-drawer-header">
+        <button className="drawer-close" aria-label="Close company details" onClick={onClose}>×</button>
+        <div className="drawer-person company-drawer-identity"><span>{initials(company.name)}</span><div><p className="eyebrow">COMPANY DETAILS</p><h2 id="company-drawer-title">{company.name || company.domain || "Unnamed company"}</h2>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain} ↗</a> : <p>No website saved</p>}</div></div>
+        <div className="drawer-summary"><span><b>{formatNumber(company.prospect_count)}</b>prospects</span><span><b>{formatNumber(company.client_count)}</b>clients</span><span><b>{new Date(company.created_at).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}</b>added</span></div>
+        <div className="company-drawer-title"><div><strong>Linked prospects</strong><small>People connected to this company</small></div><span>{formatNumber(prospects.length)} loaded</span></div>
+      </div>
+      <div className="company-drawer-body">
+        {loading ? <div className="company-prospect-loading">Loading prospects…</div> : error ? <div className="inline-error" role="alert">{error}</div> : prospects.length ? <div className="company-prospect-list"><table><thead><tr><th>Name</th><th>Title</th><th>Email</th><th>Seniority</th><th>Location</th></tr></thead><tbody>{prospects.map((prospect) => <tr key={prospect.id}><td><div className="compact-person"><span>{initials(prospect.full_name)}</span><strong>{prospect.full_name || "Unnamed prospect"}</strong></div></td><td>{prospect.title || "-"}</td><td>{prospect.work_email || prospect.personal_email || "-"}</td><td>{String(prospect.seniority || "-")}</td><td>{[prospect.city, prospect.country].filter(Boolean).join(", ") || "-"}</td></tr>)}</tbody></table></div> : <div className="drawer-empty">No linked prospects found.</div>}
+      </div>
+    </aside>
+  </div>;
 }
 
 function ClientsView({ clients, onOpen, onImport }: { clients: ClientRecord[]; onOpen: (client: ClientRecord) => void; onImport: () => void }) {
