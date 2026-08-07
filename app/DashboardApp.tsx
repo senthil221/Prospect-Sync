@@ -10,7 +10,7 @@ type Company = { id: string; name: string; domain: string; prospect_count: numbe
 type ImportRecord = { id: string; file_name: string; client_name: string; list_name: string; processed_rows: number; unique_added: number; duplicates_linked: number; status: string; created_at: string };
 type DeleteKind = "import" | "list" | "client";
 type DeleteRequest = { kind: DeleteKind; id: string; name: string; context: string };
-type ProspectFilter = { id: string; field: string; operator: "contains" | "equals" | "empty" | "not_empty"; value: string };
+type ProspectFilter = { id: string; field: string; operator: "contains" | "equals" | "empty" | "not_empty"; values: string[] };
 type FileAudit = { headers: string[]; rows: number; populatedCells: number };
 
 const emptyStats = { prospects: 0, companies: 0, clients: 0, lists: 0, rowsImported: 0, duplicatesDetected: 0 };
@@ -93,7 +93,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   const [error, setError] = useState("");
   const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const encodedProspectFilters = useMemo(() => JSON.stringify(prospectFilters.map(({ field, operator, value }) => ({ field, operator, value }))), [prospectFilters]);
+  const encodedProspectFilters = useMemo(() => JSON.stringify(prospectFilters.map(({ field, operator, values }) => ({ field, operator, values }))), [prospectFilters]);
 
   const refreshDashboard = useCallback(async () => {
     try {
@@ -280,17 +280,21 @@ function ProspectTable({ prospects, total, fields, filters, page, onFiltersChang
 
   const configuredDefinitions = visibleColumns.map((id) => allColumns.find((column) => column.id === id)).filter((column): column is { id: string; label: string } => Boolean(column));
   const visibleDefinitions = configuredDefinitions.length ? configuredDefinitions : standardProspectFields.slice(0, 4);
+  const suggestedValues = useMemo(() => new Map(allColumns.map((field) => {
+    const options = Array.from(new Set(prospects.map((prospect) => prospectFieldValue(prospect, field.id).trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right)).slice(0, 40);
+    return [field.id, options];
+  })), [allColumns, prospects]);
   const totalPages = Math.max(1, Math.ceil(total / 50));
   const firstRecord = total ? (page - 1) * 50 + 1 : 0;
   const lastRecord = Math.min(page * 50, total);
 
   function addFilter(field = "__country") {
-    onFiltersChange([...filters, { id: crypto.randomUUID(), field, operator: "contains", value: "" }]);
+    onFiltersChange([...filters, { id: crypto.randomUUID(), field, operator: "contains", values: [] }]);
   }
 
   return <section className="people-workspace">
     <div className="people-heading">
-      <div><p className="eyebrow">PROSPECT INTELLIGENCE</p><h2>Find and organize people</h2><p>Explore every synchronized field across your master database.</p></div>
+      <div><p className="eyebrow">PROSPECT INTELLIGENCE</p><h2>Find people</h2><p>Search, segment and reuse every prospect in your master database.</p></div>
       <button className="primary" onClick={onImport}>↑ Import prospects</button>
     </div>
     <div className="people-tabs">
@@ -306,17 +310,60 @@ function ProspectTable({ prospects, total, fields, filters, page, onFiltersChang
           <div><strong>{formatNumber(total)} people</strong><span>{filters.length ? `${filters.length} active filter${filters.length === 1 ? "" : "s"}` : "Master database"}</span></div>
           <div className="column-control"><button className="outline-button" onClick={() => setColumnMenu((open) => !open)}>▥ Columns <span>{visibleDefinitions.length}</span></button>{columnMenu && <div className="column-menu"><div><strong>Choose columns</strong><button onClick={() => { setVisibleColumns(defaultProspectColumns); localStorage.setItem("prospecthub-visible-columns", JSON.stringify(defaultProspectColumns)); }}>Reset</button></div>{allColumns.map((field) => <label key={field.id}><input type="checkbox" checked={visibleColumns.includes(field.id)} onChange={() => toggleColumn(field.id)} />{field.label}</label>)}</div>}</div>
         </div>
+        {filters.some((filter) => filter.values.length || filter.operator === "empty" || filter.operator === "not_empty") ? <div className="active-filter-strip">{filters.flatMap((filter) => {
+          const label = allColumns.find((field) => field.id === filter.field)?.label ?? filter.field;
+          if (filter.operator === "empty" || filter.operator === "not_empty") return [<button key={filter.id} onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>{label}: {filter.operator === "empty" ? "Empty" : "Not empty"} <span>×</span></button>];
+          return filter.values.map((value) => <button key={`${filter.id}-${value}`} onClick={() => updateFilter(filter.id, { values: filter.values.filter((item) => item !== value) })}>{label}: {value} <span>×</span></button>);
+        })}<button className="clear-filter-chip" onClick={() => onFiltersChange([])}>Clear all</button></div> : null}
         {prospects.length ? <><div className="master-table-wrap"><table className="master-data-table"><thead><tr>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr key={person.id} onClick={() => onSelect(person)}>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "—"}</span> : <span title={value}>{value || "—"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)}–{formatNumber(lastRecord)} of {formatNumber(total)}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={filters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and every unique prospect will be synchronized here."} action={filters.length ? "Clear filters" : "Import CSV"} onAction={filters.length ? () => onFiltersChange([]) : onImport} />}
       </article>
       <aside className="panel filter-panel">
-        <div className="filter-panel-head"><div><span className="filter-icon">≡</span><div><strong>Filters</strong><small>Narrow your prospect list</small></div></div>{filters.length ? <button onClick={() => onFiltersChange([])}>Clear all</button> : null}</div>
-        <div className="filter-body">{filters.length ? filters.map((filter, index) => <div className="filter-card" key={filter.id}><div><strong>Filter {index + 1}</strong><button aria-label="Remove filter" onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>×</button></div><label>Field<select value={filter.field} onChange={(event) => updateFilter(filter.id, { field: event.target.value })}>{allColumns.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}</select></label><label>Condition<select value={filter.operator} onChange={(event) => updateFilter(filter.id, { operator: event.target.value as ProspectFilter["operator"] })}><option value="contains">Contains</option><option value="equals">Equals</option><option value="not_empty">Is not empty</option><option value="empty">Is empty</option></select></label>{filter.operator === "contains" || filter.operator === "equals" ? <label>Value<input value={filter.value} onChange={(event) => updateFilter(filter.id, { value: event.target.value })} placeholder="Type a value" /></label> : null}</div>) : <div className="filter-empty"><span>⌁</span><strong>No filters applied</strong><p>Add a filter to narrow this master list using any uploaded field.</p></div>}
+        <div className="filter-panel-head"><div><span className="filter-icon">≡</span><div><strong>Filters</strong><small>Use multiple values in each rule</small></div></div>{filters.length ? <button onClick={() => onFiltersChange([])}>Clear all</button> : null}</div>
+        <div className="filter-body">{filters.length ? filters.map((filter, index) => <div className="filter-rule" key={filter.id}>
+          <div className="filter-rule-head"><span>{String(index + 1).padStart(2, "0")}</span><select aria-label={`Filter ${index + 1} field`} value={filter.field} onChange={(event) => updateFilter(filter.id, { field: event.target.value, values: [] })}>{allColumns.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}</select><button aria-label="Remove filter" onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>×</button></div>
+          <select className="filter-condition" value={filter.operator} onChange={(event) => updateFilter(filter.id, { operator: event.target.value as ProspectFilter["operator"] })}><option value="contains">Includes any</option><option value="equals">Exactly matches any</option><option value="not_empty">Is not empty</option><option value="empty">Is empty</option></select>
+          {filter.operator === "contains" || filter.operator === "equals" ? <MultiValueSelect key={`${filter.id}-${filter.field}`} values={filter.values} options={suggestedValues.get(filter.field) ?? []} onChange={(values) => updateFilter(filter.id, { values })} /> : null}
+        </div>) : <div className="filter-empty"><span>⌁</span><strong>Build a segment</strong><p>Select a quick filter below or add any uploaded field.</p></div>}
           <button className="add-filter-button" onClick={() => addFilter()}>＋ Add filter</button>
-          {!filters.length ? <div className="quick-filters"><small>QUICK FILTERS</small><button onClick={() => addFilter("__country")}>Country</button><button onClick={() => addFilter("__title")}>Job title</button><button onClick={() => addFilter("__seniority")}>Seniority</button><button onClick={() => addFilter("Industry")}>Industry</button></div> : null}
+          <div className="quick-filters"><small>QUICK FILTERS</small><button onClick={() => addFilter("__country")}>＋ Country</button><button onClick={() => addFilter("__title")}>＋ Job title</button><button onClick={() => addFilter("__seniority")}>＋ Seniority</button><button onClick={() => addFilter("Industry")}>＋ Industry</button></div>
         </div>
       </aside>
     </div>}
   </section>;
+}
+
+function MultiValueSelect({ values, options, onChange }: { values: string[]; options: string[]; onChange: (values: string[]) => void }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const normalizedValues = values.map((value) => value.toLocaleLowerCase());
+  const availableOptions = Array.from(new Set([...values, ...options])).filter((option) => option.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).slice(0, 12);
+
+  function addValue(rawValue: string) {
+    const value = rawValue.trim();
+    if (!value || normalizedValues.includes(value.toLocaleLowerCase())) return;
+    onChange([...values, value]);
+    setQuery("");
+  }
+
+  function toggleValue(value: string) {
+    const selected = normalizedValues.includes(value.toLocaleLowerCase());
+    onChange(selected ? values.filter((item) => item.toLocaleLowerCase() !== value.toLocaleLowerCase()) : [...values, value]);
+  }
+
+  return <div className="multi-value-field">
+    <div className="multi-value-control">
+      {values.map((value) => <button type="button" className="value-chip" key={value} onClick={(event) => { event.stopPropagation(); onChange(values.filter((item) => item !== value)); }}>{value}<span>×</span></button>)}
+      <input value={query} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => window.setTimeout(() => setOpen(false), 120)} onKeyDown={(event) => {
+        if ((event.key === "Enter" || event.key === ",") && query.trim()) { event.preventDefault(); addValue(query.replace(/,$/, "")); }
+        if (event.key === "Backspace" && !query && values.length) onChange(values.slice(0, -1));
+      }} placeholder={values.length ? "Add another…" : "Select or type values…"} />
+    </div>
+    {open && (availableOptions.length || query.trim()) ? <div className="multi-value-menu">
+      {availableOptions.map((option) => <button type="button" key={option} className={normalizedValues.includes(option.toLocaleLowerCase()) ? "selected" : ""} onMouseDown={(event) => event.preventDefault()} onClick={() => toggleValue(option)}><span>{normalizedValues.includes(option.toLocaleLowerCase()) ? "✓" : ""}</span>{option}</button>)}
+      {query.trim() && !availableOptions.some((option) => option.toLocaleLowerCase() === query.trim().toLocaleLowerCase()) ? <button type="button" className="create-value" onMouseDown={(event) => event.preventDefault()} onClick={() => addValue(query)}>＋ Add “{query.trim()}”</button> : null}
+    </div> : null}
+    <small>{values.length ? `${values.length} selected · matches any value` : "Press Enter to add a custom value"}</small>
+  </div>;
 }
 
 function CompanyTable({ companies, onImport }: { companies: Company[]; onImport: () => void }) {

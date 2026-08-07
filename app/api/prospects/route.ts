@@ -1,7 +1,7 @@
 import { authorizeApi } from "../../../lib/auth";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
-type ProspectFilter = { field: string; operator: "contains" | "equals" | "empty" | "not_empty"; value: string };
+type ProspectFilter = { field: string; operator: "contains" | "equals" | "empty" | "not_empty"; values: string[] };
 
 const allowedOperators = new Set(["contains", "equals", "empty", "not_empty"]);
 
@@ -15,10 +15,11 @@ function parseFilters(value: string | null): ProspectFilter[] {
       const candidate = item as Record<string, unknown>;
       const field = String(candidate.field ?? "").trim().slice(0, 160);
       const operator = String(candidate.operator ?? "contains");
-      const filterValue = String(candidate.value ?? "").trim().slice(0, 300);
+      const rawValues = Array.isArray(candidate.values) ? candidate.values : [candidate.value];
+      const values = rawValues.map((value) => String(value ?? "").trim().slice(0, 160)).filter(Boolean).slice(0, 30);
       if (!field || !allowedOperators.has(operator)) return [];
-      if ((operator === "contains" || operator === "equals") && !filterValue) return [];
-      return [{ field, operator: operator as ProspectFilter["operator"], value: filterValue }];
+      if ((operator === "contains" || operator === "equals") && !values.length) return [];
+      return [{ field, operator: operator as ProspectFilter["operator"], values }];
     });
   } catch {
     return [];
