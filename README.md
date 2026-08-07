@@ -11,7 +11,7 @@ ProspectHub is a centralized prospect database for cold-email agency operations.
 ## Supabase setup
 
 1. Create a Supabase project.
-2. Open the Supabase SQL Editor and run `supabase/migrations/20260807000000_initial_schema.sql`.
+2. Open the Supabase SQL Editor and run the files in `supabase/migrations` in filename order.
 3. In Supabase Authentication, open **Users** and create one user for each approved team member with an email and permanent password.
 4. Copy `.env.example` to `.env.local` and enter the project values.
 5. Set `ALLOWED_USER_EMAILS` to the comma-separated email addresses for the agency owner and boss. These must match the Supabase users.
@@ -44,3 +44,7 @@ A CSV row matches an existing master prospect when any normalized identifier mat
 4. Full name plus company domain
 
 The original row remains attached to its client list. Missing master fields are filled from later imports, while existing non-empty master values are preserved.
+
+## Safe deletion
+
+Imports, lists, and clients can be removed from the dashboard after confirmation. Cleanup is transactional: client-list links are removed first, and an optional orphan cleanup deletes a master prospect only when no remaining client list uses it. Companies are removed only when no master prospect references them.

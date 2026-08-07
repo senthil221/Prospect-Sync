@@ -8,6 +8,8 @@ type ListRecord = { id: string; name: string; source_file_name: string; uploaded
 type Prospect = Record<string, unknown> & { id: string; full_name: string; work_email: string; title: string; company_name: string; company_domain: string; client_count: number; list_count: number; all_data: string | Record<string, string> };
 type Company = { id: string; name: string; domain: string; prospect_count: number; client_count: number; created_at: string };
 type ImportRecord = { id: string; file_name: string; client_name: string; list_name: string; processed_rows: number; unique_added: number; duplicates_linked: number; status: string; created_at: string };
+type DeleteKind = "import" | "list" | "client";
+type DeleteRequest = { kind: DeleteKind; id: string; name: string; context: string };
 
 const emptyStats = { prospects: 0, companies: 0, clients: 0, lists: 0, rowsImported: 0, duplicatesDetected: 0 };
 
@@ -84,6 +86,8 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const refreshDashboard = useCallback(async () => {
     try {
@@ -92,7 +96,11 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
         api<{ clients: ClientRecord[] }>("/api/clients"),
       ]);
       setStats(dashboard.stats); setRecentImports(dashboard.recentImports); setClients(clientData.clients);
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to load data."); }
+      return clientData.clients;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to load data.");
+      return [];
+    }
   }, []);
 
   useEffect(() => {
@@ -125,6 +133,35 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
     if (next !== "clients") setSelectedClient(null);
   }
 
+  async function confirmDelete(deleteOrphans: boolean) {
+    if (!deleteRequest) return;
+    setDeleting(true); setError("");
+    try {
+      const endpoint = deleteRequest.kind === "client" ? "clients" : deleteRequest.kind === "list" ? "lists" : "imports";
+      await api(`/api/${endpoint}/${encodeURIComponent(deleteRequest.id)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deleteOrphans }),
+      });
+      const refreshedClients = await refreshDashboard();
+      if (deleteRequest.kind === "client") {
+        setSelectedClient(null);
+      } else if (selectedClient) {
+        const updatedClient = refreshedClients.find((client) => client.id === selectedClient.id) ?? null;
+        setSelectedClient(updatedClient);
+        if (updatedClient) {
+          const data = await api<{ lists: ListRecord[] }>(`/api/lists?clientId=${updatedClient.id}`);
+          setLists(data.lists);
+        }
+      }
+      setDeleteRequest(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to delete this record.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   const title = navItems.find((item) => item.id === section)?.label ?? "Overview";
 
   return (
@@ -149,15 +186,16 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
         {error && <div className="alert"><span>!</span>{error}<button onClick={() => setError("")}>×</button></div>}
         <section className="content">
           {loading ? <LoadingState /> : null}
-          {!loading && section === "overview" && <Overview stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} />}
+          {!loading && section === "overview" && <Overview stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name} · ${item.list_name}` })} />}
           {!loading && section === "prospects" && <ProspectTable prospects={prospects} total={prospectTotal} onSelect={setSelectedProspect} onImport={() => navigate("imports")} />}
           {!loading && section === "companies" && <CompanyTable companies={companies} onImport={() => navigate("imports")} />}
           {!loading && section === "clients" && !selectedClient && <ClientsView clients={clients} onOpen={openClient} onImport={() => navigate("imports")} />}
-          {!loading && section === "clients" && selectedClient && <ClientDetail client={selectedClient} lists={lists} onBack={() => setSelectedClient(null)} onImport={() => navigate("imports")} />}
+          {!loading && section === "clients" && selectedClient && <ClientDetail client={selectedClient} lists={lists} onBack={() => setSelectedClient(null)} onImport={() => navigate("imports")} onDeleteClient={() => setDeleteRequest({ kind: "client", id: selectedClient.id, name: selectedClient.name, context: `${selectedClient.list_count} lists · ${selectedClient.prospect_count} linked prospects` })} onDeleteList={(list) => setDeleteRequest({ kind: "list", id: list.id, name: list.name, context: `${list.source_file_name} · ${list.prospect_count} linked prospects` })} />}
           {!loading && section === "imports" && <ImportView clients={clients} onComplete={async () => { await refreshDashboard(); navigate("overview"); }} />}
         </section>
       </main>
       {selectedProspect && <ProspectDrawer prospect={selectedProspect} onClose={() => setSelectedProspect(null)} />}
+      {deleteRequest && <DeleteConfirmation target={deleteRequest} busy={deleting} onCancel={() => setDeleteRequest(null)} onConfirm={confirmDelete} />}
     </div>
   );
 }
@@ -166,7 +204,7 @@ function LoadingState() {
   return <div className="loading-state"><div className="loading-bar"/><div className="loading-grid"><span/><span/><span/><span/></div></div>;
 }
 
-function Overview({ stats, recentImports, clients, onImport, onViewMaster }: { stats: typeof emptyStats; recentImports: ImportRecord[]; clients: ClientRecord[]; onImport: () => void; onViewMaster: () => void }) {
+function Overview({ stats, recentImports, clients, onImport, onViewMaster, onDeleteImport }: { stats: typeof emptyStats; recentImports: ImportRecord[]; clients: ClientRecord[]; onImport: () => void; onViewMaster: () => void; onDeleteImport: (item: ImportRecord) => void }) {
   const cards = [
     ["Unique prospects", stats.prospects, "Master records", "violet"],
     ["Known companies", stats.companies, "Matched by domain", "blue"],
@@ -176,7 +214,7 @@ function Overview({ stats, recentImports, clients, onImport, onViewMaster }: { s
   return <>
     <div className="welcome"><div><p className="eyebrow">MASTER DATABASE</p><h2>One clean source for every prospect.</h2><p>Upload a client list. ProspectHub keeps the list intact, finds existing people, and syncs new data into your master database.</p><div className="welcome-actions"><button className="primary" onClick={onImport}>Import your first CSV</button><button className="secondary" onClick={onViewMaster}>View master database</button></div></div><div className="sync-visual"><div className="file-chip">CSV<span>Client list</span></div><div className="sync-line"><i/><i/><i/></div><div className="database-chip"><b>◉</b><span>Master database<small>Unique & synchronized</small></span></div></div></div>
     <div className="metric-grid">{cards.map(([label, value, note, color]) => <article className={`metric-card ${color}`} key={String(label)}><div className="metric-icon">{color === "violet" ? "◉" : color === "blue" ? "▦" : color === "amber" ? "◇" : "✓"}</div><p>{label}</p><strong>{formatNumber(value)}</strong><small>{note}</small></article>)}</div>
-    <div className="dashboard-grid"><article className="panel"><div className="panel-head"><div><h3>Recent imports</h3><p>Latest client lists synchronized with the master</p></div><button onClick={onImport}>Import CSV</button></div>{recentImports.length ? <div className="activity-list">{recentImports.map((item) => <div className="activity" key={item.id}><span className="csv-icon">CSV</span><div><strong>{item.file_name}</strong><small>{item.client_name} · {item.list_name}</small></div><div className="activity-result"><strong>{formatNumber(item.processed_rows)} rows</strong><small>{formatNumber(item.duplicates_linked)} duplicates found</small></div><span className="status">Complete</span></div>)}</div> : <EmptyCompact text="Your completed imports will appear here." action="Import a CSV" onAction={onImport} />}</article>
+    <div className="dashboard-grid"><article className="panel"><div className="panel-head"><div><h3>Recent imports</h3><p>Latest client lists synchronized with the master</p></div><button onClick={onImport}>Import CSV</button></div>{recentImports.length ? <div className="activity-list">{recentImports.map((item) => <div className="activity" key={item.id}><span className="csv-icon">CSV</span><div><strong>{item.file_name}</strong><small>{item.client_name} · {item.list_name}</small></div><div className="activity-result"><strong>{formatNumber(item.processed_rows)} rows</strong><small>{formatNumber(item.duplicates_linked)} duplicates found</small></div><div className="activity-actions"><span className="status">Complete</span><button className="text-danger" onClick={() => onDeleteImport(item)}>Undo</button></div></div>)}</div> : <EmptyCompact text="Your completed imports will appear here." action="Import a CSV" onAction={onImport} />}</article>
       <article className="panel coverage"><div className="panel-head"><div><h3>Database coverage</h3><p>Current organization</p></div></div><div className="coverage-row"><span>Rows processed</span><strong>{formatNumber(stats.rowsImported)}</strong></div><div className="coverage-row"><span>Unique master records</span><strong>{formatNumber(stats.prospects)}</strong></div><div className="coverage-row"><span>Known companies</span><strong>{formatNumber(stats.companies)}</strong></div><div className="coverage-track"><i style={{ width: stats.rowsImported ? `${Math.min(100, Math.round((stats.prospects / stats.rowsImported) * 100))}%` : "0%" }}/></div><p className="coverage-note">{stats.rowsImported ? `${Math.round((stats.duplicatesDetected / stats.rowsImported) * 100)}% of imported rows matched existing prospects.` : "Import a list to calculate master database coverage."}</p><div className="client-mini"><span>Clients</span><div>{clients.slice(0, 4).map((client) => <i key={client.id}>{initials(client.name)}</i>)}{clients.length > 4 && <i>+{clients.length - 4}</i>}</div></div></article></div>
   </>;
 }
@@ -193,8 +231,8 @@ function ClientsView({ clients, onOpen, onImport }: { clients: ClientRecord[]; o
   return <><div className="section-intro"><div><p className="eyebrow">CLIENT WORKSPACES</p><h2>Keep every ICP list organized.</h2><p>Each client keeps its original lists while sharing clean prospect records with the master.</p></div><button className="primary" onClick={onImport}>＋ Import client list</button></div>{clients.length ? <div className="clients-grid">{clients.map((client, index) => <button className="client-card" key={client.id} onClick={() => onOpen(client)}><span className={`client-logo tone-${index % 4}`}>{initials(client.name)}</span><div className="client-title"><strong>{client.name}</strong><small>Active workspace</small></div><div className="client-stats"><span><b>{formatNumber(client.prospect_count)}</b>prospects</span><span><b>{formatNumber(client.list_count)}</b>lists</span></div><div className="client-link">Open client <span>→</span></div></button>)}</div> : <EmptyState title="Create your first client" text="Import a list and enter the client name. The workspace will be created automatically." action="Import client list" onAction={onImport} />}</>;
 }
 
-function ClientDetail({ client, lists, onBack, onImport }: { client: ClientRecord; lists: ListRecord[]; onBack: () => void; onImport: () => void }) {
-  return <><button className="back" onClick={onBack}>← All clients</button><div className="client-hero"><span className="client-logo tone-0">{initials(client.name)}</span><div><p className="eyebrow">CLIENT WORKSPACE</p><h2>{client.name}</h2><p>{formatNumber(client.prospect_count)} prospects across {formatNumber(client.list_count)} lists</p></div><button className="primary" onClick={onImport}>＋ Import another list</button></div><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Every list remains separate and synchronized with the master.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Source file</th><th>Rows</th><th>New to master</th><th>Existing prospects</th><th>Imported</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><strong>{list.name}</strong></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></>;
+function ClientDetail({ client, lists, onBack, onImport, onDeleteClient, onDeleteList }: { client: ClientRecord; lists: ListRecord[]; onBack: () => void; onImport: () => void; onDeleteClient: () => void; onDeleteList: (list: ListRecord) => void }) {
+  return <><button className="back" onClick={onBack}>← All clients</button><div className="client-hero"><span className="client-logo tone-0">{initials(client.name)}</span><div><p className="eyebrow">CLIENT WORKSPACE</p><h2>{client.name}</h2><p>{formatNumber(client.prospect_count)} prospects across {formatNumber(client.list_count)} lists</p></div><div className="client-actions"><button className="primary" onClick={onImport}>＋ Import another list</button><button className="danger-button" onClick={onDeleteClient}>Delete client</button></div></div><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Every list remains separate and synchronized with the master.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Source file</th><th>Rows</th><th>New to master</th><th>Existing prospects</th><th>Imported</th><th>Actions</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><strong>{list.name}</strong></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><button className="row-danger" onClick={() => onDeleteList(list)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></>;
 }
 
 function ImportView({ clients, onComplete }: { clients: ClientRecord[]; onComplete: () => Promise<void> }) {
@@ -241,6 +279,17 @@ function ImportView({ clients, onComplete }: { clients: ClientRecord[]; onComple
 function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
   const data = parseAllData(prospect.all_data);
   return <div className="drawer-backdrop"><button className="drawer-dismiss" aria-label="Close prospect details" onClick={onClose}/><aside className="drawer" role="dialog" aria-modal="true" aria-label="Prospect details"><button className="drawer-close" aria-label="Close prospect details" onClick={onClose}>×</button><div className="drawer-person"><span>{initials(prospect.full_name)}</span><div><p className="eyebrow">MASTER PROSPECT</p><h2>{prospect.full_name || "Unnamed prospect"}</h2><p>{prospect.title || "No title"} {prospect.company_name ? `at ${prospect.company_name}` : ""}</p></div></div><div className="drawer-summary"><span><b>{formatNumber(prospect.client_count)}</b>clients</span><span><b>{formatNumber(prospect.list_count)}</b>lists</span><span><b>{Object.keys(data).length}</b>data fields</span></div><h3>All synchronized data</h3><div className="field-list">{Object.entries(data).map(([field, value]) => <div key={field}><span>{field}</span><strong>{value || "—"}</strong></div>)}</div></aside></div>;
+}
+
+function DeleteConfirmation({ target, busy, onCancel, onConfirm }: { target: DeleteRequest; busy: boolean; onCancel: () => void; onConfirm: (deleteOrphans: boolean) => Promise<void> }) {
+  const [deleteOrphans, setDeleteOrphans] = useState(true);
+  const action = target.kind === "import" ? "Undo import" : target.kind === "list" ? "Delete list" : "Delete client";
+  const explanation = target.kind === "import"
+    ? "This removes the import and its client-list links. The list is also removed when nothing else uses it."
+    : target.kind === "list"
+      ? "This removes the list, its import history, and all links between this list and the master database."
+      : "This removes the client workspace, every list under it, its import history, and its master-database links.";
+  return <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="delete-title">{action}?</h2><p>{explanation}</p><div className="delete-target"><strong>{target.name}</strong><span>{target.context}</span></div><div className="cleanup-choice"><input id="delete-unused-master-records" type="checkbox" checked={deleteOrphans} onChange={(event) => setDeleteOrphans(event.target.checked)} /><label htmlFor="delete-unused-master-records"><strong>Remove unused master records</strong><small>Delete prospects and companies only when no other client list uses them.</small></label></div><p className="shared-safety">Shared prospects remain untouched when they are still linked to another client.</p><div className="modal-actions"><button className="secondary" disabled={busy} onClick={onCancel}>Cancel</button><button className="danger-button solid" disabled={busy} onClick={() => void onConfirm(deleteOrphans)}>{busy ? "Working…" : action}</button></div></section></div>;
 }
 
 function parseAllData(data: Prospect["all_data"]) {
