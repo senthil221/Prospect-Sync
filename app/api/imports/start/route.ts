@@ -5,7 +5,7 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const payload = await request.json() as { clientId?: string; clientName?: string; listName?: string; fileName?: string; totalRows?: number };
+  const payload = await request.json() as { clientId?: string; clientName?: string; listName?: string; fileName?: string; totalRows?: number; headers?: string[] };
   const supabase = createAdminClient();
   let clientId = payload.clientId ?? "";
   if (!clientId) {
@@ -24,12 +24,21 @@ export async function POST(request: Request) {
   if (!listName) return Response.json({ error: "List name is required." }, { status: 400 });
   const listId = crypto.randomUUID();
   const importId = crypto.randomUUID();
-  const listResult = await supabase.from("lists").insert({ id: listId, client_id: clientId, name: listName, source_file_name: payload.fileName ?? "", uploaded_rows: payload.totalRows ?? 0 });
+  const headers = Array.isArray(payload.headers) ? payload.headers.map((header) => String(header).trim()).filter(Boolean).slice(0, 500) : [];
+  const listResult = await supabase.from("lists").insert({ id: listId, client_id: clientId, name: listName, source_file_name: payload.fileName ?? "", uploaded_rows: payload.totalRows ?? 0, field_headers: headers });
   if (listResult.error) return Response.json({ error: listResult.error.message }, { status: 500 });
-  const importResult = await supabase.from("imports").insert({ id: importId, client_id: clientId, list_id: listId, file_name: payload.fileName ?? "", total_rows: payload.totalRows ?? 0 });
+  const importResult = await supabase.from("imports").insert({ id: importId, client_id: clientId, list_id: listId, file_name: payload.fileName ?? "", total_rows: payload.totalRows ?? 0, field_headers: headers });
   if (importResult.error) {
     await supabase.from("lists").delete().eq("id", listId);
     return Response.json({ error: importResult.error.message }, { status: 500 });
+  }
+  if (headers.length) {
+    const seenAt = new Date().toISOString();
+    const fieldResult = await supabase.from("prospect_fields").upsert(headers.map((fieldName) => ({ field_name: fieldName, last_seen_at: seenAt })), { onConflict: "field_name" });
+    if (fieldResult.error) {
+      await supabase.from("lists").delete().eq("id", listId);
+      return Response.json({ error: fieldResult.error.message }, { status: 500 });
+    }
   }
   return Response.json({ importId, listId, clientId }, { status: 201 });
 }

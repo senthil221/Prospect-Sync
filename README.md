@@ -45,6 +45,12 @@ A CSV row matches an existing master prospect when any normalized identifier mat
 
 The original row remains attached to its client list. Missing master fields are filled from later imports, while existing non-empty master values are preserved.
 
+## Data workspace
+
+The master database exposes every uploaded CSV field through a configurable horizontal table. Name, company, email, and title are visible by default; additional standard or uploaded fields can be shown or hidden. Search and multi-field filters run on the server with pagination, so the workflow remains usable as the database grows.
+
+Each import records its complete header set and preserves every valid source row in `list_rows`, including repeated prospects within the same client list. The import preview and client-list summary show how many fields were detected and stored.
+
 ## Safe deletion
 
 Imports, lists, and clients can be removed from the dashboard after confirmation. Cleanup is transactional: client-list links are removed first, and an optional orphan cleanup deletes a master prospect only when no remaining client list uses it. Companies are removed only when no master prospect references them.

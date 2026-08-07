@@ -1,17 +1,56 @@
 import { authorizeApi } from "../../../lib/auth";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
+type ProspectFilter = { field: string; operator: "contains" | "equals" | "empty" | "not_empty"; value: string };
+
+const allowedOperators = new Set(["contains", "equals", "empty", "not_empty"]);
+
+function parseFilters(value: string | null): ProspectFilter[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.slice(0, 8).flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const candidate = item as Record<string, unknown>;
+      const field = String(candidate.field ?? "").trim().slice(0, 160);
+      const operator = String(candidate.operator ?? "contains");
+      const filterValue = String(candidate.value ?? "").trim().slice(0, 300);
+      if (!field || !allowedOperators.has(operator)) return [];
+      if ((operator === "contains" || operator === "equals") && !filterValue) return [];
+      return [{ field, operator: operator as ProspectFilter["operator"], value: filterValue }];
+    });
+  } catch {
+    return [];
+  }
+}
+
 export async function GET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const url = new URL(request.url);
-  const search = (url.searchParams.get("search") ?? "").trim().replace(/[,()]/g, " ");
+  const search = (url.searchParams.get("search") ?? "").trim().slice(0, 300);
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
-  const limit = 30;
-  const from = (page - 1) * limit;
-  let query = createAdminClient().from("prospect_summaries").select("*", { count: "exact" });
-  if (search) query = query.or(`full_name.ilike.%${search}%,work_email.ilike.%${search}%,title.ilike.%${search}%,company_name.ilike.%${search}%,company_domain.ilike.%${search}%`);
-  const { data, count, error } = await query.order("created_at", { ascending: false }).range(from, from + limit - 1);
+  const limit = 50;
+  const filters = parseFilters(url.searchParams.get("filters"));
+  const supabase = createAdminClient();
+  const [workspace, fields] = await Promise.all([
+    supabase.rpc("search_prospect_workspace", {
+      p_search: search,
+      p_filters: filters,
+      p_limit: limit,
+      p_offset: (page - 1) * limit,
+    }),
+    supabase.from("prospect_fields").select("field_name").order("field_name").limit(500),
+  ]);
+  const error = workspace.error ?? fields.error;
   if (error) return Response.json({ error: error.message }, { status: 500 });
-  return Response.json({ prospects: data ?? [], total: count ?? 0, page, limit });
+  const summary = Array.isArray(workspace.data) ? workspace.data[0] : workspace.data;
+  return Response.json({
+    prospects: summary?.result_rows ?? [],
+    total: Number(summary?.total_count ?? 0),
+    page,
+    limit,
+    fields: (fields.data ?? []).map((item) => item.field_name),
+  });
 }

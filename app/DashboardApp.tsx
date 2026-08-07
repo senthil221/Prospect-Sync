@@ -1,15 +1,17 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 type Section = "overview" | "prospects" | "companies" | "clients" | "imports";
 type ClientRecord = { id: string; name: string; list_count: number; prospect_count: number };
-type ListRecord = { id: string; name: string; source_file_name: string; uploaded_rows: number; unique_added: number; duplicates_linked: number; prospect_count: number; created_at: string };
+type ListRecord = { id: string; name: string; source_file_name: string; uploaded_rows: number; unique_added: number; duplicates_linked: number; prospect_count: number; created_at: string; field_count: number; field_headers: string[] };
 type Prospect = Record<string, unknown> & { id: string; full_name: string; work_email: string; title: string; company_name: string; company_domain: string; client_count: number; list_count: number; all_data: string | Record<string, string> };
 type Company = { id: string; name: string; domain: string; prospect_count: number; client_count: number; created_at: string };
 type ImportRecord = { id: string; file_name: string; client_name: string; list_name: string; processed_rows: number; unique_added: number; duplicates_linked: number; status: string; created_at: string };
 type DeleteKind = "import" | "list" | "client";
 type DeleteRequest = { kind: DeleteKind; id: string; name: string; context: string };
+type ProspectFilter = { id: string; field: string; operator: "contains" | "equals" | "empty" | "not_empty"; value: string };
+type FileAudit = { headers: string[]; rows: number; populatedCells: number };
 
 const emptyStats = { prospects: 0, companies: 0, clients: 0, lists: 0, rowsImported: 0, duplicatesDetected: 0 };
 
@@ -79,6 +81,9 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [prospectTotal, setProspectTotal] = useState(0);
+  const [prospectFields, setProspectFields] = useState<string[]>([]);
+  const [prospectFilters, setProspectFilters] = useState<ProspectFilter[]>([]);
+  const [prospectPage, setProspectPage] = useState(1);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [lists, setLists] = useState<ListRecord[]>([]);
   const [selectedClient, setSelectedClient] = useState<ClientRecord | null>(null);
@@ -88,6 +93,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   const [error, setError] = useState("");
   const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const encodedProspectFilters = useMemo(() => JSON.stringify(prospectFilters.map(({ field, operator, value }) => ({ field, operator, value }))), [prospectFilters]);
 
   const refreshDashboard = useCallback(async () => {
     try {
@@ -111,8 +117,8 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   useEffect(() => {
     const timer = setTimeout(async () => {
       if (section === "prospects") {
-        const data = await api<{ prospects: Prospect[]; total: number }>(`/api/prospects?search=${encodeURIComponent(search)}`);
-        setProspects(data.prospects); setProspectTotal(data.total);
+        const data = await api<{ prospects: Prospect[]; total: number; fields: string[] }>(`/api/prospects?search=${encodeURIComponent(search)}&page=${prospectPage}&filters=${encodeURIComponent(encodedProspectFilters)}`);
+        setProspects(data.prospects); setProspectTotal(data.total); setProspectFields(data.fields);
       }
       if (section === "companies") {
         const data = await api<{ companies: Company[] }>(`/api/companies?search=${encodeURIComponent(search)}`);
@@ -120,7 +126,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
       }
     }, 220);
     return () => clearTimeout(timer);
-  }, [section, search, stats.prospects]);
+  }, [section, search, stats.prospects, prospectPage, encodedProspectFilters]);
 
   async function openClient(client: ClientRecord) {
     setSelectedClient(client);
@@ -129,7 +135,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   }
 
   function navigate(next: Section) {
-    setSection(next); setSearch(""); setError("");
+    setSection(next); setSearch(""); setError(""); setProspectPage(1);
     if (next !== "clients") setSelectedClient(null);
   }
 
@@ -178,7 +184,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
         <header className="topbar">
           <div><p className="eyebrow">DATABASE WORKSPACE</p><h1>{selectedClient ? selectedClient.name : title}</h1></div>
           <div className="top-actions">
-            {(section === "prospects" || section === "companies") && <label className="search"><span>⌕</span><input aria-label="Search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${section}...`} /></label>}
+            {(section === "prospects" || section === "companies") && <label className="search"><span>⌕</span><input aria-label="Search" value={search} onChange={(event) => { setSearch(event.target.value); if (section === "prospects") setProspectPage(1); }} placeholder={`Search ${section}...`} /></label>}
             <button className="primary" onClick={() => navigate("imports")}><span>＋</span> Import list</button>
           </div>
         </header>
@@ -187,7 +193,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
         <section className="content">
           {loading ? <LoadingState /> : null}
           {!loading && section === "overview" && <Overview stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name} · ${item.list_name}` })} />}
-          {!loading && section === "prospects" && <ProspectTable prospects={prospects} total={prospectTotal} onSelect={setSelectedProspect} onImport={() => navigate("imports")} />}
+          {!loading && section === "prospects" && <ProspectTable prospects={prospects} total={prospectTotal} fields={prospectFields} filters={prospectFilters} page={prospectPage} onFiltersChange={(next) => { setProspectFilters(next); setProspectPage(1); }} onPageChange={setProspectPage} onSelect={setSelectedProspect} onImport={() => navigate("imports")} />}
           {!loading && section === "companies" && <CompanyTable companies={companies} onImport={() => navigate("imports")} />}
           {!loading && section === "clients" && !selectedClient && <ClientsView clients={clients} onOpen={openClient} onImport={() => navigate("imports")} />}
           {!loading && section === "clients" && selectedClient && <ClientDetail client={selectedClient} lists={lists} onBack={() => setSelectedClient(null)} onImport={() => navigate("imports")} onDeleteClient={() => setDeleteRequest({ kind: "client", id: selectedClient.id, name: selectedClient.name, context: `${selectedClient.list_count} lists · ${selectedClient.prospect_count} linked prospects` })} onDeleteList={(list) => setDeleteRequest({ kind: "list", id: list.id, name: list.name, context: `${list.source_file_name} · ${list.prospect_count} linked prospects` })} />}
@@ -219,8 +225,66 @@ function Overview({ stats, recentImports, clients, onImport, onViewMaster, onDel
   </>;
 }
 
-function ProspectTable({ prospects, total, onSelect, onImport }: { prospects: Prospect[]; total: number; onSelect: (row: Prospect) => void; onImport: () => void }) {
-  return <article className="panel table-panel"><div className="panel-head"><div><p className="eyebrow">CANONICAL RECORDS</p><h3>{formatNumber(total)} unique prospects</h3><p>One person appears once here, even when used across several client lists.</p></div><button onClick={onImport}>＋ Add from CSV</button></div>{prospects.length ? <div className="table-wrap"><table><thead><tr><th>Prospect</th><th>Company</th><th>Title</th><th>Reach</th><th>Used in</th><th/></tr></thead><tbody>{prospects.map((person) => <tr key={person.id} onClick={() => onSelect(person)}><td><div className="person"><span>{initials(person.full_name || String(person.work_email))}</span><div><strong>{person.full_name || "Unnamed prospect"}</strong><small>{person.work_email || "No work email"}</small></div></div></td><td><strong>{person.company_name || "—"}</strong><small className="cell-note">{person.company_domain || "No domain"}</small></td><td>{person.title || "—"}</td><td><span className="data-pill">{Object.values(parseAllData(person.all_data)).filter(Boolean).length} fields</span></td><td>{formatNumber(person.client_count)} clients · {formatNumber(person.list_count)} lists</td><td className="arrow">›</td></tr>)}</tbody></table></div> : <EmptyState title="No master prospects yet" text="Import a CSV and every unique prospect will be synchronized here." action="Import CSV" onAction={onImport} />}</article>;
+const standardProspectFields = [
+  { id: "__name", label: "Name" },
+  { id: "__company", label: "Company" },
+  { id: "__email", label: "Email" },
+  { id: "__title", label: "Title" },
+  { id: "__linkedin", label: "LinkedIn" },
+  { id: "__country", label: "Country" },
+  { id: "__seniority", label: "Seniority" },
+  { id: "__department", label: "Department" },
+];
+const defaultProspectColumns = ["__name", "__company", "__email", "__title"];
+
+function prospectFieldValue(prospect: Prospect, field: string) {
+  if (field === "__name") return String(prospect.full_name || "");
+  if (field === "__company") return String(prospect.company_name || "");
+  if (field === "__email") return String(prospect.work_email || prospect.personal_email || "");
+  if (field === "__title") return String(prospect.title || "");
+  if (field === "__linkedin") return String(prospect.linkedin_url || "");
+  if (field === "__country") return String(prospect.country || "");
+  if (field === "__seniority") return String(prospect.seniority || "");
+  if (field === "__department") return String(prospect.department || "");
+  return String(parseAllData(prospect.all_data)[field] || "");
+}
+
+function ProspectTable({ prospects, total, fields, filters, page, onFiltersChange, onPageChange, onSelect, onImport }: { prospects: Prospect[]; total: number; fields: string[]; filters: ProspectFilter[]; page: number; onFiltersChange: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onSelect: (row: Prospect) => void; onImport: () => void }) {
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(defaultProspectColumns);
+  const [columnMenu, setColumnMenu] = useState(false);
+  const [tab, setTab] = useState<"records" | "coverage">("records");
+  const allColumns = useMemo(() => [...standardProspectFields, ...fields.map((field) => ({ id: field, label: field }))], [fields]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const saved = JSON.parse(localStorage.getItem("prospecthub-visible-columns") || "[]") as string[];
+        if (Array.isArray(saved) && saved.length) setVisibleColumns(saved);
+      } catch { /* Keep the standard columns. */ }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  function toggleColumn(id: string) {
+    setVisibleColumns((current) => {
+      const next = current.includes(id) ? current.filter((field) => field !== id) : [...current, id];
+      const safe = next.length ? next : ["__name"];
+      localStorage.setItem("prospecthub-visible-columns", JSON.stringify(safe));
+      return safe;
+    });
+  }
+
+  function updateFilter(id: string, patch: Partial<ProspectFilter>) {
+    onFiltersChange(filters.map((filter) => filter.id === id ? { ...filter, ...patch } : filter));
+  }
+
+  const configuredDefinitions = visibleColumns.map((id) => allColumns.find((column) => column.id === id)).filter((column): column is { id: string; label: string } => Boolean(column));
+  const visibleDefinitions = configuredDefinitions.length ? configuredDefinitions : standardProspectFields.slice(0, 4);
+  const totalPages = Math.max(1, Math.ceil(total / 50));
+  const firstRecord = total ? (page - 1) * 50 + 1 : 0;
+  const lastRecord = Math.min(page * 50, total);
+
+  return <article className="panel data-workspace"><div className="workspace-head"><div><p className="eyebrow">MASTER DATA WORKSPACE</p><h2>{formatNumber(total)} unique prospects</h2><p>Every uploaded field is preserved. Configure the table for the data you need right now.</p></div><button className="primary" onClick={onImport}>＋ Import CSV</button></div><div className="workspace-tabs"><button className={tab === "records" ? "active" : ""} onClick={() => setTab("records")}>All prospects <span>{formatNumber(total)}</span></button><button className={tab === "coverage" ? "active" : ""} onClick={() => setTab("coverage")}>Field coverage <span>{formatNumber(fields.length)}</span></button></div>{tab === "coverage" ? <div className="field-coverage"><div className="coverage-summary"><span className="coverage-symbol">✓</span><div><strong>{formatNumber(fields.length)} uploaded fields available</strong><p>These field names were detected in your CSV files and synchronized into the master database.</p></div></div><div className="coverage-groups"><section><h3>Standard columns</h3><div>{standardProspectFields.map((field, index) => <span className={`field-chip tone-${index % 4}`} key={field.id}>{field.label}</span>)}</div></section><section><h3>Uploaded CSV fields</h3><div>{fields.map((field, index) => <span className={`field-chip tone-${index % 4}`} key={field}>{field}</span>)}</div></section></div></div> : <><div className="data-toolbar"><div className="filter-stack">{filters.map((filter) => <div className="filter-row" key={filter.id}><select aria-label="Filter field" value={filter.field} onChange={(event) => updateFilter(filter.id, { field: event.target.value })}>{allColumns.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}</select><select aria-label="Filter operator" value={filter.operator} onChange={(event) => updateFilter(filter.id, { operator: event.target.value as ProspectFilter["operator"] })}><option value="contains">contains</option><option value="equals">equals</option><option value="not_empty">is not empty</option><option value="empty">is empty</option></select>{filter.operator === "contains" || filter.operator === "equals" ? <input aria-label="Filter value" value={filter.value} onChange={(event) => updateFilter(filter.id, { value: event.target.value })} placeholder="Enter value…" /> : <span className="filter-spacer"/>}<button aria-label="Remove filter" className="remove-filter" onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>×</button></div>)}</div><div className="toolbar-actions"><button className="toolbar-button" onClick={() => onFiltersChange([...filters, { id: crypto.randomUUID(), field: "__country", operator: "contains", value: "" }])}>＋ Filter</button>{filters.length ? <button className="toolbar-button muted" onClick={() => onFiltersChange([])}>Clear</button> : null}<div className="column-control"><button className="toolbar-button" onClick={() => setColumnMenu((open) => !open)}>▥ Columns <span>{visibleDefinitions.length}</span></button>{columnMenu && <div className="column-menu"><div><strong>Visible columns</strong><button onClick={() => { setVisibleColumns(defaultProspectColumns); localStorage.setItem("prospecthub-visible-columns", JSON.stringify(defaultProspectColumns)); }}>Reset</button></div>{allColumns.map((field) => <label key={field.id}><input type="checkbox" checked={visibleColumns.includes(field.id)} onChange={() => toggleColumn(field.id)} />{field.label}</label>)}</div>}</div></div></div>{prospects.length ? <><div className="master-table-wrap"><table className="master-data-table"><thead><tr>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr key={person.id} onClick={() => onSelect(person)}>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "—"}</span> : <span title={value}>{value || "—"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)}–{formatNumber(lastRecord)} of {formatNumber(total)}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={filters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and every unique prospect will be synchronized here."} action={filters.length ? "Clear filters" : "Import CSV"} onAction={filters.length ? () => onFiltersChange([]) : onImport} />}</>}</article>;
 }
 
 function CompanyTable({ companies, onImport }: { companies: Company[]; onImport: () => void }) {
@@ -232,7 +296,7 @@ function ClientsView({ clients, onOpen, onImport }: { clients: ClientRecord[]; o
 }
 
 function ClientDetail({ client, lists, onBack, onImport, onDeleteClient, onDeleteList }: { client: ClientRecord; lists: ListRecord[]; onBack: () => void; onImport: () => void; onDeleteClient: () => void; onDeleteList: (list: ListRecord) => void }) {
-  return <><button className="back" onClick={onBack}>← All clients</button><div className="client-hero"><span className="client-logo tone-0">{initials(client.name)}</span><div><p className="eyebrow">CLIENT WORKSPACE</p><h2>{client.name}</h2><p>{formatNumber(client.prospect_count)} prospects across {formatNumber(client.list_count)} lists</p></div><div className="client-actions"><button className="primary" onClick={onImport}>＋ Import another list</button><button className="danger-button" onClick={onDeleteClient}>Delete client</button></div></div><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Every list remains separate and synchronized with the master.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Source file</th><th>Rows</th><th>New to master</th><th>Existing prospects</th><th>Imported</th><th>Actions</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><strong>{list.name}</strong></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><button className="row-danger" onClick={() => onDeleteList(list)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></>;
+  return <><button className="back" onClick={onBack}>← All clients</button><div className="client-hero"><span className="client-logo tone-0">{initials(client.name)}</span><div><p className="eyebrow">CLIENT WORKSPACE</p><h2>{client.name}</h2><p>{formatNumber(client.prospect_count)} prospects across {formatNumber(client.list_count)} lists</p></div><div className="client-actions"><button className="primary" onClick={onImport}>＋ Import another list</button><button className="danger-button" onClick={onDeleteClient}>Delete client</button></div></div><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Every list remains separate and synchronized with the master.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Source file</th><th>Rows</th><th>Fields preserved</th><th>New to master</th><th>Existing prospects</th><th>Imported</th><th>Actions</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><strong>{list.name}</strong></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="field-verified">✓ {formatNumber(list.field_count)} fields</span></td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><button className="row-danger" onClick={() => onDeleteList(list)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></>;
 }
 
 function ImportView({ clients, onComplete }: { clients: ClientRecord[]; onComplete: () => Promise<void> }) {
@@ -244,12 +308,21 @@ function ImportView({ clients, onComplete }: { clients: ClientRecord[]; onComple
   const [phase, setPhase] = useState<"idle" | "reading" | "uploading" | "done">("idle");
   const [message, setMessage] = useState("");
   const [summary, setSummary] = useState<{ processed_rows: number; unique_added: number; duplicates_linked: number } | null>(null);
-  const canSubmit = file && listName.trim() && (clientId || newClient.trim()) && phase === "idle";
+  const [fileAudit, setFileAudit] = useState<FileAudit | null>(null);
+  const canSubmit = file && fileAudit && listName.trim() && (clientId || newClient.trim()) && phase === "idle";
 
-  function pickFile(event: ChangeEvent<HTMLInputElement>) {
+  async function pickFile(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0] ?? null;
-    setFile(next); setMessage("");
+    setFile(next); setFileAudit(null); setMessage("");
     if (next && !listName) setListName(next.name.replace(/\.csv$/i, ""));
+    if (!next) return;
+    try {
+      const parsed = parseCsv(await next.text());
+      const populatedCells = parsed.rows.reduce((count, row) => count + row.filter((value) => value.trim()).length, 0);
+      setFileAudit({ headers: parsed.headers, rows: parsed.rows.length, populatedCells });
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : "Unable to read this CSV.");
+    }
   }
 
   async function startImport() {
@@ -258,12 +331,12 @@ function ImportView({ clients, onComplete }: { clients: ClientRecord[]; onComple
       setPhase("reading"); setMessage("Reading CSV and checking the columns…");
       const parsed = parseCsv(await file.text());
       if (!parsed.headers.length || !parsed.rows.length) throw new Error("The CSV needs a header row and at least one data row.");
-      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: clientId || undefined, clientName: newClient || undefined, listName, fileName: file.name, totalRows: parsed.rows.length }) });
+      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: clientId || undefined, clientName: newClient || undefined, listName, fileName: file.name, totalRows: parsed.rows.length, headers: parsed.headers }) });
       setPhase("uploading"); setMessage(`Synchronizing ${formatNumber(parsed.rows.length)} rows with the master database…`);
       const chunkSize = 100;
       for (let index = 0; index < parsed.rows.length; index += chunkSize) {
         const chunk = parsed.rows.slice(index, index + chunkSize);
-        await api("/api/imports/chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId, listId: started.listId, headers: parsed.headers, rows: chunk }) });
+        await api("/api/imports/chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId, listId: started.listId, headers: parsed.headers, rows: chunk, rowOffset: index }) });
         setProgress(Math.round(((index + chunk.length) / parsed.rows.length) * 100));
       }
       const completed = await api<{ summary: { processed_rows: number; unique_added: number; duplicates_linked: number } }>("/api/imports/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId, listId: started.listId }) });
@@ -271,9 +344,9 @@ function ImportView({ clients, onComplete }: { clients: ClientRecord[]; onComple
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Import failed."); setPhase("idle"); }
   }
 
-  if (phase === "done" && summary) return <div className="import-success"><span className="success-mark">✓</span><p className="eyebrow">IMPORT COMPLETE</p><h2>Your list is synchronized.</h2><p>{message}</p><div className="result-grid"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(summary.unique_added)}</strong><span>Added to master</span></div><div><strong>{formatNumber(summary.duplicates_linked)}</strong><span>Existing prospects linked</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
+  if (phase === "done" && summary) return <div className="import-success"><span className="success-mark">✓</span><p className="eyebrow">IMPORT COMPLETE</p><h2>Your list is synchronized.</h2><p>{message}</p><div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(fileAudit?.headers.length)}</strong><span>Fields preserved</span></div><div><strong>{formatNumber(summary.unique_added)}</strong><span>Added to master</span></div><div><strong>{formatNumber(summary.duplicates_linked)}</strong><span>Existing prospects linked</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
 
-  return <div className="import-layout"><div className="import-copy"><p className="eyebrow">CSV IMPORT</p><h2>Bring every list into one clean database.</h2><p>Download the Google Sheet as a CSV, choose the client, and upload it here. All columns are preserved. Existing prospects are linked; new prospects are added once.</p><ol><li><span>1</span><div><strong>Preserve the client list</strong><p>The original row and every uploaded field stay attached to the list.</p></div></li><li><span>2</span><div><strong>Match exact prospects</strong><p>Email, LinkedIn, or full name plus company domain are checked.</p></div></li><li><span>3</span><div><strong>Sync the master</strong><p>Missing fields are filled without overwriting existing master data.</p></div></li></ol></div><div className="import-card"><div className="form-field"><label htmlFor="import-client">Client</label><select id="import-client" value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></div>{!clientId && <div className="form-field"><label htmlFor="new-client-name">New client name</label><input id="new-client-name" value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}<div className="form-field"><label htmlFor="list-name">List name</label><input id="list-name" value={listName} onChange={(event) => setListName(event.target.value)} placeholder="e.g. HR Leaders — India" /></div><label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={pickFile}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to import</small></> : <><strong>Choose a CSV file</strong><small>Download your Google Sheet as .csv</small></>}</label>{phase !== "idle" && <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div>}{message && phase === "idle" && <p className="form-error">{message}</p>}<button className="primary import-button" disabled={!canSubmit} onClick={startImport}>{phase === "idle" ? "Start import & sync" : "Processing…"}</button><p className="privacy-note">Your uploaded data is stored in your private database.</p></div></div>;
+  return <div className="import-layout"><div className="import-copy"><p className="eyebrow">CSV IMPORT</p><h2>Bring every list into one clean database.</h2><p>Download the Google Sheet as a CSV, choose the client, and upload it here. All columns are preserved. Existing prospects are linked; new prospects are added once.</p><ol><li><span>1</span><div><strong>Preserve every row and field</strong><p>The exact client-list rows and all uploaded columns remain available.</p></div></li><li><span>2</span><div><strong>Match exact prospects</strong><p>Email, LinkedIn, or full name plus company domain are checked.</p></div></li><li><span>3</span><div><strong>Sync the master</strong><p>Missing fields are filled without overwriting existing master data.</p></div></li></ol></div><div className="import-card"><div className="form-field"><label htmlFor="import-client">Client</label><select id="import-client" value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></div>{!clientId && <div className="form-field"><label htmlFor="new-client-name">New client name</label><input id="new-client-name" value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}<div className="form-field"><label htmlFor="list-name">List name</label><input id="list-name" value={listName} onChange={(event) => setListName(event.target.value)} placeholder="e.g. HR Leaders — India" /></div><label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void pickFile(event)}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to import</small></> : <><strong>Choose a CSV file</strong><small>Download your Google Sheet as .csv</small></>}</label>{fileAudit && <div className="file-audit"><div><span className="audit-check">✓</span><p><strong>{formatNumber(fileAudit.headers.length)} fields detected</strong><small>{formatNumber(fileAudit.rows)} rows · {formatNumber(fileAudit.populatedCells)} populated cells</small></p></div><div className="audit-fields">{fileAudit.headers.slice(0, 8).map((header) => <span key={header}>{header}</span>)}{fileAudit.headers.length > 8 && <span>+{fileAudit.headers.length - 8} more</span>}</div><p>All {fileAudit.headers.length} fields will be preserved and available in the column selector.</p></div>}{phase !== "idle" && <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div>}{message && phase === "idle" && <p className="form-error">{message}</p>}<button className="primary import-button" disabled={!canSubmit} onClick={startImport}>{phase === "idle" ? "Start import & sync" : "Processing…"}</button><p className="privacy-note">Your uploaded data is stored in your private database.</p></div></div>;
 }
 
 function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
