@@ -9,10 +9,10 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.includes("localhost") ? "http" : "https");
   const image = `${protocol}://${host}/og.png`;
   return {
-    title: "ProspectHub — Master Prospect Database",
+    title: "Prospect Sync — Master Prospect Database",
     description: "A centralized prospect database for clean client list operations.",
-    openGraph: { title: "ProspectHub", description: "One clean source for every prospect.", images: [{ url: image, width: 1536, height: 1024 }] },
-    twitter: { card: "summary_large_image", title: "ProspectHub", description: "One clean source for every prospect.", images: [image] },
+    openGraph: { title: "Prospect Sync", description: "One clean source for every prospect.", images: [{ url: image, width: 1536, height: 1024 }] },
+    twitter: { card: "summary_large_image", title: "Prospect Sync", description: "One clean source for every prospect.", images: [image] },
   };
 }
 

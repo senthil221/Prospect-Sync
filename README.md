@@ -1,6 +1,6 @@
-# ProspectHub
+# Prospect Sync
 
-ProspectHub is a centralized prospect database for cold-email agency operations. It imports client CSV lists, preserves every source field, links duplicate people to one master record, and tracks company and client-list coverage.
+Prospect Sync is a centralized prospect database for cold-email agency operations. It imports client CSV lists, preserves every source field, links duplicate people to one master record, and tracks company and client-list coverage.
 
 ## Stack
 
