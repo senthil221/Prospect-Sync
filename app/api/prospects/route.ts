@@ -1,9 +1,9 @@
 import { authorizeApi } from "../../../lib/auth";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
-type ProspectFilter = { field: string; operator: "contains" | "equals" | "empty" | "not_empty"; values: string[] };
+type ProspectFilter = { field: string; operator: "contains" | "equals" | "not_contains" | "not_equals" | "empty" | "not_empty"; values: string[] };
 
-const allowedOperators = new Set(["contains", "equals", "empty", "not_empty"]);
+const allowedOperators = new Set(["contains", "equals", "not_contains", "not_equals", "empty", "not_empty"]);
 
 function parseFilters(value: string | null): ProspectFilter[] {
   if (!value) return [];
@@ -18,7 +18,7 @@ function parseFilters(value: string | null): ProspectFilter[] {
       const rawValues = Array.isArray(candidate.values) ? candidate.values : [candidate.value];
       const values = rawValues.map((value) => String(value ?? "").trim().slice(0, 160)).filter(Boolean).slice(0, 30);
       if (!field || !allowedOperators.has(operator)) return [];
-      if ((operator === "contains" || operator === "equals") && !values.length) return [];
+      if (!["empty", "not_empty"].includes(operator) && !values.length) return [];
       return [{ field, operator: operator as ProspectFilter["operator"], values }];
     });
   } catch {
@@ -32,18 +32,23 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const search = (url.searchParams.get("search") ?? "").trim().slice(0, 300);
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+  const sort = ["created_at", "name", "company", "title", "last_contacted"].includes(url.searchParams.get("sort") ?? "") ? String(url.searchParams.get("sort")) : "created_at";
+  const direction = url.searchParams.get("direction") === "asc" ? "asc" : "desc";
   const limit = 50;
   const filters = parseFilters(url.searchParams.get("filters"));
   const supabase = createAdminClient();
-  const [workspace, fields] = await Promise.all([
-    supabase.rpc("search_prospect_workspace", {
+  let workspace = await supabase.rpc("search_prospect_workspace_v3", {
       p_search: search,
       p_filters: filters,
+      p_sort: sort,
+      p_direction: direction,
       p_limit: limit,
       p_offset: (page - 1) * limit,
-    }),
-    supabase.from("prospect_fields").select("field_name").order("field_name").limit(500),
-  ]);
+    });
+  if (workspace.error?.code === "PGRST202" || workspace.error?.code === "42883") {
+    workspace = await supabase.rpc("search_prospect_workspace", { p_search: search, p_filters: filters.filter((filter) => !["not_contains", "not_equals"].includes(filter.operator)), p_limit: limit, p_offset: (page - 1) * limit });
+  }
+  const fields = await supabase.from("prospect_fields").select("field_name").order("field_name").limit(500);
   const error = workspace.error ?? fields.error;
   if (error) return Response.json({ error: error.message }, { status: 500 });
   const summary = Array.isArray(workspace.data) ? workspace.data[0] : workspace.data;

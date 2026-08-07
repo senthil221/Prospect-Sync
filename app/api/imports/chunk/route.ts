@@ -5,12 +5,14 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const { importId, listId, headers, rows, rowOffset } = await request.json() as { importId?: string; listId?: string; headers?: string[]; rows?: string[][]; rowOffset?: number };
+  const { importId, listId, headers, rows, rowOffset, fieldMap } = await request.json() as { importId?: string; listId?: string; headers?: string[]; rows?: string[][]; rowOffset?: number; fieldMap?: Record<string, string> };
   if (!importId || !listId || !headers?.length || !rows?.length) return Response.json({ error: "Invalid import chunk." }, { status: 400 });
   if (rows.length > 250) return Response.json({ error: "Import chunks cannot exceed 250 rows." }, { status: 400 });
 
   const mapped = rows.map((values, index) => {
-    const prospect = mapProspect(headers, values);
+    const mappedHeaders = headers.map((header) => String(fieldMap?.[header] || header));
+    const prospect = mapProspect(mappedHeaders, values);
+    prospect.raw = Object.fromEntries(headers.map((header, valueIndex) => [header, String(values[valueIndex] ?? "").trim()]));
     const companyId = prospect.companyDomain
       ? `domain:${prospect.companyDomain}`
       : prospect.companyName ? `name:${normalizeText(prospect.companyName)}` : "";

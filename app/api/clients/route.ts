@@ -5,9 +5,11 @@ import { createAdminClient } from "../../../lib/supabase/admin";
 export async function GET() {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const { data, error } = await createAdminClient().from("client_summaries").select("*").order("name");
-  if (error) return Response.json({ error: error.message }, { status: 500 });
-  return Response.json({ clients: data ?? [] });
+  const supabase = createAdminClient();
+  const [summaries, settings] = await Promise.all([supabase.from("client_summaries").select("*").order("name"), supabase.from("client_settings").select("client_id,cooldown_days")]);
+  if (summaries.error) return Response.json({ error: summaries.error.message }, { status: 500 });
+  const cooldowns = new Map((settings.data ?? []).map((setting) => [setting.client_id, setting.cooldown_days]));
+  return Response.json({ clients: (summaries.data ?? []).map((client) => ({ ...client, cooldown_days: cooldowns.get(client.id) ?? 90 })) });
 }
 
 export async function POST(request: Request) {
