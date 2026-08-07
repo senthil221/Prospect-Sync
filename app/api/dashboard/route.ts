@@ -1,26 +1,34 @@
-import { ensureDatabase, getD1 } from "../../../db/runtime";
+import { authorizeApi } from "../../../lib/auth";
+import { createAdminClient } from "../../../lib/supabase/admin";
 
 export async function GET() {
-  await ensureDatabase();
-  const db = getD1();
-  const results = await db.batch([
-    db.prepare("SELECT COUNT(*) AS count FROM prospects"),
-    db.prepare("SELECT COUNT(*) AS count FROM companies"),
-    db.prepare("SELECT COUNT(*) AS count FROM clients"),
-    db.prepare("SELECT COUNT(*) AS count FROM lists"),
-    db.prepare("SELECT COALESCE(SUM(processed_rows), 0) AS count FROM imports"),
-    db.prepare("SELECT COALESCE(SUM(duplicates_linked), 0) AS count FROM imports"),
-    db.prepare(`SELECT i.id, i.file_name, i.status, i.processed_rows, i.unique_added,
-      i.duplicates_linked, i.created_at, c.name AS client_name, l.name AS list_name
-      FROM imports i JOIN clients c ON c.id = i.client_id JOIN lists l ON l.id = i.list_id
-      ORDER BY i.created_at DESC LIMIT 6`),
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
+  const supabase = createAdminClient();
+  const [prospects, companies, clients, lists, importTotals, recent] = await Promise.all([
+    supabase.from("prospects").select("id", { count: "exact", head: true }),
+    supabase.from("companies").select("id", { count: "exact", head: true }),
+    supabase.from("clients").select("id", { count: "exact", head: true }),
+    supabase.from("lists").select("id", { count: "exact", head: true }),
+    supabase.from("imports").select("processed_rows, duplicates_linked"),
+    supabase.from("imports").select("id,file_name,status,processed_rows,unique_added,duplicates_linked,created_at,client:clients(name),list:lists(name)").order("created_at", { ascending: false }).limit(6),
   ]);
-  const count = (index: number) => Number((results[index].results[0] as { count?: number } | undefined)?.count ?? 0);
+  const failure = [prospects, companies, clients, lists, importTotals, recent].find((result) => result.error)?.error;
+  if (failure) return Response.json({ error: failure.message }, { status: 500 });
+  const totals = (importTotals.data ?? []).reduce((acc, item) => ({
+    rows: acc.rows + Number(item.processed_rows ?? 0), duplicates: acc.duplicates + Number(item.duplicates_linked ?? 0),
+  }), { rows: 0, duplicates: 0 });
+  const recentImports = (recent.data ?? []).map((item) => {
+    const client = item.client as unknown as { name?: string } | Array<{ name?: string }> | null;
+    const list = item.list as unknown as { name?: string } | Array<{ name?: string }> | null;
+    return {
+      ...item,
+      client_name: Array.isArray(client) ? client[0]?.name : client?.name,
+      list_name: Array.isArray(list) ? list[0]?.name : list?.name,
+    };
+  });
   return Response.json({
-    stats: {
-      prospects: count(0), companies: count(1), clients: count(2), lists: count(3),
-      rowsImported: count(4), duplicatesDetected: count(5),
-    },
-    recentImports: results[6].results,
+    stats: { prospects: prospects.count ?? 0, companies: companies.count ?? 0, clients: clients.count ?? 0, lists: lists.count ?? 0, rowsImported: totals.rows, duplicatesDetected: totals.duplicates },
+    recentImports,
   });
 }

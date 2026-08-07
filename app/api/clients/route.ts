@@ -1,26 +1,28 @@
-import { ensureDatabase, getD1 } from "../../../db/runtime";
+import { authorizeApi } from "../../../lib/auth";
 import { normalizeText } from "../../../db/normalize";
+import { createAdminClient } from "../../../lib/supabase/admin";
 
 export async function GET() {
-  await ensureDatabase();
-  const result = await getD1().prepare(`SELECT c.id, c.name, c.created_at,
-    COUNT(DISTINCT l.id) AS list_count, COUNT(DISTINCT lm.prospect_id) AS prospect_count
-    FROM clients c LEFT JOIN lists l ON l.client_id = c.id
-    LEFT JOIN list_memberships lm ON lm.list_id = l.id
-    GROUP BY c.id ORDER BY c.name`).all();
-  return Response.json({ clients: result.results });
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
+  const { data, error } = await createAdminClient().from("client_summaries").select("*").order("name");
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+  return Response.json({ clients: data ?? [] });
 }
 
 export async function POST(request: Request) {
-  await ensureDatabase();
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
   const { name } = await request.json() as { name?: string };
   const cleaned = String(name ?? "").trim();
   if (!cleaned) return Response.json({ error: "Client name is required." }, { status: 400 });
-  const db = getD1();
-  const normalized = normalizeText(cleaned);
-  const existing = await db.prepare("SELECT id, name FROM clients WHERE normalized_name = ?").bind(normalized).first();
-  if (existing) return Response.json({ client: existing });
-  const id = crypto.randomUUID();
-  await db.prepare("INSERT INTO clients (id, name, normalized_name) VALUES (?, ?, ?)").bind(id, cleaned, normalized).run();
-  return Response.json({ client: { id, name: cleaned } }, { status: 201 });
+  const supabase = createAdminClient();
+  const normalizedName = normalizeText(cleaned);
+  const existing = await supabase.from("clients").select("id,name").eq("normalized_name", normalizedName).maybeSingle();
+  if (existing.error) return Response.json({ error: existing.error.message }, { status: 500 });
+  if (existing.data) return Response.json({ client: existing.data });
+  const client = { id: crypto.randomUUID(), name: cleaned, normalized_name: normalizedName };
+  const { error } = await supabase.from("clients").insert(client);
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+  return Response.json({ client: { id: client.id, name: client.name } }, { status: 201 });
 }

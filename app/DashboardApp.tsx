@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useState } from "react";
 
 type Section = "overview" | "prospects" | "companies" | "clients" | "imports";
 type ClientRecord = { id: string; name: string; list_count: number; prospect_count: number };
@@ -70,7 +70,7 @@ const navItems: Array<{ id: Section; label: string; mark: string }> = [
   { id: "imports", label: "Import CSV", mark: "↑" },
 ];
 
-export default function DashboardApp() {
+export default function DashboardApp({ currentUserEmail }: { currentUserEmail: string }) {
   const [section, setSection] = useState<Section>("overview");
   const [stats, setStats] = useState(emptyStats);
   const [recentImports, setRecentImports] = useState<ImportRecord[]>([]);
@@ -95,7 +95,10 @@ export default function DashboardApp() {
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to load data."); }
   }, []);
 
-  useEffect(() => { refreshDashboard().finally(() => setLoading(false)); }, [refreshDashboard]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshDashboard().finally(() => setLoading(false)); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshDashboard]);
 
   useEffect(() => {
     const timer = setTimeout(async () => {
@@ -131,7 +134,7 @@ export default function DashboardApp() {
         <div className="workspace"><span className="workspace-avatar">PA</span><div><strong>Prospect Agency</strong><small>Internal workspace</small></div><span className="chevron">⌄</span></div>
         <nav>{navItems.map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => navigate(item.id)}><span>{item.mark}</span>{item.label}</button>)}</nav>
         <div className="sidebar-note"><span className="pulse"/><div><strong>Master sync active</strong><small>Every import updates one source of truth</small></div></div>
-        <div className="profile"><span className="profile-avatar">SN</span><div><strong>Agency Admin</strong><small>Full access</small></div></div>
+        <a className="profile" href="/auth/signout"><span className="profile-avatar">{initials(currentUserEmail)}</span><div><strong>{currentUserEmail}</strong><small>Sign out</small></div></a>
       </aside>
 
       <main>
@@ -232,12 +235,12 @@ function ImportView({ clients, onComplete }: { clients: ClientRecord[]; onComple
 
   if (phase === "done" && summary) return <div className="import-success"><span className="success-mark">✓</span><p className="eyebrow">IMPORT COMPLETE</p><h2>Your list is synchronized.</h2><p>{message}</p><div className="result-grid"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(summary.unique_added)}</strong><span>Added to master</span></div><div><strong>{formatNumber(summary.duplicates_linked)}</strong><span>Existing prospects linked</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
 
-  return <div className="import-layout"><div className="import-copy"><p className="eyebrow">CSV IMPORT</p><h2>Bring every list into one clean database.</h2><p>Download the Google Sheet as a CSV, choose the client, and upload it here. All columns are preserved. Existing prospects are linked; new prospects are added once.</p><ol><li><span>1</span><div><strong>Preserve the client list</strong><p>The original row and every uploaded field stay attached to the list.</p></div></li><li><span>2</span><div><strong>Match exact prospects</strong><p>Email, LinkedIn, or full name plus company domain are checked.</p></div></li><li><span>3</span><div><strong>Sync the master</strong><p>Missing fields are filled without overwriting existing master data.</p></div></li></ol></div><div className="import-card"><div className="form-field"><label>Client</label><select value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></div>{!clientId && <div className="form-field"><label>New client name</label><input value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}<div className="form-field"><label>List name</label><input value={listName} onChange={(event) => setListName(event.target.value)} placeholder="e.g. HR Leaders — India" /></div><label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={pickFile}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to import</small></> : <><strong>Choose a CSV file</strong><small>Download your Google Sheet as .csv</small></>}</label>{phase !== "idle" && <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div>}{message && phase === "idle" && <p className="form-error">{message}</p>}<button className="primary import-button" disabled={!canSubmit} onClick={startImport}>{phase === "idle" ? "Start import & sync" : "Processing…"}</button><p className="privacy-note">Your uploaded data is stored in your private database.</p></div></div>;
+  return <div className="import-layout"><div className="import-copy"><p className="eyebrow">CSV IMPORT</p><h2>Bring every list into one clean database.</h2><p>Download the Google Sheet as a CSV, choose the client, and upload it here. All columns are preserved. Existing prospects are linked; new prospects are added once.</p><ol><li><span>1</span><div><strong>Preserve the client list</strong><p>The original row and every uploaded field stay attached to the list.</p></div></li><li><span>2</span><div><strong>Match exact prospects</strong><p>Email, LinkedIn, or full name plus company domain are checked.</p></div></li><li><span>3</span><div><strong>Sync the master</strong><p>Missing fields are filled without overwriting existing master data.</p></div></li></ol></div><div className="import-card"><div className="form-field"><label htmlFor="import-client">Client</label><select id="import-client" value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></div>{!clientId && <div className="form-field"><label htmlFor="new-client-name">New client name</label><input id="new-client-name" value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}<div className="form-field"><label htmlFor="list-name">List name</label><input id="list-name" value={listName} onChange={(event) => setListName(event.target.value)} placeholder="e.g. HR Leaders — India" /></div><label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={pickFile}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to import</small></> : <><strong>Choose a CSV file</strong><small>Download your Google Sheet as .csv</small></>}</label>{phase !== "idle" && <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div>}{message && phase === "idle" && <p className="form-error">{message}</p>}<button className="primary import-button" disabled={!canSubmit} onClick={startImport}>{phase === "idle" ? "Start import & sync" : "Processing…"}</button><p className="privacy-note">Your uploaded data is stored in your private database.</p></div></div>;
 }
 
 function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
   const data = parseAllData(prospect.all_data);
-  return <div className="drawer-backdrop" onMouseDown={onClose}><aside className="drawer" onMouseDown={(event) => event.stopPropagation()}><button className="drawer-close" onClick={onClose}>×</button><div className="drawer-person"><span>{initials(prospect.full_name)}</span><div><p className="eyebrow">MASTER PROSPECT</p><h2>{prospect.full_name || "Unnamed prospect"}</h2><p>{prospect.title || "No title"} {prospect.company_name ? `at ${prospect.company_name}` : ""}</p></div></div><div className="drawer-summary"><span><b>{formatNumber(prospect.client_count)}</b>clients</span><span><b>{formatNumber(prospect.list_count)}</b>lists</span><span><b>{Object.keys(data).length}</b>data fields</span></div><h3>All synchronized data</h3><div className="field-list">{Object.entries(data).map(([field, value]) => <div key={field}><span>{field}</span><strong>{value || "—"}</strong></div>)}</div></aside></div>;
+  return <div className="drawer-backdrop"><button className="drawer-dismiss" aria-label="Close prospect details" onClick={onClose}/><aside className="drawer" role="dialog" aria-modal="true" aria-label="Prospect details"><button className="drawer-close" aria-label="Close prospect details" onClick={onClose}>×</button><div className="drawer-person"><span>{initials(prospect.full_name)}</span><div><p className="eyebrow">MASTER PROSPECT</p><h2>{prospect.full_name || "Unnamed prospect"}</h2><p>{prospect.title || "No title"} {prospect.company_name ? `at ${prospect.company_name}` : ""}</p></div></div><div className="drawer-summary"><span><b>{formatNumber(prospect.client_count)}</b>clients</span><span><b>{formatNumber(prospect.list_count)}</b>lists</span><span><b>{Object.keys(data).length}</b>data fields</span></div><h3>All synchronized data</h3><div className="field-list">{Object.entries(data).map(([field, value]) => <div key={field}><span>{field}</span><strong>{value || "—"}</strong></div>)}</div></aside></div>;
 }
 
 function parseAllData(data: Prospect["all_data"]) {

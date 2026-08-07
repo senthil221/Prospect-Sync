@@ -1,26 +1,35 @@
-import { ensureDatabase, getD1 } from "../../../../db/runtime";
+import { authorizeApi } from "../../../../lib/auth";
 import { normalizeText } from "../../../../db/normalize";
+import { createAdminClient } from "../../../../lib/supabase/admin";
 
 export async function POST(request: Request) {
-  await ensureDatabase();
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
   const payload = await request.json() as { clientId?: string; clientName?: string; listName?: string; fileName?: string; totalRows?: number };
-  const db = getD1();
+  const supabase = createAdminClient();
   let clientId = payload.clientId ?? "";
   if (!clientId) {
     const clientName = String(payload.clientName ?? "").trim();
     if (!clientName) return Response.json({ error: "Choose or create a client." }, { status: 400 });
-    const normalized = normalizeText(clientName);
-    const existing = await db.prepare("SELECT id FROM clients WHERE normalized_name = ?").bind(normalized).first<{ id: string }>();
-    clientId = existing?.id ?? crypto.randomUUID();
-    if (!existing) await db.prepare("INSERT INTO clients (id, name, normalized_name) VALUES (?, ?, ?)").bind(clientId, clientName, normalized).run();
+    const normalizedName = normalizeText(clientName);
+    const existing = await supabase.from("clients").select("id").eq("normalized_name", normalizedName).maybeSingle();
+    if (existing.error) return Response.json({ error: existing.error.message }, { status: 500 });
+    clientId = existing.data?.id ?? crypto.randomUUID();
+    if (!existing.data) {
+      const created = await supabase.from("clients").insert({ id: clientId, name: clientName, normalized_name: normalizedName });
+      if (created.error) return Response.json({ error: created.error.message }, { status: 500 });
+    }
   }
   const listName = String(payload.listName ?? "").trim();
   if (!listName) return Response.json({ error: "List name is required." }, { status: 400 });
   const listId = crypto.randomUUID();
   const importId = crypto.randomUUID();
-  await db.batch([
-    db.prepare("INSERT INTO lists (id, client_id, name, source_file_name, uploaded_rows) VALUES (?, ?, ?, ?, ?)").bind(listId, clientId, listName, payload.fileName ?? "", payload.totalRows ?? 0),
-    db.prepare("INSERT INTO imports (id, client_id, list_id, file_name, total_rows) VALUES (?, ?, ?, ?, ?)").bind(importId, clientId, listId, payload.fileName ?? "", payload.totalRows ?? 0),
-  ]);
+  const listResult = await supabase.from("lists").insert({ id: listId, client_id: clientId, name: listName, source_file_name: payload.fileName ?? "", uploaded_rows: payload.totalRows ?? 0 });
+  if (listResult.error) return Response.json({ error: listResult.error.message }, { status: 500 });
+  const importResult = await supabase.from("imports").insert({ id: importId, client_id: clientId, list_id: listId, file_name: payload.fileName ?? "", total_rows: payload.totalRows ?? 0 });
+  if (importResult.error) {
+    await supabase.from("lists").delete().eq("id", listId);
+    return Response.json({ error: importResult.error.message }, { status: 500 });
+  }
   return Response.json({ importId, listId, clientId }, { status: 201 });
 }

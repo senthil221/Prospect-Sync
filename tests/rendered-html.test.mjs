@@ -8,9 +8,10 @@ test("ships the ProspectHub product instead of the starter", async () => {
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/DashboardApp.tsx", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /<DashboardApp \/>/);
+  assert.match(page, /<DashboardApp currentUserEmail=/);
   assert.match(layout, /ProspectHub/);
   assert.match(dashboard, /Master database/);
   assert.match(dashboard, /Import CSV/);
+  assert.match(dashboard, /currentUserEmail/);
   assert.doesNotMatch(page, /SkeletonPreview|codex-preview/);
 });

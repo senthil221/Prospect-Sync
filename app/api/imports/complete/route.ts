@@ -1,16 +1,23 @@
-import { ensureDatabase, getD1 } from "../../../../db/runtime";
+import { authorizeApi } from "../../../../lib/auth";
+import { createAdminClient } from "../../../../lib/supabase/admin";
 
 export async function POST(request: Request) {
-  await ensureDatabase();
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
   const { importId, listId } = await request.json() as { importId?: string; listId?: string };
   if (!importId || !listId) return Response.json({ error: "Invalid import." }, { status: 400 });
-  const db = getD1();
-  await db.batch([
-    db.prepare("UPDATE imports SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?").bind(importId),
-    db.prepare(`UPDATE lists SET unique_added = (SELECT unique_added FROM imports WHERE id = ?),
-      duplicates_linked = (SELECT duplicates_linked FROM imports WHERE id = ?),
-      uploaded_rows = (SELECT processed_rows FROM imports WHERE id = ?) WHERE id = ?`).bind(importId, importId, importId, listId),
+  const supabase = createAdminClient();
+  const current = await supabase.from("imports").select("processed_rows,unique_added,duplicates_linked").eq("id", importId).single();
+  if (current.error) return Response.json({ error: current.error.message }, { status: 500 });
+  const [importResult, listResult] = await Promise.all([
+    supabase.from("imports").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", importId),
+    supabase.from("lists").update({
+      uploaded_rows: current.data.processed_rows,
+      unique_added: current.data.unique_added,
+      duplicates_linked: current.data.duplicates_linked,
+    }).eq("id", listId),
   ]);
-  const summary = await db.prepare("SELECT processed_rows, unique_added, duplicates_linked FROM imports WHERE id = ?").bind(importId).first();
-  return Response.json({ summary });
+  const error = importResult.error ?? listResult.error;
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+  return Response.json({ summary: current.data });
 }

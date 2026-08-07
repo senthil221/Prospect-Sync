@@ -1,12 +1,12 @@
-import { ensureDatabase, getD1 } from "../../../db/runtime";
+import { authorizeApi } from "../../../lib/auth";
+import { createAdminClient } from "../../../lib/supabase/admin";
 
 export async function GET(request: Request) {
-  await ensureDatabase();
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
   const clientId = new URL(request.url).searchParams.get("clientId");
   if (!clientId) return Response.json({ lists: [] });
-  const result = await getD1().prepare(`SELECT l.id, l.name, l.source_file_name, l.uploaded_rows,
-    l.unique_added, l.duplicates_linked, l.created_at, COUNT(lm.prospect_id) AS prospect_count
-    FROM lists l LEFT JOIN list_memberships lm ON lm.list_id = l.id
-    WHERE l.client_id = ? GROUP BY l.id ORDER BY l.created_at DESC`).bind(clientId).all();
-  return Response.json({ lists: result.results });
+  const { data, error } = await createAdminClient().from("list_summaries").select("*").eq("client_id", clientId).order("created_at", { ascending: false });
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+  return Response.json({ lists: data ?? [] });
 }

@@ -1,16 +1,13 @@
-import { ensureDatabase, getD1 } from "../../../db/runtime";
+import { authorizeApi } from "../../../lib/auth";
+import { createAdminClient } from "../../../lib/supabase/admin";
 
 export async function GET(request: Request) {
-  await ensureDatabase();
-  const url = new URL(request.url);
-  const search = (url.searchParams.get("search") ?? "").trim();
-  const pattern = `%${search}%`;
-  const where = search ? "WHERE c.name LIKE ? OR c.domain LIKE ?" : "";
-  const bindings = search ? [pattern, pattern] : [];
-  const result = await getD1().prepare(`SELECT c.id, c.name, c.domain, c.created_at,
-    COUNT(DISTINCT p.id) AS prospect_count, COUNT(DISTINCT l.client_id) AS client_count
-    FROM companies c LEFT JOIN prospects p ON p.company_id = c.id
-    LEFT JOIN list_memberships lm ON lm.prospect_id = p.id LEFT JOIN lists l ON l.id = lm.list_id
-    ${where} GROUP BY c.id ORDER BY prospect_count DESC, c.name LIMIT 100`).bind(...bindings).all();
-  return Response.json({ companies: result.results });
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
+  const search = (new URL(request.url).searchParams.get("search") ?? "").trim().replace(/[,()]/g, " ");
+  let query = createAdminClient().from("company_summaries").select("*");
+  if (search) query = query.or(`name.ilike.%${search}%,domain.ilike.%${search}%`);
+  const { data, error } = await query.order("prospect_count", { ascending: false }).order("name").limit(100);
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+  return Response.json({ companies: data ?? [] });
 }
