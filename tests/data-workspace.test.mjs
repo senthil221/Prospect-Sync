@@ -12,7 +12,8 @@ test("ships full-field preservation, filters, and configurable columns", async (
   ]);
 
   assert.match(dashboard, /Field coverage/);
-  assert.match(dashboard, /Visible columns/);
+  assert.match(dashboard, /Choose columns/);
+  assert.match(dashboard, /Narrow your prospect list/);
   assert.match(dashboard, /All .* fields will be preserved/);
   assert.match(dashboard, /__name.*__company.*__email.*__title/s);
   assert.match(prospectsRoute, /search_prospect_workspace/);
