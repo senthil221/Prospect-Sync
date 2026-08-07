@@ -5,16 +5,16 @@ ProspectHub is a centralized prospect database for cold-email agency operations.
 ## Stack
 
 - Next.js App Router
-- Supabase PostgreSQL and passwordless email authentication
+- Supabase PostgreSQL and email/password authentication
 - Vercel hosting
 
 ## Supabase setup
 
 1. Create a Supabase project.
 2. Open the Supabase SQL Editor and run `supabase/migrations/20260807000000_initial_schema.sql`.
-3. In Supabase Authentication URL Configuration, set the Site URL to your Vercel URL and add `https://YOUR-VERCEL-DOMAIN/auth/callback` as a redirect URL.
+3. In Supabase Authentication, open **Users** and create one user for each approved team member with an email and permanent password.
 4. Copy `.env.example` to `.env.local` and enter the project values.
-5. Set `ALLOWED_USER_EMAILS` to the comma-separated email addresses for the agency owner and boss.
+5. Set `ALLOWED_USER_EMAILS` to the comma-separated email addresses for the agency owner and boss. These must match the Supabase users.
 
 ## Vercel environment variables
 
