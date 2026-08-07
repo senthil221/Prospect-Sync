@@ -1,12 +1,12 @@
 "use client";
 
-import { ChangeEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { mapProspect } from "../db/normalize";
 
 type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" | "quality" | "imports";
 type ClientRecord = { id: string; name: string; list_count: number; prospect_count: number; cooldown_days?: number };
 type ListRecord = { id: string; name: string; source_file_name: string; uploaded_rows: number; unique_added: number; duplicates_linked: number; prospect_count: number; created_at: string; field_count: number; field_headers: string[] };
-type Prospect = Record<string, unknown> & { id: string; full_name: string; work_email: string; title: string; company_name: string; company_domain: string; client_count: number; list_count: number; all_data: string | Record<string, string>; last_contacted_at?: string; next_eligible_at?: string; eligible?: boolean; tags?: Array<{ id: string; name: string; color: string }> };
+type Prospect = Record<string, unknown> & { id: string; full_name: string; work_email: string; personal_email?: string; title: string; company_name: string; company_domain: string; city?: string; country?: string; seniority?: string; client_count: number; list_count: number; all_data: string | Record<string, string>; last_contacted_at?: string; next_eligible_at?: string; eligible?: boolean; tags?: Array<{ id: string; name: string; color: string }> };
 type Company = { id: string; name: string; domain: string; prospect_count: number; client_count: number; created_at: string };
 type ImportRecord = { id: string; file_name: string; client_name: string; list_name: string; processed_rows: number; unique_added: number; duplicates_linked: number; status: string; created_at: string };
 type DeleteKind = "import" | "list" | "client";
@@ -280,7 +280,7 @@ function Overview({ stats, recentImports, clients, onImport, onViewMaster, onDel
   const uniqueRate = stats.rowsImported ? Math.round((stats.prospects / stats.rowsImported) * 100) : 0;
   const reuseRate = stats.rowsImported ? Math.round((stats.duplicatesDetected / stats.rowsImported) * 100) : 0;
   return <>
-    <div className="welcome"><div><div className="hero-status"><span/><strong>Database healthy</strong><small>Live sync is active</small></div><p className="eyebrow">MASTER PROSPECT OPERATIONS</p><h2>Your agency’s prospect intelligence, in one place.</h2><p>Know what you already own, reuse clean data across clients, and stop paying to scrape the same prospects twice.</p><div className="welcome-actions"><button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import a client list</button><button className="secondary" onClick={onViewMaster}>Explore master database <AppIcon name="arrow" size={15}/></button></div></div><div className="sync-visual"><div className="file-chip"><AppIcon name="upload" size={20}/><span>Client CSV</span></div><div className="sync-line"><i/><i/><i/></div><div className="database-chip"><b><AppIcon name="database" size={19}/></b><span>Master database<small>{formatNumber(stats.prospects)} unique prospects</small></span></div></div></div>
+    <div className="welcome"><div><div className="hero-status"><span/><strong>Database healthy</strong><small>Live sync is active</small></div><p className="eyebrow">MASTER PROSPECT OPERATIONS</p><h2>Your agency’s prospect intelligence, in one place.</h2><div className="welcome-actions"><button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import a client list</button><button className="secondary" onClick={onViewMaster}>Explore master database <AppIcon name="arrow" size={15}/></button></div></div><div className="sync-visual"><div className="file-chip"><AppIcon name="upload" size={20}/><span>Client CSV</span></div><div className="sync-line"><i/><i/><i/></div><div className="database-chip"><b><AppIcon name="database" size={19}/></b><span>Master database<small>{formatNumber(stats.prospects)} unique prospects</small></span></div></div></div>
     <div className="metric-grid">{cards.map((card) => <article className={`metric-card ${card.color}`} key={card.label}><div className="metric-icon"><AppIcon name={card.icon} size={17}/></div><p>{card.label}</p><strong>{formatNumber(card.value)}</strong><small>{card.note}</small><span className="metric-arrow"><AppIcon name="arrow" size={14}/></span></article>)}</div>
     <div className="dashboard-grid"><article className="panel"><div className="panel-head"><div><h3>Recent imports</h3><p>Latest client lists synchronized with the master</p></div><button onClick={onImport}>Import CSV</button></div>{recentImports.length ? <div className="activity-list">{recentImports.map((item) => <div className="activity" key={item.id}><span className="csv-icon">CSV</span><div><strong>{item.file_name}</strong><small>{item.client_name} · {item.list_name}</small></div><div className="activity-result"><strong>{formatNumber(item.processed_rows)} rows</strong><small>{formatNumber(item.duplicates_linked)} duplicates found</small></div><div className="activity-actions"><span className="status">Complete</span><button className="text-danger" onClick={() => onDeleteImport(item)}>Undo</button></div></div>)}</div> : <EmptyCompact text="Your completed imports will appear here." action="Import a CSV" onAction={onImport} />}</article>
       <article className="panel coverage"><div className="panel-head"><div><h3>Database efficiency</h3><p>How effectively your data is being reused</p></div><span className="health-badge"><i/> Healthy</span></div><div className="coverage-spotlight"><strong>{reuseRate}%</strong><span>of imported rows matched data you already owned</span></div><div className="coverage-row"><span>Rows processed</span><strong>{formatNumber(stats.rowsImported)}</strong></div><div className="coverage-row"><span>Unique-record ratio</span><strong>{uniqueRate}%</strong></div><div className="coverage-row"><span>Known companies</span><strong>{formatNumber(stats.companies)}</strong></div><div className="coverage-track"><i style={{ width: `${Math.min(100, reuseRate)}%` }}/></div><p className="coverage-note">Every match prevents another duplicate record and helps reduce future scraping.</p><div className="client-mini"><span>Active client workspaces</span><div>{clients.slice(0, 4).map((client) => <i key={client.id}>{initials(client.name)}</i>)}{clients.length > 4 && <i>+{clients.length - 4}</i>}</div></div></article></div>
@@ -328,6 +328,8 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
   const [bulkBusy, setBulkBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(true);
+  const [filterSearch, setFilterSearch] = useState("");
+  const [expandedFilterId, setExpandedFilterId] = useState("");
   const allColumns = useMemo(() => [...standardProspectFields, ...fields.map((field) => ({ id: field, label: field }))], [fields]);
 
   useEffect(() => {
@@ -366,6 +368,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
   const totalPages = Math.max(1, Math.ceil(total / 50));
   const firstRecord = total ? (page - 1) * 50 + 1 : 0;
   const lastRecord = Math.min(page * 50, total);
+  const filterCatalog = allColumns.filter((field) => field.label.toLocaleLowerCase().includes(filterSearch.trim().toLocaleLowerCase()));
 
   useEffect(() => {
     const scrollArea = tableScrollRef.current;
@@ -383,7 +386,11 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
   }
 
   function addFilter(field = "__country") {
-    onFiltersChange([...filters, { id: crypto.randomUUID(), field, operator: "contains", values: [] }]);
+    const existing = filters.find((filter) => filter.field === field);
+    if (existing) { setExpandedFilterId(existing.id); return; }
+    const id = crypto.randomUUID();
+    onFiltersChange([...filters, { id, field, operator: "contains", values: [] }]);
+    setExpandedFilterId(id);
   }
 
   function toggleSelected(id: string) {
@@ -481,13 +488,12 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
       </article>
       {filtersOpen ? <aside className="panel filter-panel">
         <div className="filter-panel-head"><div><span className="filter-icon"><AppIcon name="filter" size={16}/></span><div><strong>Filters</strong><small>Build precise reusable segments</small></div></div>{filters.length ? <button onClick={() => onFiltersChange([])}>Clear all</button> : null}</div>
-        <div className="filter-body">{filters.length ? filters.map((filter, index) => <div className="filter-rule" key={filter.id}>
-          <div className="filter-rule-head"><span>{String(index + 1).padStart(2, "0")}</span><select aria-label={`Filter ${index + 1} field`} value={filter.field} onChange={(event) => updateFilter(filter.id, { field: event.target.value, values: [] })}>{allColumns.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}</select><button aria-label="Remove filter" onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>×</button></div>
-          <select className="filter-condition" value={filter.operator} onChange={(event) => updateFilter(filter.id, { operator: event.target.value as ProspectFilter["operator"] })}><option value="contains">Includes any</option><option value="equals">Exactly matches any</option><option value="not_contains">Excludes any</option><option value="not_equals">Does not equal</option><option value="not_empty">Is not empty</option><option value="empty">Is empty</option></select>
-          {!["empty", "not_empty"].includes(filter.operator) ? <MultiValueSelect key={`${filter.id}-${filter.field}`} values={filter.values} options={suggestedValues.get(filter.field) ?? []} onChange={(values) => updateFilter(filter.id, { values })} /> : null}
-        </div>) : <div className="filter-empty"><span>⌁</span><strong>Build a segment</strong><p>Select a quick filter below or add any uploaded field.</p></div>}
-          <button className="add-filter-button" onClick={() => addFilter()}>＋ Add filter</button>
-          <div className="quick-filters"><small>QUICK FILTERS</small><button onClick={() => addFilter("__country")}>＋ Country</button><button onClick={() => addFilter("__title")}>＋ Job title</button><button onClick={() => addFilter("__seniority")}>＋ Seniority</button><button onClick={() => addFilter("Industry")}>＋ Industry</button></div>
+        <label className="filter-panel-search"><AppIcon name="search" size={15}/><input aria-label="Search filters" value={filterSearch} onChange={(event) => setFilterSearch(event.target.value)} placeholder="Search all filters…"/></label>
+        <div className="filter-body filter-body-apollo">{filters.length ? <div className="active-filter-rules">{filters.map((filter) => { const label = allColumns.find((field) => field.id === filter.field)?.label ?? filter.field; const expanded = expandedFilterId === filter.id; return <div className={`filter-rule ${expanded ? "expanded" : ""}`} key={filter.id}>
+          <button className="filter-rule-summary" aria-expanded={expanded} onClick={() => setExpandedFilterId(expanded ? "" : filter.id)}><span className="filter-rule-symbol"><AppIcon name="filter" size={13}/></span><strong>{label}</strong>{filter.values.length ? <span className="filter-count">{filter.values.length}</span> : null}<span className="filter-chevron">{expanded ? "−" : "+"}</span></button>
+          {expanded ? <div className="filter-rule-content"><div className="filter-rule-actions"><select aria-label={`${label} condition`} value={filter.operator} onChange={(event) => updateFilter(filter.id, { operator: event.target.value as ProspectFilter["operator"] })}><option value="contains">Includes any</option><option value="equals">Exactly matches any</option><option value="not_contains">Excludes any</option><option value="not_equals">Does not equal</option><option value="not_empty">Is not empty</option><option value="empty">Is empty</option></select><button aria-label={`Remove ${label} filter`} onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>Remove</button></div>{!["empty", "not_empty"].includes(filter.operator) ? <MultiValueSelect key={`${filter.id}-${filter.field}`} values={filter.values} options={suggestedValues.get(filter.field) ?? []} onChange={(values) => updateFilter(filter.id, { values })} /> : <p className="filter-mode-note">This filter does not require values.</p>}</div> : null}
+        </div>; })}</div> : <div className="filter-empty"><span><AppIcon name="filter" size={18}/></span><strong>Build a segment</strong><p>Choose a filter below, then select one or many values.</p></div>}
+          <div className="filter-library"><small>ALL FILTERS</small>{filterCatalog.map((field) => { const active = filters.some((filter) => filter.field === field.id); return <button className={active ? "active" : ""} key={field.id} onClick={() => addFilter(field.id)}><span>{field.label}</span><b>{active ? "✓" : "＋"}</b></button>; })}{!filterCatalog.length ? <p>No filters match “{filterSearch}”.</p> : null}</div>
         </div>
       </aside> : null}
     </div>}
@@ -497,8 +503,17 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
 function MultiValueSelect({ values, options, onChange }: { values: string[]; options: string[]; onChange: (values: string[]) => void }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const normalizedValues = values.map((value) => value.toLocaleLowerCase());
-  const availableOptions = Array.from(new Set([...values, ...options])).filter((option) => option.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).slice(0, 12);
+  const availableOptions = Array.from(new Set([...values, ...options])).filter((option) => option.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).slice(0, 40);
+
+  useEffect(() => {
+    function closeOnOutside(event: PointerEvent) { if (!rootRef.current?.contains(event.target as Node)) setOpen(false); }
+    function closeOnEscape(event: KeyboardEvent) { if (event.key === "Escape") { setOpen(false); rootRef.current?.querySelector("input")?.blur(); } }
+    document.addEventListener("pointerdown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => { document.removeEventListener("pointerdown", closeOnOutside); document.removeEventListener("keydown", closeOnEscape); };
+  }, []);
 
   function addValue(rawValue: string) {
     const value = rawValue.trim();
@@ -512,15 +527,15 @@ function MultiValueSelect({ values, options, onChange }: { values: string[]; opt
     onChange(selected ? values.filter((item) => item.toLocaleLowerCase() !== value.toLocaleLowerCase()) : [...values, value]);
   }
 
-  return <div className="multi-value-field">
+  return <div className="multi-value-field" ref={rootRef}>
     <div className="multi-value-control">
       {values.map((value) => <button type="button" className="value-chip" key={value} onClick={(event) => { event.stopPropagation(); onChange(values.filter((item) => item !== value)); }}>{value}<span>×</span></button>)}
-      <input value={query} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => window.setTimeout(() => setOpen(false), 120)} onKeyDown={(event) => {
+      <input value={query} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onFocus={() => setOpen(true)} onKeyDown={(event) => {
         if ((event.key === "Enter" || event.key === ",") && query.trim()) { event.preventDefault(); addValue(query.replace(/,$/, "")); }
         if (event.key === "Backspace" && !query && values.length) onChange(values.slice(0, -1));
       }} placeholder={values.length ? "Add another…" : "Select or type values…"} />
     </div>
-    {open && (availableOptions.length || query.trim()) ? <div className="multi-value-menu">
+    {open && (availableOptions.length || query.trim()) ? <div className="multi-value-menu" role="listbox" aria-multiselectable="true">
       {availableOptions.map((option) => <button type="button" key={option} className={normalizedValues.includes(option.toLocaleLowerCase()) ? "selected" : ""} onMouseDown={(event) => event.preventDefault()} onClick={() => toggleValue(option)}><span>{normalizedValues.includes(option.toLocaleLowerCase()) ? "✓" : ""}</span>{option}</button>)}
       {query.trim() && !availableOptions.some((option) => option.toLocaleLowerCase() === query.trim().toLocaleLowerCase()) ? <button type="button" className="create-value" onMouseDown={(event) => event.preventDefault()} onClick={() => addValue(query)}>＋ Add “{query.trim()}”</button> : null}
     </div> : null}
@@ -530,7 +545,24 @@ function MultiValueSelect({ values, options, onChange }: { values: string[]; opt
 
 function CompanyTable({ companies, onImport }: { companies: Company[]; onImport: () => void }) {
   const covered = companies.filter((company) => company.prospect_count > 0).length;
-  return <section className="companies-workspace"><div className="section-intro company-intro"><div><p className="eyebrow">COMPANY INTELLIGENCE</p><h2>Your known company universe.</h2><p>See where prospect coverage already exists before building another contact list.</p></div><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div><div className="company-summary"><div><span>Companies in database</span><strong>{formatNumber(companies.length)}</strong></div><div><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong></div><div><span>Total linked prospects</span><strong>{formatNumber(companies.reduce((sum, company) => sum + company.prospect_count, 0))}</strong></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div><article className="panel company-table-panel"><div className="panel-head"><div><h3>Company database</h3><p>{formatNumber(companies.length)} organizations available</p></div></div>{companies.length ? <div className="table-wrap"><table className="company-table"><thead><tr><th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th></tr></thead><tbody>{companies.map((company) => <tr key={company.id}><td><div className="company-identity"><span className="company-logo">{initials(company.name)}</span><div><strong>{company.name || company.domain || "Unnamed company"}</strong><small>{company.prospect_count ? `${formatNumber(company.prospect_count)} people available` : "No prospects linked"}</small></div></div></td><td>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain}</a> : <span className="missing-value">No domain</span>}</td><td><strong>{formatNumber(company.prospect_count)}</strong></td><td>{formatNumber(company.client_count)} {company.client_count === 1 ? "client" : "clients"}</td><td>{new Date(company.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><span className={`coverage-status ${company.prospect_count ? "known" : "new"}`}>{company.prospect_count ? "Covered" : "Needs prospects"}</span></td></tr>)}</tbody></table></div> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article></section>;
+  const [expandedId, setExpandedId] = useState("");
+  const [prospectsByCompany, setProspectsByCompany] = useState<Record<string, Prospect[]>>({});
+  const [loadingCompany, setLoadingCompany] = useState("");
+  const [companyError, setCompanyError] = useState("");
+
+  async function toggleCompany(company: Company) {
+    if (expandedId === company.id) { setExpandedId(""); return; }
+    setExpandedId(company.id); setCompanyError("");
+    if (prospectsByCompany[company.id] || !company.prospect_count) return;
+    setLoadingCompany(company.id);
+    try {
+      const data = await api<{ prospects: Prospect[] }>(`/api/companies/${encodeURIComponent(company.id)}/prospects?limit=100`);
+      setProspectsByCompany((current) => ({ ...current, [company.id]: data.prospects }));
+    } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to load company prospects."); }
+    finally { setLoadingCompany(""); }
+  }
+
+  return <section className="companies-workspace"><div className="section-intro company-intro"><div><p className="eyebrow">COMPANY INTELLIGENCE</p><h2>Your known company universe.</h2><p>Expand any company to inspect the prospects already available in your master database.</p></div><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div><div className="company-summary"><div><span>Companies in database</span><strong>{formatNumber(companies.length)}</strong></div><div><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong></div><div><span>Total linked prospects</span><strong>{formatNumber(companies.reduce((sum, company) => sum + company.prospect_count, 0))}</strong></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div>{companyError ? <div className="inline-error" role="alert">{companyError}</div> : null}<article className="panel company-table-panel"><div className="panel-head"><div><h3>Company database</h3><p>{formatNumber(companies.length)} organizations available · click a row to explore</p></div></div>{companies.length ? <div className="table-wrap"><table className="company-table"><thead><tr><th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th></tr></thead><tbody>{companies.map((company) => { const expanded = expandedId === company.id; const companyProspects = prospectsByCompany[company.id] ?? []; return <Fragment key={company.id}><tr className={`company-row ${expanded ? "expanded" : ""}`} onClick={() => void toggleCompany(company)}><td><div className="company-identity"><button className="company-expand" aria-label={`${expanded ? "Collapse" : "Expand"} ${company.name}`} aria-expanded={expanded}>{expanded ? "−" : "+"}</button><span className="company-logo">{initials(company.name)}</span><div><strong>{company.name || company.domain || "Unnamed company"}</strong><small>{company.prospect_count ? `${formatNumber(company.prospect_count)} people available` : "No prospects linked"}</small></div></div></td><td onClick={(event) => event.stopPropagation()}>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain}</a> : <span className="missing-value">No domain</span>}</td><td><strong>{formatNumber(company.prospect_count)}</strong></td><td>{formatNumber(company.client_count)} {company.client_count === 1 ? "client" : "clients"}</td><td>{new Date(company.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><span className={`coverage-status ${company.prospect_count ? "known" : "new"}`}>{company.prospect_count ? "Covered" : "Needs prospects"}</span></td></tr>{expanded ? <tr className="company-prospect-row"><td colSpan={6}>{loadingCompany === company.id ? <div className="company-prospect-loading">Loading prospects…</div> : companyProspects.length ? <div className="company-prospect-list"><div className="company-prospect-head"><strong>Prospects at {company.name}</strong><span>{formatNumber(companyProspects.length)} loaded</span></div><table><thead><tr><th>Name</th><th>Title</th><th>Email</th><th>Seniority</th><th>Location</th></tr></thead><tbody>{companyProspects.map((prospect) => <tr key={prospect.id}><td><div className="compact-person"><span>{initials(prospect.full_name)}</span><strong>{prospect.full_name || "Unnamed prospect"}</strong></div></td><td>{prospect.title || "—"}</td><td>{prospect.work_email || prospect.personal_email || "—"}</td><td>{String(prospect.seniority || "—")}</td><td>{[prospect.city, prospect.country].filter(Boolean).join(", ") || "—"}</td></tr>)}</tbody></table></div> : <div className="company-prospect-loading">No linked prospects found.</div>}</td></tr> : null}</Fragment>; })}</tbody></table></div> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article></section>;
 }
 
 function ClientsView({ clients, onOpen, onImport }: { clients: ClientRecord[]; onOpen: (client: ClientRecord) => void; onImport: () => void }) {
@@ -563,7 +595,7 @@ function ListWorkspace({ client, list, onBack, onSelect }: { client: ClientRecor
   }, [list.id, deferredSearch, page]);
   const totalPages = Math.max(1, Math.ceil(total / 50));
   return <section className="operations-page"><button className="back" onClick={onBack}>← {client.name} lists</button><div className="section-intro compact-intro"><div><p className="eyebrow">LIST WORKSPACE</p><h2>{list.name}</h2><p>{formatNumber(total)} linked prospects · {formatNumber(list.field_count)} preserved fields · {list.source_file_name}</p></div><label className="workspace-search"><span>⌕</span><input aria-label="Search this list" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this list…"/></label></div>
-    <article className="panel list-workspace-panel">{error ? <div className="inline-error" role="alert">{error}</div> : null}{loading ? <div className="workspace-loading">Loading list records…</div> : rows.length ? <div className="table-wrap"><table><thead><tr><th>Name</th><th>Company</th><th>Email</th><th>Title</th><th>Last contacted</th><th>Reuse eligibility</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id} onClick={() => onSelect(row)}><td><div className="compact-person"><span>{initials(row.full_name)}</span><strong>{row.full_name || "Unnamed prospect"}</strong></div></td><td>{row.company_name || "—"}</td><td>{row.work_email || "—"}</td><td>{row.title || "—"}</td><td>{row.last_contacted_at ? new Date(row.last_contacted_at).toLocaleDateString("en-IN") : "Never"}</td><td><span className={`eligibility ${row.eligible ? "eligible" : "cooling"}`}>{row.eligible ? "Eligible now" : `Wait until ${row.next_eligible_at ? new Date(row.next_eligible_at).toLocaleDateString("en-IN") : "—"}`}</span></td></tr>)}</tbody></table></div> : <EmptyCompact text="No prospects match this search." action="Clear search" onAction={() => setSearch("")} />}<div className="table-footer"><span>{formatNumber(total)} records</span><div><button disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}>Next →</button></div></div></article>
+    <article className="panel list-workspace-panel">{error ? <div className="inline-error" role="alert">{error}</div> : null}{loading ? <div className="workspace-loading">Loading list records…</div> : rows.length ? <div className="table-wrap"><table><thead><tr><th>Name</th><th>Company</th><th>Email</th><th>Title</th><th>Last contacted</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id} onClick={() => onSelect(row)}><td><div className="compact-person"><span>{initials(row.full_name)}</span><strong>{row.full_name || "Unnamed prospect"}</strong></div></td><td>{row.company_name || "—"}</td><td>{row.work_email || "—"}</td><td>{row.title || "—"}</td><td>{row.last_contacted_at ? new Date(row.last_contacted_at).toLocaleDateString("en-IN") : "Never"}</td></tr>)}</tbody></table></div> : <EmptyCompact text="No prospects match this search." action="Clear search" onAction={() => setSearch("")} />}<div className="table-footer"><span>{formatNumber(total)} records</span><div><button disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => setPage((current) => current + 1)}>Next →</button></div></div></article>
   </section>;
 }
 
@@ -646,7 +678,9 @@ function DataQualityCenter({ onMerged }: { onMerged: () => void }) {
 }
 
 function ProspectCompareCard({ prospect }: { prospect: Prospect }) {
-  return <div className="compare-card"><div className="compact-person"><span>{initials(prospect.full_name)}</span><strong>{prospect.full_name || "Unnamed"}</strong></div><p>{prospect.title || "No title"}</p><p>{prospect.company_name || "No company"}</p><p>{prospect.work_email || "No work email"}</p><small>{formatNumber(prospect.list_count)} lists · {formatNumber(Object.keys(parseAllData(prospect.all_data)).length)} fields</small></div>;
+  const [expanded, setExpanded] = useState(false);
+  const fields = Object.entries({ "Full name": prospect.full_name, "Title": prospect.title, "Company": prospect.company_name, "Work email": prospect.work_email, "Personal email": prospect.personal_email, "LinkedIn": prospect.linkedin_url, "Mobile": prospect.mobile_number, "Seniority": prospect.seniority, "Department": prospect.department, "City": prospect.city, "State": prospect.state, "Country": prospect.country, ...parseAllData(prospect.all_data) }).filter(([, value]) => String(value ?? "").trim());
+  return <div className={`compare-card ${expanded ? "expanded" : ""}`}><div className="compact-person"><span>{initials(prospect.full_name)}</span><strong>{prospect.full_name || "Unnamed"}</strong></div><p>{prospect.title || "No title"}</p><p>{prospect.company_name || "No company"}</p><p>{prospect.work_email || "No work email"}</p><div className="compare-card-footer"><small>{formatNumber(prospect.list_count)} lists · {formatNumber(fields.length)} populated fields</small><button aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>{expanded ? "Hide fields" : "View all fields"}</button></div>{expanded ? <div className="compare-fields">{fields.map(([field, value]) => <div key={field}><span>{field}</span><strong>{String(value)}</strong></div>)}</div> : null}</div>;
 }
 
 function ImportMappingPanel({ audit, fieldMap, onChange }: { audit: FileAudit; fieldMap: Record<string, string>; onChange: (header: string, value: string) => void }) {
