@@ -9,7 +9,7 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
     readFile(new URL("../app/api/companies/[id]/prospects/route.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(dashboard, /Your agency’s prospect intelligence/);
+  assert.match(dashboard, /All your prospects, organized in one place/);
   assert.match(dashboard, /function AppIcon/);
   assert.match(dashboard, /company-table/);
   assert.match(dashboard, /company-prospect-list/);

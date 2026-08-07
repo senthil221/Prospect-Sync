@@ -4,7 +4,7 @@ import DashboardApp from "./DashboardApp";
 import { getAuthorizedUser } from "../lib/auth";
 
 export const metadata: Metadata = {
-  title: "Prospect Sync — Master Prospect Database",
+  title: "Prospect Sync | Master Prospect Database",
   description: "A centralized prospect database for clean client list operations.",
 };
 
