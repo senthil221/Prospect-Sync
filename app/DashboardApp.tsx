@@ -25,6 +25,10 @@ function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "CL";
 }
 
+function colorTone(value: string) {
+  return Array.from(value).reduce((sum, character) => sum + character.charCodeAt(0), 0) % 6;
+}
+
 type IconName = "home" | "database" | "company" | "clients" | "coverage" | "quality" | "upload" | "search" | "plus" | "filter" | "columns" | "check" | "arrow";
 
 function AppIcon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -136,6 +140,8 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   const [prospectDirection, setProspectDirection] = useState<"asc" | "desc">("desc");
   const [prospectRefresh, setProspectRefresh] = useState(0);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyPage, setCompanyPage] = useState(1);
+  const [companySummary, setCompanySummary] = useState({ total: 0, covered: 0, prospectTotal: 0, pageSize: 50 });
   const [lists, setLists] = useState<ListRecord[]>([]);
   const [selectedClient, setSelectedClient] = useState<ClientRecord | null>(null);
   const [selectedList, setSelectedList] = useState<ListRecord | null>(null);
@@ -176,13 +182,13 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
           if (active) { setProspects(data.prospects); setProspectTotal(data.total); setProspectFields(data.fields); }
         }
         if (section === "companies") {
-          const data = await api<{ companies: Company[] }>(`/api/companies?search=${encodeURIComponent(deferredSearch)}`);
-          if (active) setCompanies(data.companies);
+          const data = await api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(`/api/companies?search=${encodeURIComponent(deferredSearch)}&page=${companyPage}&pageSize=50`);
+          if (active) { setCompanies(data.companies); setCompanySummary({ total: data.total, covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); }
         }
       } catch (caught) { if (active) setError(caught instanceof Error ? caught.message : "Unable to load workspace data."); }
     }, 220);
     return () => { active = false; clearTimeout(timer); };
-  }, [section, deferredSearch, stats.prospects, prospectPage, encodedProspectFilters, prospectSort, prospectDirection, prospectRefresh]);
+  }, [section, deferredSearch, stats.prospects, prospectPage, encodedProspectFilters, prospectSort, prospectDirection, prospectRefresh, companyPage]);
 
   async function openClient(client: ClientRecord) {
     setSelectedClient(client);
@@ -191,7 +197,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   }
 
   function navigate(next: Section) {
-    setSection(next); setSearch(""); setError(""); setProspectPage(1); setSelectedList(null);
+    setSection(next); setSearch(""); setError(""); setProspectPage(1); setCompanyPage(1); setSelectedList(null);
     if (next !== "clients") setSelectedClient(null);
   }
 
@@ -241,7 +247,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
         <header className="topbar">
           <div><p className="eyebrow">DATABASE WORKSPACE</p><h1>{selectedClient ? selectedClient.name : title}</h1></div>
           <div className="top-actions">
-            {(section === "prospects" || section === "companies") && <label className="search"><span><AppIcon name="search" size={16}/></span><input aria-label="Search" value={search} onChange={(event) => { setSearch(event.target.value); if (section === "prospects") setProspectPage(1); }} placeholder={`Search ${section}...`} /></label>}
+            {(section === "prospects" || section === "companies") && <label className="search"><span><AppIcon name="search" size={16}/></span><input aria-label="Search" value={search} onChange={(event) => { setSearch(event.target.value); if (section === "prospects") setProspectPage(1); if (section === "companies") setCompanyPage(1); }} placeholder={`Search ${section}...`} /></label>}
             <button className="primary" onClick={() => navigate("imports")}><AppIcon name="plus" size={15}/> Import list</button>
           </div>
         </header>
@@ -251,7 +257,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
           {loading ? <LoadingState /> : null}
           {!loading && section === "overview" && <Overview stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name} · ${item.list_name}` })} />}
           {!loading && section === "prospects" && <ProspectTable prospects={prospects} total={prospectTotal} fields={prospectFields} filters={prospectFilters} page={prospectPage} clients={clients} sort={prospectSort} direction={prospectDirection} onSortChange={(nextSort, nextDirection) => { setProspectSort(nextSort); setProspectDirection(nextDirection); setProspectPage(1); }} onFiltersChange={(next) => { setProspectFilters(next); setProspectPage(1); }} onPageChange={setProspectPage} onSelect={setSelectedProspect} onImport={() => navigate("imports")} onRefresh={() => setProspectRefresh((current) => current + 1)} />}
-          {!loading && section === "companies" && <CompanyTable companies={companies} onImport={() => navigate("imports")} />}
+          {!loading && section === "companies" && <CompanyTable companies={companies} total={companySummary.total} covered={companySummary.covered} prospectTotal={companySummary.prospectTotal} page={companyPage} pageSize={companySummary.pageSize} onPageChange={setCompanyPage} onImport={() => navigate("imports")} />}
           {!loading && section === "clients" && !selectedClient && <ClientsView clients={clients} onOpen={openClient} onImport={() => navigate("imports")} />}
           {!loading && section === "clients" && selectedClient && !selectedList && <ClientDetail client={selectedClient} lists={lists} onBack={() => setSelectedClient(null)} onOpenList={setSelectedList} onImport={() => navigate("imports")} onDeleteClient={() => setDeleteRequest({ kind: "client", id: selectedClient.id, name: selectedClient.name, context: `${selectedClient.list_count} lists · ${selectedClient.prospect_count} linked prospects` })} onDeleteList={(list) => setDeleteRequest({ kind: "list", id: list.id, name: list.name, context: `${list.source_file_name} · ${list.prospect_count} linked prospects` })} />}
           {!loading && section === "clients" && selectedClient && selectedList && <ListWorkspace client={selectedClient} list={selectedList} onBack={() => setSelectedList(null)} onSelect={setSelectedProspect} />}
@@ -543,12 +549,15 @@ function MultiValueSelect({ values, options, onChange }: { values: string[]; opt
   </div>;
 }
 
-function CompanyTable({ companies, onImport }: { companies: Company[]; onImport: () => void }) {
-  const covered = companies.filter((company) => company.prospect_count > 0).length;
+function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize, onPageChange, onImport }: { companies: Company[]; total: number; covered: number; prospectTotal: number; page: number; pageSize: number; onPageChange: (page: number) => void; onImport: () => void }) {
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [prospectsByCompany, setProspectsByCompany] = useState<Record<string, Prospect[]>>({});
+  const [prospectTotalsByCompany, setProspectTotalsByCompany] = useState<Record<string, number>>({});
   const [loadingCompany, setLoadingCompany] = useState("");
   const [companyError, setCompanyError] = useState("");
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const resultStart = total ? (page - 1) * pageSize + 1 : 0;
+  const resultEnd = Math.min(page * pageSize, total);
 
   async function openCompany(company: Company) {
     setSelectedCompany(company);
@@ -556,22 +565,38 @@ function CompanyTable({ companies, onImport }: { companies: Company[]; onImport:
     if (prospectsByCompany[company.id] || !company.prospect_count) return;
     setLoadingCompany(company.id);
     try {
-      const data = await api<{ prospects: Prospect[] }>(`/api/companies/${encodeURIComponent(company.id)}/prospects?limit=100`);
+      const data = await api<{ prospects: Prospect[]; total: number }>(`/api/companies/${encodeURIComponent(company.id)}/prospects?page=1&pageSize=50`);
       setProspectsByCompany((current) => ({ ...current, [company.id]: data.prospects }));
+      setProspectTotalsByCompany((current) => ({ ...current, [company.id]: data.total }));
     } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to load company prospects."); }
+    finally { setLoadingCompany(""); }
+  }
+
+  async function loadMoreProspects(company: Company) {
+    const existing = prospectsByCompany[company.id] ?? [];
+    const nextPage = Math.floor(existing.length / 50) + 1;
+    setLoadingCompany(company.id); setCompanyError("");
+    try {
+      const data = await api<{ prospects: Prospect[]; total: number }>(`/api/companies/${encodeURIComponent(company.id)}/prospects?page=${nextPage}&pageSize=50`);
+      setProspectsByCompany((current) => {
+        const combined = [...(current[company.id] ?? []), ...data.prospects];
+        return { ...current, [company.id]: Array.from(new Map(combined.map((prospect) => [prospect.id, prospect])).values()) };
+      });
+      setProspectTotalsByCompany((current) => ({ ...current, [company.id]: data.total }));
+    } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to load more prospects."); }
     finally { setLoadingCompany(""); }
   }
 
   return <section className="companies-workspace">
     <div className="section-intro company-intro"><div><p className="eyebrow">COMPANIES</p><h2>Companies already in your database.</h2><p>Open a company to see its prospects in a separate panel.</p></div><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div>
-    <div className="company-summary"><div><span>Companies in database</span><strong>{formatNumber(companies.length)}</strong></div><div><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong></div><div><span>Total linked prospects</span><strong>{formatNumber(companies.reduce((sum, company) => sum + company.prospect_count, 0))}</strong></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div>
+    <div className="company-summary"><div className="summary-violet"><span>Companies in database</span><strong>{formatNumber(total)}</strong><small>Complete company directory</small></div><div className="summary-blue"><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong><small>{total ? `${Math.round((covered / total) * 100)}% of companies` : "No companies yet"}</small></div><div className="summary-green"><span>Total linked prospects</span><strong>{formatNumber(prospectTotal)}</strong><small>Across all matching companies</small></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div>
     {companyError ? <div className="inline-error" role="alert">{companyError}</div> : null}
-    <article className="panel company-table-panel"><div className="panel-head"><div><h3>Company database</h3><p>{formatNumber(companies.length)} companies. Click any row to open its details.</p></div></div>{companies.length ? <div className="table-wrap"><table className="company-table"><thead><tr><th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th></tr></thead><tbody>{companies.map((company) => <tr className="company-row" key={company.id} onClick={() => void openCompany(company)}><td><div className="company-identity"><button className="company-open" aria-label={`Open ${company.name || company.domain || "company"} details`} onClick={(event) => { event.stopPropagation(); void openCompany(company); }}><AppIcon name="arrow" size={15}/></button><span className="company-logo">{initials(company.name)}</span><div><strong>{company.name || company.domain || "Unnamed company"}</strong><small>{company.prospect_count ? `${formatNumber(company.prospect_count)} people available` : "No prospects linked"}</small></div></div></td><td onClick={(event) => event.stopPropagation()}>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain}</a> : <span className="missing-value">No domain</span>}</td><td><strong>{formatNumber(company.prospect_count)}</strong></td><td>{formatNumber(company.client_count)} {company.client_count === 1 ? "client" : "clients"}</td><td>{new Date(company.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><span className={`coverage-status ${company.prospect_count ? "known" : "new"}`}>{company.prospect_count ? "Covered" : "Needs prospects"}</span></td></tr>)}</tbody></table></div> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article>
-    {selectedCompany ? <CompanyDrawer company={selectedCompany} prospects={prospectsByCompany[selectedCompany.id] ?? []} loading={loadingCompany === selectedCompany.id} error={companyError} onClose={() => { setSelectedCompany(null); setCompanyError(""); }} /> : null}
+    <article className="panel company-table-panel"><div className="panel-head company-panel-head"><div><h3>Company database</h3><p>Showing {formatNumber(resultStart)}–{formatNumber(resultEnd)} of {formatNumber(total)} companies. Click any row to open its details.</p></div><span className="directory-badge">{formatNumber(total)} total</span></div>{companies.length ? <><div className="table-wrap"><table className="company-table"><thead><tr><th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th></tr></thead><tbody>{companies.map((company) => { const tone = colorTone(company.id); return <tr className={`company-row tone-${tone}`} key={company.id} onClick={() => void openCompany(company)}><td><div className="company-identity"><button className="company-open" aria-label={`Open ${company.name || company.domain || "company"} details`} onClick={(event) => { event.stopPropagation(); void openCompany(company); }}><AppIcon name="arrow" size={15}/></button><span className={`company-logo tone-${tone}`}>{initials(company.name)}</span><div><strong>{company.name || company.domain || "Unnamed company"}</strong><small>{company.prospect_count ? `${formatNumber(company.prospect_count)} people available` : "No prospects linked"}</small></div></div></td><td onClick={(event) => event.stopPropagation()}>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain}</a> : <span className="missing-value">No domain</span>}</td><td><span className="prospect-count-badge">{formatNumber(company.prospect_count)}</span></td><td>{formatNumber(company.client_count)} {company.client_count === 1 ? "client" : "clients"}</td><td>{new Date(company.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><span className={`coverage-status ${company.prospect_count ? "known" : "new"}`}>{company.prospect_count ? "Covered" : "Needs prospects"}</span></td></tr>; })}</tbody></table></div><div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article>
+    {selectedCompany ? <CompanyDrawer company={selectedCompany} prospects={prospectsByCompany[selectedCompany.id] ?? []} total={prospectTotalsByCompany[selectedCompany.id] ?? selectedCompany.prospect_count} loading={loadingCompany === selectedCompany.id} error={companyError} onLoadMore={() => void loadMoreProspects(selectedCompany)} onClose={() => { setSelectedCompany(null); setCompanyError(""); }} /> : null}
   </section>;
 }
 
-function CompanyDrawer({ company, prospects, loading, error, onClose }: { company: Company; prospects: Prospect[]; loading: boolean; error: string; onClose: () => void }) {
+function CompanyDrawer({ company, prospects, total, loading, error, onLoadMore, onClose }: { company: Company; prospects: Prospect[]; total: number; loading: boolean; error: string; onLoadMore: () => void; onClose: () => void }) {
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) { if (event.key === "Escape") onClose(); }
     window.addEventListener("keydown", closeOnEscape);
@@ -583,12 +608,12 @@ function CompanyDrawer({ company, prospects, loading, error, onClose }: { compan
     <aside className="drawer company-drawer" role="dialog" aria-modal="true" aria-labelledby="company-drawer-title">
       <div className="company-drawer-header">
         <button className="drawer-close" aria-label="Close company details" onClick={onClose}>×</button>
-        <div className="drawer-person company-drawer-identity"><span>{initials(company.name)}</span><div><p className="eyebrow">COMPANY DETAILS</p><h2 id="company-drawer-title">{company.name || company.domain || "Unnamed company"}</h2>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain} ↗</a> : <p>No website saved</p>}</div></div>
+        <div className="drawer-person company-drawer-identity"><span className={`tone-${colorTone(company.id)}`}>{initials(company.name)}</span><div><p className="eyebrow">COMPANY DETAILS</p><h2 id="company-drawer-title">{company.name || company.domain || "Unnamed company"}</h2>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain} ↗</a> : <p>No website saved</p>}</div></div>
         <div className="drawer-summary"><span><b>{formatNumber(company.prospect_count)}</b>prospects</span><span><b>{formatNumber(company.client_count)}</b>clients</span><span><b>{new Date(company.created_at).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}</b>added</span></div>
-        <div className="company-drawer-title"><div><strong>Linked prospects</strong><small>People connected to this company</small></div><span>{formatNumber(prospects.length)} loaded</span></div>
+        <div className="company-drawer-title"><div><strong>Linked prospects</strong><small>People connected to this company</small></div><span>{formatNumber(prospects.length)} of {formatNumber(total)}</span></div>
       </div>
       <div className="company-drawer-body">
-        {loading ? <div className="company-prospect-loading">Loading prospects…</div> : error ? <div className="inline-error" role="alert">{error}</div> : prospects.length ? <div className="company-prospect-list"><table><thead><tr><th>Name</th><th>Title</th><th>Email</th><th>Seniority</th><th>Location</th></tr></thead><tbody>{prospects.map((prospect) => <tr key={prospect.id}><td><div className="compact-person"><span>{initials(prospect.full_name)}</span><strong>{prospect.full_name || "Unnamed prospect"}</strong></div></td><td>{prospect.title || "-"}</td><td>{prospect.work_email || prospect.personal_email || "-"}</td><td>{String(prospect.seniority || "-")}</td><td>{[prospect.city, prospect.country].filter(Boolean).join(", ") || "-"}</td></tr>)}</tbody></table></div> : <div className="drawer-empty">No linked prospects found.</div>}
+        {loading && !prospects.length ? <div className="company-prospect-loading">Loading prospects…</div> : prospects.length ? <><div className="company-prospect-list"><table><thead><tr><th>Name</th><th>Title</th><th>Email</th><th>Seniority</th><th>Location</th></tr></thead><tbody>{prospects.map((prospect) => <tr key={prospect.id}><td><div className="compact-person"><span className={`tone-${colorTone(prospect.id)}`}>{initials(prospect.full_name)}</span><strong>{prospect.full_name || "Unnamed prospect"}</strong></div></td><td>{prospect.title || "-"}</td><td>{prospect.work_email || prospect.personal_email || "-"}</td><td>{String(prospect.seniority || "-")}</td><td>{[prospect.city, prospect.country].filter(Boolean).join(", ") || "-"}</td></tr>)}</tbody></table></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{prospects.length < total ? <button className="load-more-prospects" disabled={loading} onClick={onLoadMore}>{loading ? "Loading…" : `Load ${Math.min(50, total - prospects.length)} more prospects (${formatNumber(total - prospects.length)} remaining)`}</button> : <div className="all-prospects-loaded"><AppIcon name="check" size={14}/> All {formatNumber(total)} prospects loaded</div>}</> : error ? <div className="inline-error" role="alert">{error}</div> : <div className="drawer-empty">No linked prospects found.</div>}
       </div>
     </aside>
   </div>;
