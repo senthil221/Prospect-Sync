@@ -34,17 +34,23 @@ export async function GET(request: Request) {
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
   const sort = ["created_at", "name", "company", "title", "last_contacted"].includes(url.searchParams.get("sort") ?? "") ? String(url.searchParams.get("sort")) : "created_at";
   const direction = url.searchParams.get("direction") === "asc" ? "asc" : "desc";
+  const clientId = (url.searchParams.get("clientId") ?? "").trim() || null;
   const limit = 50;
   const filters = parseFilters(url.searchParams.get("filters"));
   const supabase = createAdminClient();
-  let workspace = await supabase.rpc("search_prospect_workspace_v3", {
+  let workspace = await supabase.rpc("search_prospect_workspace_v4", {
       p_search: search,
       p_filters: filters,
       p_sort: sort,
       p_direction: direction,
       p_limit: limit,
       p_offset: (page - 1) * limit,
+      p_client_id: clientId,
     });
+  if (workspace.error?.code === "PGRST202" || workspace.error?.code === "42883") {
+    if (clientId) return Response.json({ error: "Apply the latest database migration to enable client workspaces." }, { status: 503 });
+    workspace = await supabase.rpc("search_prospect_workspace_v3", { p_search: search, p_filters: filters, p_sort: sort, p_direction: direction, p_limit: limit, p_offset: (page - 1) * limit });
+  }
   if (workspace.error?.code === "PGRST202" || workspace.error?.code === "42883") {
     workspace = await supabase.rpc("search_prospect_workspace", { p_search: search, p_filters: filters.filter((filter) => !["not_contains", "not_equals"].includes(filter.operator)), p_limit: limit, p_offset: (page - 1) * limit });
   }

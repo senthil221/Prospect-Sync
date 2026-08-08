@@ -6,7 +6,8 @@ import { mapProspect } from "../db/normalize";
 type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" | "quality" | "imports";
 type ClientRecord = { id: string; name: string; list_count: number; prospect_count: number; cooldown_days?: number };
 type ListRecord = { id: string; name: string; source_file_name: string; uploaded_rows: number; unique_added: number; duplicates_linked: number; prospect_count: number; created_at: string; field_count: number; field_headers: string[] };
-type Prospect = Record<string, unknown> & { id: string; full_name: string; work_email: string; personal_email?: string; title: string; company_name: string; company_domain: string; city?: string; country?: string; seniority?: string; client_count: number; list_count: number; all_data: string | Record<string, string>; last_contacted_at?: string; next_eligible_at?: string; eligible?: boolean; tags?: Array<{ id: string; name: string; color: string }> };
+type ProspectMembership = { listId: string; listName: string; clientId: string; clientName: string };
+type Prospect = Record<string, unknown> & { id: string; full_name: string; work_email: string; personal_email?: string; title: string; company_name: string; company_domain: string; city?: string; country?: string; seniority?: string; client_count: number; list_count: number; list_names?: string[]; client_names?: string[]; list_memberships?: ProspectMembership[]; all_data: string | Record<string, string>; last_contacted_at?: string; next_eligible_at?: string; eligible?: boolean; tags?: Array<{ id: string; name: string; color: string }> };
 type Company = { id: string; name: string; domain: string; prospect_count: number; client_count: number; created_at: string };
 type ImportRecord = { id: string; file_name: string; client_name: string; list_name: string; processed_rows: number; unique_added: number; duplicates_linked: number; status: string; created_at: string };
 type DeleteKind = "import" | "list" | "client";
@@ -109,11 +110,36 @@ function parseCsv(text: string) {
   return { headers: uniqueHeaders(rows[0]), rows: rows.slice(1) };
 }
 
+const apiResponseCache = new Map<string, { data: unknown; expiresAt: number }>();
+const apiRequests = new Map<string, Promise<unknown>>();
+
+function clearApiCache() {
+  apiResponseCache.clear();
+}
+
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(path, options);
-  const data = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(data.error || "Something went wrong.");
-  return data;
+  const method = String(options?.method ?? "GET").toUpperCase();
+  if (method === "GET") {
+    const cached = apiResponseCache.get(path);
+    if (cached && cached.expiresAt > Date.now()) return cached.data as T;
+    const pending = apiRequests.get(path);
+    if (pending) return pending as Promise<T>;
+  }
+  const request = (async () => {
+    const response = await fetch(path, options);
+    const data = await response.json() as T & { error?: string };
+    if (!response.ok) throw new Error(data.error || "Something went wrong.");
+    if (method === "GET") apiResponseCache.set(path, { data, expiresAt: Date.now() + 5 * 60_000 });
+    else clearApiCache();
+    return data;
+  })();
+  if (method === "GET") apiRequests.set(path, request);
+  try { return await request; }
+  finally { if (method === "GET") apiRequests.delete(path); }
+}
+
+function prefetchApi(path: string) {
+  void api(path).catch(() => undefined);
 }
 
 const navItems: Array<{ id: Section; label: string; mark: IconName }> = [
@@ -175,7 +201,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
 
   useEffect(() => {
     let active = true;
-    const timer = setTimeout(async () => {
+    void (async () => {
       try {
         if (section === "prospects") {
           const data = await api<{ prospects: Prospect[]; total: number; fields: string[] }>(`/api/prospects?search=${encodeURIComponent(deferredSearch)}&page=${prospectPage}&sort=${encodeURIComponent(prospectSort)}&direction=${prospectDirection}&filters=${encodeURIComponent(encodedProspectFilters)}`);
@@ -186,13 +212,16 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
           if (active) { setCompanies(data.companies); setCompanySummary({ total: data.total, covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); }
         }
       } catch (caught) { if (active) setError(caught instanceof Error ? caught.message : "Unable to load workspace data."); }
-    }, 220);
-    return () => { active = false; clearTimeout(timer); };
+    })();
+    return () => { active = false; };
   }, [section, deferredSearch, stats.prospects, prospectPage, encodedProspectFilters, prospectSort, prospectDirection, prospectRefresh, companyPage]);
 
   async function openClient(client: ClientRecord) {
     setSelectedClient(client);
-    const data = await api<{ lists: ListRecord[] }>(`/api/lists?clientId=${client.id}`);
+    const clientId = encodeURIComponent(client.id);
+    prefetchApi(`/api/prospects?search=&page=1&sort=created_at&direction=desc&filters=%5B%5D&clientId=${clientId}`);
+    prefetchApi(`/api/companies?search=&clientId=${clientId}&page=1&pageSize=50`);
+    const data = await api<{ lists: ListRecord[] }>(`/api/lists?clientId=${clientId}`);
     setLists(data.lists);
   }
 
@@ -259,7 +288,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
           {!loading && section === "prospects" && <ProspectTable prospects={prospects} total={prospectTotal} fields={prospectFields} filters={prospectFilters} page={prospectPage} clients={clients} sort={prospectSort} direction={prospectDirection} onSortChange={(nextSort, nextDirection) => { setProspectSort(nextSort); setProspectDirection(nextDirection); setProspectPage(1); }} onFiltersChange={(next) => { setProspectFilters(next); setProspectPage(1); }} onPageChange={setProspectPage} onSelect={setSelectedProspect} onImport={() => navigate("imports")} onRefresh={() => setProspectRefresh((current) => current + 1)} />}
           {!loading && section === "companies" && <CompanyTable companies={companies} total={companySummary.total} covered={companySummary.covered} prospectTotal={companySummary.prospectTotal} page={companyPage} pageSize={companySummary.pageSize} onPageChange={setCompanyPage} onImport={() => navigate("imports")} />}
           {!loading && section === "clients" && !selectedClient && <ClientsView clients={clients} onOpen={openClient} onImport={() => navigate("imports")} />}
-          {!loading && section === "clients" && selectedClient && !selectedList && <ClientDetail client={selectedClient} lists={lists} onBack={() => setSelectedClient(null)} onOpenList={setSelectedList} onImport={() => navigate("imports")} onDeleteClient={() => setDeleteRequest({ kind: "client", id: selectedClient.id, name: selectedClient.name, context: `${selectedClient.list_count} lists · ${selectedClient.prospect_count} linked prospects` })} onDeleteList={(list) => setDeleteRequest({ kind: "list", id: list.id, name: list.name, context: `${list.source_file_name} · ${list.prospect_count} linked prospects` })} />}
+          {!loading && section === "clients" && selectedClient && !selectedList && <ClientDetail client={selectedClient} clients={clients} lists={lists} onBack={() => setSelectedClient(null)} onOpenList={setSelectedList} onSelectProspect={setSelectedProspect} onImport={() => navigate("imports")} onDeleteClient={() => setDeleteRequest({ kind: "client", id: selectedClient.id, name: selectedClient.name, context: `${selectedClient.list_count} lists · ${selectedClient.prospect_count} linked prospects` })} onDeleteList={(list) => setDeleteRequest({ kind: "list", id: list.id, name: list.name, context: `${list.source_file_name} · ${list.prospect_count} linked prospects` })} />}
           {!loading && section === "clients" && selectedClient && selectedList && <ListWorkspace client={selectedClient} list={selectedList} onBack={() => setSelectedList(null)} onSelect={setSelectedProspect} />}
           {!loading && section === "coverage" && <CoverageChecker />}
           {!loading && section === "quality" && <DataQualityCenter onMerged={() => void refreshDashboard()} />}
@@ -281,14 +310,14 @@ function Overview({ stats, recentImports, clients, onImport, onViewMaster, onDel
     { label: "Unique prospects", value: stats.prospects, note: "Clean master records", color: "violet", icon: "database" as IconName },
     { label: "Known companies", value: stats.companies, note: "Matched by name or domain", color: "blue", icon: "company" as IconName },
     { label: "Client lists", value: stats.lists, note: `${stats.clients} active clients`, color: "amber", icon: "clients" as IconName },
-    { label: "Duplicates prevented", value: stats.duplicatesDetected, note: "Reused instead of copied", color: "green", icon: "quality" as IconName },
+    { label: "Cross-client overlaps", value: stats.duplicatesDetected, note: "Reused across client databases", color: "green", icon: "quality" as IconName },
   ];
   const uniqueRate = stats.rowsImported ? Math.round((stats.prospects / stats.rowsImported) * 100) : 0;
   const reuseRate = stats.rowsImported ? Math.round((stats.duplicatesDetected / stats.rowsImported) * 100) : 0;
   return <>
     <div className="welcome"><div><div className="hero-status"><span/><strong>Database healthy</strong><small>Live sync is active</small></div><p className="eyebrow">MASTER DATABASE</p><h2>All your prospects, organized in one place.</h2><div className="welcome-actions"><button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import a client list</button><button className="secondary" onClick={onViewMaster}>Explore master database <AppIcon name="arrow" size={15}/></button></div></div><div className="sync-visual"><div className="file-chip"><AppIcon name="upload" size={20}/><span>Client CSV</span></div><div className="sync-line"><i/><i/><i/></div><div className="database-chip"><b><AppIcon name="database" size={19}/></b><span>Master database<small>{formatNumber(stats.prospects)} unique prospects</small></span></div></div></div>
     <div className="metric-grid">{cards.map((card) => <article className={`metric-card ${card.color}`} key={card.label}><div className="metric-icon"><AppIcon name={card.icon} size={17}/></div><p>{card.label}</p><strong>{formatNumber(card.value)}</strong><small>{card.note}</small><span className="metric-arrow"><AppIcon name="arrow" size={14}/></span></article>)}</div>
-    <div className="dashboard-grid"><article className="panel"><div className="panel-head"><div><h3>Recent imports</h3><p>Lists you imported recently</p></div><button onClick={onImport}>Import CSV</button></div>{recentImports.length ? <div className="activity-list">{recentImports.map((item) => <div className="activity" key={item.id}><span className="csv-icon">CSV</span><div><strong>{item.file_name}</strong><small>{item.client_name} · {item.list_name}</small></div><div className="activity-result"><strong>{formatNumber(item.processed_rows)} rows</strong><small>{formatNumber(item.duplicates_linked)} duplicates found</small></div><div className="activity-actions"><span className="status">Complete</span><button className="text-danger" onClick={() => onDeleteImport(item)}>Undo</button></div></div>)}</div> : <EmptyCompact text="Your completed imports will appear here." action="Import a CSV" onAction={onImport} />}</article>
+    <div className="dashboard-grid"><article className="panel"><div className="panel-head"><div><h3>Recent imports</h3><p>Lists you imported recently</p></div><button onClick={onImport}>Import CSV</button></div>{recentImports.length ? <div className="activity-list">{recentImports.map((item) => <div className="activity" key={item.id}><span className="csv-icon">CSV</span><div><strong>{item.file_name}</strong><small>{item.client_name} · {item.list_name}</small></div><div className="activity-result"><strong>{formatNumber(item.processed_rows)} rows</strong><small>{formatNumber(item.duplicates_linked)} cross-client overlaps</small></div><div className="activity-actions"><span className="status">Complete</span><button className="text-danger" onClick={() => onDeleteImport(item)}>Undo</button></div></div>)}</div> : <EmptyCompact text="Your completed imports will appear here." action="Import a CSV" onAction={onImport} />}</article>
       <article className="panel coverage"><div className="panel-head"><div><h3>Time and money saved</h3><p>See how often existing data was reused</p></div><span className="health-badge"><i/> Healthy</span></div><div className="coverage-spotlight"><strong>{reuseRate}%</strong><span>of imported rows matched data you already owned</span></div><div className="coverage-row"><span>Rows processed</span><strong>{formatNumber(stats.rowsImported)}</strong></div><div className="coverage-row"><span>Unique-record ratio</span><strong>{uniqueRate}%</strong></div><div className="coverage-row"><span>Known companies</span><strong>{formatNumber(stats.companies)}</strong></div><div className="coverage-track"><i style={{ width: `${Math.min(100, reuseRate)}%` }}/></div><p className="coverage-note">Each match means one less prospect you need to scrape again.</p><div className="client-mini"><span>Active client workspaces</span><div>{clients.slice(0, 4).map((client) => <i key={client.id}>{initials(client.name)}</i>)}{clients.length > 4 && <i>+{clients.length - 4}</i>}</div></div></article></div>
   </>;
 }
@@ -298,6 +327,8 @@ const standardProspectFields = [
   { id: "__company", label: "Company" },
   { id: "__email", label: "Email" },
   { id: "__title", label: "Title" },
+  { id: "__lists", label: "List names" },
+  { id: "__clients", label: "Clients" },
   { id: "__linkedin", label: "LinkedIn" },
   { id: "__country", label: "Country" },
   { id: "__seniority", label: "Seniority" },
@@ -305,13 +336,15 @@ const standardProspectFields = [
   { id: "__tags", label: "Tags" },
   { id: "__last_contacted", label: "Last contacted" },
 ];
-const defaultProspectColumns = ["__name", "__company", "__email", "__title"];
+const defaultProspectColumns = ["__name", "__company", "__email", "__title", "__lists"];
 
 function prospectFieldValue(prospect: Prospect, field: string) {
   if (field === "__name") return String(prospect.full_name || "");
   if (field === "__company") return String(prospect.company_name || "");
   if (field === "__email") return String(prospect.work_email || prospect.personal_email || "");
   if (field === "__title") return String(prospect.title || "");
+  if (field === "__lists") return Array.isArray(prospect.list_names) ? prospect.list_names.join(", ") : "";
+  if (field === "__clients") return Array.isArray(prospect.client_names) ? prospect.client_names.join(", ") : "";
   if (field === "__linkedin") return String(prospect.linkedin_url || "");
   if (field === "__country") return String(prospect.country || "");
   if (field === "__seniority") return String(prospect.seniority || "");
@@ -321,7 +354,7 @@ function prospectFieldValue(prospect: Prospect, field: string) {
   return String(parseAllData(prospect.all_data)[field] || "");
 }
 
-function ProspectTable({ prospects, total, fields, filters, page, clients, sort, direction, onSortChange, onFiltersChange, onPageChange, onSelect, onImport, onRefresh }: { prospects: Prospect[]; total: number; fields: string[]; filters: ProspectFilter[]; page: number; clients: ClientRecord[]; sort: string; direction: "asc" | "desc"; onSortChange: (sort: string, direction: "asc" | "desc") => void; onFiltersChange: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onSelect: (row: Prospect) => void; onImport: () => void; onRefresh: () => void }) {
+function ProspectTable({ prospects, total, fields, filters, page, clients, sort, direction, active = true, onSortChange, onFiltersChange, onPageChange, onSelect, onImport, onRefresh }: { prospects: Prospect[]; total: number; fields: string[]; filters: ProspectFilter[]; page: number; clients: ClientRecord[]; sort: string; direction: "asc" | "desc"; active?: boolean; onSortChange: (sort: string, direction: "asc" | "desc") => void; onFiltersChange: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onSelect: (row: Prospect) => void; onImport: () => void; onRefresh: () => void }) {
   const [visibleColumns, setVisibleColumns] = useState<string[]>(defaultProspectColumns);
   const [columnMenu, setColumnMenu] = useState(false);
   const [tab, setTab] = useState<"records" | "coverage">("records");
@@ -342,7 +375,11 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
     const timer = window.setTimeout(() => {
       try {
         const saved = JSON.parse(localStorage.getItem("prospecthub-visible-columns") || "[]") as string[];
-        if (Array.isArray(saved) && saved.length) setVisibleColumns(saved);
+        if (Array.isArray(saved) && saved.length) {
+          const withListNames = saved.includes("__lists") ? saved : [...saved, "__lists"];
+          setVisibleColumns(withListNames);
+          localStorage.setItem("prospecthub-visible-columns", JSON.stringify(withListNames));
+        }
       } catch { /* Keep the standard columns. */ }
     }, 0);
     return () => window.clearTimeout(timer);
@@ -368,7 +405,8 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
   const configuredDefinitions = visibleColumns.map((id) => allColumns.find((column) => column.id === id)).filter((column): column is { id: string; label: string } => Boolean(column));
   const visibleDefinitions = configuredDefinitions.length ? configuredDefinitions : standardProspectFields.slice(0, 4);
   const suggestedValues = useMemo(() => new Map(allColumns.map((field) => {
-    const options = Array.from(new Set(prospects.map((prospect) => prospectFieldValue(prospect, field.id).trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right)).slice(0, 40);
+    const rawOptions = field.id === "__lists" ? prospects.flatMap((prospect) => prospect.list_names ?? []) : field.id === "__clients" ? prospects.flatMap((prospect) => prospect.client_names ?? []) : prospects.map((prospect) => prospectFieldValue(prospect, field.id).trim()).filter(Boolean);
+    const options = Array.from(new Set(rawOptions)).sort((left, right) => left.localeCompare(right)).slice(0, 40);
     return [field.id, options];
   })), [allColumns, prospects]);
   const totalPages = Math.max(1, Math.ceil(total / 50));
@@ -377,6 +415,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
   const filterCatalog = allColumns.filter((field) => field.label.toLocaleLowerCase().includes(filterSearch.trim().toLocaleLowerCase()));
 
   useEffect(() => {
+    if (!active) return;
     const scrollArea = tableScrollRef.current;
     const table = scrollArea?.querySelector("table");
     if (!scrollArea || !table) return;
@@ -385,7 +424,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
     const observer = new ResizeObserver(measure);
     observer.observe(table);
     return () => observer.disconnect();
-  }, [prospects, visibleDefinitions.length]);
+  }, [prospects, visibleDefinitions.length, active]);
 
   function syncHorizontalScroll(source: HTMLDivElement, target: HTMLDivElement | null) {
     if (target && Math.abs(target.scrollLeft - source.scrollLeft) > 1) target.scrollLeft = source.scrollLeft;
@@ -490,7 +529,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
           if (filter.operator === "empty" || filter.operator === "not_empty") return [<button key={filter.id} onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>{label}: {filter.operator === "empty" ? "Empty" : "Not empty"} <span>×</span></button>];
           return filter.values.map((value) => <button key={`${filter.id}-${value}`} onClick={() => updateFilter(filter.id, { values: filter.values.filter((item) => item !== value) })}>{label}: {value} <span>×</span></button>);
         })}<button className="clear-filter-chip" onClick={() => onFiltersChange([])}>Clear all</button></div> : null}
-        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => selectedIds.has(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr className={selectedIds.has(person.id) ? "selected" : ""} key={person.id} onClick={() => onSelect(person)}><td className="select-column" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${person.full_name || "prospect"}`} type="checkbox" checked={selectedIds.has(person.id)} onChange={() => toggleSelected(person.id)}/></td>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "-"}</span> : <span title={value}>{value || "-"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {formatNumber(total)}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={filters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and your unique prospects will appear here."} action={filters.length ? "Clear filters" : "Import CSV"} onAction={filters.length ? () => onFiltersChange([]) : onImport} />}
+        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => selectedIds.has(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr className={selectedIds.has(person.id) ? "selected" : ""} key={person.id} onClick={() => onSelect(person)}><td className="select-column" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${person.full_name || "prospect"}`} type="checkbox" checked={selectedIds.has(person.id)} onChange={() => toggleSelected(person.id)}/></td>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "-"}</span> : field.id === "__lists" ? <div className="membership-chips">{(person.list_memberships?.length ? person.list_memberships.map((membership) => ({ key: membership.listId, label: person.client_count > 1 ? `${membership.clientName}: ${membership.listName}` : membership.listName })) : (person.list_names ?? []).map((name) => ({ key: name, label: name }))).map((membership) => <span key={membership.key}>{membership.label}</span>)}</div> : <span title={value}>{value || "-"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {formatNumber(total)}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={filters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and your unique prospects will appear here."} action={filters.length ? "Clear filters" : "Import CSV"} onAction={filters.length ? () => onFiltersChange([]) : onImport} />}
       </article>
       {filtersOpen ? <aside className="panel filter-panel">
         <div className="filter-panel-head"><div><span className="filter-icon"><AppIcon name="filter" size={16}/></span><div><strong>Filters</strong><small>Choose fields and values</small></div></div>{filters.length ? <button onClick={() => onFiltersChange([])}>Clear all</button> : null}</div>
@@ -549,7 +588,7 @@ function MultiValueSelect({ values, options, onChange }: { values: string[]; opt
   </div>;
 }
 
-function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize, onPageChange, onImport }: { companies: Company[]; total: number; covered: number; prospectTotal: number; page: number; pageSize: number; onPageChange: (page: number) => void; onImport: () => void }) {
+function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize, clientId = "", onPageChange, onImport }: { companies: Company[]; total: number; covered: number; prospectTotal: number; page: number; pageSize: number; clientId?: string; onPageChange: (page: number) => void; onImport: () => void }) {
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [prospectsByCompany, setProspectsByCompany] = useState<Record<string, Prospect[]>>({});
   const [prospectTotalsByCompany, setProspectTotalsByCompany] = useState<Record<string, number>>({});
@@ -565,7 +604,7 @@ function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize
     if (prospectsByCompany[company.id] || !company.prospect_count) return;
     setLoadingCompany(company.id);
     try {
-      const data = await api<{ prospects: Prospect[]; total: number }>(`/api/companies/${encodeURIComponent(company.id)}/prospects?page=1&pageSize=50`);
+      const data = await api<{ prospects: Prospect[]; total: number }>(`/api/companies/${encodeURIComponent(company.id)}/prospects?page=1&pageSize=50${clientId ? `&clientId=${encodeURIComponent(clientId)}` : ""}`);
       setProspectsByCompany((current) => ({ ...current, [company.id]: data.prospects }));
       setProspectTotalsByCompany((current) => ({ ...current, [company.id]: data.total }));
     } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to load company prospects."); }
@@ -577,7 +616,7 @@ function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize
     const nextPage = Math.floor(existing.length / 50) + 1;
     setLoadingCompany(company.id); setCompanyError("");
     try {
-      const data = await api<{ prospects: Prospect[]; total: number }>(`/api/companies/${encodeURIComponent(company.id)}/prospects?page=${nextPage}&pageSize=50`);
+      const data = await api<{ prospects: Prospect[]; total: number }>(`/api/companies/${encodeURIComponent(company.id)}/prospects?page=${nextPage}&pageSize=50${clientId ? `&clientId=${encodeURIComponent(clientId)}` : ""}`);
       setProspectsByCompany((current) => {
         const combined = [...(current[company.id] ?? []), ...data.prospects];
         return { ...current, [company.id]: Array.from(new Map(combined.map((prospect) => [prospect.id, prospect])).values()) };
@@ -623,15 +662,61 @@ function ClientsView({ clients, onOpen, onImport }: { clients: ClientRecord[]; o
   return <><div className="section-intro"><div><p className="eyebrow">CLIENT WORKSPACES</p><h2>Keep every ICP list organized.</h2><p>Each client keeps its original lists while sharing clean prospect records with the master.</p></div><button className="primary" onClick={onImport}>＋ Import client list</button></div>{clients.length ? <div className="clients-grid">{clients.map((client, index) => <button className="client-card" key={client.id} onClick={() => onOpen(client)}><span className={`client-logo tone-${index % 4}`}>{initials(client.name)}</span><div className="client-title"><strong>{client.name}</strong><small>Active workspace</small></div><div className="client-stats"><span><b>{formatNumber(client.prospect_count)}</b>prospects</span><span><b>{formatNumber(client.list_count)}</b>lists</span></div><div className="client-link">Open client <span>→</span></div></button>)}</div> : <EmptyState title="Create your first client" text="Import a list and enter the client name. The workspace will be created automatically." action="Import client list" onAction={onImport} />}</>;
 }
 
-function ClientDetail({ client, lists, onBack, onOpenList, onImport, onDeleteClient, onDeleteList }: { client: ClientRecord; lists: ListRecord[]; onBack: () => void; onOpenList: (list: ListRecord) => void; onImport: () => void; onDeleteClient: () => void; onDeleteList: (list: ListRecord) => void }) {
+function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectProspect, onImport, onDeleteClient, onDeleteList }: { client: ClientRecord; clients: ClientRecord[]; lists: ListRecord[]; onBack: () => void; onOpenList: (list: ListRecord) => void; onSelectProspect: (prospect: Prospect) => void; onImport: () => void; onDeleteClient: () => void; onDeleteList: (list: ListRecord) => void }) {
   const [cooldown, setCooldown] = useState(client.cooldown_days ?? 90);
   const [cooldownState, setCooldownState] = useState("");
+  const [tab, setTab] = useState<"lists" | "prospects" | "companies">("lists");
   async function saveCooldown() {
     setCooldownState("Saving…");
     try { const result = await api<{ cooldownDays: number }>(`/api/clients/${encodeURIComponent(client.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cooldownDays: cooldown }) }); setCooldown(result.cooldownDays); setCooldownState("Saved"); }
     catch (caught) { setCooldownState(caught instanceof Error ? caught.message : "Unable to save"); }
   }
-  return <><button className="back" onClick={onBack}>← All clients</button><div className="client-hero"><span className="client-logo tone-0">{initials(client.name)}</span><div><p className="eyebrow">CLIENT WORKSPACE</p><h2>{client.name}</h2><p>{formatNumber(client.prospect_count)} prospects across {formatNumber(client.list_count)} lists</p></div><div className="cooldown-setting"><label htmlFor="cooldown-days">Contact cooldown</label><div><input id="cooldown-days" type="number" min="0" max="730" value={cooldown} onChange={(event) => setCooldown(Number(event.target.value))}/><span>days</span><button onClick={() => void saveCooldown()}>Save</button></div><small role="status">{cooldownState || "Used when checking reuse eligibility"}</small></div><div className="client-actions"><button className="primary" onClick={onImport}>＋ Import another list</button><button className="danger-button" onClick={onDeleteClient}>Delete client</button></div></div><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Open any list to search its original rows and inspect preserved fields.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Source file</th><th>Rows</th><th>Fields preserved</th><th>New to master</th><th>Existing prospects</th><th>Imported</th><th>Actions</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><button className="list-open-button" onClick={() => onOpenList(list)}><strong>{list.name}</strong><span>Open →</span></button></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="field-verified">✓ {formatNumber(list.field_count)} fields</span></td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><button className="row-danger" onClick={() => onDeleteList(list)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></>;
+  return <><button className="back" onClick={onBack}>← All clients</button><div className="client-hero"><span className="client-logo tone-0">{initials(client.name)}</span><div><p className="eyebrow">CLIENT WORKSPACE</p><h2>{client.name}</h2><p>{formatNumber(client.prospect_count)} prospects across {formatNumber(client.list_count)} lists</p></div><div className="cooldown-setting"><label htmlFor="cooldown-days">Contact cooldown</label><div><input id="cooldown-days" type="number" min="0" max="730" value={cooldown} onChange={(event) => setCooldown(Number(event.target.value))}/><span>days</span><button onClick={() => void saveCooldown()}>Save</button></div><small role="status">{cooldownState || "Used when checking reuse eligibility"}</small></div><div className="client-actions"><button className="primary" onClick={onImport}>＋ Import another list</button><button className="danger-button" onClick={onDeleteClient}>Delete client</button></div></div>
+    <div className="client-database-tabs" role="tablist" aria-label={`${client.name} databases`}><button role="tab" aria-selected={tab === "lists"} className={tab === "lists" ? "active" : ""} onClick={() => setTab("lists")}><AppIcon name="upload" size={15}/> Uploaded lists <span>{formatNumber(client.list_count)}</span></button><button role="tab" aria-selected={tab === "prospects"} className={tab === "prospects" ? "active" : ""} onClick={() => setTab("prospects")}><AppIcon name="database" size={15}/> Master DB <span>{formatNumber(client.prospect_count)}</span></button><button role="tab" aria-selected={tab === "companies"} className={tab === "companies" ? "active" : ""} onClick={() => setTab("companies")}><AppIcon name="company" size={15}/> Company DB</button></div>
+    <div className={`client-tab-panel ${tab === "lists" ? "active" : ""}`}><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Open any list to search its original rows and inspect preserved fields.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Source file</th><th>Rows</th><th>Fields preserved</th><th>New to master</th><th>Cross-client duplicates</th><th>Imported</th><th>Actions</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><button className="list-open-button" onClick={() => onOpenList(list)}><strong>{list.name}</strong><span>Open →</span></button></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="field-verified">✓ {formatNumber(list.field_count)} fields</span></td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><button className="row-danger" onClick={() => onDeleteList(list)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></div>
+    <div className={`client-tab-panel ${tab === "prospects" ? "active" : ""}`}><ClientMasterDatabase client={client} clients={clients} active={tab === "prospects"} onSelect={onSelectProspect} onImport={onImport}/></div>
+    <div className={`client-tab-panel ${tab === "companies" ? "active" : ""}`}><ClientCompanyDatabase client={client} onImport={onImport}/></div>
+  </>;
+}
+
+function ClientMasterDatabase({ client, clients, active, onSelect, onImport }: { client: ClientRecord; clients: ClientRecord[]; active: boolean; onSelect: (prospect: Prospect) => void; onImport: () => void }) {
+  const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [total, setTotal] = useState(client.prospect_count);
+  const [fields, setFields] = useState<string[]>([]);
+  const [filters, setFilters] = useState<ProspectFilter[]>([]);
+  const [page, setPage] = useState(1);
+  const [sort, setSort] = useState("created_at");
+  const [direction, setDirection] = useState<"asc" | "desc">("desc");
+  const [search, setSearch] = useState("");
+  const [refresh, setRefresh] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const deferredSearch = useDeferredValue(search);
+  const encodedFilters = useMemo(() => JSON.stringify(filters.map(({ field, operator, values }) => ({ field, operator, values }))), [filters]);
+  useEffect(() => {
+    let current = true;
+    const path = `/api/prospects?search=${encodeURIComponent(deferredSearch)}&page=${page}&sort=${encodeURIComponent(sort)}&direction=${direction}&filters=${encodeURIComponent(encodedFilters)}&clientId=${encodeURIComponent(client.id)}`;
+    void api<{ prospects: Prospect[]; total: number; fields: string[] }>(path).then((data) => { if (current) { setProspects(data.prospects); setTotal(data.total); setFields(data.fields); setError(""); } }).catch((caught) => { if (current) setError(caught instanceof Error ? caught.message : "Unable to load the client master database."); }).finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [client.id, client.prospect_count, deferredSearch, page, sort, direction, encodedFilters, refresh]);
+  return <section className="client-database-workspace"><div className="client-database-heading"><div><p className="eyebrow">CLIENT MASTER DB</p><h3>{client.name} prospects</h3><p>Every master prospect connected to this client, across all uploaded lists.</p></div><label className="workspace-search"><span>⌕</span><input aria-label={`Search ${client.name} prospects`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this client database…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{loading ? <div className="workspace-loading">Preparing client database…</div> : <ProspectTable prospects={prospects} total={total} fields={fields} filters={filters} page={page} clients={clients} sort={sort} direction={direction} onSortChange={(nextSort, nextDirection) => { setSort(nextSort); setDirection(nextDirection); setPage(1); }} onFiltersChange={(next) => { setFilters(next); setPage(1); }} onPageChange={setPage} onSelect={onSelect} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} active={active}/>}</section>;
+}
+
+function ClientCompanyDatabase({ client, onImport }: { client: ClientRecord; onImport: () => void }) {
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [summary, setSummary] = useState({ total: 0, covered: 0, prospectTotal: 0, pageSize: 50 });
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const deferredSearch = useDeferredValue(search);
+  useEffect(() => {
+    let current = true;
+    const path = `/api/companies?search=${encodeURIComponent(deferredSearch)}&clientId=${encodeURIComponent(client.id)}&page=${page}&pageSize=50`;
+    void api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(path).then((data) => { if (current) { setCompanies(data.companies); setSummary({ total: data.total, covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); setError(""); } }).catch((caught) => { if (current) setError(caught instanceof Error ? caught.message : "Unable to load the client company database."); }).finally(() => { if (current) setLoading(false); });
+    return () => { current = false; };
+  }, [client.id, client.prospect_count, deferredSearch, page]);
+  return <section className="client-database-workspace"><div className="client-database-heading"><div><p className="eyebrow">CLIENT COMPANY DB</p><h3>{client.name} companies</h3><p>Companies represented by prospects in this client workspace.</p></div><label className="workspace-search"><span>⌕</span><input aria-label={`Search ${client.name} companies`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search client companies…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{loading ? <div className="workspace-loading">Preparing company database…</div> : <CompanyTable companies={companies} total={summary.total} covered={summary.covered} prospectTotal={summary.prospectTotal} page={page} pageSize={summary.pageSize} clientId={client.id} onPageChange={setPage} onImport={onImport}/>}</section>;
 }
 
 function ListWorkspace({ client, list, onBack, onSelect }: { client: ClientRecord; list: ListRecord; onBack: () => void; onSelect: (prospect: Prospect) => void }) {
@@ -728,13 +813,13 @@ function DataQualityCenter({ onMerged }: { onMerged: () => void }) {
   const issues = quality ? [
     ["Missing email", quality.missingEmail], ["Missing title", quality.missingTitle], ["Missing LinkedIn", quality.missingLinkedin], ["Missing company", quality.missingCompany], ["Missing domain", quality.missingDomain], ["Stale 180+ days", quality.staleRecords],
   ] as Array<[string, number]> : [];
-  return <section className="operations-page"><div className="section-intro compact-intro"><div><p className="eyebrow">DATABASE HEALTH</p><h2>Data quality centre</h2><p>Find incomplete records and safely resolve potential duplicate master prospects.</p></div><button className="secondary" onClick={() => void load()}>↻ Refresh</button></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{loading ? <div className="workspace-loading">Analyzing master data…</div> : quality ? <><div className="quality-metrics"><div><span>Master prospects</span><strong>{formatNumber(quality.total)}</strong></div>{issues.map(([label, value]) => <div key={label}><span>{label}</span><strong>{formatNumber(value)}</strong><small>{quality.total ? `${Math.round((value / quality.total) * 100)}% of database` : "0%"}</small></div>)}</div><article className="panel duplicate-panel"><div className="panel-head"><div><h3>Duplicate review</h3><p>{formatNumber(candidates.length)} candidate pairs require review</p></div></div>{candidates.length ? <div className="duplicate-list">{candidates.map((candidate) => <div className="duplicate-pair" key={`${candidate.left.id}-${candidate.right.id}`}><div className="duplicate-confidence"><strong>{candidate.confidence}%</strong><span>{candidate.reason}</span></div><ProspectCompareCard prospect={candidate.left}/><div className="duplicate-actions"><button disabled={Boolean(merging)} onClick={() => void merge(candidate.left.id, candidate.right.id)}>Keep left</button><span>or</span><button disabled={Boolean(merging)} onClick={() => void merge(candidate.right.id, candidate.left.id)}>Keep right</button></div><ProspectCompareCard prospect={candidate.right}/></div>)}</div> : <EmptyCompact text="No potential duplicate groups need review." action="Refresh" onAction={() => void load()} />}</article></> : null}</section>;
+  return <section className="operations-page"><div className="section-intro compact-intro"><div><p className="eyebrow">DATABASE HEALTH</p><h2>Data quality centre</h2><p>Review incomplete records and duplicate candidates found across different clients.</p></div><button className="secondary" onClick={() => { clearApiCache(); void load(); }}>↻ Refresh</button></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{loading ? <div className="workspace-loading">Analyzing master data…</div> : quality ? <><div className="quality-metrics"><div><span>Master prospects</span><strong>{formatNumber(quality.total)}</strong></div>{issues.map(([label, value]) => <div key={label}><span>{label}</span><strong>{formatNumber(value)}</strong><small>{quality.total ? `${Math.round((value / quality.total) * 100)}% of database` : "0%"}</small></div>)}</div><article className="panel duplicate-panel"><div className="panel-head"><div><h3>Cross-client duplicate review</h3><p>{formatNumber(candidates.length)} candidate pairs require review</p></div></div>{candidates.length ? <div className="duplicate-list">{candidates.map((candidate) => <div className="duplicate-pair" key={`${candidate.left.id}-${candidate.right.id}`}><div className="duplicate-confidence"><strong>{candidate.confidence}%</strong><span>{candidate.reason}</span></div><ProspectCompareCard prospect={candidate.left}/><div className="duplicate-actions"><button disabled={Boolean(merging)} onClick={() => void merge(candidate.left.id, candidate.right.id)}>Keep left</button><span>or</span><button disabled={Boolean(merging)} onClick={() => void merge(candidate.right.id, candidate.left.id)}>Keep right</button></div><ProspectCompareCard prospect={candidate.right}/></div>)}</div> : <EmptyCompact text="No cross-client duplicate groups need review." action="Refresh" onAction={() => { clearApiCache(); void load(); }} />}</article></> : null}</section>;
 }
 
 function ProspectCompareCard({ prospect }: { prospect: Prospect }) {
   const [expanded, setExpanded] = useState(false);
   const fields = Object.entries({ "Full name": prospect.full_name, "Title": prospect.title, "Company": prospect.company_name, "Work email": prospect.work_email, "Personal email": prospect.personal_email, "LinkedIn": prospect.linkedin_url, "Mobile": prospect.mobile_number, "Seniority": prospect.seniority, "Department": prospect.department, "City": prospect.city, "State": prospect.state, "Country": prospect.country, ...parseAllData(prospect.all_data) }).filter(([, value]) => String(value ?? "").trim());
-  return <div className={`compare-card ${expanded ? "expanded" : ""}`}><div className="compact-person"><span>{initials(prospect.full_name)}</span><strong>{prospect.full_name || "Unnamed"}</strong></div><p>{prospect.title || "No title"}</p><p>{prospect.company_name || "No company"}</p><p>{prospect.work_email || "No work email"}</p><div className="compare-card-footer"><small>{formatNumber(prospect.list_count)} lists · {formatNumber(fields.length)} populated fields</small><button aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>{expanded ? "Hide fields" : "View all fields"}</button></div>{expanded ? <div className="compare-fields">{fields.map(([field, value]) => <div key={field}><span>{field}</span><strong>{String(value)}</strong></div>)}</div> : null}</div>;
+  return <div className={`compare-card ${expanded ? "expanded" : ""}`}><div className="compact-person"><span>{initials(prospect.full_name)}</span><strong>{prospect.full_name || "Unnamed"}</strong></div><p>{prospect.title || "No title"}</p><p>{prospect.company_name || "No company"}</p><p>{prospect.work_email || "No work email"}</p>{prospect.client_names?.length ? <div className="compare-client-list">{prospect.client_names.map((name) => <span key={name}>{name}</span>)}</div> : null}<div className="compare-card-footer"><small>{formatNumber(prospect.list_count)} lists · {formatNumber(fields.length)} populated fields</small><button aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>{expanded ? "Hide fields" : "View all fields"}</button></div>{expanded ? <div className="compare-fields">{fields.map(([field, value]) => <div key={field}><span>{field}</span><strong>{String(value)}</strong></div>)}</div> : null}</div>;
 }
 
 function ImportMappingPanel({ audit, fieldMap, onChange }: { audit: FileAudit; fieldMap: Record<string, string>; onChange: (header: string, value: string) => void }) {

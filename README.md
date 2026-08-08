@@ -45,9 +45,13 @@ A CSV row matches an existing master prospect when any normalized identifier mat
 
 The original row remains attached to its client list. Missing master fields are filled from later imports, while existing non-empty master values are preserved.
 
+Duplicate import counts and duplicate-review candidates are client-aware: an existing person is counted as an overlap only when that person already belongs to a different client. Repeated appearances within the same client remain ordinary list memberships and are not reported as cross-client duplicates.
+
 ## Data workspace
 
-The master database exposes every uploaded CSV field through a configurable horizontal table. Name, company, email, and title are visible by default; additional standard or uploaded fields can be shown or hidden. Search and multi-field filters run on the server with pagination, so the workflow remains usable as the database grows.
+The master database exposes every uploaded CSV field through a configurable horizontal table. Name, company, email, title, and list memberships are visible by default; additional standard or uploaded fields can be shown or hidden. List names and clients are server-side filters. Search and multi-field filters run on the server with pagination, so the workflow remains usable as the database grows.
+
+Each client workspace includes Uploaded lists, Master DB, and Company DB tabs. The client databases are scoped through indexed server queries and prefetched when a client is opened for seamless tab switching.
 
 Each import records its complete header set and preserves every valid source row in `list_rows`, including repeated prospects within the same client list. The import preview and client-list summary show how many fields were detected and stored.
 

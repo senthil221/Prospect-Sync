@@ -6,10 +6,30 @@ export async function GET(request: Request) {
   if (unauthorized) return unauthorized;
   const url = new URL(request.url);
   const search = (url.searchParams.get("search") ?? "").trim().replace(/[,()]/g, " ");
+  const clientId = (url.searchParams.get("clientId") ?? "").trim();
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
   const pageSize = Math.max(10, Math.min(100, Number(url.searchParams.get("pageSize") ?? 50)));
   const from = (page - 1) * pageSize;
   const supabase = createAdminClient();
+
+  if (clientId) {
+    const { data, error } = await supabase.rpc("client_company_workspace", {
+      p_client_id: clientId,
+      p_search: search,
+      p_limit: pageSize,
+      p_offset: from,
+    });
+    if (error) return Response.json({ error: error.code === "PGRST202" || error.code === "42883" ? "Apply the latest database migration to enable client workspaces." : error.message }, { status: error.code === "PGRST202" || error.code === "42883" ? 503 : 500 });
+    const summary = Array.isArray(data) ? data[0] : data;
+    return Response.json({
+      companies: summary?.result_rows ?? [],
+      total: Number(summary?.total_count ?? 0),
+      covered: Number(summary?.covered_count ?? 0),
+      prospectTotal: Number(summary?.prospect_count ?? 0),
+      page,
+      pageSize,
+    });
+  }
 
   let companiesQuery = supabase.from("company_summaries").select("*", { count: "exact" });
   let coveredQuery = supabase.from("company_summaries").select("id", { count: "exact", head: true }).gt("prospect_count", 0);

@@ -18,13 +18,17 @@ export async function POST(request: Request) {
       : prospect.companyName ? `name:${normalizeText(prospect.companyName)}` : "";
     return { ...prospect, companyId, normalizedCompanyName: normalizeText(prospect.companyName), sourceRowNumber: Number(rowOffset ?? 0) + index + 2 };
   });
-  const { data, error } = await createAdminClient().rpc("import_prospect_batch_v2", {
+  const supabase = createAdminClient();
+  let result = await supabase.rpc("import_prospect_batch_v3", {
     p_import_id: importId,
     p_list_id: listId,
     p_rows: mapped,
   });
-  if (error) return Response.json({ error: error.message }, { status: 500 });
-  const summary = Array.isArray(data) ? data[0] : data;
+  if (result.error?.code === "PGRST202" || result.error?.code === "42883") {
+    result = await supabase.rpc("import_prospect_batch_v2", { p_import_id: importId, p_list_id: listId, p_rows: mapped });
+  }
+  if (result.error) return Response.json({ error: result.error.message }, { status: 500 });
+  const summary = Array.isArray(result.data) ? result.data[0] : result.data;
   return Response.json({
     processed: Number(summary?.processed ?? rows.length),
     uniqueAdded: Number(summary?.unique_added ?? 0),
