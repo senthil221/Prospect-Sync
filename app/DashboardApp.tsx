@@ -143,6 +143,18 @@ function prefetchApi(path: string) {
   void api(path).catch(() => undefined);
 }
 
+function prospectApiPath({ search = "", page = 1, sort = "created_at", direction = "desc", filters = "[]", clientId = "", includeFields = true }: { search?: string; page?: number; sort?: string; direction?: "asc" | "desc"; filters?: string; clientId?: string; includeFields?: boolean }) {
+  const params = new URLSearchParams({ search, page: String(page), sort, direction, filters, includeFields: includeFields ? "1" : "0" });
+  if (clientId) params.set("clientId", clientId);
+  return `/api/prospects?${params.toString()}`;
+}
+
+function companyApiPath({ search = "", page = 1, clientId = "" }: { search?: string; page?: number; clientId?: string }) {
+  const params = new URLSearchParams({ search, page: String(page), pageSize: "50" });
+  if (clientId) params.set("clientId", clientId);
+  return `/api/companies?${params.toString()}`;
+}
+
 const navItems: Array<{ id: Section; label: string; mark: IconName }> = [
   { id: "overview", label: "Overview", mark: "home" },
   { id: "prospects", label: "Master database", mark: "database" },
@@ -175,11 +187,18 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [error, setError] = useState("");
   const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const prospectFieldsLoaded = useRef(false);
   const deferredSearch = useDeferredValue(search);
   const encodedProspectFilters = useMemo(() => JSON.stringify(prospectFilters.map(({ field, operator, values }) => ({ field, operator, values }))), [prospectFilters]);
+
+  const prefetchSection = useCallback((next: Section) => {
+    if (next === "prospects") prefetchApi(prospectApiPath({ filters: encodedProspectFilters, sort: prospectSort, direction: prospectDirection, includeFields: prospectFields.length === 0 }));
+    if (next === "companies") prefetchApi(companyApiPath({}));
+  }, [encodedProspectFilters, prospectDirection, prospectFields.length, prospectSort]);
 
   const refreshDashboard = useCallback(async () => {
     try {
@@ -201,33 +220,47 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   }, [refreshDashboard]);
 
   useEffect(() => {
+    if (loading) return;
+    const timer = window.setTimeout(() => {
+      prefetchSection("prospects");
+      prefetchSection("companies");
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [loading, prefetchSection]);
+
+  useEffect(() => {
     let active = true;
+    if (section !== "prospects" && section !== "companies") {
+      return () => { active = false; };
+    }
     void (async () => {
+      setWorkspaceLoading(true);
+      setError("");
       try {
         if (section === "prospects") {
-          const data = await api<{ prospects: Prospect[]; total: number; fields: string[] }>(`/api/prospects?search=${encodeURIComponent(deferredSearch)}&page=${prospectPage}&sort=${encodeURIComponent(prospectSort)}&direction=${prospectDirection}&filters=${encodeURIComponent(encodedProspectFilters)}`);
-          if (active) { setProspects(data.prospects); setProspectTotal(data.total); setProspectFields(data.fields); }
+          const data = await api<{ prospects: Prospect[]; total: number; fields?: string[] }>(prospectApiPath({ search: deferredSearch, page: prospectPage, sort: prospectSort, direction: prospectDirection, filters: encodedProspectFilters, includeFields: !prospectFieldsLoaded.current }));
+          if (active) { setProspects(data.prospects); setProspectTotal(data.total); if (data.fields?.length) { prospectFieldsLoaded.current = true; setProspectFields(data.fields); } }
         }
         if (section === "companies") {
-          const data = await api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(`/api/companies?search=${encodeURIComponent(deferredSearch)}&page=${companyPage}&pageSize=50`);
+          const data = await api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(companyApiPath({ search: deferredSearch, page: companyPage }));
           if (active) { setCompanies(data.companies); setCompanySummary({ total: data.total, covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); }
         }
       } catch (caught) { if (active) setError(caught instanceof Error ? caught.message : "Unable to load workspace data."); }
+      finally { if (active) setWorkspaceLoading(false); }
     })();
     return () => { active = false; };
   }, [section, deferredSearch, stats.prospects, prospectPage, encodedProspectFilters, prospectSort, prospectDirection, prospectRefresh, companyPage]);
 
   async function openClient(client: ClientRecord) {
     setSelectedClient(client);
-    const clientId = encodeURIComponent(client.id);
-    prefetchApi(`/api/prospects?search=&page=1&sort=created_at&direction=desc&filters=%5B%5D&clientId=${clientId}`);
-    prefetchApi(`/api/companies?search=&clientId=${clientId}&page=1&pageSize=50`);
-    const data = await api<{ lists: ListRecord[] }>(`/api/lists?clientId=${clientId}`);
+    prefetchApi(prospectApiPath({ clientId: client.id }));
+    prefetchApi(companyApiPath({ clientId: client.id }));
+    const data = await api<{ lists: ListRecord[] }>(`/api/lists?clientId=${encodeURIComponent(client.id)}`);
     setLists(data.lists);
   }
 
   function navigate(next: Section) {
-    setSection(next); setSearch(""); setError(""); setProspectPage(1); setCompanyPage(1); setSelectedList(null);
+    setSection(next); setSearch(""); setError(""); setWorkspaceLoading(false); setProspectPage(1); setCompanyPage(1); setSelectedList(null);
     if (next !== "clients") setSelectedClient(null);
   }
 
@@ -268,7 +301,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark"><AppIcon name="database" size={17}/></span><span>Prospect <span>Sync</span></span></div>
         <div className="workspace"><span className="workspace-avatar">PA</span><div><strong>Prospect Agency</strong><small>Internal workspace</small></div><span className="chevron">⌄</span></div>
-        <nav aria-label="Primary navigation">{navItems.map((item) => <button key={item.id} aria-current={section === item.id ? "page" : undefined} className={section === item.id ? "active" : ""} onClick={() => navigate(item.id)}><span aria-hidden="true"><AppIcon name={item.mark} size={17}/></span>{item.label}</button>)}</nav>
+        <nav aria-label="Primary navigation">{navItems.map((item) => <button key={item.id} aria-current={section === item.id ? "page" : undefined} className={section === item.id ? "active" : ""} onMouseEnter={() => prefetchSection(item.id)} onFocus={() => prefetchSection(item.id)} onClick={() => navigate(item.id)}><span aria-hidden="true"><AppIcon name={item.mark} size={17}/></span>{item.label}</button>)}</nav>
         <div className="sidebar-note"><span className="pulse"/><div><strong>Master sync active</strong><small>Every import updates one source of truth</small></div></div>
         <a className="profile" href="/auth/signout"><span className="profile-avatar">{initials(currentUserEmail)}</span><div><strong>{currentUserEmail}</strong><small>Sign out</small></div></a>
       </aside>
@@ -283,8 +316,9 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
         </header>
 
         {error && <div className="alert"><span>!</span>{error}<button onClick={() => setError("")}>×</button></div>}
-        <section className="content" aria-busy={loading}>
+        <section className="content" aria-busy={loading || workspaceLoading}>
           {loading ? <LoadingState /> : null}
+          {!loading && workspaceLoading ? <div className="workspace-progress" role="status"><span/>Updating {title.toLowerCase()}…</div> : null}
           {!loading && section === "overview" && <Overview stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name} · ${item.list_name}` })} />}
           {!loading && section === "prospects" && <ProspectTable prospects={prospects} total={prospectTotal} fields={prospectFields} filters={prospectFilters} page={prospectPage} clients={clients} sort={prospectSort} direction={prospectDirection} onSortChange={(nextSort, nextDirection) => { setProspectSort(nextSort); setProspectDirection(nextDirection); setProspectPage(1); }} onFiltersChange={(next) => { setProspectFilters(next); setProspectPage(1); }} onPageChange={setProspectPage} onSelect={setSelectedProspect} onImport={() => navigate("imports")} onRefresh={() => setProspectRefresh((current) => current + 1)} />}
           {!loading && section === "companies" && <CompanyTable companies={companies} total={companySummary.total} covered={companySummary.covered} prospectTotal={companySummary.prospectTotal} page={companyPage} pageSize={companySummary.pageSize} onPageChange={setCompanyPage} onImport={() => navigate("imports")} />}
@@ -740,16 +774,25 @@ function ClientMasterDatabase({ client, clients, active, onSelect, onImport }: {
   const [search, setSearch] = useState("");
   const [refresh, setRefresh] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const fieldsLoaded = useRef(false);
   const deferredSearch = useDeferredValue(search);
   const encodedFilters = useMemo(() => JSON.stringify(filters.map(({ field, operator, values }) => ({ field, operator, values }))), [filters]);
   useEffect(() => {
     let current = true;
-    const path = `/api/prospects?search=${encodeURIComponent(deferredSearch)}&page=${page}&sort=${encodeURIComponent(sort)}&direction=${direction}&filters=${encodeURIComponent(encodedFilters)}&clientId=${encodeURIComponent(client.id)}`;
-    void api<{ prospects: Prospect[]; total: number; fields: string[] }>(path).then((data) => { if (current) { setProspects(data.prospects); setTotal(data.total); setFields(data.fields); setError(""); } }).catch((caught) => { if (current) setError(caught instanceof Error ? caught.message : "Unable to load the client master database."); }).finally(() => { if (current) setLoading(false); });
+    const path = prospectApiPath({ search: deferredSearch, page, sort, direction, filters: encodedFilters, clientId: client.id, includeFields: !fieldsLoaded.current });
+    void (async () => {
+      setRefreshing(true);
+      try {
+        const data = await api<{ prospects: Prospect[]; total: number; fields?: string[] }>(path);
+        if (current) { setProspects(data.prospects); setTotal(data.total); if (data.fields?.length) { fieldsLoaded.current = true; setFields(data.fields); } setError(""); }
+      } catch (caught) { if (current) setError(caught instanceof Error ? caught.message : "Unable to load the client master database."); }
+      finally { if (current) { setLoading(false); setRefreshing(false); } }
+    })();
     return () => { current = false; };
   }, [client.id, client.prospect_count, deferredSearch, page, sort, direction, encodedFilters, refresh]);
-  return <section className="client-database-workspace"><div className="client-database-heading"><div><p className="eyebrow">CLIENT MASTER DB</p><h3>{client.name} prospects</h3><p>Every master prospect connected to this client, across all uploaded lists.</p></div><label className="workspace-search"><span>⌕</span><input aria-label={`Search ${client.name} prospects`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this client database…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{loading ? <div className="workspace-loading">Preparing client database…</div> : <ProspectTable prospects={prospects} total={total} fields={fields} filters={filters} page={page} clients={clients} sort={sort} direction={direction} clientId={client.id} onSortChange={(nextSort, nextDirection) => { setSort(nextSort); setDirection(nextDirection); setPage(1); }} onFiltersChange={(next) => { setFilters(next); setPage(1); }} onPageChange={setPage} onSelect={onSelect} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} active={active}/>}</section>;
+  return <section className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT MASTER DB</p><h3>{client.name} prospects</h3><p>Every master prospect connected to this client, across all uploaded lists.</p></div><label className="workspace-search"><span>⌕</span><input aria-label={`Search ${client.name} prospects`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this client database…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client prospects…</div> : null}{loading ? <div className="workspace-loading">Preparing client database…</div> : <ProspectTable prospects={prospects} total={total} fields={fields} filters={filters} page={page} clients={clients} sort={sort} direction={direction} clientId={client.id} onSortChange={(nextSort, nextDirection) => { setSort(nextSort); setDirection(nextDirection); setPage(1); }} onFiltersChange={(next) => { setFilters(next); setPage(1); }} onPageChange={setPage} onSelect={onSelect} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} active={active}/>}</section>;
 }
 
 function ClientCompanyDatabase({ client, onImport }: { client: ClientRecord; onImport: () => void }) {
@@ -758,15 +801,23 @@ function ClientCompanyDatabase({ client, onImport }: { client: ClientRecord; onI
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const deferredSearch = useDeferredValue(search);
   useEffect(() => {
     let current = true;
-    const path = `/api/companies?search=${encodeURIComponent(deferredSearch)}&clientId=${encodeURIComponent(client.id)}&page=${page}&pageSize=50`;
-    void api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(path).then((data) => { if (current) { setCompanies(data.companies); setSummary({ total: data.total, covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); setError(""); } }).catch((caught) => { if (current) setError(caught instanceof Error ? caught.message : "Unable to load the client company database."); }).finally(() => { if (current) setLoading(false); });
+    const path = companyApiPath({ search: deferredSearch, clientId: client.id, page });
+    void (async () => {
+      setRefreshing(true);
+      try {
+        const data = await api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(path);
+        if (current) { setCompanies(data.companies); setSummary({ total: data.total, covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); setError(""); }
+      } catch (caught) { if (current) setError(caught instanceof Error ? caught.message : "Unable to load the client company database."); }
+      finally { if (current) { setLoading(false); setRefreshing(false); } }
+    })();
     return () => { current = false; };
   }, [client.id, client.prospect_count, deferredSearch, page]);
-  return <section className="client-database-workspace"><div className="client-database-heading"><div><p className="eyebrow">CLIENT COMPANY DB</p><h3>{client.name} companies</h3><p>Companies represented by prospects in this client workspace.</p></div><label className="workspace-search"><span>⌕</span><input aria-label={`Search ${client.name} companies`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search client companies…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{loading ? <div className="workspace-loading">Preparing company database…</div> : <CompanyTable companies={companies} total={summary.total} covered={summary.covered} prospectTotal={summary.prospectTotal} page={page} pageSize={summary.pageSize} clientId={client.id} onPageChange={setPage} onImport={onImport}/>}</section>;
+  return <section className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT COMPANY DB</p><h3>{client.name} companies</h3><p>Companies represented by prospects in this client workspace.</p></div><label className="workspace-search"><span>⌕</span><input aria-label={`Search ${client.name} companies`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search client companies…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client companies…</div> : null}{loading ? <div className="workspace-loading">Preparing company database…</div> : <CompanyTable companies={companies} total={summary.total} covered={summary.covered} prospectTotal={summary.prospectTotal} page={page} pageSize={summary.pageSize} clientId={client.id} onPageChange={setPage} onImport={onImport}/>}</section>;
 }
 
 function ListWorkspace({ client, list, onBack, onSelect }: { client: ClientRecord; list: ListRecord; onBack: () => void; onSelect: (prospect: Prospect) => void }) {

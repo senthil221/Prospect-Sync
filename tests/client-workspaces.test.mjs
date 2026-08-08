@@ -24,6 +24,7 @@ test("ships client-aware duplicates, memberships, and database tabs", async () =
   assert.match(dashboard, /drawer-membership-list/);
   assert.match(dashboard, /apiResponseCache/);
   assert.match(dashboard, /prefetchApi/);
+  assert.match(dashboard, /prefetchSection/);
   assert.match(styles, /\.client-database-tabs/);
   assert.match(styles, /\.membership-chips/);
   assert.match(styles, /\.drawer-memberships/);
@@ -38,4 +39,21 @@ test("ships client-aware duplicates, memberships, and database tabs", async () =
   assert.match(companiesRoute, /client_company_workspace/);
   assert.match(companyProspectsRoute, /client_company_prospects/);
   assert.match(chunkRoute, /import_prospect_batch_v3/);
+});
+
+test("ships the database and API performance hardening", async () => {
+  const [migration, dashboardRoute, prospectsRoute] = await Promise.all([
+    readFile(new URL("../supabase/migrations/20260808030000_performance_hardening.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/dashboard/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/prospects/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(migration, /idx_imports_client_id/);
+  assert.match(migration, /idx_imports_list_id/);
+  assert.match(migration, /idx_memberships_import_id/);
+  assert.match(migration, /create or replace function public\.dashboard_workspace/);
+  assert.match(migration, /revoke execute on function public\.rls_auto_enable/);
+  assert.match(dashboardRoute, /rpc\("dashboard_workspace"\)/);
+  assert.match(prospectsRoute, /includeFields/);
+  assert.match(prospectsRoute, /Promise\.all\(\[workspaceRequest, fieldsRequest\]\)/);
 });

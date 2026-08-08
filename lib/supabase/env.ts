@@ -11,5 +11,7 @@ export function isAllowedEmail(email: string | null | undefined) {
     .split(",")
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean);
-  return configured.length === 0 || configured.includes(email.toLowerCase());
+  // Server routes use a Supabase service-role client after this check, so a
+  // missing allowlist must never broaden access in a deployed environment.
+  return configured.length > 0 && configured.includes(email.toLowerCase());
 }

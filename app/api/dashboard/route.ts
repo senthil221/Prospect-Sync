@@ -5,6 +5,16 @@ export async function GET() {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const supabase = createAdminClient();
+  const workspace = await supabase.rpc("dashboard_workspace");
+  if (!workspace.error) {
+    const row = Array.isArray(workspace.data) ? workspace.data[0] : workspace.data;
+    return Response.json(row?.result ?? { stats: {}, recentImports: [] });
+  }
+  if (workspace.error.code !== "PGRST202" && workspace.error.code !== "42883") {
+    return Response.json({ error: workspace.error.message }, { status: 500 });
+  }
+
+  // Keep older environments usable until the performance migration is applied.
   const [prospects, companies, clients, lists, importTotals, recent] = await Promise.all([
     supabase.from("prospects").select("id", { count: "exact", head: true }),
     supabase.from("companies").select("id", { count: "exact", head: true }),
