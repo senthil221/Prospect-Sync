@@ -18,10 +18,15 @@ test("ships client-aware duplicates, memberships, and database tabs", async () =
   assert.match(dashboard, /Company DB/);
   assert.match(dashboard, /__lists/);
   assert.match(dashboard, /membership-chips/);
+  assert.match(dashboard, /prospectMembershipItems/);
+  assert.match(dashboard, /\+\{hiddenCount\} more/);
+  assert.match(dashboard, /Tag count verified/);
+  assert.match(dashboard, /drawer-membership-list/);
   assert.match(dashboard, /apiResponseCache/);
   assert.match(dashboard, /prefetchApi/);
   assert.match(styles, /\.client-database-tabs/);
   assert.match(styles, /\.membership-chips/);
+  assert.match(styles, /\.drawer-memberships/);
   assert.match(migration, /create or replace view public\.prospect_summaries/);
   assert.match(migration, /list_memberships/);
   assert.match(migration, /search_prospect_workspace_v4/);
