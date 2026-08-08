@@ -16,6 +16,10 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
   assert.match(dashboard, /company-prospect-list/);
   assert.match(dashboard, /function CompanyDrawer/);
   assert.match(dashboard, /company-drawer/);
+  assert.match(dashboard, /const navGroups/);
+  assert.match(dashboard, /Data tools/);
+  assert.doesNotMatch(dashboard, /className="sync-visual"/);
+  assert.doesNotMatch(dashboard, /className="sidebar-note"/);
   assert.match(dashboard, /Load \$\{Math\.min\(50, total - prospects\.length\)\} more prospects/);
   assert.match(dashboard, /company-pagination/);
   assert.doesNotMatch(dashboard, /company-prospect-row/);
@@ -34,6 +38,9 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
   assert.match(styles, /\.company-table/);
   assert.match(styles, /\.company-drawer/);
   assert.match(styles, /\.summary-violet/);
+  assert.match(styles, /\.nav-group-label/);
+  assert.match(styles, /\.nav-group \{ display: contents; \}/);
+  assert.match(styles, /\.login-logo \{ display: flex; \}/);
   assert.match(styles, /@media \(max-width: 760px\)/);
   assert.match(styles, /prefers-reduced-motion/);
   assert.doesNotMatch(styles, /font-size: 6(?:\.5)?px/);

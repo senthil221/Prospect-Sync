@@ -155,15 +155,27 @@ function companyApiPath({ search = "", page = 1, clientId = "" }: { search?: str
   return `/api/companies?${params.toString()}`;
 }
 
-const navItems: Array<{ id: Section; label: string; mark: IconName }> = [
-  { id: "overview", label: "Overview", mark: "home" },
-  { id: "prospects", label: "Master database", mark: "database" },
-  { id: "companies", label: "Companies", mark: "company" },
-  { id: "clients", label: "Clients & lists", mark: "clients" },
-  { id: "coverage", label: "Coverage checker", mark: "coverage" },
-  { id: "quality", label: "Data quality", mark: "quality" },
-  { id: "imports", label: "Import CSV", mark: "upload" },
+const navGroups: Array<{ label: string; items: Array<{ id: Section; label: string; mark: IconName }> }> = [
+  {
+    label: "Workspace",
+    items: [
+      { id: "overview", label: "Overview", mark: "home" },
+      { id: "prospects", label: "Master database", mark: "database" },
+      { id: "companies", label: "Companies", mark: "company" },
+      { id: "clients", label: "Clients & lists", mark: "clients" },
+    ],
+  },
+  {
+    label: "Data tools",
+    items: [
+      { id: "coverage", label: "Coverage checker", mark: "coverage" },
+      { id: "quality", label: "Data quality", mark: "quality" },
+      { id: "imports", label: "Import CSV", mark: "upload" },
+    ],
+  },
 ];
+
+const navItems = navGroups.flatMap((group) => group.items);
 
 export default function DashboardApp({ currentUserEmail }: { currentUserEmail: string }) {
   const [section, setSection] = useState<Section>("overview");
@@ -301,8 +313,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark"><AppIcon name="database" size={17}/></span><span>Prospect <span>Sync</span></span></div>
         <div className="workspace"><span className="workspace-avatar">PA</span><div><strong>Prospect Agency</strong><small>Internal workspace</small></div><span className="chevron">⌄</span></div>
-        <nav aria-label="Primary navigation">{navItems.map((item) => <button key={item.id} aria-current={section === item.id ? "page" : undefined} className={section === item.id ? "active" : ""} onMouseEnter={() => prefetchSection(item.id)} onFocus={() => prefetchSection(item.id)} onClick={() => navigate(item.id)}><span aria-hidden="true"><AppIcon name={item.mark} size={17}/></span>{item.label}</button>)}</nav>
-        <div className="sidebar-note"><span className="pulse"/><div><strong>Master sync active</strong><small>Every import updates one source of truth</small></div></div>
+        <nav aria-label="Primary navigation">{navGroups.map((group) => <div className="nav-group" key={group.label}><span className="nav-group-label">{group.label}</span>{group.items.map((item) => <button key={item.id} aria-current={section === item.id ? "page" : undefined} className={section === item.id ? "active" : ""} onMouseEnter={() => prefetchSection(item.id)} onFocus={() => prefetchSection(item.id)} onClick={() => navigate(item.id)}><span aria-hidden="true"><AppIcon name={item.mark} size={17}/></span>{item.label}</button>)}</div>)}</nav>
         <a className="profile" href="/auth/signout"><span className="profile-avatar">{initials(currentUserEmail)}</span><div><strong>{currentUserEmail}</strong><small>Sign out</small></div></a>
       </aside>
 
@@ -350,7 +361,7 @@ function Overview({ stats, recentImports, clients, onImport, onViewMaster, onDel
   const uniqueRate = stats.rowsImported ? Math.round((stats.prospects / stats.rowsImported) * 100) : 0;
   const reuseRate = stats.rowsImported ? Math.round((stats.duplicatesDetected / stats.rowsImported) * 100) : 0;
   return <>
-    <div className="welcome"><div><div className="hero-status"><span/><strong>Database healthy</strong><small>Live sync is active</small></div><p className="eyebrow">MASTER DATABASE</p><h2>All your prospects, organized in one place.</h2><div className="welcome-actions"><button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import a client list</button><button className="secondary" onClick={onViewMaster}>Explore master database <AppIcon name="arrow" size={15}/></button></div></div><div className="sync-visual"><div className="file-chip"><AppIcon name="upload" size={20}/><span>Client CSV</span></div><div className="sync-line"><i/><i/><i/></div><div className="database-chip"><b><AppIcon name="database" size={19}/></b><span>Master database<small>{formatNumber(stats.prospects)} unique prospects</small></span></div></div></div>
+    <div className="welcome"><div><div className="hero-status"><span/><strong>Database healthy</strong><small>Live sync active</small></div><p className="eyebrow">MASTER DATABASE</p><h2>All your prospects, organized in one place.</h2><p>Search the master database, review client coverage, or import a new list.</p></div><div className="welcome-actions"><button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import client list</button><button className="secondary" onClick={onViewMaster}>Open master database <AppIcon name="arrow" size={15}/></button></div></div>
     <div className="metric-grid">{cards.map((card) => <article className={`metric-card ${card.color}`} key={card.label}><div className="metric-icon"><AppIcon name={card.icon} size={17}/></div><p>{card.label}</p><strong>{formatNumber(card.value)}</strong><small>{card.note}</small><span className="metric-arrow"><AppIcon name="arrow" size={14}/></span></article>)}</div>
     <div className="dashboard-grid"><article className="panel"><div className="panel-head"><div><h3>Recent imports</h3><p>Lists you imported recently</p></div><button onClick={onImport}>Import CSV</button></div>{recentImports.length ? <div className="activity-list">{recentImports.map((item) => <div className="activity" key={item.id}><span className="csv-icon">CSV</span><div><strong>{item.file_name}</strong><small>{item.client_name} · {item.list_name}</small></div><div className="activity-result"><strong>{formatNumber(item.processed_rows)} rows</strong><small>{formatNumber(item.duplicates_linked)} cross-client overlaps</small></div><div className="activity-actions"><span className="status">Complete</span><button className="text-danger" onClick={() => onDeleteImport(item)}>Undo</button></div></div>)}</div> : <EmptyCompact text="Your completed imports will appear here." action="Import a CSV" onAction={onImport} />}</article>
       <article className="panel coverage"><div className="panel-head"><div><h3>Time and money saved</h3><p>See how often existing data was reused</p></div><span className="health-badge"><i/> Healthy</span></div><div className="coverage-spotlight"><strong>{reuseRate}%</strong><span>of imported rows matched data you already owned</span></div><div className="coverage-row"><span>Rows processed</span><strong>{formatNumber(stats.rowsImported)}</strong></div><div className="coverage-row"><span>Unique-record ratio</span><strong>{uniqueRate}%</strong></div><div className="coverage-row"><span>Known companies</span><strong>{formatNumber(stats.companies)}</strong></div><div className="coverage-track"><i style={{ width: `${Math.min(100, reuseRate)}%` }}/></div><p className="coverage-note">Each match means one less prospect you need to scrape again.</p><div className="client-mini"><span>Active client workspaces</span><div>{clients.slice(0, 4).map((client) => <i key={client.id}>{initials(client.name)}</i>)}{clients.length > 4 && <i>+{clients.length - 4}</i>}</div></div></article></div>
