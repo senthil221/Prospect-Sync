@@ -49,7 +49,7 @@ Duplicate import counts and duplicate-review candidates are client-aware: an exi
 
 ## Data workspace
 
-The master database exposes every uploaded CSV field through a configurable horizontal table. Name, company, email, title, and list memberships are visible by default; additional standard or uploaded fields can be shown or hidden. List names and clients are server-side filters. Search and multi-field filters run on the server with pagination, so the workflow remains usable as the database grows.
+The master database exposes every uploaded CSV field through a configurable horizontal table. Name, company, email, title, and list memberships are visible by default; additional standard or uploaded fields can be shown or hidden. Search and multi-field filters run on the server before pagination. Filter-value suggestions are queried from the complete database (or the complete client scope), rather than inferred from the current page, so every saved list, client, and field value remains discoverable.
 
 Each client workspace includes Uploaded lists, Master DB, and Company DB tabs. The client databases are scoped through indexed server queries and prefetched when a client is opened for seamless tab switching.
 

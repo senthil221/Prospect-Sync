@@ -13,6 +13,7 @@ type ImportRecord = { id: string; file_name: string; client_name: string; list_n
 type DeleteKind = "import" | "list" | "client";
 type DeleteRequest = { kind: DeleteKind; id: string; name: string; context: string };
 type ProspectFilter = { id: string; field: string; operator: "contains" | "equals" | "not_contains" | "not_equals" | "empty" | "not_empty"; values: string[] };
+type FilterValueOption = { value: string; count: number };
 type FileAudit = { headers: string[]; rows: number; populatedCells: number; invalidRows: number };
 type SavedView = { id: string; name: string; definition: { filters: ProspectFilter[]; columns: string[]; sort: string; direction: "asc" | "desc" } };
 
@@ -354,14 +355,15 @@ function prospectFieldValue(prospect: Prospect, field: string) {
   return String(parseAllData(prospect.all_data)[field] || "");
 }
 
-function ProspectTable({ prospects, total, fields, filters, page, clients, sort, direction, active = true, onSortChange, onFiltersChange, onPageChange, onSelect, onImport, onRefresh }: { prospects: Prospect[]; total: number; fields: string[]; filters: ProspectFilter[]; page: number; clients: ClientRecord[]; sort: string; direction: "asc" | "desc"; active?: boolean; onSortChange: (sort: string, direction: "asc" | "desc") => void; onFiltersChange: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onSelect: (row: Prospect) => void; onImport: () => void; onRefresh: () => void }) {
+function ProspectTable({ prospects, total, fields, filters, page, clients, sort, direction, clientId = "", active = true, onSortChange, onFiltersChange, onPageChange, onSelect, onImport, onRefresh }: { prospects: Prospect[]; total: number; fields: string[]; filters: ProspectFilter[]; page: number; clients: ClientRecord[]; sort: string; direction: "asc" | "desc"; clientId?: string; active?: boolean; onSortChange: (sort: string, direction: "asc" | "desc") => void; onFiltersChange: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onSelect: (row: Prospect) => void; onImport: () => void; onRefresh: () => void }) {
   const [visibleColumns, setVisibleColumns] = useState<string[]>(defaultProspectColumns);
   const [columnMenu, setColumnMenu] = useState(false);
   const [tab, setTab] = useState<"records" | "coverage">("records");
   const [tableScrollWidth, setTableScrollWidth] = useState(0);
   const topScrollRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedRows, setSelectedRows] = useState<Map<string, Prospect>>(new Map());
+  const selectedIds = useMemo(() => new Set(selectedRows.keys()), [selectedRows]);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [bulkClientId, setBulkClientId] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -404,11 +406,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
 
   const configuredDefinitions = visibleColumns.map((id) => allColumns.find((column) => column.id === id)).filter((column): column is { id: string; label: string } => Boolean(column));
   const visibleDefinitions = configuredDefinitions.length ? configuredDefinitions : standardProspectFields.slice(0, 4);
-  const suggestedValues = useMemo(() => new Map(allColumns.map((field) => {
-    const rawOptions = field.id === "__lists" ? prospects.flatMap((prospect) => prospect.list_names ?? []) : field.id === "__clients" ? prospects.flatMap((prospect) => prospect.client_names ?? []) : prospects.map((prospect) => prospectFieldValue(prospect, field.id).trim()).filter(Boolean);
-    const options = Array.from(new Set(rawOptions)).sort((left, right) => left.localeCompare(right)).slice(0, 40);
-    return [field.id, options];
-  })), [allColumns, prospects]);
+  const effectiveFilters = filters.filter((filter) => filter.values.length || filter.operator === "empty" || filter.operator === "not_empty");
   const totalPages = Math.max(1, Math.ceil(total / 50));
   const firstRecord = total ? (page - 1) * 50 + 1 : 0;
   const lastRecord = Math.min(page * 50, total);
@@ -433,15 +431,18 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
   function addFilter(field = "__country") {
     const existing = filters.find((filter) => filter.field === field);
     if (existing) { setExpandedFilterId(existing.id); return; }
+    if (filters.length >= 8) { setNotice("You can combine up to 8 filters in one view."); return; }
     const id = crypto.randomUUID();
     onFiltersChange([...filters, { id, field, operator: "contains", values: [] }]);
     setExpandedFilterId(id);
   }
 
   function toggleSelected(id: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id); else next.add(id);
+    const prospect = prospects.find((row) => row.id === id);
+    if (!prospect) return;
+    setSelectedRows((current) => {
+      const next = new Map(current);
+      if (next.has(id)) next.delete(id); else next.set(id, prospect);
       return next;
     });
   }
@@ -449,15 +450,15 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
   function togglePageSelection() {
     const pageIds = prospects.map((prospect) => prospect.id);
     const allSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      pageIds.forEach((id) => allSelected ? next.delete(id) : next.add(id));
+    setSelectedRows((current) => {
+      const next = new Map(current);
+      prospects.forEach((prospect) => allSelected ? next.delete(prospect.id) : next.set(prospect.id, prospect));
       return next;
     });
   }
 
   function exportSelected() {
-    const rows = prospects.filter((prospect) => selectedIds.has(prospect.id));
+    const rows = [...selectedRows.values()];
     if (!rows.length) return;
     const escape = (value: string) => `"${value.replace(/"/g, '""')}"`;
     const csv = [visibleDefinitions.map((field) => escape(field.label)).join(","), ...rows.map((prospect) => visibleDefinitions.map((field) => escape(prospectFieldValue(prospect, field.id))).join(","))].join("\r\n");
@@ -473,7 +474,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
     setBulkBusy(true); setNotice("");
     try {
       const result = await api<{ updated: number }>("/api/operations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, prospectIds: [...selectedIds], tagName, clientId: bulkClientId }) });
-      setNotice(`${formatNumber(result.updated)} prospects updated.`); setSelectedIds(new Set()); onRefresh();
+      setNotice(`${formatNumber(result.updated)} prospects updated.`); setSelectedRows(new Map()); onRefresh();
     } catch (caught) { setNotice(caught instanceof Error ? caught.message : "Bulk action failed."); }
     finally { setBulkBusy(false); }
   }
@@ -513,30 +514,30 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
     </article> : <div className={`people-layout ${filtersOpen ? "" : "filters-collapsed"}`}>
       <article className="panel results-panel">
         <div className="results-toolbar">
-          <div><strong>{formatNumber(total)} people</strong><span>{filters.length ? `${filters.length} active filter${filters.length === 1 ? "" : "s"}` : "Master database"}</span></div>
+          <div><strong>{formatNumber(total)} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "Master database"}</span></div>
           <div className="workspace-actions">
             <label><span className="sr-only">Saved ICP view</span><select defaultValue="" onChange={(event) => applyView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label>
             <button className="outline-button" onClick={() => void saveCurrentView()}>☆ Save view</button>
             <label><span className="sr-only">Sort prospects</span><select value={`${sort}:${direction}`} onChange={(event) => { const [nextSort, nextDirection] = event.target.value.split(":"); onSortChange(nextSort, nextDirection as "asc" | "desc"); }}><option value="created_at:desc">Newest first</option><option value="name:asc">Name A to Z</option><option value="company:asc">Company A to Z</option><option value="title:asc">Title A to Z</option><option value="last_contacted:desc">Recently contacted</option></select></label>
-            <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {filters.length ? <span>{filters.length}</span> : null}</button>
+            <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {effectiveFilters.length ? <span>{effectiveFilters.length}</span> : null}</button>
             <div className="column-control"><button className="outline-button" onClick={() => setColumnMenu((open) => !open)}><AppIcon name="columns" size={14}/> Columns <span>{visibleDefinitions.length}</span></button>{columnMenu && <div className="column-menu"><div><strong>Choose columns</strong><button onClick={() => { setVisibleColumns(defaultProspectColumns); localStorage.setItem("prospecthub-visible-columns", JSON.stringify(defaultProspectColumns)); }}>Reset</button></div>{allColumns.map((field) => <label key={field.id}><input type="checkbox" checked={visibleColumns.includes(field.id)} onChange={() => toggleColumn(field.id)} />{field.label}</label>)}</div>}</div>
           </div>
         </div>
         {notice ? <div className="inline-notice" role="status">{notice}<button aria-label="Dismiss notification" onClick={() => setNotice("")}>×</button></div> : null}
-        {selectedIds.size ? <div className="bulk-bar"><strong>{formatNumber(selectedIds.size)} selected</strong><button onClick={exportSelected}>↓ Export CSV</button><button disabled={bulkBusy} onClick={() => void bulkAction("tag")}>＋ Add tag</button><select aria-label="Client for contact history" value={bulkClientId} onChange={(event) => setBulkClientId(event.target.value)}><option value="">Choose client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><button disabled={bulkBusy || !bulkClientId} onClick={() => void bulkAction("mark_contacted")}>✓ Mark contacted</button><button onClick={() => setSelectedIds(new Set())}>Clear</button></div> : null}
-        {filters.some((filter) => filter.values.length || filter.operator === "empty" || filter.operator === "not_empty") ? <div className="active-filter-strip">{filters.flatMap((filter) => {
+        {selectedIds.size ? <div className="bulk-bar"><strong>{formatNumber(selectedIds.size)} selected across pages</strong><button onClick={exportSelected}>↓ Export selected</button><button disabled={bulkBusy} onClick={() => void bulkAction("tag")}>＋ Add tag</button><select aria-label="Client for contact history" value={bulkClientId} onChange={(event) => setBulkClientId(event.target.value)}><option value="">Choose client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><button disabled={bulkBusy || !bulkClientId} onClick={() => void bulkAction("mark_contacted")}>✓ Mark contacted</button><button onClick={() => setSelectedRows(new Map())}>Clear</button></div> : null}
+        {effectiveFilters.length ? <div className="active-filter-strip">{effectiveFilters.flatMap((filter) => {
           const label = allColumns.find((field) => field.id === filter.field)?.label ?? filter.field;
           if (filter.operator === "empty" || filter.operator === "not_empty") return [<button key={filter.id} onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>{label}: {filter.operator === "empty" ? "Empty" : "Not empty"} <span>×</span></button>];
           return filter.values.map((value) => <button key={`${filter.id}-${value}`} onClick={() => updateFilter(filter.id, { values: filter.values.filter((item) => item !== value) })}>{label}: {value} <span>×</span></button>);
         })}<button className="clear-filter-chip" onClick={() => onFiltersChange([])}>Clear all</button></div> : null}
-        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => selectedIds.has(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr className={selectedIds.has(person.id) ? "selected" : ""} key={person.id} onClick={() => onSelect(person)}><td className="select-column" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${person.full_name || "prospect"}`} type="checkbox" checked={selectedIds.has(person.id)} onChange={() => toggleSelected(person.id)}/></td>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "-"}</span> : field.id === "__lists" ? <div className="membership-chips">{(person.list_memberships?.length ? person.list_memberships.map((membership) => ({ key: membership.listId, label: person.client_count > 1 ? `${membership.clientName}: ${membership.listName}` : membership.listName })) : (person.list_names ?? []).map((name) => ({ key: name, label: name }))).map((membership) => <span key={membership.key}>{membership.label}</span>)}</div> : <span title={value}>{value || "-"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {formatNumber(total)}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={filters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and your unique prospects will appear here."} action={filters.length ? "Clear filters" : "Import CSV"} onAction={filters.length ? () => onFiltersChange([]) : onImport} />}
+        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select all prospects on this page" title="Select all prospects on this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => selectedIds.has(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr className={selectedIds.has(person.id) ? "selected" : ""} key={person.id} onClick={() => onSelect(person)}><td className="select-column" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${person.full_name || "prospect"}`} type="checkbox" checked={selectedIds.has(person.id)} onChange={() => toggleSelected(person.id)}/></td>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "-"}</span> : field.id === "__lists" ? <div className="membership-chips">{(person.list_memberships?.length ? person.list_memberships.map((membership) => ({ key: membership.listId, label: person.client_count > 1 ? `${membership.clientName}: ${membership.listName}` : membership.listName })) : (person.list_names ?? []).map((name) => ({ key: name, label: name }))).map((membership) => <span key={membership.key}>{membership.label}</span>)}</div> : <span title={value}>{value || "-"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {formatNumber(total)} matching records</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={effectiveFilters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and your unique prospects will appear here."} action={effectiveFilters.length ? "Clear filters" : "Import CSV"} onAction={effectiveFilters.length ? () => onFiltersChange([]) : onImport} />}
       </article>
       {filtersOpen ? <aside className="panel filter-panel">
         <div className="filter-panel-head"><div><span className="filter-icon"><AppIcon name="filter" size={16}/></span><div><strong>Filters</strong><small>Choose fields and values</small></div></div>{filters.length ? <button onClick={() => onFiltersChange([])}>Clear all</button> : null}</div>
         <label className="filter-panel-search"><AppIcon name="search" size={15}/><input aria-label="Search filters" value={filterSearch} onChange={(event) => setFilterSearch(event.target.value)} placeholder="Search all filters…"/></label>
         <div className="filter-body filter-body-apollo">{filters.length ? <div className="active-filter-rules">{filters.map((filter) => { const label = allColumns.find((field) => field.id === filter.field)?.label ?? filter.field; const expanded = expandedFilterId === filter.id; return <div className={`filter-rule ${expanded ? "expanded" : ""}`} key={filter.id}>
           <button className="filter-rule-summary" aria-expanded={expanded} onClick={() => setExpandedFilterId(expanded ? "" : filter.id)}><span className="filter-rule-symbol"><AppIcon name="filter" size={13}/></span><strong>{label}</strong>{filter.values.length ? <span className="filter-count">{filter.values.length}</span> : null}<span className="filter-chevron">{expanded ? "−" : "+"}</span></button>
-          {expanded ? <div className="filter-rule-content"><div className="filter-rule-actions"><select aria-label={`${label} condition`} value={filter.operator} onChange={(event) => updateFilter(filter.id, { operator: event.target.value as ProspectFilter["operator"] })}><option value="contains">Includes any</option><option value="equals">Exactly matches any</option><option value="not_contains">Excludes any</option><option value="not_equals">Does not equal</option><option value="not_empty">Is not empty</option><option value="empty">Is empty</option></select><button aria-label={`Remove ${label} filter`} onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>Remove</button></div>{!["empty", "not_empty"].includes(filter.operator) ? <MultiValueSelect key={`${filter.id}-${filter.field}`} values={filter.values} options={suggestedValues.get(filter.field) ?? []} onChange={(values) => updateFilter(filter.id, { values })} /> : <p className="filter-mode-note">This filter does not require values.</p>}</div> : null}
+          {expanded ? <div className="filter-rule-content"><div className="filter-rule-actions"><select aria-label={`${label} condition`} value={filter.operator} onChange={(event) => updateFilter(filter.id, { operator: event.target.value as ProspectFilter["operator"] })}><option value="contains">Includes any</option><option value="equals">Exactly matches any</option><option value="not_contains">Excludes any</option><option value="not_equals">Does not equal</option><option value="not_empty">Is not empty</option><option value="empty">Is empty</option></select><button aria-label={`Remove ${label} filter`} onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>Remove</button></div>{!["empty", "not_empty"].includes(filter.operator) ? <MultiValueSelect key={`${filter.id}-${filter.field}`} values={filter.values} field={filter.field} clientId={clientId} onChange={(values) => updateFilter(filter.id, { values })} /> : <p className="filter-mode-note">This filter does not require values.</p>}</div> : null}
         </div>; })}</div> : <div className="filter-empty"><span><AppIcon name="filter" size={18}/></span><strong>Build a segment</strong><p>Choose a filter below, then select one or many values.</p></div>}
           <div className="filter-library"><small>ALL FILTERS</small>{filterCatalog.map((field) => { const active = filters.some((filter) => filter.field === field.id); return <button className={active ? "active" : ""} key={field.id} onClick={() => addFilter(field.id)}><span>{field.label}</span><b>{active ? "✓" : "＋"}</b></button>; })}{!filterCatalog.length ? <p>No filters match “{filterSearch}”.</p> : null}</div>
         </div>
@@ -545,12 +546,31 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
   </section>;
 }
 
-function MultiValueSelect({ values, options, onChange }: { values: string[]; options: string[]; onChange: (values: string[]) => void }) {
+function MultiValueSelect({ values, field, clientId, onChange }: { values: string[]; field: string; clientId?: string; onChange: (values: string[]) => void }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [options, setOptions] = useState<FilterValueOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const normalizedValues = values.map((value) => value.toLocaleLowerCase());
-  const availableOptions = Array.from(new Set([...values, ...options])).filter((option) => option.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).slice(0, 40);
+  const countByValue = new Map(options.map((option) => [option.value.toLocaleLowerCase(), option.count]));
+  const availableOptions = Array.from(new Set([...values, ...options.map((option) => option.value)]));
+
+  useEffect(() => {
+    if (!open) return;
+    let current = true;
+    const timer = window.setTimeout(() => {
+      setLoading(true);
+      setError("");
+      const path = `/api/prospects/filter-values?field=${encodeURIComponent(field)}&search=${encodeURIComponent(query.trim())}&limit=50${clientId ? `&clientId=${encodeURIComponent(clientId)}` : ""}`;
+      void api<{ values: FilterValueOption[] }>(path)
+        .then((data) => { if (current) setOptions(data.values); })
+        .catch((caught) => { if (current) { setOptions([]); setError(caught instanceof Error ? caught.message : "Unable to load values."); } })
+        .finally(() => { if (current) setLoading(false); });
+    }, 180);
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [clientId, field, open, query]);
 
   useEffect(() => {
     function closeOnOutside(event: PointerEvent) { if (!rootRef.current?.contains(event.target as Node)) setOpen(false); }
@@ -562,13 +582,14 @@ function MultiValueSelect({ values, options, onChange }: { values: string[]; opt
 
   function addValue(rawValue: string) {
     const value = rawValue.trim();
-    if (!value || normalizedValues.includes(value.toLocaleLowerCase())) return;
+    if (!value || normalizedValues.includes(value.toLocaleLowerCase()) || values.length >= 30) return;
     onChange([...values, value]);
     setQuery("");
   }
 
   function toggleValue(value: string) {
     const selected = normalizedValues.includes(value.toLocaleLowerCase());
+    if (!selected && values.length >= 30) return;
     onChange(selected ? values.filter((item) => item.toLocaleLowerCase() !== value.toLocaleLowerCase()) : [...values, value]);
   }
 
@@ -580,11 +601,14 @@ function MultiValueSelect({ values, options, onChange }: { values: string[]; opt
         if (event.key === "Backspace" && !query && values.length) onChange(values.slice(0, -1));
       }} placeholder={values.length ? "Add another…" : "Select or type values…"} />
     </div>
-    {open && (availableOptions.length || query.trim()) ? <div className="multi-value-menu" role="listbox" aria-multiselectable="true">
-      {availableOptions.map((option) => <button type="button" key={option} className={normalizedValues.includes(option.toLocaleLowerCase()) ? "selected" : ""} onMouseDown={(event) => event.preventDefault()} onClick={() => toggleValue(option)}><span>{normalizedValues.includes(option.toLocaleLowerCase()) ? "✓" : ""}</span>{option}</button>)}
+    {open ? <div className="multi-value-menu" role="listbox" aria-multiselectable="true">
+      {availableOptions.map((option) => <button type="button" key={option} className={normalizedValues.includes(option.toLocaleLowerCase()) ? "selected" : ""} onMouseDown={(event) => event.preventDefault()} onClick={() => toggleValue(option)}><span>{normalizedValues.includes(option.toLocaleLowerCase()) ? "✓" : ""}</span><b>{option}</b>{countByValue.has(option.toLocaleLowerCase()) ? <small>{formatNumber(countByValue.get(option.toLocaleLowerCase()))}</small> : null}</button>)}
       {query.trim() && !availableOptions.some((option) => option.toLocaleLowerCase() === query.trim().toLocaleLowerCase()) ? <button type="button" className="create-value" onMouseDown={(event) => event.preventDefault()} onClick={() => addValue(query)}>＋ Add “{query.trim()}”</button> : null}
+      {loading ? <p className="filter-values-state">Searching the full database…</p> : null}
+      {!loading && !availableOptions.length && !query.trim() && !error ? <p className="filter-values-state">No saved values for this field.</p> : null}
+      {error ? <p className="filter-values-state error">{error}</p> : null}
     </div> : null}
-    <small>{values.length ? `${values.length} selected · matches any value` : "Press Enter to add a custom value"}</small>
+    <small>{values.length ? `${values.length} selected · matches any value across all records` : "Searches every record, not only this page"}</small>
   </div>;
 }
 
@@ -699,7 +723,7 @@ function ClientMasterDatabase({ client, clients, active, onSelect, onImport }: {
     void api<{ prospects: Prospect[]; total: number; fields: string[] }>(path).then((data) => { if (current) { setProspects(data.prospects); setTotal(data.total); setFields(data.fields); setError(""); } }).catch((caught) => { if (current) setError(caught instanceof Error ? caught.message : "Unable to load the client master database."); }).finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
   }, [client.id, client.prospect_count, deferredSearch, page, sort, direction, encodedFilters, refresh]);
-  return <section className="client-database-workspace"><div className="client-database-heading"><div><p className="eyebrow">CLIENT MASTER DB</p><h3>{client.name} prospects</h3><p>Every master prospect connected to this client, across all uploaded lists.</p></div><label className="workspace-search"><span>⌕</span><input aria-label={`Search ${client.name} prospects`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this client database…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{loading ? <div className="workspace-loading">Preparing client database…</div> : <ProspectTable prospects={prospects} total={total} fields={fields} filters={filters} page={page} clients={clients} sort={sort} direction={direction} onSortChange={(nextSort, nextDirection) => { setSort(nextSort); setDirection(nextDirection); setPage(1); }} onFiltersChange={(next) => { setFilters(next); setPage(1); }} onPageChange={setPage} onSelect={onSelect} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} active={active}/>}</section>;
+  return <section className="client-database-workspace"><div className="client-database-heading"><div><p className="eyebrow">CLIENT MASTER DB</p><h3>{client.name} prospects</h3><p>Every master prospect connected to this client, across all uploaded lists.</p></div><label className="workspace-search"><span>⌕</span><input aria-label={`Search ${client.name} prospects`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this client database…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{loading ? <div className="workspace-loading">Preparing client database…</div> : <ProspectTable prospects={prospects} total={total} fields={fields} filters={filters} page={page} clients={clients} sort={sort} direction={direction} clientId={client.id} onSortChange={(nextSort, nextDirection) => { setSort(nextSort); setDirection(nextDirection); setPage(1); }} onFiltersChange={(next) => { setFilters(next); setPage(1); }} onPageChange={setPage} onSelect={onSelect} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} active={active}/>}</section>;
 }
 
 function ClientCompanyDatabase({ client, onImport }: { client: ClientRecord; onImport: () => void }) {
