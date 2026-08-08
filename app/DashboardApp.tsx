@@ -7,7 +7,7 @@ type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" |
 type ClientRecord = { id: string; name: string; list_count: number; prospect_count: number; cooldown_days?: number };
 type ListRecord = { id: string; name: string; source_file_name: string; uploaded_rows: number; unique_added: number; duplicates_linked: number; prospect_count: number; created_at: string; field_count: number; field_headers: string[] };
 type ProspectMembership = { listId: string; listName: string; clientId: string; clientName: string };
-type Prospect = Record<string, unknown> & { id: string; full_name: string; work_email: string; personal_email?: string; title: string; company_name: string; company_domain: string; city?: string; country?: string; seniority?: string; client_count: number; list_count: number; list_names?: string[]; client_names?: string[]; list_memberships?: ProspectMembership[]; all_data: string | Record<string, string>; last_contacted_at?: string; next_eligible_at?: string; eligible?: boolean; tags?: Array<{ id: string; name: string; color: string }> };
+type Prospect = Record<string, unknown> & { id: string; full_name: string; work_email: string; personal_email?: string; title: string; company_name: string; company_domain: string; city?: string; country?: string; seniority?: string; esp?: string; email_provider_type?: string; mx_records?: string[]; mx_status?: string; mx_checked_at?: string; client_count: number; list_count: number; list_names?: string[]; client_names?: string[]; list_memberships?: ProspectMembership[]; all_data: string | Record<string, string>; last_contacted_at?: string; next_eligible_at?: string; eligible?: boolean; tags?: Array<{ id: string; name: string; color: string }> };
 type Company = { id: string; name: string; domain: string; prospect_count: number; client_count: number; created_at: string };
 type ImportRecord = { id: string; file_name: string; client_name: string; list_name: string; processed_rows: number; unique_added: number; duplicates_linked: number; status: string; created_at: string };
 type DeleteKind = "import" | "list" | "client";
@@ -379,10 +379,12 @@ const standardProspectFields = [
   { id: "__country", label: "Country" },
   { id: "__seniority", label: "Seniority" },
   { id: "__department", label: "Department" },
+  { id: "__esp", label: "ESP" },
+  { id: "__email_provider_type", label: "Email provider type" },
   { id: "__tags", label: "Tags" },
   { id: "__last_contacted", label: "Last contacted" },
 ];
-const defaultProspectColumns = ["__name", "__company", "__email", "__title", "__lists"];
+const defaultProspectColumns = ["__name", "__company", "__email", "__esp", "__title", "__lists"];
 
 function prospectFieldValue(prospect: Prospect, field: string) {
   if (field === "__name") return String(prospect.full_name || "");
@@ -395,6 +397,8 @@ function prospectFieldValue(prospect: Prospect, field: string) {
   if (field === "__country") return String(prospect.country || "");
   if (field === "__seniority") return String(prospect.seniority || "");
   if (field === "__department") return String(prospect.department || "");
+  if (field === "__esp") return String(prospect.esp || "");
+  if (field === "__email_provider_type") return String(prospect.email_provider_type || "Unknown");
   if (field === "__tags") return Array.isArray(prospect.tags) ? prospect.tags.map((tag) => tag.name).join(", ") : "";
   if (field === "__last_contacted") return prospect.last_contacted_at ? new Date(prospect.last_contacted_at).toLocaleDateString("en-IN") : "";
   return String(parseAllData(prospect.all_data)[field] || "");
@@ -438,6 +442,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [bulkClientId, setBulkClientId] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [espScanning, setEspScanning] = useState(false);
   const [notice, setNotice] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [filterSearch, setFilterSearch] = useState("");
@@ -550,6 +555,34 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
     finally { setBulkBusy(false); }
   }
 
+  async function scanEmailProviders() {
+    setEspScanning(true); setNotice("Checking company MX records…");
+    let afterId = "";
+    let checked = 0;
+    let updated = 0;
+    let failed = 0;
+    let segs = 0;
+    try {
+      for (;;) {
+        const result = await api<{ checked: number; updated: number; failed: number; segs: number; nextCursor: string; hasMore: boolean }>("/api/email-providers/scan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ afterId, limit: 20 }),
+        });
+        checked += result.checked; updated += result.updated; failed += result.failed; segs += result.segs;
+        setNotice(`Checking MX records… ${formatNumber(checked)} domains processed`);
+        if (!result.hasMore || !result.checked) break;
+        if (!result.nextCursor || result.nextCursor === afterId) throw new Error("The MX scan did not advance. Please retry.");
+        afterId = result.nextCursor;
+      }
+      setNotice(checked
+        ? `MX scan complete: ${formatNumber(updated)} domains updated, ${formatNumber(segs)} SEGs detected${failed ? `, ${formatNumber(failed)} updates failed` : ""}.`
+        : "All company domains have already been checked.");
+      onRefresh();
+    } catch (caught) { setNotice(caught instanceof Error ? caught.message : "MX scan failed."); }
+    finally { setEspScanning(false); }
+  }
+
   async function saveCurrentView() {
     const name = window.prompt("Name this ICP view")?.trim();
     if (!name) return;
@@ -589,6 +622,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
           <div className="workspace-actions">
             <label><span className="sr-only">Saved ICP view</span><select defaultValue="" onChange={(event) => applyView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label>
             <button className="outline-button" onClick={() => void saveCurrentView()}>☆ Save view</button>
+            {!clientId ? <button className="outline-button" disabled={espScanning} title="Detect MX-visible gateways and mailbox providers. API-only email security products are not visible in MX records." onClick={() => void scanEmailProviders()}>{espScanning ? "Scanning MX…" : "Detect ESPs"}</button> : null}
             <label><span className="sr-only">Sort prospects</span><select value={`${sort}:${direction}`} onChange={(event) => { const [nextSort, nextDirection] = event.target.value.split(":"); onSortChange(nextSort, nextDirection as "asc" | "desc"); }}><option value="created_at:desc">Newest first</option><option value="name:asc">Name A to Z</option><option value="company:asc">Company A to Z</option><option value="title:asc">Title A to Z</option><option value="last_contacted:desc">Recently contacted</option></select></label>
             <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {effectiveFilters.length ? <span>{effectiveFilters.length}</span> : null}</button>
             <div className="column-control"><button className="outline-button" onClick={() => setColumnMenu((open) => !open)}><AppIcon name="columns" size={14}/> Columns <span>{visibleDefinitions.length}</span></button>{columnMenu && <div className="column-menu"><div><strong>Choose columns</strong><button onClick={() => { setVisibleColumns(defaultProspectColumns); localStorage.setItem("prospecthub-visible-columns", JSON.stringify(defaultProspectColumns)); }}>Reset</button></div>{allColumns.map((field) => <label key={field.id}><input type="checkbox" checked={visibleColumns.includes(field.id)} onChange={() => toggleColumn(field.id)} />{field.label}</label>)}</div>}</div>
@@ -601,7 +635,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
           if (filter.operator === "empty" || filter.operator === "not_empty") return [<button key={filter.id} onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>{label}: {filter.operator === "empty" ? "Empty" : "Not empty"} <span>×</span></button>];
           return filter.values.map((value) => <button key={`${filter.id}-${value}`} onClick={() => updateFilter(filter.id, { values: filter.values.filter((item) => item !== value) })}>{label}: {value} <span>×</span></button>);
         })}<button className="clear-filter-chip" onClick={() => onFiltersChange([])}>Clear all</button></div> : null}
-        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select all prospects on this page" title="Select all prospects on this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => selectedIds.has(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr className={selectedIds.has(person.id) ? "selected" : ""} key={person.id} onClick={() => onSelect(person)}><td className="select-column" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${person.full_name || "prospect"}`} type="checkbox" checked={selectedIds.has(person.id)} onChange={() => toggleSelected(person.id)}/></td>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "-"}</span> : field.id === "__lists" ? <ListMembershipCell prospect={person} includeClient={!clientId} onShowAll={() => onSelect(person)} /> : <span title={value}>{value || "-"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {formatNumber(total)} matching records</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={effectiveFilters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and your unique prospects will appear here."} action={effectiveFilters.length ? "Clear filters" : "Import CSV"} onAction={effectiveFilters.length ? () => onFiltersChange([]) : onImport} />}
+        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select all prospects on this page" title="Select all prospects on this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => selectedIds.has(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr className={selectedIds.has(person.id) ? "selected" : ""} key={person.id} onClick={() => onSelect(person)}><td className="select-column" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${person.full_name || "prospect"}`} type="checkbox" checked={selectedIds.has(person.id)} onChange={() => toggleSelected(person.id)}/></td>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "-"}</span> : field.id === "__esp" ? <span className={`esp-cell ${person.email_provider_type === "SEG" ? "seg" : ""}`} title={Array.isArray(person.mx_records) && person.mx_records.length ? person.mx_records.join("\n") : "Run Detect ESPs to check this domain"}><strong>{value || "Not checked"}</strong><small>{person.email_provider_type || "Unknown"}</small></span> : field.id === "__lists" ? <ListMembershipCell prospect={person} includeClient={!clientId} onShowAll={() => onSelect(person)} /> : <span title={value}>{value || "-"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {formatNumber(total)} matching records</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={effectiveFilters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and your unique prospects will appear here."} action={effectiveFilters.length ? "Clear filters" : "Import CSV"} onAction={effectiveFilters.length ? () => onFiltersChange([]) : onImport} />}
       </article>
       {filtersOpen ? <aside className="panel filter-panel">
         <div className="filter-panel-head"><div><span className="filter-icon"><AppIcon name="filter" size={16}/></span><div><strong>Filters</strong><small>Choose fields and values</small></div></div>{filters.length ? <button onClick={() => onFiltersChange([])}>Clear all</button> : null}</div>

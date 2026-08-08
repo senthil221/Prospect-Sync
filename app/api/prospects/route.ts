@@ -40,7 +40,7 @@ export async function GET(request: Request) {
   const filters = parseFilters(url.searchParams.get("filters"));
   const supabase = createAdminClient();
   const workspaceRequest = (async () => {
-    let workspace = await supabase.rpc("search_prospect_workspace_v4", {
+    let workspace = await supabase.rpc("search_prospect_workspace_v5", {
       p_search: search,
       p_filters: filters,
       p_sort: sort,
@@ -50,11 +50,22 @@ export async function GET(request: Request) {
       p_client_id: clientId,
     });
     if (workspace.error?.code === "PGRST202" || workspace.error?.code === "42883") {
-      if (clientId) return workspace;
-      workspace = await supabase.rpc("search_prospect_workspace_v3", { p_search: search, p_filters: filters, p_sort: sort, p_direction: direction, p_limit: limit, p_offset: (page - 1) * limit });
+      workspace = await supabase.rpc("search_prospect_workspace_v4", {
+        p_search: search,
+        p_filters: filters.filter((filter) => !["__esp", "__email_provider_type"].includes(filter.field)),
+        p_sort: sort,
+        p_direction: direction,
+        p_limit: limit,
+        p_offset: (page - 1) * limit,
+        p_client_id: clientId,
+      });
     }
     if (workspace.error?.code === "PGRST202" || workspace.error?.code === "42883") {
-      workspace = await supabase.rpc("search_prospect_workspace", { p_search: search, p_filters: filters.filter((filter) => !["not_contains", "not_equals"].includes(filter.operator)), p_limit: limit, p_offset: (page - 1) * limit });
+      if (clientId) return workspace;
+      workspace = await supabase.rpc("search_prospect_workspace_v3", { p_search: search, p_filters: filters.filter((filter) => !["__esp", "__email_provider_type"].includes(filter.field)), p_sort: sort, p_direction: direction, p_limit: limit, p_offset: (page - 1) * limit });
+    }
+    if (workspace.error?.code === "PGRST202" || workspace.error?.code === "42883") {
+      workspace = await supabase.rpc("search_prospect_workspace", { p_search: search, p_filters: filters.filter((filter) => !["not_contains", "not_equals"].includes(filter.operator) && !["__esp", "__email_provider_type"].includes(filter.field)), p_limit: limit, p_offset: (page - 1) * limit });
     }
     return workspace;
   })();

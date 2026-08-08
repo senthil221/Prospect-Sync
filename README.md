@@ -55,6 +55,14 @@ Each client workspace includes Uploaded lists, Master DB, and Company DB tabs. T
 
 Each import records its complete header set and preserves every valid source row in `list_rows`, including repeated prospects within the same client list. The import preview and client-list summary show how many fields were detected and stored.
 
+## ESP and secure email gateway detection
+
+Apply `supabase/migrations/20260809000000_email_provider_enrichment.sql`, then open the master database and choose **Detect ESPs**. The server resolves each unique company domain once, falls back to Cloudflare DNS-over-HTTPS when direct DNS is unavailable, stores the observed MX hosts on the company, and exposes the exact detected provider in the **ESP** prospect column.
+
+Use the **Email provider type** filter with `SEG` to isolate MX-visible secure email gateways, or filter **ESP** for a provider such as Mimecast, Proofpoint, Barracuda, Cisco Secure Email, Sophos Email, Trend Micro Email Security, or Hornetsecurity. Google Workspace, Microsoft 365, and other direct mailbox providers are classified separately.
+
+MX records only reveal services that receive mail for the domain. API-only or post-delivery security products do not change MX records and therefore cannot be identified reliably by this scan; those domains retain their visible mailbox provider instead of being guessed.
+
 ## Safe deletion
 
 Imports, lists, and clients can be removed from the dashboard after confirmation. Cleanup is transactional: client-list links are removed first, and an optional orphan cleanup deletes a master prospect only when no remaining client list uses it. Companies are removed only when no master prospect references them.
