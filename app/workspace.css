@@ -32,8 +32,14 @@
   --ph-warning-soft: #fff6df;
   --ph-danger: #b42318;
   --ph-danger-soft: #fff0ee;
-  --ph-shadow: 0 1px 2px rgba(16, 24, 40, .025), 0 3px 10px rgba(16, 24, 40, .035);
-  --ph-shadow-lifted: 0 14px 34px rgba(16, 24, 40, .12);
+  --ph-shadow-xs: 0 1px 2px rgba(16, 24, 40, .04);
+  --ph-shadow: 0 1px 2px rgba(16, 24, 40, .03), 0 2px 6px -1px rgba(16, 24, 40, .05);
+  --ph-shadow-md: 0 2px 4px -1px rgba(16, 24, 40, .05), 0 8px 20px -6px rgba(16, 24, 40, .09);
+  --ph-shadow-lifted: 0 4px 10px -4px rgba(16, 24, 40, .08), 0 18px 44px -12px rgba(16, 24, 40, .18);
+  /* One premium easing language for the whole surface */
+  --ph-ease: cubic-bezier(.4, 0, .2, 1);
+  --ph-ease-out: cubic-bezier(.16, 1, .3, 1);
+  --ph-dur: .18s;
 }
 
 html, body {
@@ -47,8 +53,14 @@ html, body {
 }
 
 button, input, select { font-family: inherit; }
-button, input, select, a { transition: border-color .16s ease, background-color .16s ease, color .16s ease, box-shadow .16s ease, transform .16s ease; }
+button, input, select, a { transition: border-color var(--ph-dur) var(--ph-ease), background-color var(--ph-dur) var(--ph-ease), color var(--ph-dur) var(--ph-ease), box-shadow var(--ph-dur) var(--ph-ease), transform var(--ph-dur) var(--ph-ease); }
 button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid rgba(91, 91, 214, .22); outline-offset: 2px; }
+::selection { background: rgba(91, 91, 214, .18); color: #2b2b6b; }
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background-clip: padding-box; background-color: #cdd2dc; }
+::-webkit-scrollbar-thumb:hover { background-color: #b3b9c6; }
+* { scrollbar-width: thin; scrollbar-color: #cdd2dc transparent; }
 .sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .skip-link { position: fixed; left: 16px; top: -60px; z-index: 100; padding: 10px 14px; border-radius: 8px; background: var(--ph-text); color: #fff; font-size: 13px; font-weight: 650; }
 .skip-link:focus { top: 14px; }
@@ -307,3 +319,100 @@ main { min-width: 0; grid-column: 2; }
 .export-progress-bar { height: 6px; border-radius: 999px; background: #ecebf5; overflow: hidden; }
 .export-progress-bar i { display: block; height: 100%; background: var(--ph-brand); transition: width .2s ease; }
 .export-modal .export-field-grid { flex: 1 1 auto; min-height: 0; }
+
+/* ============================================================
+   Premium refinement layer
+   Layout rhythm, depth, and motion polish. Token- and
+   cascade-driven so it layers over the base with no markup
+   changes. Fully reversible — delete this block to revert.
+   ============================================================ */
+
+/* Atmosphere: a barely-there tint gives the flat canvas depth
+   without introducing new color. */
+.app-shell {
+  background:
+    radial-gradient(1200px 520px at 78% -6%, rgba(91, 91, 214, .05), transparent 60%),
+    radial-gradient(900px 500px at 0% 100%, rgba(91, 91, 214, .035), transparent 55%),
+    var(--ph-bg);
+}
+
+/* Sidebar — hairline separation and calmer, springier nav */
+.sidebar { box-shadow: 1px 0 0 rgba(16, 24, 40, .02); }
+.sidebar nav button { transition: background-color var(--ph-dur) var(--ph-ease), color var(--ph-dur) var(--ph-ease), box-shadow var(--ph-dur) var(--ph-ease); }
+.sidebar nav button > span { transition: color var(--ph-dur) var(--ph-ease), transform var(--ph-dur) var(--ph-ease-out); }
+.sidebar nav button:hover:not(.active) > span { transform: translateX(1px); }
+.sidebar nav button.active { box-shadow: inset 3px 0 var(--ph-brand), 0 1px 2px rgba(72, 72, 184, .06); }
+.brand-mark { box-shadow: 0 6px 16px rgba(82, 82, 193, .26), inset 0 1px 0 rgba(255, 255, 255, .22); }
+
+/* Topbar — deeper glass and a crisp hairline under the blur */
+.topbar { background: rgba(255, 255, 255, .78); backdrop-filter: saturate(180%) blur(18px); -webkit-backdrop-filter: saturate(180%) blur(18px); box-shadow: 0 1px 0 rgba(16, 24, 40, .04); }
+
+/* Surfaces — layered shadow ramp + smoother, calmer lift */
+.panel, .metric-card, .client-card, .client-hero, .import-card { transition: transform .22s var(--ph-ease-out), box-shadow .22s var(--ph-ease-out), border-color var(--ph-dur) var(--ph-ease); }
+.metric-card { box-shadow: var(--ph-shadow); }
+.metric-card:hover { transform: translateY(-2px); box-shadow: var(--ph-shadow-md); }
+.metric-icon { box-shadow: inset 0 0 0 1px rgba(16, 24, 40, .015); }
+.client-card:hover { transform: translateY(-3px); box-shadow: var(--ph-shadow-lifted); }
+.welcome { box-shadow: var(--ph-shadow-md); }
+
+/* Buttons — tactile press + refined shadow behavior */
+.primary { box-shadow: 0 1px 2px rgba(72, 72, 184, .18), 0 4px 12px -4px rgba(72, 72, 184, .4); }
+.primary:hover { box-shadow: 0 2px 4px rgba(72, 72, 184, .2), 0 10px 22px -6px rgba(72, 72, 184, .5); }
+.primary:active, .secondary:active, .outline-button:active, .company-pagination button:active:not(:disabled), .table-footer button:active:not(:disabled) { transform: translateY(1px); }
+.primary:active { box-shadow: 0 1px 2px rgba(72, 72, 184, .22); }
+
+/* Tables — smoother row transitions, softer sticky header, and
+   an accent rail on hover for scan-ability */
+.master-data-table tbody tr { transition: background-color .13s var(--ph-ease), box-shadow .13s var(--ph-ease); }
+.master-data-table tbody tr:hover { box-shadow: inset 3px 0 var(--ph-brand); }
+.master-data-table tbody tr.selected { box-shadow: inset 3px 0 var(--ph-brand-dark); }
+.master-data-table th { box-shadow: 0 1px 0 #dde0e6; border-bottom-color: transparent; }
+.company-table th, table th { box-shadow: 0 1px 0 #e1e4e9; }
+
+/* Panels — hairline crispness against the tinted canvas */
+.panel { box-shadow: var(--ph-shadow); }
+.panel:hover { box-shadow: var(--ph-shadow-md); }
+
+/* Filter panel + pills — gentle interaction feedback */
+.active-filter-strip button, .quick-filters button, .value-chip, .membership-chips span { transition: background-color var(--ph-dur) var(--ph-ease), border-color var(--ph-dur) var(--ph-ease), color var(--ph-dur) var(--ph-ease), transform var(--ph-dur) var(--ph-ease); }
+.quick-filters button:hover { transform: translateY(-1px); }
+
+/* Drawer + modals — richer, softer elevation for focus moments */
+.drawer { box-shadow: -24px 0 60px -20px rgba(16, 24, 40, .28); }
+.drawer, .confirm-modal, .export-modal { animation: ph-surface-in .32s var(--ph-ease-out) both; }
+.drawer-backdrop, .modal-backdrop { animation: ph-fade-in .2s var(--ph-ease) both; }
+@keyframes ph-fade-in { from { opacity: 0; } }
+@keyframes ph-surface-in { from { opacity: 0; transform: translateY(10px) scale(.99); } }
+.drawer { animation-name: ph-drawer-in; }
+@keyframes ph-drawer-in { from { opacity: 0; transform: translateX(24px); } }
+
+/* Content entrance — one orchestrated, subtle reveal on each view
+   so navigation feels responsive and composed, not janky. */
+.content > * { animation: ph-rise .42s var(--ph-ease-out) both; }
+.content > *:nth-child(2) { animation-delay: .05s; }
+.content > *:nth-child(3) { animation-delay: .1s; }
+.content > *:nth-child(4) { animation-delay: .14s; }
+@keyframes ph-rise { from { opacity: 0; transform: translateY(8px); } }
+
+/* Dropdowns / popovers — quick, springy entrance from their anchor so
+   open/close reads as a deliberate motion, not a flash. */
+.column-menu, .token-options, .multi-value-menu { transform-origin: top right; animation: ph-pop .16s var(--ph-ease-out) both; }
+.token-options, .multi-value-menu { transform-origin: top left; }
+@keyframes ph-pop { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
+.column-menu, .token-options, .multi-value-menu, .apollo-filter-content, .filter-rule-content { box-shadow: var(--ph-shadow-lifted); }
+.apollo-filter-content, .filter-rule-content { box-shadow: none; }
+/* Expanding a filter section — reveal its body without layout jank. */
+.apollo-filter-content { animation: ph-reveal .2s var(--ph-ease-out) both; }
+@keyframes ph-reveal { from { opacity: 0; transform: translateY(-3px); } }
+
+/* Empty & loading states — warmer, more intentional. */
+.empty > span, .coverage-placeholder > span { box-shadow: inset 0 0 0 1px rgba(91, 91, 214, .08), 0 8px 20px -8px rgba(91, 91, 214, .35); }
+.empty { animation: ph-rise .42s var(--ph-ease-out) both; }
+.loading-bar, .loading-grid span { background-color: #eef0f4; }
+
+/* Respect users who prefer less motion — kill transforms/entrances,
+   keep instant, legible state changes. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+  .metric-card:hover, .client-card:hover, .primary:hover, .quick-filters button:hover { transform: none; }
+}

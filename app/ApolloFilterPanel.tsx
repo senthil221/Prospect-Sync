@@ -1,7 +1,8 @@
 "use client";
 
-import { ClipboardEvent, KeyboardEvent, useEffect, useState } from "react";
+import { ClipboardEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { ProspectFieldDefinition } from "../lib/prospect-fields";
+import { useDismiss } from "./use-dismiss";
 
 export type ProspectFilterOperator = "contains" | "equals" | "not_contains" | "not_equals" | "empty" | "not_empty" | "boolean" | "number_ranges";
 export type ProspectFilter = { id: string; field: string; operator: ProspectFilterOperator; values: string[] };
@@ -66,6 +67,8 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, onC
 }) {
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState("");
+  const panelRef = useRef<HTMLElement>(null);
+  useDismiss(panelRef, () => setExpanded(""), Boolean(expanded));
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const visibleMain = mainFilters.filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
   const visibleOptional = [...optionalFilters, ...customFields].filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
@@ -97,7 +100,7 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, onC
     </section>;
   }
 
-  return <aside className="panel filter-panel apollo-filter-panel">
+  return <aside ref={panelRef} className="panel filter-panel apollo-filter-panel">
     <div className="filter-panel-head"><div><span className="filter-icon">⌁</span><div><strong>Filters</strong><small>Apollo-style prospect filters</small></div></div>{filters.length ? <button onClick={() => onChange([])}>Clear all</button> : null}</div>
     <label className="filter-panel-search"><span>⌕</span><input aria-label="Search filters" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search all filters…"/></label>
     <div className="apollo-filter-scroll">
@@ -183,6 +186,8 @@ function TokenValuePicker({ field, values, clientId, placeholder, onChange }: {
   const [options, setOptions] = useState<Array<{ value: string; count: number }>>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  useDismiss(pickerRef, () => setOpen(false), open);
 
   useEffect(() => {
     if (!open) return;
@@ -225,7 +230,7 @@ function TokenValuePicker({ field, values, clientId, placeholder, onChange }: {
 
   const selected = new Set(values.map((value) => value.toLocaleLowerCase()));
   const visibleOptions = options.filter((option) => !selected.has(option.value.toLocaleLowerCase()));
-  return <div className="token-value-picker">
+  return <div className="token-value-picker" ref={pickerRef}>
     <div className="token-input">
       {values.map((value) => <button type="button" key={value} onClick={(event) => { event.stopPropagation(); onChange(values.filter((item) => item !== value)); }}>{value}<span>×</span></button>)}
       <input value={query} onFocus={() => setOpen(true)} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} onBlur={() => { if (query.trim()) addMany(query); window.setTimeout(() => setOpen(false), 150); }} placeholder={values.length ? "Add another…" : placeholder}/>
