@@ -7,6 +7,7 @@ export type CanonicalProspect = {
   mobileNumber: string;
   linkedinUrl: string;
   title: string;
+  keywords: string[];
   seniority: string;
   department: string;
   city: string;
@@ -14,6 +15,12 @@ export type CanonicalProspect = {
   country: string;
   companyName: string;
   companyDomain: string;
+  companyEmployeeCountMin: number | null;
+  companyEmployeeCountMax: number | null;
+  companyLocation: string;
+  companyCity: string;
+  companyState: string;
+  companyCountry: string;
   raw: Record<string, string>;
   identifiers: Array<{ type: string; value: string }>;
 };
@@ -58,6 +65,26 @@ function findWorkEmail(raw: Record<string, string>) {
   return "";
 }
 
+function parseKeywords(value: string) {
+  const seen = new Set<string>();
+  return value.split(/[,;|]/).map(clean).filter((item) => {
+    const normalized = item.toLocaleLowerCase();
+    if (!normalized || seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+}
+
+export function parseEmployeeCount(value: string): { min: number | null; max: number | null } {
+  const normalized = clean(value).toLocaleLowerCase();
+  if (!normalized || ["unknown", "n/a", "na", "none", "null", "-"].includes(normalized)) return { min: null, max: null };
+  const numbers = [...normalized.matchAll(/\d[\d,]*/g)].map((match) => Number(match[0].replaceAll(",", ""))).filter(Number.isFinite);
+  if (!numbers.length) return { min: null, max: null };
+  if (normalized.includes("+") || /(?:more|over|above)/.test(normalized)) return { min: numbers[0], max: null };
+  if (numbers.length > 1) return { min: Math.min(numbers[0], numbers[1]), max: Math.max(numbers[0], numbers[1]) };
+  return { min: numbers[0], max: numbers[0] };
+}
+
 export function mapProspect(headers: string[], values: string[]): CanonicalProspect {
   const raw: Record<string, string> = {};
   headers.forEach((header, index) => { raw[header] = clean(values[index]); });
@@ -71,6 +98,7 @@ export function mapProspect(headers: string[], values: string[]): CanonicalProsp
   const linkedinUrl = normalizeLinkedin(findValue(raw, ["linkedin", "linkedin url", "linkedin profile", "linkedinurl"]));
   const companyName = findValue(raw, ["casual company name", "company name", "company", "organization"]);
   const companyDomain = normalizeDomain(findValue(raw, ["company website", "website", "company domain", "domain", "companywebsite"]));
+  const employeeCount = parseEmployeeCount(findValue(raw, ["# employees", "number of employees", "employee count", "employees", "company employee count", "company employees", "company headcount", "headcount"]));
   const identifiers: Array<{ type: string; value: string }> = [];
   if (workEmail) identifiers.push({ type: "work_email", value: workEmail });
   if (personalEmail) identifiers.push({ type: "personal_email", value: personalEmail });
@@ -86,6 +114,7 @@ export function mapProspect(headers: string[], values: string[]): CanonicalProsp
     mobileNumber: findValue(raw, ["mobile number", "mobile", "phone", "phone number"]),
     linkedinUrl,
     title: findValue(raw, ["title", "job title", "jobtitle"]),
+    keywords: parseKeywords(findValue(raw, ["keywords", "keyword", "person keywords", "prospect keywords"])),
     seniority: findValue(raw, ["seniority", "seniority level"]),
     department: findValue(raw, ["department", "function"]),
     city: findValue(raw, ["city"]),
@@ -93,6 +122,12 @@ export function mapProspect(headers: string[], values: string[]): CanonicalProsp
     country: findValue(raw, ["country"]),
     companyName,
     companyDomain,
+    companyEmployeeCountMin: employeeCount.min,
+    companyEmployeeCountMax: employeeCount.max,
+    companyLocation: findValue(raw, ["company location", "account location", "headquarters", "hq location"]),
+    companyCity: findValue(raw, ["company city", "account city", "hq city"]),
+    companyState: findValue(raw, ["company state", "account state", "hq state", "company region"]),
+    companyCountry: findValue(raw, ["company country", "account country", "hq country"]),
     raw,
     identifiers,
   };

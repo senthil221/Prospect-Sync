@@ -3,15 +3,16 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("filter pickers search values across the database instead of the current page", async () => {
-  const [dashboard, route, migration, workspaceMigration] = await Promise.all([
+  const [dashboard, filterPanel, route, migration, workspaceMigration] = await Promise.all([
     readFile(new URL("../app/DashboardApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ApolloFilterPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/prospects/filter-values/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../supabase/migrations/20260808020000_database_wide_filter_values.sql", import.meta.url), "utf8"),
     readFile(new URL("../supabase/migrations/20260808010000_client_scoped_workspaces.sql", import.meta.url), "utf8"),
   ]);
 
-  assert.match(dashboard, /api\/prospects\/filter-values/);
-  assert.match(dashboard, /Searches every record, not only this page/);
+  assert.match(filterPanel, /api\/prospects\/filter-values/);
+  assert.match(filterPanel, /Searching all prospects/);
   assert.match(dashboard, /clientId=\{client\.id\}/);
   assert.match(dashboard, /new Set\(selectedRows\.keys\(\)\)/);
   assert.match(dashboard, /selectionMode === "all_matching"/);

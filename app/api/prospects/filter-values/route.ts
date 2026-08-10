@@ -12,12 +12,24 @@ export async function GET(request: Request) {
   const limit = Math.max(1, Math.min(100, Number(url.searchParams.get("limit") ?? 50) || 50));
   if (!field) return Response.json({ error: "Choose a filter field." }, { status: 400 });
 
-  const { data, error } = await createAdminClient().rpc("prospect_filter_values", {
+  const supabase = createAdminClient();
+  let result = await supabase.rpc("prospect_filter_values_v2", {
     p_field: field,
     p_search: search,
     p_client_id: clientId,
     p_limit: limit,
   });
+
+  const requiresV2 = field.startsWith("custom:") || ["__first_name", "__last_name", "__keywords", "__person_location", "__company_location", "__company_city", "__company_state", "__company_country"].includes(field);
+  if (!requiresV2 && (result.error?.code === "PGRST202" || result.error?.code === "42883")) {
+    result = await supabase.rpc("prospect_filter_values", {
+      p_field: field,
+      p_search: search,
+      p_client_id: clientId,
+      p_limit: limit,
+    });
+  }
+  const { data, error } = result;
 
   if (error) {
     const migrationMissing = error.code === "PGRST202" || error.code === "42883";

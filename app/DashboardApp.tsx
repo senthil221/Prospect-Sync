@@ -2,18 +2,18 @@
 
 import { ChangeEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { mapProspect } from "../db/normalize";
+import { buildCustomFieldDefinitions, customFieldValue } from "../lib/prospect-fields";
+import ApolloFilterPanel, { filterLabel, type ProspectFilter } from "./ApolloFilterPanel";
 
 type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" | "quality" | "imports";
 type ClientRecord = { id: string; name: string; list_count: number; prospect_count: number; cooldown_days?: number };
 type ListRecord = { id: string; name: string; source_file_name: string; uploaded_rows: number; unique_added: number; duplicates_linked: number; prospect_count: number; created_at: string; field_count: number; field_headers: string[] };
 type ProspectMembership = { listId: string; listName: string; clientId: string; clientName: string };
-type Prospect = Record<string, unknown> & { id: string; full_name: string; work_email: string; personal_email?: string; title: string; company_name: string; company_domain: string; city?: string; country?: string; seniority?: string; esp?: string; email_provider_type?: string; mx_records?: string[]; mx_status?: string; mx_checked_at?: string; client_count: number; list_count: number; list_names?: string[]; client_names?: string[]; list_memberships?: ProspectMembership[]; all_data: string | Record<string, string>; last_contacted_at?: string; next_eligible_at?: string; eligible?: boolean; tags?: Array<{ id: string; name: string; color: string }> };
+type Prospect = Record<string, unknown> & { id: string; full_name: string; first_name?: string; last_name?: string; work_email: string; personal_email?: string; title: string; keywords?: string[]; company_name: string; company_domain: string; city?: string; state?: string; country?: string; company_location?: string; company_city?: string; company_state?: string; company_country?: string; employee_count_min?: number; employee_count_max?: number; seniority?: string; department?: string; esp?: string; email_provider_type?: string; mx_records?: string[]; mx_status?: string; mx_checked_at?: string; client_count: number; list_count: number; list_names?: string[]; client_names?: string[]; list_memberships?: ProspectMembership[]; all_data: string | Record<string, string>; last_contacted_at?: string; next_eligible_at?: string; eligible?: boolean; tags?: Array<{ id: string; name: string; color: string }> };
 type Company = { id: string; name: string; domain: string; prospect_count: number; client_count: number; created_at: string };
 type ImportRecord = { id: string; file_name: string; client_name: string; list_name: string; processed_rows: number; unique_added: number; duplicates_linked: number; status: string; created_at: string };
 type DeleteKind = "import" | "list" | "client";
 type DeleteRequest = { kind: DeleteKind; id: string; name: string; context: string };
-type ProspectFilter = { id: string; field: string; operator: "contains" | "equals" | "not_contains" | "not_equals" | "empty" | "not_empty"; values: string[] };
-type FilterValueOption = { value: string; count: number };
 type FileAudit = { headers: string[]; rows: number; populatedCells: number; invalidRows: number };
 type SavedView = { id: string; name: string; definition: { filters: ProspectFilter[]; columns: string[]; sort: string; direction: "asc" | "desc" } };
 
@@ -21,6 +21,14 @@ const emptyStats = { prospects: 0, companies: 0, clients: 0, lists: 0, rowsImpor
 
 function formatNumber(value: unknown) {
   return new Intl.NumberFormat("en-IN").format(Number(value ?? 0));
+}
+
+function filterChipValue(field: string, value: string) {
+  if (field !== "__employee_count") return value;
+  if (value === "unknown") return "Unknown";
+  const [minimum, maximum] = value.split(":");
+  if (!minimum) return value;
+  return maximum ? `${formatNumber(minimum)}–${formatNumber(maximum)}` : `${formatNumber(minimum)}+`;
 }
 
 function initials(name: string) {
@@ -70,7 +78,7 @@ function deriveListName(fileName: string) {
     .trim();
 }
 
-const canonicalImportFields = ["Auto detect", "First Name", "Last Name", "Full Name", "Work Email", "Personal Email", "Mobile Number", "LinkedIn", "Title", "Seniority", "Department", "City", "State", "Country", "Company Name", "Company Website"];
+const canonicalImportFields = ["Auto detect", "First Name", "Last Name", "Full Name", "Work Email", "Personal Email", "Mobile Number", "LinkedIn", "Title", "Keywords", "Seniority", "Department", "City", "State", "Country", "Company Name", "Company Website", "Company Employee Count", "Company Location", "Company City", "Company State", "Company Country"];
 
 function suggestedImportField(header: string) {
   const normalized = header.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -78,10 +86,13 @@ function suggestedImportField(header: string) {
     firstname: "First Name", lastname: "Last Name", fullname: "Full Name", name: "Full Name",
     email: "Work Email", workemail: "Work Email", businessemail: "Work Email", personalemail: "Personal Email",
     mobile: "Mobile Number", mobilenumber: "Mobile Number", phone: "Mobile Number", phonenumber: "Mobile Number",
-    linkedin: "LinkedIn", linkedinurl: "LinkedIn", title: "Title", jobtitle: "Title", seniority: "Seniority",
+    linkedin: "LinkedIn", linkedinurl: "LinkedIn", title: "Title", jobtitle: "Title", keyword: "Keywords", keywords: "Keywords", personkeywords: "Keywords", prospectkeywords: "Keywords", seniority: "Seniority",
     department: "Department", city: "City", state: "State", country: "Country", company: "Company Name",
     companyname: "Company Name", casualcompanyname: "Company Name", organization: "Company Name",
     companywebsite: "Company Website", website: "Company Website", domain: "Company Website", companydomain: "Company Website",
+    employees: "Company Employee Count", employeecount: "Company Employee Count", numberofemployees: "Company Employee Count", companyemployees: "Company Employee Count", companyheadcount: "Company Employee Count", headcount: "Company Employee Count",
+    companylocation: "Company Location", accountlocation: "Company Location", headquarters: "Company Location", hqlocation: "Company Location",
+    companycity: "Company City", accountcity: "Company City", hqcity: "Company City", companystate: "Company State", accountstate: "Company State", hqstate: "Company State", companyregion: "Company State", companycountry: "Company Country", accountcountry: "Company Country", hqcountry: "Company Country",
   };
   return aliases[normalized] ?? "Auto detect";
 }
@@ -370,13 +381,19 @@ function Overview({ stats, recentImports, clients, onImport, onViewMaster, onDel
 
 const standardProspectFields = [
   { id: "__name", label: "Name" },
+  { id: "__first_name", label: "First name" },
+  { id: "__last_name", label: "Last name" },
   { id: "__company", label: "Company" },
   { id: "__email", label: "Email" },
   { id: "__title", label: "Title" },
+  { id: "__keywords", label: "Keywords" },
   { id: "__lists", label: "List names" },
   { id: "__clients", label: "Clients" },
   { id: "__linkedin", label: "LinkedIn" },
   { id: "__country", label: "Country" },
+  { id: "__person_location", label: "Person location" },
+  { id: "__company_location", label: "Company location" },
+  { id: "__employee_count", label: "# Employees" },
   { id: "__seniority", label: "Seniority" },
   { id: "__department", label: "Department" },
   { id: "__esp", label: "ESP" },
@@ -394,13 +411,22 @@ const standardProspectExportFields = [
   { id: "__mobile_number", label: "Mobile Number" },
   { id: "__linkedin", label: "LinkedIn" },
   { id: "__title", label: "Title" },
+  { id: "__keywords", label: "Keywords" },
   { id: "__seniority", label: "Seniority" },
   { id: "__department", label: "Department" },
   { id: "__city", label: "City" },
   { id: "__state", label: "State" },
   { id: "__country", label: "Country" },
+  { id: "__person_location", label: "Person Location" },
   { id: "__company", label: "Company" },
   { id: "__website", label: "Website" },
+  { id: "__employee_count", label: "# Employees" },
+  { id: "__employee_count_min", label: "Employee Count Min" },
+  { id: "__employee_count_max", label: "Employee Count Max" },
+  { id: "__company_location", label: "Company Location" },
+  { id: "__company_city", label: "Company City" },
+  { id: "__company_state", label: "Company State" },
+  { id: "__company_country", label: "Company Country" },
   { id: "__esp", label: "ESP" },
   { id: "__email_provider_type", label: "Email Provider Type" },
   { id: "__mx_records", label: "MX Records" },
@@ -417,19 +443,32 @@ const defaultProspectExportFields = ["__name", "__work_email", "__company", "__w
 
 function prospectFieldValue(prospect: Prospect, field: string) {
   if (field === "__name") return String(prospect.full_name || "");
+  if (field === "__first_name") return String(prospect.first_name || "");
+  if (field === "__last_name") return String(prospect.last_name || "");
   if (field === "__company") return String(prospect.company_name || "");
   if (field === "__email") return String(prospect.work_email || prospect.personal_email || "");
   if (field === "__title") return String(prospect.title || "");
+  if (field === "__keywords") return Array.isArray(prospect.keywords) ? prospect.keywords.join(", ") : "";
   if (field === "__lists") return Array.isArray(prospect.list_names) ? prospect.list_names.join(", ") : "";
   if (field === "__clients") return Array.isArray(prospect.client_names) ? prospect.client_names.join(", ") : "";
   if (field === "__linkedin") return String(prospect.linkedin_url || "");
   if (field === "__country") return String(prospect.country || "");
+  if (field === "__person_location") return [prospect.city, prospect.state, prospect.country].filter(Boolean).join(", ");
+  if (field === "__company_location") return [prospect.company_location, prospect.company_city, prospect.company_state, prospect.company_country].filter(Boolean).join(", ");
+  if (field === "__employee_count") {
+    const minimum = prospect.employee_count_min;
+    const maximum = prospect.employee_count_max;
+    if (minimum == null && maximum == null) return "";
+    if (minimum != null && maximum == null) return `${formatNumber(minimum)}+`;
+    return minimum === maximum ? formatNumber(minimum) : `${formatNumber(minimum)}–${formatNumber(maximum)}`;
+  }
   if (field === "__seniority") return String(prospect.seniority || "");
   if (field === "__department") return String(prospect.department || "");
   if (field === "__esp") return String(prospect.esp || "");
   if (field === "__email_provider_type") return String(prospect.email_provider_type || "Unknown");
   if (field === "__tags") return Array.isArray(prospect.tags) ? prospect.tags.map((tag) => tag.name).join(", ") : "";
   if (field === "__last_contacted") return prospect.last_contacted_at ? new Date(prospect.last_contacted_at).toLocaleDateString("en-IN") : "";
+  if (field.startsWith("custom:")) return customFieldValue(parseAllData(prospect.all_data), field.slice(7));
   return String(parseAllData(prospect.all_data)[field] || "");
 }
 
@@ -481,10 +520,9 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
   const [espScanning, setEspScanning] = useState(false);
   const [notice, setNotice] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(true);
-  const [filterSearch, setFilterSearch] = useState("");
-  const [expandedFilterId, setExpandedFilterId] = useState("");
-  const allColumns = useMemo(() => [...standardProspectFields, ...fields.map((field) => ({ id: field, label: field }))], [fields]);
-  const exportFieldCatalog = useMemo(() => [...standardProspectExportFields, ...fields.map((field) => ({ id: `custom:${field}`, label: field }))], [fields]);
+  const customFields = useMemo(() => buildCustomFieldDefinitions(fields), [fields]);
+  const allColumns = useMemo(() => [...standardProspectFields, ...customFields], [customFields]);
+  const exportFieldCatalog = useMemo(() => [...standardProspectExportFields, ...customFields], [customFields]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -526,7 +564,6 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
   const totalPages = Math.max(1, Math.ceil(total / 50));
   const firstRecord = total ? (page - 1) * 50 + 1 : 0;
   const lastRecord = Math.min(page * 50, total);
-  const filterCatalog = allColumns.filter((field) => field.label.toLocaleLowerCase().includes(filterSearch.trim().toLocaleLowerCase()));
 
   useEffect(() => {
     if (!active) return;
@@ -542,15 +579,6 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
 
   function syncHorizontalScroll(source: HTMLDivElement, target: HTMLDivElement | null) {
     if (target && Math.abs(target.scrollLeft - source.scrollLeft) > 1) target.scrollLeft = source.scrollLeft;
-  }
-
-  function addFilter(field = "__country") {
-    const existing = filters.find((filter) => filter.field === field);
-    if (existing) { setExpandedFilterId(existing.id); return; }
-    if (filters.length >= 8) { setNotice("You can combine up to 8 filters in one view."); return; }
-    const id = crypto.randomUUID();
-    onFiltersChange([...filters, { id, field, operator: "contains", values: [] }]);
-    setExpandedFilterId(id);
   }
 
   function clearSelection() {
@@ -620,7 +648,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
 
   function openExportDialog(scope: "all_matching" | "selected") {
     if (scope === "selected" && !selectedCount) return;
-    const visibleExportFields = visibleColumns.flatMap((field) => field === "__email" ? ["__work_email"] : standardProspectExportFields.some((item) => item.id === field) ? [field] : fields.includes(field) ? [`custom:${field}`] : []);
+    const visibleExportFields = visibleColumns.flatMap((field) => field === "__email" ? ["__work_email"] : standardProspectExportFields.some((item) => item.id === field) || field.startsWith("custom:") ? [field] : []);
     setExportFields(visibleExportFields.length ? [...new Set(visibleExportFields)] : defaultProspectExportFields);
     setExportScope(scope);
     setExportDialogOpen(true);
@@ -761,92 +789,19 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
         {notice ? <div className="inline-notice" role="status">{notice}<button aria-label="Dismiss notification" onClick={() => setNotice("")}>×</button></div> : null}
         {selectedCount ? <div className="bulk-bar"><strong>{formatNumber(selectedCount)} selected {selectionMode === "all_matching" ? "across all pages" : "across pages"}</strong>{selectionMode === "explicit" && selectedCount < total ? <button onClick={selectAllMatching}>Select all {formatNumber(total)}</button> : null}<button onClick={() => openExportDialog("selected")}>↓ Export selected</button>{selectionMode === "explicit" ? <><button disabled={bulkBusy} onClick={() => void bulkAction("tag")}>＋ Add tag</button><select aria-label="Client for contact history" value={bulkClientId} onChange={(event) => setBulkClientId(event.target.value)}><option value="">Choose client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><button disabled={bulkBusy || !bulkClientId} onClick={() => void bulkAction("mark_contacted")}>✓ Mark contacted</button></> : <span className="selection-scope-note">Database-wide selection is ready to export</span>}<button onClick={clearSelection}>Clear</button></div> : null}
         {effectiveFilters.length ? <div className="active-filter-strip">{effectiveFilters.flatMap((filter) => {
-          const label = allColumns.find((field) => field.id === filter.field)?.label ?? filter.field;
+          const label = filterLabel(filter.field, customFields);
           if (filter.operator === "empty" || filter.operator === "not_empty") return [<button key={filter.id} onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>{label}: {filter.operator === "empty" ? "Empty" : "Not empty"} <span>×</span></button>];
-          return filter.values.map((value) => <button key={`${filter.id}-${value}`} onClick={() => updateFilter(filter.id, { values: filter.values.filter((item) => item !== value) })}>{label}: {value} <span>×</span></button>);
+          const prefix = filter.operator === "not_contains" || filter.operator === "not_equals" ? "Exclude " : filter.operator === "boolean" ? "Boolean " : "";
+          return filter.values.map((value) => <button key={`${filter.id}-${value}`} onClick={() => updateFilter(filter.id, { values: filter.values.filter((item) => item !== value) })}>{prefix}{label}: {filterChipValue(filter.field, value)} <span>×</span></button>);
         })}<button className="clear-filter-chip" onClick={() => onFiltersChange([])}>Clear all</button></div> : null}
         {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select all prospects on this page" title="Select all prospects on this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => isProspectSelected(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr className={isProspectSelected(person.id) ? "selected" : ""} key={person.id} onClick={() => onSelect(person)}><td className="select-column" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${person.full_name || "prospect"}`} type="checkbox" checked={isProspectSelected(person.id)} onChange={() => toggleSelected(person.id)}/></td>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "-"}</span> : field.id === "__esp" ? <span className={`esp-cell ${person.email_provider_type === "SEG" ? "seg" : ""}`} title={Array.isArray(person.mx_records) && person.mx_records.length ? person.mx_records.join("\n") : "Run Detect ESPs to check this domain"}><strong>{value || "Not checked"}</strong><small>{person.email_provider_type || "Unknown"}</small></span> : field.id === "__lists" ? <ListMembershipCell prospect={person} includeClient={!clientId} onShowAll={() => onSelect(person)} /> : <span title={value}>{value || "-"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {formatNumber(total)} matching records</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={effectiveFilters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and your unique prospects will appear here."} action={effectiveFilters.length ? "Clear filters" : "Import CSV"} onAction={effectiveFilters.length ? () => onFiltersChange([]) : onImport} />}
       </article>
-      {filtersOpen ? <aside className="panel filter-panel">
-        <div className="filter-panel-head"><div><span className="filter-icon"><AppIcon name="filter" size={16}/></span><div><strong>Filters</strong><small>Choose fields and values</small></div></div>{filters.length ? <button onClick={() => onFiltersChange([])}>Clear all</button> : null}</div>
-        <label className="filter-panel-search"><AppIcon name="search" size={15}/><input aria-label="Search filters" value={filterSearch} onChange={(event) => setFilterSearch(event.target.value)} placeholder="Search all filters…"/></label>
-        <div className="filter-body filter-body-apollo">{filters.length ? <div className="active-filter-rules">{filters.map((filter) => { const label = allColumns.find((field) => field.id === filter.field)?.label ?? filter.field; const expanded = expandedFilterId === filter.id; return <div className={`filter-rule ${expanded ? "expanded" : ""}`} key={filter.id}>
-          <button className="filter-rule-summary" aria-expanded={expanded} onClick={() => setExpandedFilterId(expanded ? "" : filter.id)}><span className="filter-rule-symbol"><AppIcon name="filter" size={13}/></span><strong>{label}</strong>{filter.values.length ? <span className="filter-count">{filter.values.length}</span> : null}<span className="filter-chevron">{expanded ? "−" : "+"}</span></button>
-          {expanded ? <div className="filter-rule-content"><div className="filter-rule-actions"><select aria-label={`${label} condition`} value={filter.operator} onChange={(event) => updateFilter(filter.id, { operator: event.target.value as ProspectFilter["operator"] })}><option value="contains">Includes any</option><option value="equals">Exactly matches any</option><option value="not_contains">Excludes any</option><option value="not_equals">Does not equal</option><option value="not_empty">Is not empty</option><option value="empty">Is empty</option></select><button aria-label={`Remove ${label} filter`} onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>Remove</button></div>{!["empty", "not_empty"].includes(filter.operator) ? <MultiValueSelect key={`${filter.id}-${filter.field}`} values={filter.values} field={filter.field} clientId={clientId} onChange={(values) => updateFilter(filter.id, { values })} /> : <p className="filter-mode-note">This filter does not require values.</p>}</div> : null}
-        </div>; })}</div> : <div className="filter-empty"><span><AppIcon name="filter" size={18}/></span><strong>Build a segment</strong><p>Choose a filter below, then select one or many values.</p></div>}
-          <div className="filter-library"><small>ALL FILTERS</small>{filterCatalog.map((field) => { const active = filters.some((filter) => filter.field === field.id); return <button className={active ? "active" : ""} key={field.id} onClick={() => addFilter(field.id)}><span>{field.label}</span><b>{active ? "✓" : "＋"}</b></button>; })}{!filterCatalog.length ? <p>No filters match “{filterSearch}”.</p> : null}</div>
-        </div>
-      </aside> : null}
+      {filtersOpen ? <ApolloFilterPanel filters={filters} customFields={customFields} clientId={clientId} onChange={onFiltersChange}/> : null}
     </div>}
     {exportDialogOpen ? <div className="modal-backdrop" role="presentation"><section className="export-modal" role="dialog" aria-modal="true" aria-labelledby="prospect-export-title"><div className="export-modal-head"><div><p className="eyebrow">CSV EXPORT</p><h2 id="prospect-export-title">Choose prospects and fields</h2><p>Only the fields checked below will be included in the download.</p></div><button aria-label="Close export dialog" disabled={exportingProspects} onClick={() => setExportDialogOpen(false)}>×</button></div><fieldset className="export-scope"><legend>Prospects to export</legend><label htmlFor="export-all-matching"><span className="sr-only">All matching prospects</span><input id="export-all-matching" type="radio" name="export-scope" checked={exportScope === "all_matching"} onChange={() => setExportScope("all_matching")}/><span><strong>All {search.trim() || effectiveFilters.length ? "matching " : ""}prospects</strong><small>{formatNumber(total)} records across every page</small></span></label><label htmlFor="export-selected" className={!selectedCount ? "disabled" : ""}><span className="sr-only">Selected prospects</span><input id="export-selected" type="radio" name="export-scope" disabled={!selectedCount} checked={exportScope === "selected"} onChange={() => setExportScope("selected")}/><span><strong>Selected prospects</strong><small>{formatNumber(selectedCount)} currently selected</small></span></label></fieldset><div className="export-fields-head"><div><strong>Fields to include</strong><span>{formatNumber(exportFields.length)} selected</span></div><div><button onClick={() => setExportFields(exportFieldCatalog.map((field) => field.id))}>Select all</button><button onClick={() => setExportFields(defaultProspectExportFields)}>Recommended</button><button onClick={() => setExportFields([])}>Clear</button></div></div><div className="export-field-grid">{exportFieldCatalog.map((field) => <label key={field.id}><input type="checkbox" checked={exportFields.includes(field.id)} onChange={() => toggleExportField(field.id)}/><span>{field.label}</span></label>)}</div><div className="modal-actions"><button className="secondary" disabled={exportingProspects} onClick={() => setExportDialogOpen(false)}>Cancel</button><button className="primary" disabled={exportingProspects || !exportFields.length || (exportScope === "selected" && !selectedCount)} onClick={() => void exportProspectsCsv()}>{exportingProspects ? "Preparing CSV…" : `Export ${formatNumber(exportScope === "selected" ? selectedCount : total)} prospects`}</button></div></section></div> : null}
   </section>;
 }
 
-function MultiValueSelect({ values, field, clientId, onChange }: { values: string[]; field: string; clientId?: string; onChange: (values: string[]) => void }) {
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const [options, setOptions] = useState<FilterValueOption[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const rootRef = useRef<HTMLDivElement>(null);
-  const normalizedValues = values.map((value) => value.toLocaleLowerCase());
-  const countByValue = new Map(options.map((option) => [option.value.toLocaleLowerCase(), option.count]));
-  const availableOptions = Array.from(new Set([...values, ...options.map((option) => option.value)]));
-
-  useEffect(() => {
-    if (!open) return;
-    let current = true;
-    const timer = window.setTimeout(() => {
-      setLoading(true);
-      setError("");
-      const path = `/api/prospects/filter-values?field=${encodeURIComponent(field)}&search=${encodeURIComponent(query.trim())}&limit=50${clientId ? `&clientId=${encodeURIComponent(clientId)}` : ""}`;
-      void api<{ values: FilterValueOption[] }>(path)
-        .then((data) => { if (current) setOptions(data.values); })
-        .catch((caught) => { if (current) { setOptions([]); setError(caught instanceof Error ? caught.message : "Unable to load values."); } })
-        .finally(() => { if (current) setLoading(false); });
-    }, 180);
-    return () => { current = false; window.clearTimeout(timer); };
-  }, [clientId, field, open, query]);
-
-  useEffect(() => {
-    function closeOnOutside(event: PointerEvent) { if (!rootRef.current?.contains(event.target as Node)) setOpen(false); }
-    function closeOnEscape(event: KeyboardEvent) { if (event.key === "Escape") { setOpen(false); rootRef.current?.querySelector("input")?.blur(); } }
-    document.addEventListener("pointerdown", closeOnOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => { document.removeEventListener("pointerdown", closeOnOutside); document.removeEventListener("keydown", closeOnEscape); };
-  }, []);
-
-  function addValue(rawValue: string) {
-    const value = rawValue.trim();
-    if (!value || normalizedValues.includes(value.toLocaleLowerCase()) || values.length >= 30) return;
-    onChange([...values, value]);
-    setQuery("");
-  }
-
-  function toggleValue(value: string) {
-    const selected = normalizedValues.includes(value.toLocaleLowerCase());
-    if (!selected && values.length >= 30) return;
-    onChange(selected ? values.filter((item) => item.toLocaleLowerCase() !== value.toLocaleLowerCase()) : [...values, value]);
-  }
-
-  return <div className="multi-value-field" ref={rootRef}>
-    <div className="multi-value-control">
-      {values.map((value) => <button type="button" className="value-chip" key={value} onClick={(event) => { event.stopPropagation(); onChange(values.filter((item) => item !== value)); }}>{value}<span>×</span></button>)}
-      <input value={query} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onFocus={() => setOpen(true)} onKeyDown={(event) => {
-        if ((event.key === "Enter" || event.key === ",") && query.trim()) { event.preventDefault(); addValue(query.replace(/,$/, "")); }
-        if (event.key === "Backspace" && !query && values.length) onChange(values.slice(0, -1));
-      }} placeholder={values.length ? "Add another…" : "Select or type values…"} />
-    </div>
-    {open ? <div className="multi-value-menu" role="listbox" aria-multiselectable="true">
-      {availableOptions.map((option) => <button type="button" key={option} className={normalizedValues.includes(option.toLocaleLowerCase()) ? "selected" : ""} onMouseDown={(event) => event.preventDefault()} onClick={() => toggleValue(option)}><span>{normalizedValues.includes(option.toLocaleLowerCase()) ? "✓" : ""}</span><b>{option}</b>{countByValue.has(option.toLocaleLowerCase()) ? <small>{formatNumber(countByValue.get(option.toLocaleLowerCase()))}</small> : null}</button>)}
-      {query.trim() && !availableOptions.some((option) => option.toLocaleLowerCase() === query.trim().toLocaleLowerCase()) ? <button type="button" className="create-value" onMouseDown={(event) => event.preventDefault()} onClick={() => addValue(query)}>＋ Add “{query.trim()}”</button> : null}
-      {loading ? <p className="filter-values-state">Searching the full database…</p> : null}
-      {!loading && !availableOptions.length && !query.trim() && !error ? <p className="filter-values-state">No saved values for this field.</p> : null}
-      {error ? <p className="filter-values-state error">{error}</p> : null}
-    </div> : null}
-    <small>{values.length ? `${values.length} selected · matches any value across all records` : "Searches every record, not only this page"}</small>
-  </div>;
-}
 
 function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize, clientId = "", search = "", onPageChange, onImport }: { companies: Company[]; total: number; covered: number; prospectTotal: number; page: number; pageSize: number; clientId?: string; search?: string; onPageChange: (page: number) => void; onImport: () => void }) {
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);

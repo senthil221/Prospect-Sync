@@ -26,7 +26,7 @@ test("bulk prospect export shares the full workspace query contract", async () =
   assert.match(dashboard, /setSelectionMode\("all_matching"\)/);
   assert.match(dashboard, /Choose prospects and fields/);
   assert.match(dashboard, /Fields to include/);
-  assert.match(dashboard, /custom:\$\{field\}/);
+  assert.match(dashboard, /buildCustomFieldDefinitions/);
   assert.match(dashboard, /method: "POST"/);
   assert.match(dashboard, /fields: exportFields/);
   assert.match(dashboard, /excludedIds/);
@@ -41,7 +41,8 @@ test("bulk prospect export shares the full workspace query contract", async () =
   assert.match(route, /"X-Exported-Rows"/);
   assert.match(route, /export async function POST/);
   assert.match(route, /requestedFields/);
-  assert.match(route, /custom:\$\{field\}/);
+  assert.match(route, /buildCustomFieldDefinitions/);
+  assert.match(route, /customFieldValue/);
   assert.match(route, /selectionMode === "ids"/);
   assert.match(route, /"Email Provider Type"/);
   assert.match(route, /"List Names"/);

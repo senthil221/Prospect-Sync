@@ -3,8 +3,9 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("ships full-field preservation, filters, and configurable columns", async () => {
-  const [dashboard, prospectsRoute, startRoute, chunkRoute, migration, multiValueMigration] = await Promise.all([
+  const [dashboard, filterPanel, prospectsRoute, startRoute, chunkRoute, migration, multiValueMigration] = await Promise.all([
     readFile(new URL("../app/DashboardApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ApolloFilterPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/prospects/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/imports/start/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/imports/chunk/route.ts", import.meta.url), "utf8"),
@@ -14,9 +15,9 @@ test("ships full-field preservation, filters, and configurable columns", async (
 
   assert.match(dashboard, /Field coverage/);
   assert.match(dashboard, /Choose columns/);
-  assert.match(dashboard, /Choose fields and values/);
-  assert.match(dashboard, /MultiValueSelect/);
-  assert.match(dashboard, /matches any value/);
+  assert.match(filterPanel, /MAIN FILTERS/);
+  assert.match(filterPanel, /TokenValuePicker/);
+  assert.match(filterPanel, /comma-separated values/);
   assert.match(dashboard, /master-scroll-top/);
   assert.match(dashboard, /syncHorizontalScroll/);
   assert.match(dashboard, /deriveListName\(next\.name\)/);

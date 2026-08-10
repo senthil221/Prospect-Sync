@@ -19,11 +19,18 @@ export async function POST(request: Request) {
     return { ...prospect, companyId, normalizedCompanyName: normalizeText(prospect.companyName), sourceRowNumber: Number(rowOffset ?? 0) + index + 2 };
   });
   const supabase = createAdminClient();
-  let result = await supabase.rpc("import_prospect_batch_v3", {
+  const requiresV4 = mapped.some((row) => row.keywords.length > 0
+    || row.companyEmployeeCountMin !== null || row.companyEmployeeCountMax !== null
+    || row.companyLocation || row.companyCity || row.companyState || row.companyCountry);
+  let result = await supabase.rpc("import_prospect_batch_v4", {
     p_import_id: importId,
     p_list_id: listId,
     p_rows: mapped,
   });
+  if (result.error?.code === "PGRST202" || result.error?.code === "42883") {
+    if (requiresV4) return Response.json({ error: "Apply the latest database migration before importing Keywords, employee counts, or company locations." }, { status: 503 });
+    result = await supabase.rpc("import_prospect_batch_v3", { p_import_id: importId, p_list_id: listId, p_rows: mapped });
+  }
   if (result.error?.code === "PGRST202" || result.error?.code === "42883") {
     result = await supabase.rpc("import_prospect_batch_v2", { p_import_id: importId, p_list_id: listId, p_rows: mapped });
   }

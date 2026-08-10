@@ -3,8 +3,9 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("ships agency operations without enrichment or reporting modules", async () => {
-  const [dashboard, migration, coverage, operations, quality, lists, savedViews] = await Promise.all([
+  const [dashboard, filterPanel, migration, coverage, operations, quality, lists, savedViews] = await Promise.all([
     readFile(new URL("../app/DashboardApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ApolloFilterPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../supabase/migrations/20260808000000_agency_operations.sql", import.meta.url), "utf8"),
     readFile(new URL("../app/api/coverage/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/operations/route.ts", import.meta.url), "utf8"),
@@ -18,7 +19,7 @@ test("ships agency operations without enrichment or reporting modules", async ()
   assert.match(dashboard, /LIST WORKSPACE|ListWorkspace/);
   assert.match(dashboard, /Mark contacted/);
   assert.match(dashboard, /Saved views/);
-  assert.match(dashboard, /Excludes any/);
+  assert.match(filterPanel, /Exclude/);
   assert.match(dashboard, /Field mapping/);
   assert.match(dashboard, /Skip to main content/);
   assert.match(migration, /create table if not exists public\.contact_events/);

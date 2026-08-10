@@ -3,8 +3,9 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("ships the readable Prospect Sync UI v2 system", async () => {
-  const [dashboard, styles, companiesRoute, companyProspectsRoute] = await Promise.all([
+  const [dashboard, filterPanel, styles, companiesRoute, companyProspectsRoute] = await Promise.all([
     readFile(new URL("../app/DashboardApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ApolloFilterPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/workspace.css", import.meta.url), "utf8"),
     readFile(new URL("../app/api/companies/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/companies/[id]/prospects/route.ts", import.meta.url), "utf8"),
@@ -28,7 +29,7 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
   assert.match(dashboard, /X-Exported-Rows/);
   assert.doesNotMatch(dashboard, /company-prospect-row/);
   assert.match(dashboard, /filtersOpen/);
-  assert.match(dashboard, /aria-multiselectable/);
+  assert.match(filterPanel, /aria-multiselectable/);
   assert.match(dashboard, /View all fields/);
   assert.doesNotMatch(dashboard, /Know what you already own, reuse clean data across clients/);
   assert.doesNotMatch(dashboard, /Reuse eligibility/);
