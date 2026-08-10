@@ -13,8 +13,9 @@ test("filter pickers search values across the database instead of the current pa
   assert.match(dashboard, /api\/prospects\/filter-values/);
   assert.match(dashboard, /Searches every record, not only this page/);
   assert.match(dashboard, /clientId=\{client\.id\}/);
-  assert.match(dashboard, /selectedRows\.values\(\)/);
-  assert.match(dashboard, /selected across pages/);
+  assert.match(dashboard, /new Set\(selectedRows\.keys\(\)\)/);
+  assert.match(dashboard, /selectionMode === "all_matching"/);
+  assert.match(dashboard, /across pages/);
   assert.match(route, /prospect_filter_values/);
   assert.match(route, /p_client_id: clientId/);
   assert.match(migration, /create or replace function public\.prospect_filter_values/);

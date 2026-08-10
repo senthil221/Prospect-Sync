@@ -131,33 +131,33 @@ function websiteUrl(value: unknown) {
   return /^https?:\/\//i.test(domain) ? domain : `https://${domain}`;
 }
 
-const standardExportColumns: Array<{ header: string; value: (row: ProspectRow) => unknown }> = [
-  { header: "Full Name", value: (row) => row.full_name },
-  { header: "First Name", value: (row) => row.first_name },
-  { header: "Last Name", value: (row) => row.last_name },
-  { header: "Work Email", value: (row) => row.work_email },
-  { header: "Personal Email", value: (row) => row.personal_email },
-  { header: "Mobile Number", value: (row) => row.mobile_number },
-  { header: "LinkedIn", value: (row) => row.linkedin_url },
-  { header: "Title", value: (row) => row.title },
-  { header: "Seniority", value: (row) => row.seniority },
-  { header: "Department", value: (row) => row.department },
-  { header: "City", value: (row) => row.city },
-  { header: "State", value: (row) => row.state },
-  { header: "Country", value: (row) => row.country },
-  { header: "Company", value: (row) => row.company_name },
-  { header: "Website", value: (row) => websiteUrl(row.company_domain) },
-  { header: "ESP", value: (row) => row.esp },
-  { header: "Email Provider Type", value: (row) => row.email_provider_type },
-  { header: "MX Records", value: (row) => arrayText(row.mx_records) },
-  { header: "MX Status", value: (row) => row.mx_status },
-  { header: "MX Checked At", value: (row) => row.mx_checked_at },
-  { header: "List Names", value: (row) => arrayText(row.list_names) },
-  { header: "Client Names", value: (row) => arrayText(row.client_names) },
-  { header: "Tags", value: (row) => tagsText(row.tags) },
-  { header: "Last Contacted", value: (row) => row.last_contacted_at },
-  { header: "Created At", value: (row) => row.created_at },
-  { header: "Updated At", value: (row) => row.updated_at },
+const standardExportColumns: Array<{ id: string; header: string; value: (row: ProspectRow) => unknown }> = [
+  { id: "__name", header: "Full Name", value: (row) => row.full_name },
+  { id: "__first_name", header: "First Name", value: (row) => row.first_name },
+  { id: "__last_name", header: "Last Name", value: (row) => row.last_name },
+  { id: "__work_email", header: "Work Email", value: (row) => row.work_email },
+  { id: "__personal_email", header: "Personal Email", value: (row) => row.personal_email },
+  { id: "__mobile_number", header: "Mobile Number", value: (row) => row.mobile_number },
+  { id: "__linkedin", header: "LinkedIn", value: (row) => row.linkedin_url },
+  { id: "__title", header: "Title", value: (row) => row.title },
+  { id: "__seniority", header: "Seniority", value: (row) => row.seniority },
+  { id: "__department", header: "Department", value: (row) => row.department },
+  { id: "__city", header: "City", value: (row) => row.city },
+  { id: "__state", header: "State", value: (row) => row.state },
+  { id: "__country", header: "Country", value: (row) => row.country },
+  { id: "__company", header: "Company", value: (row) => row.company_name },
+  { id: "__website", header: "Website", value: (row) => websiteUrl(row.company_domain) },
+  { id: "__esp", header: "ESP", value: (row) => row.esp },
+  { id: "__email_provider_type", header: "Email Provider Type", value: (row) => row.email_provider_type },
+  { id: "__mx_records", header: "MX Records", value: (row) => arrayText(row.mx_records) },
+  { id: "__mx_status", header: "MX Status", value: (row) => row.mx_status },
+  { id: "__mx_checked_at", header: "MX Checked At", value: (row) => row.mx_checked_at },
+  { id: "__lists", header: "List Names", value: (row) => arrayText(row.list_names) },
+  { id: "__clients", header: "Client Names", value: (row) => arrayText(row.client_names) },
+  { id: "__tags", header: "Tags", value: (row) => tagsText(row.tags) },
+  { id: "__last_contacted", header: "Last Contacted", value: (row) => row.last_contacted_at },
+  { id: "__created_at", header: "Created At", value: (row) => row.created_at },
+  { id: "__updated_at", header: "Updated At", value: (row) => row.updated_at },
 ];
 
 function normalizedHeader(value: string) {
@@ -185,22 +185,35 @@ async function exportProspects(supabase: ReturnType<typeof createAdminClient>, q
   return { error: null, rows, fields: (fields.data ?? []).map((field) => String(field.field_name ?? "")).filter(Boolean) };
 }
 
-function prospectsCsv(rows: ProspectRow[], fields: string[]) {
+function prospectsCsv(rows: ProspectRow[], fields: string[], requestedFields?: string[]) {
+  const selected = requestedFields ? new Set(requestedFields) : null;
+  const standardColumns = standardExportColumns.filter((column) => !selected || selected.has(column.id));
   const standardHeaders = new Set(standardExportColumns.map((column) => normalizedHeader(column.header)));
-  const customColumns = fields.map((field) => ({
+  const customColumns = fields.filter((field) => !selected || selected.has(`custom:${field}`)).map((field) => ({
     field,
     header: standardHeaders.has(normalizedHeader(field)) ? `${field} (Imported)` : field,
   }));
   return csvDocument(
-    [...standardExportColumns.map((column) => column.header), ...customColumns.map((column) => column.header)],
+    [...standardColumns.map((column) => column.header), ...customColumns.map((column) => column.header)],
     rows.map((row) => {
       const preserved = allData(row.all_data);
       return [
-        ...standardExportColumns.map((column) => exportValue(column.value(row))),
+        ...standardColumns.map((column) => exportValue(column.value(row))),
         ...customColumns.map((column) => exportValue(preserved[column.field])),
       ];
     }),
   );
+}
+
+function exportResponse(rows: ProspectRow[], fields: string[], requestedFields: string[] | undefined, clientId: string | null) {
+  return new Response(prospectsCsv(rows, fields, requestedFields), {
+    headers: {
+      "Cache-Control": "no-store",
+      "Content-Disposition": `attachment; filename="prospect-sync-prospects-${clientId ? "client-" : "all-"}${new Date().toISOString().slice(0, 10)}.csv"`,
+      "Content-Type": "text/csv; charset=utf-8",
+      "X-Exported-Rows": String(rows.length),
+    },
+  });
 }
 
 export async function GET(request: Request) {
@@ -224,14 +237,7 @@ export async function GET(request: Request) {
       return Response.json({ error: "Apply the latest database migration to enable client workspaces." }, { status: 503 });
     }
     if (result.error) return Response.json({ error: result.error.message }, { status: 500 });
-    return new Response(prospectsCsv(result.rows, result.fields), {
-      headers: {
-        "Cache-Control": "no-store",
-        "Content-Disposition": `attachment; filename="prospect-sync-prospects-${clientId ? "client-" : "all-"}${new Date().toISOString().slice(0, 10)}.csv"`,
-        "Content-Type": "text/csv; charset=utf-8",
-        "X-Exported-Rows": String(result.rows.length),
-      },
-    });
+    return exportResponse(result.rows, result.fields, undefined, clientId);
   }
 
   const workspaceRequest = runProspectWorkspace(supabase, {
@@ -260,4 +266,45 @@ export async function GET(request: Request) {
     limit,
     fields: (fields.data ?? []).map((item) => item.field_name),
   });
+}
+
+export async function POST(request: Request) {
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
+  const payload = await request.json().catch(() => null) as {
+    search?: unknown;
+    filters?: unknown;
+    sort?: unknown;
+    direction?: unknown;
+    clientId?: unknown;
+    fields?: unknown;
+    selection?: { mode?: unknown; ids?: unknown; excludedIds?: unknown };
+  } | null;
+  if (!payload) return Response.json({ error: "Invalid export request." }, { status: 400 });
+  const search = String(payload.search ?? "").trim().slice(0, 300);
+  const filters = parseFilters(JSON.stringify(payload.filters ?? []));
+  const sortValue = String(payload.sort ?? "created_at");
+  const sort = ["created_at", "name", "company", "title", "last_contacted"].includes(sortValue) ? sortValue : "created_at";
+  const direction = payload.direction === "asc" ? "asc" : "desc";
+  const clientId = String(payload.clientId ?? "").trim() || null;
+  const requestedFields = Array.isArray(payload.fields) ? [...new Set(payload.fields.map((field) => String(field).trim()).filter(Boolean))].slice(0, 600) : [];
+  if (!requestedFields.length) return Response.json({ error: "Choose at least one field to export." }, { status: 400 });
+
+  const supabase = createAdminClient();
+  const result = await exportProspects(supabase, { search, filters, sort, direction, clientId });
+  if (clientId && isMissingFunction(result.error)) {
+    return Response.json({ error: "Apply the latest database migration to enable client workspaces." }, { status: 503 });
+  }
+  if (result.error) return Response.json({ error: result.error.message }, { status: 500 });
+  const availableFields = new Set([...standardExportColumns.map((column) => column.id), ...result.fields.map((field) => `custom:${field}`)]);
+  const validatedFields = requestedFields.filter((field) => availableFields.has(field));
+  if (!validatedFields.length) return Response.json({ error: "None of the selected fields are available." }, { status: 400 });
+
+  const selectionMode = payload.selection?.mode === "ids" ? "ids" : "all_matching";
+  const selectionValues = selectionMode === "ids" ? payload.selection?.ids : payload.selection?.excludedIds;
+  const selectionIds = new Set(Array.isArray(selectionValues) ? selectionValues.map((id) => String(id).trim()).filter(Boolean).slice(0, 10000) : []);
+  const rows = selectionMode === "ids"
+    ? result.rows.filter((row) => selectionIds.has(String(row.id ?? "")))
+    : result.rows.filter((row) => !selectionIds.has(String(row.id ?? "")));
+  return exportResponse(rows, result.fields, validatedFields, clientId);
 }

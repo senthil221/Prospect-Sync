@@ -21,10 +21,15 @@ test("bulk prospect export shares the full workspace query contract", async () =
     readFile(new URL("../app/api/prospects/route.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(dashboard, /↓ Export all/);
-  assert.match(dashboard, /new URLSearchParams\(\{ export: "csv", sort, direction \}\)/);
-  assert.match(dashboard, /params\.set\("filters"/);
-  assert.match(dashboard, /params\.set\("clientId"/);
+  assert.match(dashboard, /↓ Export CSV/);
+  assert.match(dashboard, /Select all.*across pages/);
+  assert.match(dashboard, /setSelectionMode\("all_matching"\)/);
+  assert.match(dashboard, /Choose prospects and fields/);
+  assert.match(dashboard, /Fields to include/);
+  assert.match(dashboard, /custom:\$\{field\}/);
+  assert.match(dashboard, /method: "POST"/);
+  assert.match(dashboard, /fields: exportFields/);
+  assert.match(dashboard, /excludedIds/);
   assert.match(dashboard, /search=\{deferredSearch\}/);
   assert.match(route, /async function runProspectWorkspace/);
   assert.match(route, /search_prospect_workspace_v5/);
@@ -34,6 +39,10 @@ test("bulk prospect export shares the full workspace query contract", async () =
   assert.match(route, /from\("prospect_fields"\)/);
   assert.match(route, /row\.all_data/);
   assert.match(route, /"X-Exported-Rows"/);
+  assert.match(route, /export async function POST/);
+  assert.match(route, /requestedFields/);
+  assert.match(route, /custom:\$\{field\}/);
+  assert.match(route, /selectionMode === "ids"/);
   assert.match(route, /"Email Provider Type"/);
   assert.match(route, /"List Names"/);
   assert.match(route, /"Client Names"/);

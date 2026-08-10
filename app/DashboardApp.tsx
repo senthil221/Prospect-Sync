@@ -385,6 +385,35 @@ const standardProspectFields = [
   { id: "__last_contacted", label: "Last contacted" },
 ];
 const defaultProspectColumns = ["__name", "__company", "__email", "__esp", "__title", "__lists"];
+const standardProspectExportFields = [
+  { id: "__name", label: "Full Name" },
+  { id: "__first_name", label: "First Name" },
+  { id: "__last_name", label: "Last Name" },
+  { id: "__work_email", label: "Work Email" },
+  { id: "__personal_email", label: "Personal Email" },
+  { id: "__mobile_number", label: "Mobile Number" },
+  { id: "__linkedin", label: "LinkedIn" },
+  { id: "__title", label: "Title" },
+  { id: "__seniority", label: "Seniority" },
+  { id: "__department", label: "Department" },
+  { id: "__city", label: "City" },
+  { id: "__state", label: "State" },
+  { id: "__country", label: "Country" },
+  { id: "__company", label: "Company" },
+  { id: "__website", label: "Website" },
+  { id: "__esp", label: "ESP" },
+  { id: "__email_provider_type", label: "Email Provider Type" },
+  { id: "__mx_records", label: "MX Records" },
+  { id: "__mx_status", label: "MX Status" },
+  { id: "__mx_checked_at", label: "MX Checked At" },
+  { id: "__lists", label: "List Names" },
+  { id: "__clients", label: "Client Names" },
+  { id: "__tags", label: "Tags" },
+  { id: "__last_contacted", label: "Last Contacted" },
+  { id: "__created_at", label: "Created At" },
+  { id: "__updated_at", label: "Updated At" },
+];
+const defaultProspectExportFields = ["__name", "__work_email", "__company", "__website", "__title", "__esp"];
 
 function prospectFieldValue(prospect: Prospect, field: string) {
   if (field === "__name") return String(prospect.full_name || "");
@@ -439,16 +468,23 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [selectedRows, setSelectedRows] = useState<Map<string, Prospect>>(new Map());
   const selectedIds = useMemo(() => new Set(selectedRows.keys()), [selectedRows]);
+  const [selectionMode, setSelectionMode] = useState<"explicit" | "all_matching">("explicit");
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
+  const [selectionQueryKey, setSelectionQueryKey] = useState("");
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [bulkClientId, setBulkClientId] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [exportingProspects, setExportingProspects] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportScope, setExportScope] = useState<"all_matching" | "selected">("all_matching");
+  const [exportFields, setExportFields] = useState<string[]>(defaultProspectExportFields);
   const [espScanning, setEspScanning] = useState(false);
   const [notice, setNotice] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [filterSearch, setFilterSearch] = useState("");
   const [expandedFilterId, setExpandedFilterId] = useState("");
   const allColumns = useMemo(() => [...standardProspectFields, ...fields.map((field) => ({ id: field, label: field }))], [fields]);
+  const exportFieldCatalog = useMemo(() => [...standardProspectExportFields, ...fields.map((field) => ({ id: `custom:${field}`, label: field }))], [fields]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -484,6 +520,9 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
   const configuredDefinitions = visibleColumns.map((id) => allColumns.find((column) => column.id === id)).filter((column): column is { id: string; label: string } => Boolean(column));
   const visibleDefinitions = configuredDefinitions.length ? configuredDefinitions : standardProspectFields.slice(0, 4);
   const effectiveFilters = filters.filter((filter) => filter.values.length || filter.operator === "empty" || filter.operator === "not_empty");
+  const selectionKey = JSON.stringify({ clientId, search: search.trim(), filters: effectiveFilters.map(({ field, operator, values }) => ({ field, operator, values })) });
+  const selectionMatchesQuery = selectionQueryKey === selectionKey;
+  const selectedCount = !selectionMatchesQuery ? 0 : selectionMode === "all_matching" ? Math.max(0, total - excludedIds.size) : selectedIds.size;
   const totalPages = Math.max(1, Math.ceil(total / 50));
   const firstRecord = total ? (page - 1) * 50 + 1 : 0;
   const lastRecord = Math.min(page * 50, total);
@@ -514,9 +553,43 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
     setExpandedFilterId(id);
   }
 
+  function clearSelection() {
+    setSelectionMode("explicit");
+    setSelectedRows(new Map());
+    setExcludedIds(new Set());
+    setSelectionQueryKey(selectionKey);
+  }
+
+  function selectAllMatching() {
+    setSelectionMode("all_matching");
+    setSelectedRows(new Map());
+    setExcludedIds(new Set());
+    setSelectionQueryKey(selectionKey);
+  }
+
+  function isProspectSelected(id: string) {
+    if (!selectionMatchesQuery) return false;
+    return selectionMode === "all_matching" ? !excludedIds.has(id) : selectedIds.has(id);
+  }
+
   function toggleSelected(id: string) {
     const prospect = prospects.find((row) => row.id === id);
     if (!prospect) return;
+    if (!selectionMatchesQuery) {
+      setSelectionMode("explicit");
+      setSelectedRows(new Map([[id, prospect]]));
+      setExcludedIds(new Set());
+      setSelectionQueryKey(selectionKey);
+      return;
+    }
+    if (selectionMode === "all_matching") {
+      setExcludedIds((current) => {
+        const next = new Set(current);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+      });
+      return;
+    }
     setSelectedRows((current) => {
       const next = new Map(current);
       if (next.has(id)) next.delete(id); else next.set(id, prospect);
@@ -526,31 +599,60 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
 
   function togglePageSelection() {
     const pageIds = prospects.map((prospect) => prospect.id);
-    const allSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
-    setSelectedRows((current) => {
-      const next = new Map(current);
-      prospects.forEach((prospect) => allSelected ? next.delete(prospect.id) : next.set(prospect.id, prospect));
+    const allSelected = pageIds.length > 0 && pageIds.every(isProspectSelected);
+    if (!selectionMatchesQuery || selectionMode === "explicit") {
+      setSelectionMode("explicit");
+      setExcludedIds(new Set());
+      setSelectionQueryKey(selectionKey);
+      setSelectedRows((current) => {
+        const next = selectionMatchesQuery ? new Map(current) : new Map<string, Prospect>();
+        prospects.forEach((prospect) => allSelected ? next.delete(prospect.id) : next.set(prospect.id, prospect));
+        return next;
+      });
+      return;
+    }
+    setExcludedIds((current) => {
+      const next = new Set(current);
+      pageIds.forEach((id) => allSelected ? next.add(id) : next.delete(id));
       return next;
     });
   }
 
-  function exportSelected() {
-    const rows = [...selectedRows.values()];
-    if (!rows.length) return;
-    const escape = (value: string) => `"${value.replace(/"/g, '""')}"`;
-    const csv = [visibleDefinitions.map((field) => escape(field.label)).join(","), ...rows.map((prospect) => visibleDefinitions.map((field) => escape(prospectFieldValue(prospect, field.id))).join(","))].join("\r\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a"); link.href = url; link.download = `prospect-sync-selection-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
+  function openExportDialog(scope: "all_matching" | "selected") {
+    if (scope === "selected" && !selectedCount) return;
+    const visibleExportFields = visibleColumns.flatMap((field) => field === "__email" ? ["__work_email"] : standardProspectExportFields.some((item) => item.id === field) ? [field] : fields.includes(field) ? [`custom:${field}`] : []);
+    setExportFields(visibleExportFields.length ? [...new Set(visibleExportFields)] : defaultProspectExportFields);
+    setExportScope(scope);
+    setExportDialogOpen(true);
   }
 
-  async function exportAllProspects() {
+  function toggleExportField(id: string) {
+    setExportFields((current) => current.includes(id) ? current.filter((field) => field !== id) : [...current, id]);
+  }
+
+  async function exportProspectsCsv() {
+    if (!exportFields.length) { setNotice("Choose at least one field to export."); return; }
+    if (exportScope === "selected" && !selectedCount) { setNotice("Select at least one prospect to export."); return; }
     setExportingProspects(true); setNotice("");
     try {
-      const params = new URLSearchParams({ export: "csv", sort, direction });
-      if (search.trim()) params.set("search", search.trim());
-      if (clientId) params.set("clientId", clientId);
-      if (effectiveFilters.length) params.set("filters", JSON.stringify(effectiveFilters.map(({ field, operator, values }) => ({ field, operator, values }))));
-      const response = await fetch(`/api/prospects?${params.toString()}`);
+      const selection = exportScope === "selected"
+        ? selectionMode === "all_matching"
+          ? { mode: "all_matching", excludedIds: [...excludedIds] }
+          : { mode: "ids", ids: [...selectedIds] }
+        : { mode: "all_matching", excludedIds: [] as string[] };
+      const response = await fetch("/api/prospects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          search: search.trim(),
+          filters: effectiveFilters.map(({ field, operator, values }) => ({ field, operator, values })),
+          sort,
+          direction,
+          clientId,
+          fields: exportFields,
+          selection,
+        }),
+      });
       if (!response.ok) {
         const body = await response.json().catch(() => ({ error: "Unable to export prospects." })) as { error?: string };
         throw new Error(body.error || "Unable to export prospects.");
@@ -558,24 +660,26 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
       const blobUrl = URL.createObjectURL(await response.blob());
       const link = document.createElement("a");
       link.href = blobUrl;
-      link.download = `prospect-sync-prospects-${clientId ? "client" : "all"}-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.download = `prospect-sync-prospects-${exportScope === "selected" ? "selected" : clientId ? "client" : "all"}-${new Date().toISOString().slice(0, 10)}.csv`;
       link.click();
       URL.revokeObjectURL(blobUrl);
       const exported = Number(response.headers.get("X-Exported-Rows") ?? 0);
-      setNotice(`Exported ${formatNumber(exported)} ${search.trim() || effectiveFilters.length ? "matching " : ""}prospects across all pages.`);
+      setExportDialogOpen(false);
+      setNotice(`Exported ${formatNumber(exported)} prospects with ${formatNumber(exportFields.length)} selected fields.`);
     } catch (caught) { setNotice(caught instanceof Error ? caught.message : "Unable to export prospects."); }
     finally { setExportingProspects(false); }
   }
 
   async function bulkAction(action: "tag" | "mark_contacted") {
-    if (!selectedIds.size) return;
+    if (!selectedCount) return;
+    if (selectionMode === "all_matching") { setNotice("Export supports database-wide selection. Select individual rows for tag or contact updates."); return; }
     const tagName = action === "tag" ? window.prompt("Tag name")?.trim() : "";
     if (action === "tag" && !tagName) return;
     if (action === "mark_contacted" && !bulkClientId) { setNotice("Choose a client before marking prospects as contacted."); return; }
     setBulkBusy(true); setNotice("");
     try {
       const result = await api<{ updated: number }>("/api/operations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, prospectIds: [...selectedIds], tagName, clientId: bulkClientId }) });
-      setNotice(`${formatNumber(result.updated)} prospects updated.`); setSelectedRows(new Map()); onRefresh();
+      setNotice(`${formatNumber(result.updated)} prospects updated.`); clearSelection(); onRefresh();
     } catch (caught) { setNotice(caught instanceof Error ? caught.message : "Bulk action failed."); }
     finally { setBulkBusy(false); }
   }
@@ -643,11 +747,11 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
     </article> : <div className={`people-layout ${filtersOpen ? "" : "filters-collapsed"}`}>
       <article className="panel results-panel">
         <div className="results-toolbar">
-          <div><strong>{formatNumber(total)} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "Master database"}</span></div>
+          <div className="results-count"><strong>{formatNumber(total)} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "Master database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `✓ All ${formatNumber(total)} selected` : `Select all ${formatNumber(total)} across pages`}</button> : null}</div>
           <div className="workspace-actions">
             <label><span className="sr-only">Saved ICP view</span><select defaultValue="" onChange={(event) => applyView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label>
             <button className="outline-button" onClick={() => void saveCurrentView()}>☆ Save view</button>
-            <button className="outline-button" disabled={exportingProspects} title="Export every matching prospect across all pages" onClick={() => void exportAllProspects()}>{exportingProspects ? "Exporting…" : "↓ Export all"}</button>
+            <button className="outline-button" disabled={exportingProspects} title="Choose rows and fields for a CSV export" onClick={() => openExportDialog("all_matching")}>{exportingProspects ? "Exporting…" : "↓ Export CSV"}</button>
             {!clientId ? <button className="outline-button" disabled={espScanning} title="Detect MX-visible gateways and mailbox providers. API-only email security products are not visible in MX records." onClick={() => void scanEmailProviders()}>{espScanning ? "Scanning MX…" : "Detect ESPs"}</button> : null}
             <label><span className="sr-only">Sort prospects</span><select value={`${sort}:${direction}`} onChange={(event) => { const [nextSort, nextDirection] = event.target.value.split(":"); onSortChange(nextSort, nextDirection as "asc" | "desc"); }}><option value="created_at:desc">Newest first</option><option value="name:asc">Name A to Z</option><option value="company:asc">Company A to Z</option><option value="title:asc">Title A to Z</option><option value="last_contacted:desc">Recently contacted</option></select></label>
             <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {effectiveFilters.length ? <span>{effectiveFilters.length}</span> : null}</button>
@@ -655,13 +759,13 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
           </div>
         </div>
         {notice ? <div className="inline-notice" role="status">{notice}<button aria-label="Dismiss notification" onClick={() => setNotice("")}>×</button></div> : null}
-        {selectedIds.size ? <div className="bulk-bar"><strong>{formatNumber(selectedIds.size)} selected across pages</strong><button onClick={exportSelected}>↓ Export selected</button><button disabled={bulkBusy} onClick={() => void bulkAction("tag")}>＋ Add tag</button><select aria-label="Client for contact history" value={bulkClientId} onChange={(event) => setBulkClientId(event.target.value)}><option value="">Choose client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><button disabled={bulkBusy || !bulkClientId} onClick={() => void bulkAction("mark_contacted")}>✓ Mark contacted</button><button onClick={() => setSelectedRows(new Map())}>Clear</button></div> : null}
+        {selectedCount ? <div className="bulk-bar"><strong>{formatNumber(selectedCount)} selected {selectionMode === "all_matching" ? "across all pages" : "across pages"}</strong>{selectionMode === "explicit" && selectedCount < total ? <button onClick={selectAllMatching}>Select all {formatNumber(total)}</button> : null}<button onClick={() => openExportDialog("selected")}>↓ Export selected</button>{selectionMode === "explicit" ? <><button disabled={bulkBusy} onClick={() => void bulkAction("tag")}>＋ Add tag</button><select aria-label="Client for contact history" value={bulkClientId} onChange={(event) => setBulkClientId(event.target.value)}><option value="">Choose client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><button disabled={bulkBusy || !bulkClientId} onClick={() => void bulkAction("mark_contacted")}>✓ Mark contacted</button></> : <span className="selection-scope-note">Database-wide selection is ready to export</span>}<button onClick={clearSelection}>Clear</button></div> : null}
         {effectiveFilters.length ? <div className="active-filter-strip">{effectiveFilters.flatMap((filter) => {
           const label = allColumns.find((field) => field.id === filter.field)?.label ?? filter.field;
           if (filter.operator === "empty" || filter.operator === "not_empty") return [<button key={filter.id} onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>{label}: {filter.operator === "empty" ? "Empty" : "Not empty"} <span>×</span></button>];
           return filter.values.map((value) => <button key={`${filter.id}-${value}`} onClick={() => updateFilter(filter.id, { values: filter.values.filter((item) => item !== value) })}>{label}: {value} <span>×</span></button>);
         })}<button className="clear-filter-chip" onClick={() => onFiltersChange([])}>Clear all</button></div> : null}
-        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select all prospects on this page" title="Select all prospects on this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => selectedIds.has(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr className={selectedIds.has(person.id) ? "selected" : ""} key={person.id} onClick={() => onSelect(person)}><td className="select-column" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${person.full_name || "prospect"}`} type="checkbox" checked={selectedIds.has(person.id)} onChange={() => toggleSelected(person.id)}/></td>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "-"}</span> : field.id === "__esp" ? <span className={`esp-cell ${person.email_provider_type === "SEG" ? "seg" : ""}`} title={Array.isArray(person.mx_records) && person.mx_records.length ? person.mx_records.join("\n") : "Run Detect ESPs to check this domain"}><strong>{value || "Not checked"}</strong><small>{person.email_provider_type || "Unknown"}</small></span> : field.id === "__lists" ? <ListMembershipCell prospect={person} includeClient={!clientId} onShowAll={() => onSelect(person)} /> : <span title={value}>{value || "-"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {formatNumber(total)} matching records</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={effectiveFilters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and your unique prospects will appear here."} action={effectiveFilters.length ? "Clear filters" : "Import CSV"} onAction={effectiveFilters.length ? () => onFiltersChange([]) : onImport} />}
+        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select all prospects on this page" title="Select all prospects on this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => isProspectSelected(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column"/></tr></thead><tbody>{prospects.map((person) => <tr className={isProspectSelected(person.id) ? "selected" : ""} key={person.id} onClick={() => onSelect(person)}><td className="select-column" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${person.full_name || "prospect"}`} type="checkbox" checked={isProspectSelected(person.id)} onChange={() => toggleSelected(person.id)}/></td>{visibleDefinitions.map((field) => { const value = prospectFieldValue(person, field.id); return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "-"}</span> : field.id === "__esp" ? <span className={`esp-cell ${person.email_provider_type === "SEG" ? "seg" : ""}`} title={Array.isArray(person.mx_records) && person.mx_records.length ? person.mx_records.join("\n") : "Run Detect ESPs to check this domain"}><strong>{value || "Not checked"}</strong><small>{person.email_provider_type || "Unknown"}</small></span> : field.id === "__lists" ? <ListMembershipCell prospect={person} includeClient={!clientId} onShowAll={() => onSelect(person)} /> : <span title={value}>{value || "-"}</span>}</td>; })}<td className="row-detail-column">›</td></tr>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {formatNumber(total)} matching records</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalPages}</span><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={effectiveFilters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and your unique prospects will appear here."} action={effectiveFilters.length ? "Clear filters" : "Import CSV"} onAction={effectiveFilters.length ? () => onFiltersChange([]) : onImport} />}
       </article>
       {filtersOpen ? <aside className="panel filter-panel">
         <div className="filter-panel-head"><div><span className="filter-icon"><AppIcon name="filter" size={16}/></span><div><strong>Filters</strong><small>Choose fields and values</small></div></div>{filters.length ? <button onClick={() => onFiltersChange([])}>Clear all</button> : null}</div>
@@ -674,6 +778,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
         </div>
       </aside> : null}
     </div>}
+    {exportDialogOpen ? <div className="modal-backdrop" role="presentation"><section className="export-modal" role="dialog" aria-modal="true" aria-labelledby="prospect-export-title"><div className="export-modal-head"><div><p className="eyebrow">CSV EXPORT</p><h2 id="prospect-export-title">Choose prospects and fields</h2><p>Only the fields checked below will be included in the download.</p></div><button aria-label="Close export dialog" disabled={exportingProspects} onClick={() => setExportDialogOpen(false)}>×</button></div><fieldset className="export-scope"><legend>Prospects to export</legend><label htmlFor="export-all-matching"><span className="sr-only">All matching prospects</span><input id="export-all-matching" type="radio" name="export-scope" checked={exportScope === "all_matching"} onChange={() => setExportScope("all_matching")}/><span><strong>All {search.trim() || effectiveFilters.length ? "matching " : ""}prospects</strong><small>{formatNumber(total)} records across every page</small></span></label><label htmlFor="export-selected" className={!selectedCount ? "disabled" : ""}><span className="sr-only">Selected prospects</span><input id="export-selected" type="radio" name="export-scope" disabled={!selectedCount} checked={exportScope === "selected"} onChange={() => setExportScope("selected")}/><span><strong>Selected prospects</strong><small>{formatNumber(selectedCount)} currently selected</small></span></label></fieldset><div className="export-fields-head"><div><strong>Fields to include</strong><span>{formatNumber(exportFields.length)} selected</span></div><div><button onClick={() => setExportFields(exportFieldCatalog.map((field) => field.id))}>Select all</button><button onClick={() => setExportFields(defaultProspectExportFields)}>Recommended</button><button onClick={() => setExportFields([])}>Clear</button></div></div><div className="export-field-grid">{exportFieldCatalog.map((field) => <label key={field.id}><input type="checkbox" checked={exportFields.includes(field.id)} onChange={() => toggleExportField(field.id)}/><span>{field.label}</span></label>)}</div><div className="modal-actions"><button className="secondary" disabled={exportingProspects} onClick={() => setExportDialogOpen(false)}>Cancel</button><button className="primary" disabled={exportingProspects || !exportFields.length || (exportScope === "selected" && !selectedCount)} onClick={() => void exportProspectsCsv()}>{exportingProspects ? "Preparing CSV…" : `Export ${formatNumber(exportScope === "selected" ? selectedCount : total)} prospects`}</button></div></section></div> : null}
   </section>;
 }
 
