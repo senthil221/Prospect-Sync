@@ -331,7 +331,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
           {loading ? <LoadingState /> : null}
           {!loading && workspaceLoading ? <div className="workspace-progress" role="status"><span/>Updating {title.toLowerCase()}…</div> : null}
           {!loading && section === "overview" && <Overview stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name} · ${item.list_name}` })} />}
-          {!loading && section === "prospects" && <ProspectTable prospects={prospects} total={prospectTotal} fields={prospectFields} filters={prospectFilters} page={prospectPage} clients={clients} sort={prospectSort} direction={prospectDirection} onSortChange={(nextSort, nextDirection) => { setProspectSort(nextSort); setProspectDirection(nextDirection); setProspectPage(1); }} onFiltersChange={(next) => { setProspectFilters(next); setProspectPage(1); }} onPageChange={setProspectPage} onSelect={setSelectedProspect} onImport={() => navigate("imports")} onRefresh={() => setProspectRefresh((current) => current + 1)} />}
+          {!loading && section === "prospects" && <ProspectTable prospects={prospects} total={prospectTotal} fields={prospectFields} filters={prospectFilters} page={prospectPage} clients={clients} search={deferredSearch} sort={prospectSort} direction={prospectDirection} onSortChange={(nextSort, nextDirection) => { setProspectSort(nextSort); setProspectDirection(nextDirection); setProspectPage(1); }} onFiltersChange={(next) => { setProspectFilters(next); setProspectPage(1); }} onPageChange={setProspectPage} onSelect={setSelectedProspect} onImport={() => navigate("imports")} onRefresh={() => setProspectRefresh((current) => current + 1)} />}
           {!loading && section === "companies" && <CompanyTable companies={companies} total={companySummary.total} covered={companySummary.covered} prospectTotal={companySummary.prospectTotal} page={companyPage} pageSize={companySummary.pageSize} search={deferredSearch} onPageChange={setCompanyPage} onImport={() => navigate("imports")} />}
           {!loading && section === "clients" && !selectedClient && <ClientsView clients={clients} onOpen={openClient} onImport={() => navigate("imports")} />}
           {!loading && section === "clients" && selectedClient && !selectedList && <ClientDetail client={selectedClient} clients={clients} lists={lists} onBack={() => setSelectedClient(null)} onOpenList={setSelectedList} onSelectProspect={setSelectedProspect} onImport={() => navigate("imports")} onDeleteClient={() => setDeleteRequest({ kind: "client", id: selectedClient.id, name: selectedClient.name, context: `${selectedClient.list_count} lists · ${selectedClient.prospect_count} linked prospects` })} onDeleteList={(list) => setDeleteRequest({ kind: "list", id: list.id, name: list.name, context: `${list.source_file_name} · ${list.prospect_count} linked prospects` })} />}
@@ -430,7 +430,7 @@ function ListMembershipCell({ prospect, includeClient, onShowAll }: { prospect: 
   </div>;
 }
 
-function ProspectTable({ prospects, total, fields, filters, page, clients, sort, direction, clientId = "", active = true, onSortChange, onFiltersChange, onPageChange, onSelect, onImport, onRefresh }: { prospects: Prospect[]; total: number; fields: string[]; filters: ProspectFilter[]; page: number; clients: ClientRecord[]; sort: string; direction: "asc" | "desc"; clientId?: string; active?: boolean; onSortChange: (sort: string, direction: "asc" | "desc") => void; onFiltersChange: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onSelect: (row: Prospect) => void; onImport: () => void; onRefresh: () => void }) {
+function ProspectTable({ prospects, total, fields, filters, page, clients, search = "", sort, direction, clientId = "", active = true, onSortChange, onFiltersChange, onPageChange, onSelect, onImport, onRefresh }: { prospects: Prospect[]; total: number; fields: string[]; filters: ProspectFilter[]; page: number; clients: ClientRecord[]; search?: string; sort: string; direction: "asc" | "desc"; clientId?: string; active?: boolean; onSortChange: (sort: string, direction: "asc" | "desc") => void; onFiltersChange: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onSelect: (row: Prospect) => void; onImport: () => void; onRefresh: () => void }) {
   const [visibleColumns, setVisibleColumns] = useState<string[]>(defaultProspectColumns);
   const [columnMenu, setColumnMenu] = useState(false);
   const [tab, setTab] = useState<"records" | "coverage">("records");
@@ -442,6 +442,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [bulkClientId, setBulkClientId] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [exportingProspects, setExportingProspects] = useState(false);
   const [espScanning, setEspScanning] = useState(false);
   const [notice, setNotice] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(true);
@@ -542,6 +543,30 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
     const link = document.createElement("a"); link.href = url; link.download = `prospect-sync-selection-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
   }
 
+  async function exportAllProspects() {
+    setExportingProspects(true); setNotice("");
+    try {
+      const params = new URLSearchParams({ export: "csv", sort, direction });
+      if (search.trim()) params.set("search", search.trim());
+      if (clientId) params.set("clientId", clientId);
+      if (effectiveFilters.length) params.set("filters", JSON.stringify(effectiveFilters.map(({ field, operator, values }) => ({ field, operator, values }))));
+      const response = await fetch(`/api/prospects?${params.toString()}`);
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ error: "Unable to export prospects." })) as { error?: string };
+        throw new Error(body.error || "Unable to export prospects.");
+      }
+      const blobUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `prospect-sync-prospects-${clientId ? "client" : "all"}-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(blobUrl);
+      const exported = Number(response.headers.get("X-Exported-Rows") ?? 0);
+      setNotice(`Exported ${formatNumber(exported)} ${search.trim() || effectiveFilters.length ? "matching " : ""}prospects across all pages.`);
+    } catch (caught) { setNotice(caught instanceof Error ? caught.message : "Unable to export prospects."); }
+    finally { setExportingProspects(false); }
+  }
+
   async function bulkAction(action: "tag" | "mark_contacted") {
     if (!selectedIds.size) return;
     const tagName = action === "tag" ? window.prompt("Tag name")?.trim() : "";
@@ -622,6 +647,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, sort,
           <div className="workspace-actions">
             <label><span className="sr-only">Saved ICP view</span><select defaultValue="" onChange={(event) => applyView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label>
             <button className="outline-button" onClick={() => void saveCurrentView()}>☆ Save view</button>
+            <button className="outline-button" disabled={exportingProspects} title="Export every matching prospect across all pages" onClick={() => void exportAllProspects()}>{exportingProspects ? "Exporting…" : "↓ Export all"}</button>
             {!clientId ? <button className="outline-button" disabled={espScanning} title="Detect MX-visible gateways and mailbox providers. API-only email security products are not visible in MX records." onClick={() => void scanEmailProviders()}>{espScanning ? "Scanning MX…" : "Detect ESPs"}</button> : null}
             <label><span className="sr-only">Sort prospects</span><select value={`${sort}:${direction}`} onChange={(event) => { const [nextSort, nextDirection] = event.target.value.split(":"); onSortChange(nextSort, nextDirection as "asc" | "desc"); }}><option value="created_at:desc">Newest first</option><option value="name:asc">Name A to Z</option><option value="company:asc">Company A to Z</option><option value="title:asc">Title A to Z</option><option value="last_contacted:desc">Recently contacted</option></select></label>
             <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {effectiveFilters.length ? <span>{effectiveFilters.length}</span> : null}</button>
@@ -864,7 +890,7 @@ function ClientMasterDatabase({ client, clients, active, onSelect, onImport }: {
     })();
     return () => { current = false; };
   }, [client.id, client.prospect_count, deferredSearch, page, sort, direction, encodedFilters, refresh]);
-  return <section className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT MASTER DB</p><h3>{client.name} prospects</h3><p>Every master prospect connected to this client, across all uploaded lists.</p></div><label className="workspace-search"><span>⌕</span><input aria-label={`Search ${client.name} prospects`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this client database…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client prospects…</div> : null}{loading ? <div className="workspace-loading">Preparing client database…</div> : <ProspectTable prospects={prospects} total={total} fields={fields} filters={filters} page={page} clients={clients} sort={sort} direction={direction} clientId={client.id} onSortChange={(nextSort, nextDirection) => { setSort(nextSort); setDirection(nextDirection); setPage(1); }} onFiltersChange={(next) => { setFilters(next); setPage(1); }} onPageChange={setPage} onSelect={onSelect} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} active={active}/>}</section>;
+  return <section className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT MASTER DB</p><h3>{client.name} prospects</h3><p>Every master prospect connected to this client, across all uploaded lists.</p></div><label className="workspace-search"><span>⌕</span><input aria-label={`Search ${client.name} prospects`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this client database…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client prospects…</div> : null}{loading ? <div className="workspace-loading">Preparing client database…</div> : <ProspectTable prospects={prospects} total={total} fields={fields} filters={filters} page={page} clients={clients} search={deferredSearch} sort={sort} direction={direction} clientId={client.id} onSortChange={(nextSort, nextDirection) => { setSort(nextSort); setDirection(nextDirection); setPage(1); }} onFiltersChange={(next) => { setFilters(next); setPage(1); }} onPageChange={setPage} onSelect={onSelect} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} active={active}/>}</section>;
 }
 
 function ClientCompanyDatabase({ client, onImport }: { client: ClientRecord; onImport: () => void }) {

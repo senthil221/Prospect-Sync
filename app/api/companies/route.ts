@@ -1,13 +1,8 @@
 import { authorizeApi } from "../../../lib/auth";
+import { csvDocument } from "../../../lib/csv";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
 const exportBatchSize = 1000;
-
-function csvCell(value: unknown) {
-  const text = String(value ?? "");
-  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-  return `"${safe.replace(/"/g, '""')}"`;
-}
 
 function websiteUrl(domain: string) {
   return /^https?:\/\//i.test(domain) ? domain : `https://${domain}`;
@@ -35,10 +30,10 @@ async function exportCompanies(search: string, websitesOnly: boolean) {
     offset += exportBatchSize;
   }
 
-  const csv = `\uFEFF${[
-    ["Company Name", "Website"].map(csvCell).join(","),
-    ...rows.map((company) => [company.name || company.domain || "Unnamed company", company.domain ? websiteUrl(company.domain) : ""].map(csvCell).join(",")),
-  ].join("\r\n")}`;
+  const csv = csvDocument(
+    ["Company Name", "Website"],
+    rows.map((company) => [company.name || company.domain || "Unnamed company", company.domain ? websiteUrl(company.domain) : ""]),
+  );
   return { error: "", csv, count: rows.length };
 }
 
