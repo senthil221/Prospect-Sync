@@ -1,6 +1,47 @@
 import { authorizeApi } from "../../../lib/auth";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
+const exportBatchSize = 1000;
+
+function csvCell(value: unknown) {
+  const text = String(value ?? "");
+  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
+function websiteUrl(domain: string) {
+  return /^https?:\/\//i.test(domain) ? domain : `https://${domain}`;
+}
+
+async function exportCompanies(search: string, websitesOnly: boolean) {
+  const supabase = createAdminClient();
+  const rows: Array<{ name: string; domain: string }> = [];
+  let offset = 0;
+
+  for (;;) {
+    let query = supabase
+      .from("companies")
+      .select("id,name,domain")
+      .order("name", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + exportBatchSize - 1);
+    if (websitesOnly) query = query.neq("domain", "");
+    if (search) query = query.or(`name.ilike.%${search}%,domain.ilike.%${search}%`);
+    const result = await query;
+    if (result.error) return { error: result.error.message, csv: "", count: 0 };
+    const batch = websitesOnly ? (result.data ?? []).filter((company) => String(company.domain ?? "").trim()) : (result.data ?? []);
+    rows.push(...batch.map((company) => ({ name: String(company.name ?? ""), domain: String(company.domain).trim() })));
+    if ((result.data ?? []).length < exportBatchSize) break;
+    offset += exportBatchSize;
+  }
+
+  const csv = `\uFEFF${[
+    ["Company Name", "Website"].map(csvCell).join(","),
+    ...rows.map((company) => [company.name || company.domain || "Unnamed company", company.domain ? websiteUrl(company.domain) : ""].map(csvCell).join(",")),
+  ].join("\r\n")}`;
+  return { error: "", csv, count: rows.length };
+}
+
 export async function GET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
@@ -10,6 +51,23 @@ export async function GET(request: Request) {
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
   const pageSize = Math.max(10, Math.min(100, Number(url.searchParams.get("pageSize") ?? 50)));
   const from = (page - 1) * pageSize;
+  const exportCsv = url.searchParams.get("export") === "csv";
+  const websitesOnly = url.searchParams.get("website") === "required";
+
+  if (exportCsv) {
+    if (clientId) return Response.json({ error: "Client-scoped company export is not available." }, { status: 400 });
+    const result = await exportCompanies(search, websitesOnly);
+    if (result.error) return Response.json({ error: result.error }, { status: 500 });
+    return new Response(result.csv, {
+      headers: {
+        "Cache-Control": "no-store",
+        "Content-Disposition": `attachment; filename="prospect-sync-companies-${websitesOnly ? "with-websites-" : "all-"}${new Date().toISOString().slice(0, 10)}.csv"`,
+        "Content-Type": "text/csv; charset=utf-8",
+        "X-Exported-Rows": String(result.count),
+      },
+    });
+  }
+
   const supabase = createAdminClient();
 
   if (clientId) {

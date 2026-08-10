@@ -332,7 +332,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
           {!loading && workspaceLoading ? <div className="workspace-progress" role="status"><span/>Updating {title.toLowerCase()}…</div> : null}
           {!loading && section === "overview" && <Overview stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name} · ${item.list_name}` })} />}
           {!loading && section === "prospects" && <ProspectTable prospects={prospects} total={prospectTotal} fields={prospectFields} filters={prospectFilters} page={prospectPage} clients={clients} sort={prospectSort} direction={prospectDirection} onSortChange={(nextSort, nextDirection) => { setProspectSort(nextSort); setProspectDirection(nextDirection); setProspectPage(1); }} onFiltersChange={(next) => { setProspectFilters(next); setProspectPage(1); }} onPageChange={setProspectPage} onSelect={setSelectedProspect} onImport={() => navigate("imports")} onRefresh={() => setProspectRefresh((current) => current + 1)} />}
-          {!loading && section === "companies" && <CompanyTable companies={companies} total={companySummary.total} covered={companySummary.covered} prospectTotal={companySummary.prospectTotal} page={companyPage} pageSize={companySummary.pageSize} onPageChange={setCompanyPage} onImport={() => navigate("imports")} />}
+          {!loading && section === "companies" && <CompanyTable companies={companies} total={companySummary.total} covered={companySummary.covered} prospectTotal={companySummary.prospectTotal} page={companyPage} pageSize={companySummary.pageSize} search={deferredSearch} onPageChange={setCompanyPage} onImport={() => navigate("imports")} />}
           {!loading && section === "clients" && !selectedClient && <ClientsView clients={clients} onOpen={openClient} onImport={() => navigate("imports")} />}
           {!loading && section === "clients" && selectedClient && !selectedList && <ClientDetail client={selectedClient} clients={clients} lists={lists} onBack={() => setSelectedClient(null)} onOpenList={setSelectedList} onSelectProspect={setSelectedProspect} onImport={() => navigate("imports")} onDeleteClient={() => setDeleteRequest({ kind: "client", id: selectedClient.id, name: selectedClient.name, context: `${selectedClient.list_count} lists · ${selectedClient.prospect_count} linked prospects` })} onDeleteList={(list) => setDeleteRequest({ kind: "list", id: list.id, name: list.name, context: `${list.source_file_name} · ${list.prospect_count} linked prospects` })} />}
           {!loading && section === "clients" && selectedClient && selectedList && <ListWorkspace client={selectedClient} list={selectedList} onBack={() => setSelectedList(null)} onSelect={setSelectedProspect} />}
@@ -717,12 +717,15 @@ function MultiValueSelect({ values, field, clientId, onChange }: { values: strin
   </div>;
 }
 
-function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize, clientId = "", onPageChange, onImport }: { companies: Company[]; total: number; covered: number; prospectTotal: number; page: number; pageSize: number; clientId?: string; onPageChange: (page: number) => void; onImport: () => void }) {
+function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize, clientId = "", search = "", onPageChange, onImport }: { companies: Company[]; total: number; covered: number; prospectTotal: number; page: number; pageSize: number; clientId?: string; search?: string; onPageChange: (page: number) => void; onImport: () => void }) {
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [prospectsByCompany, setProspectsByCompany] = useState<Record<string, Prospect[]>>({});
   const [prospectTotalsByCompany, setProspectTotalsByCompany] = useState<Record<string, number>>({});
   const [loadingCompany, setLoadingCompany] = useState("");
   const [companyError, setCompanyError] = useState("");
+  const [companyNotice, setCompanyNotice] = useState("");
+  const [exportingCompanies, setExportingCompanies] = useState(false);
+  const [companyExportScope, setCompanyExportScope] = useState<"all" | "with_websites">("all");
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const resultStart = total ? (page - 1) * pageSize + 1 : 0;
   const resultEnd = Math.min(page * pageSize, total);
@@ -755,10 +758,34 @@ function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize
     finally { setLoadingCompany(""); }
   }
 
+  async function exportCompanies() {
+    setExportingCompanies(true); setCompanyError(""); setCompanyNotice("");
+    try {
+      const params = new URLSearchParams({ export: "csv" });
+      if (search.trim()) params.set("search", search.trim());
+      if (companyExportScope === "with_websites") params.set("website", "required");
+      const response = await fetch(`/api/companies?${params.toString()}`);
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ error: "Unable to export companies." })) as { error?: string };
+        throw new Error(body.error || "Unable to export companies.");
+      }
+      const blobUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `prospect-sync-companies-${companyExportScope === "with_websites" ? "with-websites" : "all"}-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(blobUrl);
+      const exported = Number(response.headers.get("X-Exported-Rows") ?? 0);
+      setCompanyNotice(`Exported ${formatNumber(exported)} ${search.trim() ? "matching " : ""}companies${companyExportScope === "with_websites" ? " with websites" : ""}.`);
+    } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to export companies."); }
+    finally { setExportingCompanies(false); }
+  }
+
   return <section className="companies-workspace">
-    <div className="section-intro company-intro"><div><p className="eyebrow">COMPANIES</p><h2>Companies already in your database.</h2><p>Open a company to see its prospects in a separate panel.</p></div><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div>
+    <div className="section-intro company-intro"><div><p className="eyebrow">COMPANIES</p><h2>Companies already in your database.</h2><p>Open a company to see its prospects in a separate panel.</p></div><div className="company-intro-actions">{!clientId ? <div className="company-export-control"><label><span>Export scope</span><select aria-label="Company export scope" value={companyExportScope} disabled={exportingCompanies} onChange={(event) => setCompanyExportScope(event.target.value as "all" | "with_websites")}><option value="all">All companies</option><option value="with_websites">Only with websites</option></select></label><button className="secondary company-export-button" disabled={exportingCompanies} title="Export all matching companies across every page" onClick={() => void exportCompanies()}>{exportingCompanies ? "Exporting…" : "↓ Export CSV"}</button></div> : null}<button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div></div>
     <div className="company-summary"><div className="summary-violet"><span>Companies in database</span><strong>{formatNumber(total)}</strong><small>Complete company directory</small></div><div className="summary-blue"><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong><small>{total ? `${Math.round((covered / total) * 100)}% of companies` : "No companies yet"}</small></div><div className="summary-green"><span>Total linked prospects</span><strong>{formatNumber(prospectTotal)}</strong><small>Across all matching companies</small></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div>
     {companyError ? <div className="inline-error" role="alert">{companyError}</div> : null}
+    {companyNotice ? <div className="inline-notice company-export-notice" role="status">{companyNotice}<button aria-label="Dismiss export notification" onClick={() => setCompanyNotice("")}>×</button></div> : null}
     <article className="panel company-table-panel"><div className="panel-head company-panel-head"><div><h3>Company database</h3><p>Showing {formatNumber(resultStart)}–{formatNumber(resultEnd)} of {formatNumber(total)} companies. Click any row to open its details.</p></div><span className="directory-badge">{formatNumber(total)} total</span></div>{companies.length ? <><div className="table-wrap"><table className="company-table"><thead><tr><th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th></tr></thead><tbody>{companies.map((company) => { const tone = colorTone(company.id); return <tr className={`company-row tone-${tone}`} key={company.id} onClick={() => void openCompany(company)}><td><div className="company-identity"><button className="company-open" aria-label={`Open ${company.name || company.domain || "company"} details`} onClick={(event) => { event.stopPropagation(); void openCompany(company); }}><AppIcon name="arrow" size={15}/></button><span className={`company-logo tone-${tone}`}>{initials(company.name)}</span><div><strong>{company.name || company.domain || "Unnamed company"}</strong><small>{company.prospect_count ? `${formatNumber(company.prospect_count)} people available` : "No prospects linked"}</small></div></div></td><td onClick={(event) => event.stopPropagation()}>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain}</a> : <span className="missing-value">No domain</span>}</td><td><span className="prospect-count-badge">{formatNumber(company.prospect_count)}</span></td><td>{formatNumber(company.client_count)} {company.client_count === 1 ? "client" : "clients"}</td><td>{new Date(company.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><span className={`coverage-status ${company.prospect_count ? "known" : "new"}`}>{company.prospect_count ? "Covered" : "Needs prospects"}</span></td></tr>; })}</tbody></table></div><div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article>
     {selectedCompany ? <CompanyDrawer company={selectedCompany} prospects={prospectsByCompany[selectedCompany.id] ?? []} total={prospectTotalsByCompany[selectedCompany.id] ?? selectedCompany.prospect_count} loading={loadingCompany === selectedCompany.id} error={companyError} onLoadMore={() => void loadMoreProspects(selectedCompany)} onClose={() => { setSelectedCompany(null); setCompanyError(""); }} /> : null}
   </section>;
