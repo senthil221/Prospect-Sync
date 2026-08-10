@@ -1,4 +1,5 @@
 import { authorizeApi } from "../../../lib/auth";
+import { reindexProspects } from "../../../lib/reindex";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
 export async function GET(request: Request) {
@@ -34,6 +35,7 @@ export async function POST(request: Request) {
     }
     const result = await supabase.from("prospect_tag_links").upsert(prospectIds.map((prospectId) => ({ prospect_id: prospectId, tag_id: tagId })), { onConflict: "prospect_id,tag_id", ignoreDuplicates: true });
     if (result.error) return Response.json({ error: result.error.message }, { status: 500 });
+    await reindexProspects(supabase, prospectIds);
     return Response.json({ updated: prospectIds.length, tagId });
   }
   if (payload.action === "mark_contacted") {
@@ -41,6 +43,7 @@ export async function POST(request: Request) {
     const contactedAt = payload.contactedAt && !Number.isNaN(Date.parse(payload.contactedAt)) ? new Date(payload.contactedAt).toISOString() : new Date().toISOString();
     const result = await supabase.from("contact_events").insert(prospectIds.map((prospectId) => ({ id: crypto.randomUUID(), prospect_id: prospectId, client_id: payload.clientId, contacted_at: contactedAt, campaign_name: String(payload.campaignName ?? "").trim().slice(0, 160) })));
     if (result.error) return Response.json({ error: result.error.message }, { status: 500 });
+    await reindexProspects(supabase, prospectIds);
     return Response.json({ updated: prospectIds.length });
   }
   return Response.json({ error: "Unsupported bulk action." }, { status: 400 });

@@ -12,6 +12,7 @@ test("ships full-field preservation, filters, and configurable columns", async (
     readFile(new URL("../supabase/migrations/20260807020000_data_workspace.sql", import.meta.url), "utf8"),
     readFile(new URL("../supabase/migrations/20260807030000_multi_value_filters.sql", import.meta.url), "utf8"),
   ]);
+  const prospectFilters = await readFile(new URL("../lib/prospect-filters.ts", import.meta.url), "utf8");
 
   assert.match(dashboard, /Field coverage/);
   assert.match(dashboard, /Choose columns/);
@@ -24,7 +25,7 @@ test("ships full-field preservation, filters, and configurable columns", async (
   assert.match(dashboard, /Original headers and values are always preserved|Original rows and fields remain stored/);
   assert.match(dashboard, /__name.*__company.*__email.*__title/s);
   assert.match(prospectsRoute, /search_prospect_workspace/);
-  assert.match(prospectsRoute, /contains.*equals.*empty.*not_empty/s);
+  assert.match(prospectFilters, /contains.*equals.*empty.*not_empty/s);
   assert.match(startRoute, /field_headers/);
   assert.match(chunkRoute, /sourceRowNumber/);
   assert.match(chunkRoute, /import_prospect_batch_v2/);

@@ -13,15 +13,25 @@ export async function GET(request: Request) {
   if (!field) return Response.json({ error: "Choose a filter field." }, { status: 400 });
 
   const supabase = createAdminClient();
-  let result = await supabase.rpc("prospect_filter_values_v2", {
+  const missing = (result: { error?: { code?: string } | null }) => result.error?.code === "PGRST202" || result.error?.code === "42883";
+  // v3 reads the flat prospect_index; v2 (identical semantics) is the fallback before migration.
+  let result = await supabase.rpc("prospect_filter_values_v3", {
     p_field: field,
     p_search: search,
     p_client_id: clientId,
     p_limit: limit,
   });
+  if (missing(result)) {
+    result = await supabase.rpc("prospect_filter_values_v2", {
+      p_field: field,
+      p_search: search,
+      p_client_id: clientId,
+      p_limit: limit,
+    });
+  }
 
   const requiresV2 = field.startsWith("custom:") || ["__first_name", "__last_name", "__keywords", "__person_location", "__company_location", "__company_city", "__company_state", "__company_country"].includes(field);
-  if (!requiresV2 && (result.error?.code === "PGRST202" || result.error?.code === "42883")) {
+  if (!requiresV2 && missing(result)) {
     result = await supabase.rpc("prospect_filter_values", {
       p_field: field,
       p_search: search,

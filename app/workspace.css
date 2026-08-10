@@ -298,3 +298,12 @@ main { min-width: 0; grid-column: 2; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+.export-format { margin-top: 14px; }
+.export-format small { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.export-format small select { margin: 0 2px; padding: 1px 5px; border: 1px solid var(--ph-border); border-radius: 5px; background: #fff; color: #4747a4; font-size: 10px; font-weight: 650; }
+.export-hint { margin: 10px 0 0; color: var(--ph-muted); font-size: 10px; line-height: 1.5; }
+.export-progress { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; color: #495263; font-size: 11px; }
+.export-progress-bar { height: 6px; border-radius: 999px; background: #ecebf5; overflow: hidden; }
+.export-progress-bar i { display: block; height: 100%; background: var(--ph-brand); transition: width .2s ease; }
+.export-modal .export-field-grid { flex: 1 1 auto; min-height: 0; }

@@ -1,4 +1,5 @@
 import { authorizeApi } from "../../../lib/auth";
+import { reindexProspects } from "../../../lib/reindex";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
 export async function GET() {
@@ -15,7 +16,10 @@ export async function POST(request: Request) {
   if (unauthorized) return unauthorized;
   const { keepId, mergeId } = await request.json() as { keepId?: string; mergeId?: string };
   if (!keepId || !mergeId || keepId === mergeId) return Response.json({ error: "Choose two different prospects." }, { status: 400 });
-  const { data, error } = await createAdminClient().rpc("merge_prospects", { p_keep_id: keepId, p_merge_id: mergeId });
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.rpc("merge_prospects", { p_keep_id: keepId, p_merge_id: mergeId });
   if (error) return Response.json({ error: error.message }, { status: 500 });
+  // The merged prospect is removed (cascades out of the index); refresh the survivor.
+  await reindexProspects(supabase, [keepId]);
   return Response.json({ result: data });
 }

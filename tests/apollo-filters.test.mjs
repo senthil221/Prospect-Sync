@@ -21,10 +21,12 @@ test("Apollo panel exposes the requested main filters and interaction modes", as
 });
 
 test("new filters are applied globally before pagination and are available to exports", async () => {
-  const [migration, route, dashboard] = await Promise.all([
+  const [migration, route, dashboard, filtersLib, exportLib] = await Promise.all([
     readFile(new URL("../supabase/migrations/20260810000000_apollo_prospect_filters.sql", import.meta.url), "utf8"),
     readFile(new URL("../app/api/prospects/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/DashboardApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/prospect-filters.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/prospect-export.ts", import.meta.url), "utf8"),
   ]);
   assert.match(migration, /add column if not exists keywords text\[\]/);
   assert.match(migration, /employee_count_min integer/);
@@ -38,11 +40,12 @@ test("new filters are applied globally before pagination and are available to ex
   assert.ok(viewDefinition.indexOf("co.name as company_name") < viewDefinition.indexOf("p.keywords"), "new view columns must be appended after the existing view contract");
   assert.match(migration, /filtered as materialized/);
   assert.ok(migration.indexOf("filtered as materialized") < migration.indexOf("limit greatest", migration.indexOf("filtered as materialized")));
+  assert.match(route, /search_prospect_workspace_v7/);
   assert.match(route, /search_prospect_workspace_v6/);
-  assert.match(route, /compileBooleanSearch/);
-  assert.match(route, /operator === "number_ranges"/);
-  assert.match(route, /header: "Keywords"/);
-  assert.match(route, /header: "# Employees"/);
+  assert.match(filtersLib, /compileBooleanSearch/);
+  assert.match(filtersLib, /operator === "number_ranges"/);
+  assert.match(exportLib, /header: "Keywords"/);
+  assert.match(exportLib, /header: "# Employees"/);
   assert.match(dashboard, /ApolloFilterPanel/);
   assert.match(dashboard, /Company Employee Count/);
 });

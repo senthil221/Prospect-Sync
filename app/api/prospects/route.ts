@@ -1,11 +1,8 @@
 import { authorizeApi } from "../../../lib/auth";
-import { csvDocument } from "../../../lib/csv";
-import { compileBooleanSearch } from "../../../lib/boolean-search";
-import { buildCustomFieldDefinitions, customFieldValue } from "../../../lib/prospect-fields";
+import { parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
+import { availableExportFieldIds, prospectsCsv, type ProspectRow } from "../../../lib/prospect-export";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
-type ProspectFilter = { field: string; operator: "contains" | "equals" | "not_contains" | "not_equals" | "empty" | "not_empty" | "boolean" | "number_ranges"; values: string[] };
-type ProspectRow = Record<string, unknown>;
 type WorkspaceQuery = {
   search: string;
   filters: ProspectFilter[];
@@ -16,34 +13,9 @@ type WorkspaceQuery = {
   clientId: string | null;
 };
 
-const allowedOperators = new Set(["contains", "equals", "not_contains", "not_equals", "empty", "not_empty", "boolean", "number_ranges"]);
 const missingFunctionCodes = new Set(["PGRST202", "42883"]);
 const exportPageSize = 100;
 const exportConcurrency = 5;
-
-function parseFilters(value: string | null): ProspectFilter[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.slice(0, 20).flatMap((item) => {
-      if (!item || typeof item !== "object") return [];
-      const candidate = item as Record<string, unknown>;
-      const field = String(candidate.field ?? "").trim().slice(0, 160);
-      const operator = String(candidate.operator ?? "contains");
-      const rawValues = Array.isArray(candidate.values) ? candidate.values : [candidate.value];
-      let values = rawValues.map((value) => String(value ?? "").trim().slice(0, operator === "boolean" ? 1000 : 160)).filter(Boolean).slice(0, 50);
-      if (!field || !allowedOperators.has(operator)) return [];
-      if (!["empty", "not_empty"].includes(operator) && !values.length) return [];
-      if (operator === "boolean") values = [compileBooleanSearch(values[0])];
-      if (operator === "number_ranges") values = values.filter((range) => range === "unknown" || /^[0-9]+:[0-9]*$/.test(range));
-      if (operator === "number_ranges" && !values.length) return [];
-      return [{ field, operator: operator as ProspectFilter["operator"], values }];
-    });
-  } catch {
-    return [];
-  }
-}
 
 function isMissingFunction(error: { code?: string } | null | undefined) {
   return Boolean(error?.code && missingFunctionCodes.has(error.code));
@@ -53,7 +25,9 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
   const legacyFilters = query.filters.filter((filter) => !["__esp", "__email_provider_type"].includes(filter.field));
   const v6OnlyFields = new Set(["__first_name", "__last_name", "__keywords", "__person_location", "__company_location", "__company_city", "__company_state", "__company_country", "__employee_count"]);
   const requiresV6 = query.filters.some((filter) => v6OnlyFields.has(filter.field) || filter.field.startsWith("custom:") || ["boolean", "number_ranges"].includes(filter.operator));
-  let workspace = await supabase.rpc("search_prospect_workspace_v6", {
+  // v7 reads the flat prospect_index (fast at any size); v6 is the identical-semantics fallback
+  // used automatically until the search-index migration is applied.
+  let workspace = await supabase.rpc("search_prospect_workspace_v7", {
     p_search: query.search,
     p_filters: query.filters,
     p_sort: query.sort,
@@ -62,6 +36,17 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
     p_offset: query.offset,
     p_client_id: query.clientId,
   });
+  if (isMissingFunction(workspace.error)) {
+    workspace = await supabase.rpc("search_prospect_workspace_v6", {
+      p_search: query.search,
+      p_filters: query.filters,
+      p_sort: query.sort,
+      p_direction: query.direction,
+      p_limit: query.limit,
+      p_offset: query.offset,
+      p_client_id: query.clientId,
+    });
+  }
   if (isMissingFunction(workspace.error)) {
     if (requiresV6) return workspace;
     workspace = await supabase.rpc("search_prospect_workspace_v5", {
@@ -117,89 +102,6 @@ function workspaceRows(data: unknown): ProspectRow[] {
   return Array.isArray(rows) ? rows.filter((row): row is ProspectRow => Boolean(row) && typeof row === "object") : [];
 }
 
-function arrayText(value: unknown) {
-  return Array.isArray(value) ? value.map((item) => String(item ?? "").trim()).filter(Boolean).join(" | ") : "";
-}
-
-function tagsText(value: unknown) {
-  if (!Array.isArray(value)) return "";
-  return value.map((tag) => tag && typeof tag === "object" ? String((tag as ProspectRow).name ?? "") : String(tag ?? "")).filter(Boolean).join(" | ");
-}
-
-function allData(value: unknown): ProspectRow {
-  if (value && typeof value === "object" && !Array.isArray(value)) return value as ProspectRow;
-  if (typeof value !== "string") return {};
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ProspectRow : {};
-  } catch {
-    return {};
-  }
-}
-
-function exportValue(value: unknown) {
-  if (value == null) return "";
-  if (Array.isArray(value)) return value.map((item) => typeof item === "object" ? JSON.stringify(item) : String(item)).join(" | ");
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
-
-function websiteUrl(value: unknown) {
-  const domain = String(value ?? "").trim();
-  if (!domain) return "";
-  return /^https?:\/\//i.test(domain) ? domain : `https://${domain}`;
-}
-
-function employeeCountText(row: ProspectRow) {
-  const minimum = row.employee_count_min == null ? null : Number(row.employee_count_min);
-  const maximum = row.employee_count_max == null ? null : Number(row.employee_count_max);
-  if (minimum == null && maximum == null) return "";
-  if (minimum != null && maximum == null) return `${minimum}+`;
-  return minimum === maximum ? String(minimum ?? "") : `${minimum ?? 0}-${maximum}`;
-}
-
-const standardExportColumns: Array<{ id: string; header: string; value: (row: ProspectRow) => unknown }> = [
-  { id: "__name", header: "Full Name", value: (row) => row.full_name },
-  { id: "__first_name", header: "First Name", value: (row) => row.first_name },
-  { id: "__last_name", header: "Last Name", value: (row) => row.last_name },
-  { id: "__work_email", header: "Work Email", value: (row) => row.work_email },
-  { id: "__personal_email", header: "Personal Email", value: (row) => row.personal_email },
-  { id: "__mobile_number", header: "Mobile Number", value: (row) => row.mobile_number },
-  { id: "__linkedin", header: "LinkedIn", value: (row) => row.linkedin_url },
-  { id: "__title", header: "Title", value: (row) => row.title },
-  { id: "__keywords", header: "Keywords", value: (row) => arrayText(row.keywords) },
-  { id: "__seniority", header: "Seniority", value: (row) => row.seniority },
-  { id: "__department", header: "Department", value: (row) => row.department },
-  { id: "__city", header: "City", value: (row) => row.city },
-  { id: "__state", header: "State", value: (row) => row.state },
-  { id: "__country", header: "Country", value: (row) => row.country },
-  { id: "__person_location", header: "Person Location", value: (row) => [row.city, row.state, row.country].filter(Boolean).join(", ") },
-  { id: "__company", header: "Company", value: (row) => row.company_name },
-  { id: "__website", header: "Website", value: (row) => websiteUrl(row.company_domain) },
-  { id: "__employee_count", header: "# Employees", value: employeeCountText },
-  { id: "__employee_count_min", header: "Employee Count Min", value: (row) => row.employee_count_min },
-  { id: "__employee_count_max", header: "Employee Count Max", value: (row) => row.employee_count_max },
-  { id: "__company_location", header: "Company Location", value: (row) => row.company_location },
-  { id: "__company_city", header: "Company City", value: (row) => row.company_city },
-  { id: "__company_state", header: "Company State", value: (row) => row.company_state },
-  { id: "__company_country", header: "Company Country", value: (row) => row.company_country },
-  { id: "__esp", header: "ESP", value: (row) => row.esp },
-  { id: "__email_provider_type", header: "Email Provider Type", value: (row) => row.email_provider_type },
-  { id: "__mx_records", header: "MX Records", value: (row) => arrayText(row.mx_records) },
-  { id: "__mx_status", header: "MX Status", value: (row) => row.mx_status },
-  { id: "__mx_checked_at", header: "MX Checked At", value: (row) => row.mx_checked_at },
-  { id: "__lists", header: "List Names", value: (row) => arrayText(row.list_names) },
-  { id: "__clients", header: "Client Names", value: (row) => arrayText(row.client_names) },
-  { id: "__tags", header: "Tags", value: (row) => tagsText(row.tags) },
-  { id: "__last_contacted", header: "Last Contacted", value: (row) => row.last_contacted_at },
-  { id: "__created_at", header: "Created At", value: (row) => row.created_at },
-  { id: "__updated_at", header: "Updated At", value: (row) => row.updated_at },
-];
-
-function normalizedHeader(value: string) {
-  return value.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, "");
-}
-
 async function exportProspects(supabase: ReturnType<typeof createAdminClient>, query: Omit<WorkspaceQuery, "limit" | "offset">) {
   const firstPageRequest = runProspectWorkspace(supabase, { ...query, limit: exportPageSize, offset: 0 });
   const fieldsRequest = supabase.from("prospect_fields").select("field_name").order("field_name").limit(500);
@@ -219,26 +121,6 @@ async function exportProspects(supabase: ReturnType<typeof createAdminClient>, q
     pages.forEach((page) => rows.push(...workspaceRows(page.data)));
   }
   return { error: null, rows, fields: (fields.data ?? []).map((field) => String(field.field_name ?? "")).filter(Boolean) };
-}
-
-function prospectsCsv(rows: ProspectRow[], fields: string[], requestedFields?: string[]) {
-  const selected = requestedFields ? new Set(requestedFields) : null;
-  const standardColumns = standardExportColumns.filter((column) => !selected || selected.has(column.id));
-  const standardHeaders = new Set(standardExportColumns.map((column) => normalizedHeader(column.header)));
-  const customColumns = buildCustomFieldDefinitions(fields).filter((field) => !selected || selected.has(field.id)).map((field) => ({
-    normalized: field.id.slice(7),
-    header: standardHeaders.has(normalizedHeader(field.label)) ? `${field.label} (Imported)` : field.label,
-  }));
-  return csvDocument(
-    [...standardColumns.map((column) => column.header), ...customColumns.map((column) => column.header)],
-    rows.map((row) => {
-      const preserved = allData(row.all_data);
-      return [
-        ...standardColumns.map((column) => exportValue(column.value(row))),
-        ...customColumns.map((column) => exportValue(customFieldValue(preserved, column.normalized))),
-      ];
-    }),
-  );
 }
 
 function exportResponse(rows: ProspectRow[], fields: string[], requestedFields: string[] | undefined, clientId: string | null) {
@@ -336,7 +218,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Apply the latest database migration to enable the new prospect filters." }, { status: 503 });
   }
   if (result.error) return Response.json({ error: result.error.message }, { status: 500 });
-  const availableFields = new Set([...standardExportColumns.map((column) => column.id), ...buildCustomFieldDefinitions(result.fields).map((field) => field.id)]);
+  const availableFields = availableExportFieldIds(result.fields);
   const validatedFields = requestedFields.filter((field) => availableFields.has(field));
   if (!validatedFields.length) return Response.json({ error: "None of the selected fields are available." }, { status: 400 });
 

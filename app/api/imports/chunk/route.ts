@@ -22,16 +22,21 @@ export async function POST(request: Request) {
   const requiresV4 = mapped.some((row) => row.keywords.length > 0
     || row.companyEmployeeCountMin !== null || row.companyEmployeeCountMax !== null
     || row.companyLocation || row.companyCity || row.companyState || row.companyCountry);
-  let result = await supabase.rpc("import_prospect_batch_v4", {
+  const missing = (result: { error?: { code?: string } | null }) => result.error?.code === "PGRST202" || result.error?.code === "42883";
+  // v5 keeps the flat prospect_index fresh for the rows this import touched.
+  let result = await supabase.rpc("import_prospect_batch_v5", {
     p_import_id: importId,
     p_list_id: listId,
     p_rows: mapped,
   });
-  if (result.error?.code === "PGRST202" || result.error?.code === "42883") {
+  if (missing(result)) {
+    result = await supabase.rpc("import_prospect_batch_v4", { p_import_id: importId, p_list_id: listId, p_rows: mapped });
+  }
+  if (missing(result)) {
     if (requiresV4) return Response.json({ error: "Apply the latest database migration before importing Keywords, employee counts, or company locations." }, { status: 503 });
     result = await supabase.rpc("import_prospect_batch_v3", { p_import_id: importId, p_list_id: listId, p_rows: mapped });
   }
-  if (result.error?.code === "PGRST202" || result.error?.code === "42883") {
+  if (missing(result)) {
     result = await supabase.rpc("import_prospect_batch_v2", { p_import_id: importId, p_list_id: listId, p_rows: mapped });
   }
   if (result.error) return Response.json({ error: result.error.message }, { status: 500 });

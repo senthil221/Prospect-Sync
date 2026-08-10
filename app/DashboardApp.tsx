@@ -3,6 +3,7 @@
 import { ChangeEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { mapProspect } from "../db/normalize";
 import { buildCustomFieldDefinitions, customFieldValue } from "../lib/prospect-fields";
+import { runProspectExport, fileSystemAccessSupported, type ExportFormat } from "../lib/export-runner";
 import ApolloFilterPanel, { filterLabel, type ProspectFilter } from "./ApolloFilterPanel";
 
 type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" | "quality" | "imports";
@@ -517,6 +518,10 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportScope, setExportScope] = useState<"all_matching" | "selected">("all_matching");
   const [exportFields, setExportFields] = useState<string[]>(defaultProspectExportFields);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("single");
+  const [exportRowsPerFile, setExportRowsPerFile] = useState(50000);
+  const [exportProgress, setExportProgress] = useState<{ exported: number; total?: number; files: number } | null>(null);
+  const exportAbortRef = useRef<AbortController | null>(null);
   const [espScanning, setEspScanning] = useState(false);
   const [notice, setNotice] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(true);
@@ -658,44 +663,45 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
     setExportFields((current) => current.includes(id) ? current.filter((field) => field !== id) : [...current, id]);
   }
 
+  function cancelExport() {
+    exportAbortRef.current?.abort();
+  }
+
   async function exportProspectsCsv() {
     if (!exportFields.length) { setNotice("Choose at least one field to export."); return; }
     if (exportScope === "selected" && !selectedCount) { setNotice("Select at least one prospect to export."); return; }
-    setExportingProspects(true); setNotice("");
+    // Explicit row picks are already in memory — export them without any server round-trip.
+    const useSelectedRows = exportScope === "selected" && selectionMode === "explicit";
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+    setExportingProspects(true); setNotice(""); setExportProgress({ exported: 0, files: 0 });
     try {
-      const selection = exportScope === "selected"
-        ? selectionMode === "all_matching"
-          ? { mode: "all_matching", excludedIds: [...excludedIds] }
-          : { mode: "ids", ids: [...selectedIds] }
-        : { mode: "all_matching", excludedIds: [] as string[] };
-      const response = await fetch("/api/prospects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          search: search.trim(),
-          filters: effectiveFilters.map(({ field, operator, values }) => ({ field, operator, values })),
-          sort,
-          direction,
-          clientId,
-          fields: exportFields,
-          selection,
-        }),
+      const result = await runProspectExport({
+        search: search.trim(),
+        filters: effectiveFilters.map(({ field, operator, values }) => ({ field, operator, values })),
+        clientId: clientId || null,
+        fields: exportFields,
+        customFieldNames: fields,
+        mode: useSelectedRows ? "selected" : "all_matching",
+        selectedRows: useSelectedRows ? [...selectedRows.values()] : undefined,
+        excludedIds: exportScope === "selected" && selectionMode === "all_matching" ? [...excludedIds] : [],
+        format: exportFormat,
+        rowsPerFile: exportRowsPerFile,
+        fileBaseName: `prospect-sync-prospects-${exportScope === "selected" ? "selected" : clientId ? "client" : "all"}-${new Date().toISOString().slice(0, 10)}`,
+        signal: controller.signal,
+        onProgress: setExportProgress,
       });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({ error: "Unable to export prospects." })) as { error?: string };
-        throw new Error(body.error || "Unable to export prospects.");
+      if (result.canceled) { setNotice("Export canceled."); }
+      else {
+        setExportDialogOpen(false);
+        setNotice(`Exported ${formatNumber(result.exported)} prospects${result.files > 1 ? ` across ${formatNumber(result.files)} files` : ""} with ${formatNumber(exportFields.length)} selected fields.`);
       }
-      const blobUrl = URL.createObjectURL(await response.blob());
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = `prospect-sync-prospects-${exportScope === "selected" ? "selected" : clientId ? "client" : "all"}-${new Date().toISOString().slice(0, 10)}.csv`;
-      link.click();
-      URL.revokeObjectURL(blobUrl);
-      const exported = Number(response.headers.get("X-Exported-Rows") ?? 0);
-      setExportDialogOpen(false);
-      setNotice(`Exported ${formatNumber(exported)} prospects with ${formatNumber(exportFields.length)} selected fields.`);
-    } catch (caught) { setNotice(caught instanceof Error ? caught.message : "Unable to export prospects."); }
-    finally { setExportingProspects(false); }
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") setNotice("Export canceled.");
+      else setNotice(caught instanceof Error ? caught.message : "Unable to export prospects.");
+    } finally {
+      setExportingProspects(false); setExportProgress(null); exportAbortRef.current = null;
+    }
   }
 
   async function bulkAction(action: "tag" | "mark_contacted") {
@@ -798,7 +804,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
       </article>
       {filtersOpen ? <ApolloFilterPanel filters={filters} customFields={customFields} clientId={clientId} onChange={onFiltersChange}/> : null}
     </div>}
-    {exportDialogOpen ? <div className="modal-backdrop" role="presentation"><section className="export-modal" role="dialog" aria-modal="true" aria-labelledby="prospect-export-title"><div className="export-modal-head"><div><p className="eyebrow">CSV EXPORT</p><h2 id="prospect-export-title">Choose prospects and fields</h2><p>Only the fields checked below will be included in the download.</p></div><button aria-label="Close export dialog" disabled={exportingProspects} onClick={() => setExportDialogOpen(false)}>×</button></div><fieldset className="export-scope"><legend>Prospects to export</legend><label htmlFor="export-all-matching"><span className="sr-only">All matching prospects</span><input id="export-all-matching" type="radio" name="export-scope" checked={exportScope === "all_matching"} onChange={() => setExportScope("all_matching")}/><span><strong>All {search.trim() || effectiveFilters.length ? "matching " : ""}prospects</strong><small>{formatNumber(total)} records across every page</small></span></label><label htmlFor="export-selected" className={!selectedCount ? "disabled" : ""}><span className="sr-only">Selected prospects</span><input id="export-selected" type="radio" name="export-scope" disabled={!selectedCount} checked={exportScope === "selected"} onChange={() => setExportScope("selected")}/><span><strong>Selected prospects</strong><small>{formatNumber(selectedCount)} currently selected</small></span></label></fieldset><div className="export-fields-head"><div><strong>Fields to include</strong><span>{formatNumber(exportFields.length)} selected</span></div><div><button onClick={() => setExportFields(exportFieldCatalog.map((field) => field.id))}>Select all</button><button onClick={() => setExportFields(defaultProspectExportFields)}>Recommended</button><button onClick={() => setExportFields([])}>Clear</button></div></div><div className="export-field-grid">{exportFieldCatalog.map((field) => <label key={field.id}><input type="checkbox" checked={exportFields.includes(field.id)} onChange={() => toggleExportField(field.id)}/><span>{field.label}</span></label>)}</div><div className="modal-actions"><button className="secondary" disabled={exportingProspects} onClick={() => setExportDialogOpen(false)}>Cancel</button><button className="primary" disabled={exportingProspects || !exportFields.length || (exportScope === "selected" && !selectedCount)} onClick={() => void exportProspectsCsv()}>{exportingProspects ? "Preparing CSV…" : `Export ${formatNumber(exportScope === "selected" ? selectedCount : total)} prospects`}</button></div></section></div> : null}
+    {exportDialogOpen ? <div className="modal-backdrop" role="presentation"><section className="export-modal" role="dialog" aria-modal="true" aria-labelledby="prospect-export-title"><div className="export-modal-head"><div><p className="eyebrow">CSV EXPORT</p><h2 id="prospect-export-title">Choose prospects and fields</h2><p>Only the fields checked below will be included in the download.</p></div><button aria-label="Close export dialog" disabled={exportingProspects} onClick={() => setExportDialogOpen(false)}>×</button></div><fieldset className="export-scope"><legend>Prospects to export</legend><label htmlFor="export-all-matching"><span className="sr-only">All matching prospects</span><input id="export-all-matching" type="radio" name="export-scope" checked={exportScope === "all_matching"} onChange={() => setExportScope("all_matching")}/><span><strong>All {search.trim() || effectiveFilters.length ? "matching " : ""}prospects</strong><small>{formatNumber(total)} records across every page</small></span></label><label htmlFor="export-selected" className={!selectedCount ? "disabled" : ""}><span className="sr-only">Selected prospects</span><input id="export-selected" type="radio" name="export-scope" disabled={!selectedCount} checked={exportScope === "selected"} onChange={() => setExportScope("selected")}/><span><strong>Selected prospects</strong><small>{formatNumber(selectedCount)} currently selected</small></span></label></fieldset><div className="export-fields-head"><div><strong>Fields to include</strong><span>{formatNumber(exportFields.length)} selected</span></div><div><button onClick={() => setExportFields(exportFieldCatalog.map((field) => field.id))}>Select all</button><button onClick={() => setExportFields(defaultProspectExportFields)}>Recommended</button><button onClick={() => setExportFields([])}>Clear</button></div></div><div className="export-field-grid">{exportFieldCatalog.map((field) => <label key={field.id}><input type="checkbox" checked={exportFields.includes(field.id)} onChange={() => toggleExportField(field.id)}/><span>{field.label}</span></label>)}</div><fieldset className="export-scope export-format"><legend>Output</legend><label htmlFor="export-single"><span className="sr-only">Single CSV file</span><input id="export-single" type="radio" name="export-format" checked={exportFormat === "single"} disabled={exportingProspects} onChange={() => setExportFormat("single")}/><span><strong>One CSV file</strong><small>Everything in a single download, any size</small></span></label><label htmlFor="export-parts"><span className="sr-only">Split into multiple files</span><input id="export-parts" type="radio" name="export-format" checked={exportFormat === "parts"} disabled={exportingProspects} onChange={() => setExportFormat("parts")}/><span><strong>Split into parts</strong><small>Multiple CSVs of <select aria-label="Rows per file" disabled={exportingProspects || exportFormat !== "parts"} value={exportRowsPerFile} onClick={(event) => event.stopPropagation()} onChange={(event) => setExportRowsPerFile(Number(event.target.value))}>{[10000, 25000, 50000, 100000].map((size) => <option key={size} value={size}>{formatNumber(size)}</option>)}</select> rows each</small></span></label></fieldset>{!fileSystemAccessSupported() ? <p className="export-hint">Your browser will download the file{exportFormat === "parts" ? "s" : ""} when the export finishes. For very large exports, a Chromium browser streams straight to disk.</p> : null}{exportProgress ? <div className="export-progress" role="status"><span className="export-progress-bar"><i style={{ width: `${exportProgress.total ? Math.min(100, Math.round((exportProgress.exported / Math.max(1, exportProgress.total)) * 100)) : 100}%` }}/></span><span>Exported {formatNumber(exportProgress.exported)}{exportProgress.total ? ` of ${formatNumber(exportProgress.total)}` : ""} rows{exportProgress.files > 1 ? ` · ${formatNumber(exportProgress.files)} files` : ""}</span></div> : null}<div className="modal-actions">{exportingProspects ? <button className="secondary" onClick={cancelExport}>Cancel export</button> : <button className="secondary" onClick={() => setExportDialogOpen(false)}>Close</button>}<button className="primary" disabled={exportingProspects || !exportFields.length || (exportScope === "selected" && !selectedCount)} onClick={() => void exportProspectsCsv()}>{exportingProspects ? "Exporting…" : `Export ${formatNumber(exportScope === "selected" ? selectedCount : total)} prospects`}</button></div></section></div> : null}
   </section>;
 }
 
