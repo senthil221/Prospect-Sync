@@ -175,8 +175,8 @@ function IncludeExcludeFilter({ field, filters, clientId, onChange }: {
   </div>;
 }
 
-function TokenValuePicker({ field, values, clientId, placeholder, onChange }: {
-  field: string;
+export function TokenValuePicker({ field, values, clientId, placeholder, onChange }: {
+  field?: string;
   values: string[];
   clientId?: string;
   placeholder: string;
@@ -190,7 +190,7 @@ function TokenValuePicker({ field, values, clientId, placeholder, onChange }: {
   useDismiss(pickerRef, () => setOpen(false), open);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !field) return;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setLoading(true);

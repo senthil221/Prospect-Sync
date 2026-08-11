@@ -4,7 +4,7 @@ import { ChangeEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef,
 import { mapProspect } from "../db/normalize";
 import { buildCustomFieldDefinitions, customFieldValue } from "../lib/prospect-fields";
 import { runProspectExport, fileSystemAccessSupported, type ExportFormat } from "../lib/export-runner";
-import ApolloFilterPanel, { filterLabel, type ProspectFilter } from "./ApolloFilterPanel";
+import ApolloFilterPanel, { filterLabel, TokenValuePicker, type ProspectFilter } from "./ApolloFilterPanel";
 import { useDismiss } from "./use-dismiss";
 
 type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" | "quality" | "imports";
@@ -162,9 +162,12 @@ function prospectApiPath({ search = "", page = 1, sort = "created_at", direction
   return `/api/prospects?${params.toString()}`;
 }
 
-function companyApiPath({ search = "", page = 1, clientId = "" }: { search?: string; page?: number; clientId?: string }) {
+function companyApiPath({ search = "", page = 1, clientId = "", domains = [], seniority = [], locations = [] }: { search?: string; page?: number; clientId?: string; domains?: string[]; seniority?: string[]; locations?: string[] }) {
   const params = new URLSearchParams({ search, page: String(page), pageSize: "50" });
   if (clientId) params.set("clientId", clientId);
+  if (domains.length) params.set("domains", domains.join(","));
+  if (seniority.length) params.set("seniority", seniority.join(","));
+  if (locations.length) params.set("locations", locations.join(","));
   return `/api/companies?${params.toString()}`;
 }
 
@@ -206,6 +209,9 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyPage, setCompanyPage] = useState(1);
   const [companySummary, setCompanySummary] = useState({ total: 0, covered: 0, prospectTotal: 0, pageSize: 50 });
+  const [companyDomains, setCompanyDomains] = useState<string[]>([]);
+  const [companySeniority, setCompanySeniority] = useState<string[]>([]);
+  const [companyLocations, setCompanyLocations] = useState<string[]>([]);
   const [lists, setLists] = useState<ListRecord[]>([]);
   const [selectedClient, setSelectedClient] = useState<ClientRecord | null>(null);
   const [selectedList, setSelectedList] = useState<ListRecord | null>(null);
@@ -267,14 +273,14 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
           if (active) { setProspects(data.prospects); setProspectTotal(data.total); if (data.fields?.length) { prospectFieldsLoaded.current = true; setProspectFields(data.fields); } }
         }
         if (section === "companies") {
-          const data = await api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(companyApiPath({ search: deferredSearch, page: companyPage }));
+          const data = await api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(companyApiPath({ search: deferredSearch, page: companyPage, domains: companyDomains, seniority: companySeniority, locations: companyLocations }));
           if (active) { setCompanies(data.companies); setCompanySummary({ total: data.total, covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); }
         }
       } catch (caught) { if (active) setError(caught instanceof Error ? caught.message : "Unable to load workspace data."); }
       finally { if (active) setWorkspaceLoading(false); }
     })();
     return () => { active = false; };
-  }, [section, deferredSearch, stats.prospects, prospectPage, encodedProspectFilters, prospectSort, prospectDirection, prospectRefresh, companyPage]);
+  }, [section, deferredSearch, stats.prospects, prospectPage, encodedProspectFilters, prospectSort, prospectDirection, prospectRefresh, companyPage, companyDomains, companySeniority, companyLocations]);
 
   async function openClient(client: ClientRecord) {
     setSelectedClient(client);
@@ -345,7 +351,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
           {!loading && workspaceLoading ? <div className="workspace-progress" role="status"><span/>Updating {title.toLowerCase()}…</div> : null}
           {!loading && section === "overview" && <Overview stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name} · ${item.list_name}` })} />}
           {!loading && section === "prospects" && <ProspectTable prospects={prospects} total={prospectTotal} fields={prospectFields} filters={prospectFilters} page={prospectPage} clients={clients} search={deferredSearch} sort={prospectSort} direction={prospectDirection} onSortChange={(nextSort, nextDirection) => { setProspectSort(nextSort); setProspectDirection(nextDirection); setProspectPage(1); }} onFiltersChange={(next) => { setProspectFilters(next); setProspectPage(1); }} onPageChange={setProspectPage} onSelect={setSelectedProspect} onImport={() => navigate("imports")} onRefresh={() => setProspectRefresh((current) => current + 1)} />}
-          {!loading && section === "companies" && <CompanyTable companies={companies} total={companySummary.total} covered={companySummary.covered} prospectTotal={companySummary.prospectTotal} page={companyPage} pageSize={companySummary.pageSize} search={deferredSearch} onPageChange={setCompanyPage} onImport={() => navigate("imports")} />}
+          {!loading && section === "companies" && <CompanyTable companies={companies} total={companySummary.total} covered={companySummary.covered} prospectTotal={companySummary.prospectTotal} page={companyPage} pageSize={companySummary.pageSize} search={deferredSearch} domains={companyDomains} seniority={companySeniority} locations={companyLocations} onDomains={(next) => { setCompanyDomains(next); setCompanyPage(1); }} onSeniority={(next) => { setCompanySeniority(next); setCompanyPage(1); }} onLocations={(next) => { setCompanyLocations(next); setCompanyPage(1); }} onPageChange={setCompanyPage} onImport={() => navigate("imports")} />}
           {!loading && section === "clients" && !selectedClient && <ClientsView clients={clients} onOpen={openClient} onImport={() => navigate("imports")} />}
           {!loading && section === "clients" && selectedClient && !selectedList && <ClientDetail client={selectedClient} clients={clients} lists={lists} onBack={() => setSelectedClient(null)} onOpenList={setSelectedList} onSelectProspect={setSelectedProspect} onImport={() => navigate("imports")} onDeleteClient={() => setDeleteRequest({ kind: "client", id: selectedClient.id, name: selectedClient.name, context: `${selectedClient.list_count} lists · ${selectedClient.prospect_count} linked prospects` })} onDeleteList={(list) => setDeleteRequest({ kind: "list", id: list.id, name: list.name, context: `${list.source_file_name} · ${list.prospect_count} linked prospects` })} />}
           {!loading && section === "clients" && selectedClient && selectedList && <ListWorkspace client={selectedClient} list={selectedList} onBack={() => setSelectedList(null)} onSelect={setSelectedProspect} />}
@@ -812,7 +818,22 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
 }
 
 
-function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize, clientId = "", search = "", onPageChange, onImport }: { companies: Company[]; total: number; covered: number; prospectTotal: number; page: number; pageSize: number; clientId?: string; search?: string; onPageChange: (page: number) => void; onImport: () => void }) {
+function CompanyFilterBar({ domains, seniority, locations, onDomains, onSeniority, onLocations }: { domains: string[]; seniority: string[]; locations: string[]; onDomains: (values: string[]) => void; onSeniority: (values: string[]) => void; onLocations: (values: string[]) => void }) {
+  const activeCount = domains.length + seniority.length + locations.length;
+  return <div className="company-filter-bar">
+    <div className="company-filter-head">
+      <div><span className="filter-icon"><AppIcon name="filter" size={15}/></span><div><strong>Filter companies</strong><small>Narrow by website, seniority, or location</small></div></div>
+      {activeCount ? <button type="button" className="company-filter-clear" onClick={() => { onDomains([]); onSeniority([]); onLocations([]); }}>Clear filters ({activeCount})</button> : null}
+    </div>
+    <div className="company-filter-fields">
+      <label className="company-filter-field"><span>Website / domain</span><TokenValuePicker values={domains} placeholder="Paste domains, comma-separated…" onChange={onDomains} /></label>
+      <label className="company-filter-field"><span>Seniority</span><TokenValuePicker field="__seniority" values={seniority} placeholder="Add seniority…" onChange={onSeniority} /></label>
+      <label className="company-filter-field"><span>Location</span><TokenValuePicker field="__person_location" values={locations} placeholder="Add location, e.g. Mumbai, India…" onChange={onLocations} /></label>
+    </div>
+  </div>;
+}
+
+function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize, clientId = "", search = "", domains = [], seniority = [], locations = [], onDomains, onSeniority, onLocations, onPageChange, onImport }: { companies: Company[]; total: number; covered: number; prospectTotal: number; page: number; pageSize: number; clientId?: string; search?: string; domains?: string[]; seniority?: string[]; locations?: string[]; onDomains?: (values: string[]) => void; onSeniority?: (values: string[]) => void; onLocations?: (values: string[]) => void; onPageChange: (page: number) => void; onImport: () => void }) {
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [prospectsByCompany, setProspectsByCompany] = useState<Record<string, Prospect[]>>({});
   const [prospectTotalsByCompany, setProspectTotalsByCompany] = useState<Record<string, number>>({});
@@ -859,6 +880,9 @@ function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize
       const params = new URLSearchParams({ export: "csv" });
       if (search.trim()) params.set("search", search.trim());
       if (companyExportScope === "with_websites") params.set("website", "required");
+      if (domains.length) params.set("domains", domains.join(","));
+      if (seniority.length) params.set("seniority", seniority.join(","));
+      if (locations.length) params.set("locations", locations.join(","));
       const response = await fetch(`/api/companies?${params.toString()}`);
       if (!response.ok) {
         const body = await response.json().catch(() => ({ error: "Unable to export companies." })) as { error?: string };
@@ -871,7 +895,7 @@ function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize
       link.click();
       URL.revokeObjectURL(blobUrl);
       const exported = Number(response.headers.get("X-Exported-Rows") ?? 0);
-      setCompanyNotice(`Exported ${formatNumber(exported)} ${search.trim() ? "matching " : ""}companies${companyExportScope === "with_websites" ? " with websites" : ""}.`);
+      setCompanyNotice(`Exported ${formatNumber(exported)} ${search.trim() || domains.length || seniority.length || locations.length ? "matching " : ""}companies${companyExportScope === "with_websites" ? " with websites" : ""}.`);
     } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to export companies."); }
     finally { setExportingCompanies(false); }
   }
@@ -879,6 +903,7 @@ function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize
   return <section className="companies-workspace">
     <div className="section-intro company-intro"><div><p className="eyebrow">COMPANIES</p><h2>Companies already in your database.</h2><p>Open a company to see its prospects in a separate panel.</p></div><div className="company-intro-actions">{!clientId ? <div className="company-export-control"><label><span>Export scope</span><select aria-label="Company export scope" value={companyExportScope} disabled={exportingCompanies} onChange={(event) => setCompanyExportScope(event.target.value as "all" | "with_websites")}><option value="all">All companies</option><option value="with_websites">Only with websites</option></select></label><button className="secondary company-export-button" disabled={exportingCompanies} title="Export all matching companies across every page" onClick={() => void exportCompanies()}>{exportingCompanies ? "Exporting…" : "↓ Export CSV"}</button></div> : null}<button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div></div>
     <div className="company-summary"><div className="summary-violet"><span>Companies in database</span><strong>{formatNumber(total)}</strong><small>Complete company directory</small></div><div className="summary-blue"><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong><small>{total ? `${Math.round((covered / total) * 100)}% of companies` : "No companies yet"}</small></div><div className="summary-green"><span>Total linked prospects</span><strong>{formatNumber(prospectTotal)}</strong><small>Across all matching companies</small></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div>
+    {onDomains && onSeniority && onLocations ? <CompanyFilterBar domains={domains} seniority={seniority} locations={locations} onDomains={onDomains} onSeniority={onSeniority} onLocations={onLocations} /> : null}
     {companyError ? <div className="inline-error" role="alert">{companyError}</div> : null}
     {companyNotice ? <div className="inline-notice company-export-notice" role="status">{companyNotice}<button aria-label="Dismiss export notification" onClick={() => setCompanyNotice("")}>×</button></div> : null}
     <article className="panel company-table-panel"><div className="panel-head company-panel-head"><div><h3>Company database</h3><p>Showing {formatNumber(resultStart)}–{formatNumber(resultEnd)} of {formatNumber(total)} companies. Click any row to open its details.</p></div><span className="directory-badge">{formatNumber(total)} total</span></div>{companies.length ? <><div className="table-wrap"><table className="company-table"><thead><tr><th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th></tr></thead><tbody>{companies.map((company) => { const tone = colorTone(company.id); return <tr className={`company-row tone-${tone}`} key={company.id} onClick={() => void openCompany(company)}><td><div className="company-identity"><button className="company-open" aria-label={`Open ${company.name || company.domain || "company"} details`} onClick={(event) => { event.stopPropagation(); void openCompany(company); }}><AppIcon name="arrow" size={15}/></button><span className={`company-logo tone-${tone}`}>{initials(company.name)}</span><div><strong>{company.name || company.domain || "Unnamed company"}</strong><small>{company.prospect_count ? `${formatNumber(company.prospect_count)} people available` : "No prospects linked"}</small></div></div></td><td onClick={(event) => event.stopPropagation()}>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain}</a> : <span className="missing-value">No domain</span>}</td><td><span className="prospect-count-badge">{formatNumber(company.prospect_count)}</span></td><td>{formatNumber(company.client_count)} {company.client_count === 1 ? "client" : "clients"}</td><td>{new Date(company.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><span className={`coverage-status ${company.prospect_count ? "known" : "new"}`}>{company.prospect_count ? "Covered" : "Needs prospects"}</span></td></tr>; })}</tbody></table></div><div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article>
@@ -970,10 +995,13 @@ function ClientCompanyDatabase({ client, onImport }: { client: ClientRecord; onI
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [domains, setDomains] = useState<string[]>([]);
+  const [seniority, setSeniority] = useState<string[]>([]);
+  const [locations, setLocations] = useState<string[]>([]);
   const deferredSearch = useDeferredValue(search);
   useEffect(() => {
     let current = true;
-    const path = companyApiPath({ search: deferredSearch, clientId: client.id, page });
+    const path = companyApiPath({ search: deferredSearch, clientId: client.id, page, domains, seniority, locations });
     void (async () => {
       setRefreshing(true);
       try {
@@ -983,8 +1011,8 @@ function ClientCompanyDatabase({ client, onImport }: { client: ClientRecord; onI
       finally { if (current) { setLoading(false); setRefreshing(false); } }
     })();
     return () => { current = false; };
-  }, [client.id, client.prospect_count, deferredSearch, page]);
-  return <section className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT COMPANY DB</p><h3>{client.name} companies</h3><p>Companies represented by prospects in this client workspace.</p></div><label className="workspace-search"><span>⌕</span><input aria-label={`Search ${client.name} companies`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search client companies…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client companies…</div> : null}{loading ? <div className="workspace-loading">Preparing company database…</div> : <CompanyTable companies={companies} total={summary.total} covered={summary.covered} prospectTotal={summary.prospectTotal} page={page} pageSize={summary.pageSize} clientId={client.id} onPageChange={setPage} onImport={onImport}/>}</section>;
+  }, [client.id, client.prospect_count, deferredSearch, page, domains, seniority, locations]);
+  return <section className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT COMPANY DB</p><h3>{client.name} companies</h3><p>Companies represented by prospects in this client workspace.</p></div><label className="workspace-search"><span>⌕</span><input aria-label={`Search ${client.name} companies`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search client companies…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client companies…</div> : null}{loading ? <div className="workspace-loading">Preparing company database…</div> : <CompanyTable companies={companies} total={summary.total} covered={summary.covered} prospectTotal={summary.prospectTotal} page={page} pageSize={summary.pageSize} clientId={client.id} domains={domains} seniority={seniority} locations={locations} onDomains={(next) => { setDomains(next); setPage(1); }} onSeniority={(next) => { setSeniority(next); setPage(1); }} onLocations={(next) => { setLocations(next); setPage(1); }} onPageChange={setPage} onImport={onImport}/>}</section>;
 }
 
 function ListWorkspace({ client, list, onBack, onSelect }: { client: ClientRecord; list: ListRecord; onBack: () => void; onSelect: (prospect: Prospect) => void }) {
