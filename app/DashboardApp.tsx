@@ -820,15 +820,24 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
 
 function CompanyFilterBar({ domains, seniority, locations, onDomains, onSeniority, onLocations }: { domains: string[]; seniority: string[]; locations: string[]; onDomains: (values: string[]) => void; onSeniority: (values: string[]) => void; onLocations: (values: string[]) => void }) {
   const activeCount = domains.length + seniority.length + locations.length;
+  const fields: Array<{ key: string; label: string; field?: string; placeholder: string; values: string[]; onChange: (values: string[]) => void }> = [
+    { key: "domains", label: "Website / domain", placeholder: "Paste domains, comma-separated…", values: domains, onChange: onDomains },
+    { key: "seniority", label: "Seniority", field: "__seniority", placeholder: "Add seniority…", values: seniority, onChange: onSeniority },
+    { key: "locations", label: "Location", field: "__person_location", placeholder: "Add location, e.g. Mumbai, India…", values: locations, onChange: onLocations },
+  ];
   return <div className="company-filter-bar">
     <div className="company-filter-head">
       <div><span className="filter-icon"><AppIcon name="filter" size={15}/></span><div><strong>Filter companies</strong><small>Narrow by website, seniority, or location</small></div></div>
-      {activeCount ? <button type="button" className="company-filter-clear" onClick={() => { onDomains([]); onSeniority([]); onLocations([]); }}>Clear filters ({activeCount})</button> : null}
+      {activeCount ? <button type="button" className="company-filter-clear" onClick={() => { onDomains([]); onSeniority([]); onLocations([]); }}>Clear all ({activeCount})</button> : null}
     </div>
     <div className="company-filter-fields">
-      <label className="company-filter-field"><span>Website / domain</span><TokenValuePicker values={domains} placeholder="Paste domains, comma-separated…" onChange={onDomains} /></label>
-      <label className="company-filter-field"><span>Seniority</span><TokenValuePicker field="__seniority" values={seniority} placeholder="Add seniority…" onChange={onSeniority} /></label>
-      <label className="company-filter-field"><span>Location</span><TokenValuePicker field="__person_location" values={locations} placeholder="Add location, e.g. Mumbai, India…" onChange={onLocations} /></label>
+      {fields.map((entry) => <div className="company-filter-field" key={entry.key}>
+        <div className="company-filter-field-head">
+          <span>{entry.label}</span>
+          {entry.values.length ? <button type="button" className="company-filter-field-clear" onClick={() => entry.onChange([])}>Clear{entry.values.length > 1 ? ` (${entry.values.length})` : ""}</button> : null}
+        </div>
+        <TokenValuePicker field={entry.field} values={entry.values} placeholder={entry.placeholder} onChange={entry.onChange} />
+      </div>)}
     </div>
   </div>;
 }

@@ -212,7 +212,10 @@ main { min-width: 0; grid-column: 2; }
 .company-filter-clear:hover { background: var(--ph-brand-soft); border-color: #c7c7e9; }
 .company-filter-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .company-filter-field { display: flex; flex-direction: column; gap: 6px; }
-.company-filter-field > span { color: #555f70; font-size: 10px; font-weight: 720; letter-spacing: .5px; text-transform: uppercase; }
+.company-filter-field-head { min-height: 18px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.company-filter-field-head > span { color: #555f70; font-size: 10px; font-weight: 720; letter-spacing: .5px; text-transform: uppercase; }
+.company-filter-field-clear { padding: 2px 7px; border: 0; border-radius: 6px; background: transparent; color: var(--ph-brand); font-size: 10px; font-weight: 700; }
+.company-filter-field-clear:hover { background: var(--ph-brand-soft); color: var(--ph-brand-dark); }
 .company-filter-field .token-value-picker { width: 100%; }
 .company-filter-field .token-input { min-height: 42px; }
 @media (max-width: 1080px) { .company-filter-fields { grid-template-columns: 1fr; } }
