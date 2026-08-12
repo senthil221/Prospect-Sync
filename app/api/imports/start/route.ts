@@ -1,15 +1,19 @@
 import { authorizeApi } from "../../../../lib/auth";
 import { normalizeText } from "../../../../db/normalize";
 import { normalizeDataSource } from "../../../../lib/data-source";
+import { missingRequiredFields, requiredPersonImportFields, resolvedImportFields, suggestedPersonImportField } from "../../../../lib/import-schema";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const payload = await request.json() as { clientId?: string; clientName?: string; listName?: string; fileName?: string; totalRows?: number; headers?: string[]; dataSource?: string };
+  const payload = await request.json() as { clientId?: string; clientName?: string; listName?: string; fileName?: string; totalRows?: number; headers?: string[]; fieldMap?: Record<string, string>; dataSource?: string };
   const supabase = createAdminClient();
   const dataSource = normalizeDataSource(payload.dataSource);
   if (!dataSource) return Response.json({ error: "Choose a data source before importing." }, { status: 400 });
+  const importHeaders = Array.isArray(payload.headers) ? payload.headers.map(String) : [];
+  const missingFields = missingRequiredFields(requiredPersonImportFields, resolvedImportFields(importHeaders, payload.fieldMap, suggestedPersonImportField));
+  if (missingFields.length) return Response.json({ error: `Map all required person columns: ${missingFields.join(", ")}.` }, { status: 400 });
   let clientId = payload.clientId ?? "";
   if (!clientId) {
     const clientName = String(payload.clientName ?? "").trim();
@@ -27,7 +31,7 @@ export async function POST(request: Request) {
   if (!listName) return Response.json({ error: "List name is required." }, { status: 400 });
   const listId = crypto.randomUUID();
   const importId = crypto.randomUUID();
-  const headers = Array.isArray(payload.headers) ? payload.headers.map((header) => String(header).trim()).filter(Boolean).slice(0, 500) : [];
+  const headers = importHeaders.map((header) => header.trim()).filter(Boolean).slice(0, 500);
   const listResult = await supabase.from("lists").insert({ id: listId, client_id: clientId, name: listName, data_source: dataSource, source_file_name: payload.fileName ?? "", uploaded_rows: payload.totalRows ?? 0, field_headers: headers });
   if (listResult.error) return Response.json({ error: listResult.error.message }, { status: 500 });
   const importResult = await supabase.from("imports").insert({ id: importId, client_id: clientId, list_id: listId, data_source: dataSource, file_name: payload.fileName ?? "", total_rows: payload.totalRows ?? 0, field_headers: headers });

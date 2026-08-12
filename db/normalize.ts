@@ -95,10 +95,10 @@ export function mapProspect(headers: string[], values: string[]): CanonicalProsp
   const fullName = suppliedFullName || [firstName, lastName].filter(Boolean).join(" ");
   const workEmail = findWorkEmail(raw).toLowerCase();
   const personalEmail = findValue(raw, ["personal email", "personalemail"]).toLowerCase();
-  const linkedinUrl = normalizeLinkedin(findValue(raw, ["linkedin", "linkedin url", "linkedin profile", "linkedinurl"]));
+  const linkedinUrl = normalizeLinkedin(findValue(raw, ["linkedin", "linkedin url", "linkedin profile", "linkedinurl", "personal linkedin url", "person linkedin url"]));
   const companyName = findValue(raw, ["casual company name", "company name", "company", "organization"]);
   const companyDomain = normalizeDomain(findValue(raw, ["company website", "website", "company domain", "domain", "companywebsite"]));
-  const employeeCount = parseEmployeeCount(findValue(raw, ["# employees", "number of employees", "employee count", "employees", "company employee count", "company employees", "company headcount", "headcount"]));
+  const employeeCount = parseEmployeeCount(findValue(raw, ["# employees", "number of employees", "employee count", "employees count", "employees", "company employee count", "company employees", "company headcount", "headcount"]));
   const identifiers: Array<{ type: string; value: string }> = [];
   if (workEmail) identifiers.push({ type: "work_email", value: workEmail });
   if (personalEmail) identifiers.push({ type: "personal_email", value: personalEmail });
@@ -116,7 +116,7 @@ export function mapProspect(headers: string[], values: string[]): CanonicalProsp
     title: findValue(raw, ["title", "job title", "jobtitle"]),
     keywords: parseKeywords(findValue(raw, ["keywords", "keyword", "person keywords", "prospect keywords"])),
     seniority: findValue(raw, ["seniority", "seniority level"]),
-    department: findValue(raw, ["department", "function"]),
+    department: findValue(raw, ["department", "departments", "function"]),
     city: findValue(raw, ["city"]),
     state: findValue(raw, ["state", "region"]),
     country: findValue(raw, ["country"]),

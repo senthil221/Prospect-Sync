@@ -5,6 +5,7 @@ import { mapProspect } from "../db/normalize";
 import { buildCustomFieldDefinitions, customFieldValue } from "../lib/prospect-fields";
 import { runProspectExport, fileSystemAccessSupported, type ExportFormat } from "../lib/export-runner";
 import { commonDataSources } from "../lib/data-source";
+import { missingRequiredFields, requiredCompanyImportFields, requiredPersonImportFields, resolvedImportFields, suggestedCompanyImportField, suggestedPersonImportField } from "../lib/import-schema";
 import type { CompanyScope, PeopleScope } from "../lib/workspace-scopes";
 import ApolloFilterPanel, { filterLabel, TokenValuePicker, type ProspectFilter } from "./ApolloFilterPanel";
 import { useDismiss } from "./use-dismiss";
@@ -82,24 +83,7 @@ function deriveListName(fileName: string) {
     .trim();
 }
 
-const canonicalImportFields = ["Auto detect", "First Name", "Last Name", "Full Name", "Work Email", "Personal Email", "Mobile Number", "LinkedIn", "Title", "Keywords", "Seniority", "Department", "City", "State", "Country", "Company Name", "Company Website", "Company Employee Count", "Company Location", "Company City", "Company State", "Company Country"];
-
-function suggestedImportField(header: string) {
-  const normalized = header.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const aliases: Record<string, string> = {
-    firstname: "First Name", lastname: "Last Name", fullname: "Full Name", name: "Full Name",
-    email: "Work Email", workemail: "Work Email", businessemail: "Work Email", personalemail: "Personal Email",
-    mobile: "Mobile Number", mobilenumber: "Mobile Number", phone: "Mobile Number", phonenumber: "Mobile Number",
-    linkedin: "LinkedIn", linkedinurl: "LinkedIn", title: "Title", jobtitle: "Title", keyword: "Keywords", keywords: "Keywords", personkeywords: "Keywords", prospectkeywords: "Keywords", seniority: "Seniority",
-    department: "Department", city: "City", state: "State", country: "Country", company: "Company Name",
-    companyname: "Company Name", casualcompanyname: "Company Name", organization: "Company Name",
-    companywebsite: "Company Website", website: "Company Website", domain: "Company Website", companydomain: "Company Website",
-    employees: "Company Employee Count", employeecount: "Company Employee Count", numberofemployees: "Company Employee Count", companyemployees: "Company Employee Count", companyheadcount: "Company Employee Count", headcount: "Company Employee Count",
-    companylocation: "Company Location", accountlocation: "Company Location", headquarters: "Company Location", hqlocation: "Company Location",
-    companycity: "Company City", accountcity: "Company City", hqcity: "Company City", companystate: "Company State", accountstate: "Company State", hqstate: "Company State", companyregion: "Company State", companycountry: "Company Country", accountcountry: "Company Country", hqcountry: "Company Country",
-  };
-  return aliases[normalized] ?? "Auto detect";
-}
+const canonicalImportFields = ["Auto detect", ...requiredPersonImportFields, "First Name", "Last Name", "Personal Email", "Mobile Number", "Keywords", "City", "State", "Country", "Person Location", "Company Website", "Company Employee Count", "Company Location", "Company City", "Company State", "Company Country"];
 
 function parseCsv(text: string) {
   const rows: string[][] = [];
@@ -1199,30 +1183,30 @@ function ImportView({ clients, onComplete }: { clients: ClientRecord[]; onComple
   </section>;
 }
 
+function RequiredFieldList({ title, fields }: { title: string; fields: readonly string[] }) {
+  return <div className="required-field-list"><strong>{title}</strong><div>{fields.map((field) => <span key={field}>✓ {field}</span>)}</div></div>;
+}
+
 function CompanyImportView({ dataSource, onComplete }: { dataSource: string; onComplete: () => Promise<void> }) {
   const [file, setFile] = useState<File | null>(null);
   const [parsed, setParsed] = useState<{ headers: string[]; rows: string[][] } | null>(null);
-  const [nameField, setNameField] = useState("");
-  const [websiteField, setWebsiteField] = useState("");
+  const [fieldMap, setFieldMap] = useState<Record<string, string>>({});
   const [phase, setPhase] = useState<"idle" | "uploading" | "done">("idle");
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
-  const [invalidRows, setInvalidRows] = useState(0);
   const [summary, setSummary] = useState<{ processed_rows: number; added_count: number; updated_count: number; skipped_count: number } | null>(null);
-  const canSubmit = Boolean(file && parsed?.rows.length && dataSource && (nameField || websiteField) && phase === "idle");
+  const mappedFields = parsed ? resolvedImportFields(parsed.headers, fieldMap, suggestedCompanyImportField) : [];
+  const missingFields = missingRequiredFields(requiredCompanyImportFields, mappedFields);
+  const canSubmit = Boolean(file && parsed?.rows.length && dataSource && !missingFields.length && phase === "idle");
 
   async function pickCompanyFile(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0] ?? null;
-    setFile(next); setParsed(null); setMessage(""); setSummary(null); setProgress(0);
+    setFile(next); setParsed(null); setFieldMap({}); setMessage(""); setSummary(null); setProgress(0);
     if (!next) return;
     try {
       const nextParsed = parseCsv(await next.text());
-      const normalized = nextParsed.headers.map((header) => header.toLocaleLowerCase().replace(/[^a-z0-9]/g, ""));
-      const nextName = nextParsed.headers[normalized.findIndex((header) => ["company", "companyname", "name", "organization", "accountname"].includes(header))] ?? "";
-      const nextWebsite = nextParsed.headers[normalized.findIndex((header) => ["website", "domain", "companywebsite", "companydomain", "url"].includes(header))] ?? "";
-      setNameField(nextName); setWebsiteField(nextWebsite); setParsed(nextParsed);
-      const nameIndex = nextParsed.headers.indexOf(nextName); const websiteIndex = nextParsed.headers.indexOf(nextWebsite);
-      setInvalidRows(nextParsed.rows.filter((row) => !(nameIndex >= 0 && row[nameIndex]?.trim()) && !(websiteIndex >= 0 && row[websiteIndex]?.trim())).length);
+      setFieldMap(Object.fromEntries(nextParsed.headers.map((header) => [header, suggestedCompanyImportField(header)])));
+      setParsed(nextParsed);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Unable to read this company CSV."); }
   }
 
@@ -1230,13 +1214,24 @@ function CompanyImportView({ dataSource, onComplete }: { dataSource: string; onC
     if (!file || !parsed || !canSubmit) return;
     setPhase("uploading"); setMessage("Importing companies into the master Company DB…");
     try {
-      const started = await api<{ importId: string }>("/api/company-imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, totalRows: parsed.rows.length, dataSource }) });
-      const nameIndex = parsed.headers.indexOf(nameField); const websiteIndex = parsed.headers.indexOf(websiteField);
+      const started = await api<{ importId: string }>("/api/company-imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, totalRows: parsed.rows.length, dataSource, headers: parsed.headers, fieldMap }) });
+      const columnFor = (field: string) => parsed.headers.findIndex((header) => fieldMap[header] === field);
+      const valueFor = (row: string[], field: string) => { const column = columnFor(field); return column >= 0 ? String(row[column] ?? "").trim() : ""; };
       const chunkSize = 100;
       for (let index = 0; index < parsed.rows.length; index += chunkSize) {
         const rows = parsed.rows.slice(index, index + chunkSize).map((row, chunkIndex) => ({
-          name: nameIndex >= 0 ? row[nameIndex] : "",
-          website: websiteIndex >= 0 ? row[websiteIndex] : "",
+          name: valueFor(row, "Company Name"),
+          website: valueFor(row, "Website"),
+          employeeCount: valueFor(row, "#employees"),
+          industry: valueFor(row, "Industry"),
+          city: valueFor(row, "Company City"),
+          state: valueFor(row, "Company State"),
+          country: valueFor(row, "Company Country"),
+          keywords: valueFor(row, "Keywords"),
+          shortDescription: valueFor(row, "Short Description"),
+          foundedYear: valueFor(row, "Founded Year"),
+          technologies: valueFor(row, "Technologies"),
+          totalFunding: valueFor(row, "Total Funding"),
           raw: Object.fromEntries(parsed.headers.map((header, column) => [header, String(row[column] ?? "").trim()])),
           sourceRowNumber: index + chunkIndex + 2,
         }));
@@ -1250,7 +1245,7 @@ function CompanyImportView({ dataSource, onComplete }: { dataSource: string; onC
 
   if (phase === "done" && summary) return <div className="import-success"><span className="success-mark">✓</span><p className="eyebrow">COMPANY IMPORT COMPLETE</p><h2>Your Company DB is updated.</h2><p>{message}</p><div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(summary.added_count)}</strong><span>Companies added</span></div><div><strong>{formatNumber(summary.updated_count)}</strong><span>Companies matched</span></div><div><strong>{formatNumber(summary.skipped_count)}</strong><span>Rows skipped</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
 
-  return <div className="import-layout company-import-layout"><div className="import-copy"><p className="eyebrow">COMPANY CSV IMPORT</p><h2>Import names, websites, or both.</h2><p>Companies are matched by normalized website first and company name second. Existing companies are enriched instead of duplicated.</p></div><div className="import-card"><label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void pickCompanyFile(event)}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{formatNumber(parsed?.rows.length)} company rows ready</small></> : <><strong>Choose a company CSV</strong><small>Include Company Name, Website, or both</small></>}</label>{parsed ? <><div className="mapping-grid company-import-mapping"><label>Company name<select value={nameField} onChange={(event) => setNameField(event.target.value)}><option value="">Not mapped</option>{parsed.headers.map((header) => <option key={header}>{header}</option>)}</select></label><label>Website / domain<select value={websiteField} onChange={(event) => setWebsiteField(event.target.value)}><option value="">Not mapped</option>{parsed.headers.map((header) => <option key={header}>{header}</option>)}</select></label></div><p className={invalidRows ? "form-error" : "source-selected-note"}>{invalidRows ? `${formatNumber(invalidRows)} rows have neither a company name nor website and will be skipped.` : "Every row has a company name or website."}</p></> : null}{phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="primary import-button" disabled={!canSubmit} onClick={() => void startCompanyImport()}>{phase === "uploading" ? "Processing…" : "Import companies"}</button></div></div>;
+  return <div className="import-layout company-import-layout"><div className="import-copy"><p className="eyebrow">COMPANY CSV IMPORT</p><h2>Import a complete company dataset.</h2><p>All required company columns must be mapped. Companies are matched by normalized website first and company name second.</p><RequiredFieldList title="Required company columns" fields={requiredCompanyImportFields}/></div><div className="import-card"><label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void pickCompanyFile(event)}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{formatNumber(parsed?.rows.length)} company rows ready</small></> : <><strong>Choose a company CSV</strong><small>All 12 company columns are required</small></>}</label>{parsed ? <><div className="mapping-list company-required-mapping">{parsed.headers.map((header) => <label key={header}><span title={header}>{header}</span><b>→</b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Not mapped"} onChange={(event) => setFieldMap((current) => ({ ...current, [header]: event.target.value }))}><option>Not mapped</option>{requiredCompanyImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Map required columns: ${missingFields.join(", ")}.` : "All required company columns are mapped."}</p></> : null}{phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="primary import-button" disabled={!canSubmit} onClick={() => void startCompanyImport()}>{phase === "uploading" ? "Processing…" : "Import companies"}</button></div></div>;
 }
 
 function ProspectImportView({ clients, onComplete, dataSource }: { clients: ClientRecord[]; onComplete: () => Promise<void>; dataSource: string }) {
@@ -1264,7 +1259,9 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
   const [summary, setSummary] = useState<{ processed_rows: number; unique_added: number; duplicates_linked: number } | null>(null);
   const [fileAudit, setFileAudit] = useState<FileAudit | null>(null);
   const [fieldMap, setFieldMap] = useState<Record<string, string>>({});
-  const canSubmit = file && fileAudit && dataSource && listName.trim() && (clientId || newClient.trim()) && phase === "idle";
+  const mappedFields = fileAudit ? resolvedImportFields(fileAudit.headers, fieldMap, suggestedPersonImportField) : [];
+  const missingFields = missingRequiredFields(requiredPersonImportFields, mappedFields);
+  const canSubmit = file && fileAudit && dataSource && listName.trim() && (clientId || newClient.trim()) && !missingFields.length && phase === "idle";
 
   async function pickFile(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0] ?? null;
@@ -1274,7 +1271,7 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
     try {
       const parsed = parseCsv(await next.text());
       const populatedCells = parsed.rows.reduce((count, row) => count + row.filter((value) => value.trim()).length, 0);
-      const nextFieldMap = Object.fromEntries(parsed.headers.map((header) => [header, suggestedImportField(header)]));
+      const nextFieldMap = Object.fromEntries(parsed.headers.map((header) => [header, suggestedPersonImportField(header)]));
       const mappedHeaders = parsed.headers.map((header) => nextFieldMap[header] === "Auto detect" ? header : nextFieldMap[header]);
       const invalidRows = parsed.rows.filter((row) => mapProspect(mappedHeaders, row).identifiers.length === 0).length;
       setFieldMap(nextFieldMap);
@@ -1290,7 +1287,7 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
       setPhase("reading"); setMessage("Reading CSV and checking the columns…");
       const parsed = parseCsv(await file.text());
       if (!parsed.headers.length || !parsed.rows.length) throw new Error("The CSV needs a header row and at least one data row.");
-      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: clientId || undefined, clientName: newClient || undefined, listName, dataSource, fileName: file.name, totalRows: parsed.rows.length, headers: parsed.headers }) });
+      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: clientId || undefined, clientName: newClient || undefined, listName, dataSource, fileName: file.name, totalRows: parsed.rows.length, headers: parsed.headers, fieldMap }) });
       setPhase("uploading"); setMessage(`Synchronizing ${formatNumber(parsed.rows.length)} rows with the master database…`);
       const chunkSize = 100;
       for (let index = 0; index < parsed.rows.length; index += chunkSize) {
@@ -1307,13 +1304,13 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
   if (phase === "done" && summary) return <div className="import-success"><span className="success-mark">✓</span><p className="eyebrow">IMPORT COMPLETE</p><h2>Your list is ready.</h2><p>{message}</p><div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(fileAudit?.headers.length)}</strong><span>Fields preserved</span></div><div><strong>{formatNumber(summary.unique_added)}</strong><span>Added to master</span></div><div><strong>{formatNumber(summary.duplicates_linked)}</strong><span>Existing prospects linked</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
 
   return <div className="import-layout">
-    <div className="import-copy"><p className="eyebrow">CSV IMPORT</p><h2>Bring every list into one clean database.</h2><p>Preview the file, confirm field mapping, choose the client, and synchronize it safely with your master database.</p><ol><li><span>1</span><div><strong>Validate before import</strong><p>Review fields, row counts and records without usable identity data.</p></div></li><li><span>2</span><div><strong>Control field mapping</strong><p>Map unusual CSV headers without losing the original source fields.</p></div></li><li><span>3</span><div><strong>Sync with rollback</strong><p>Existing prospects are linked, new records are added once, and imports can be undone.</p></div></li></ol></div>
+    <div className="import-copy"><p className="eyebrow">CSV IMPORT</p><h2>Bring every list into one clean database.</h2><p>Preview the file, confirm field mapping, choose the client, and synchronize it safely with your master database.</p><RequiredFieldList title="Required person columns" fields={requiredPersonImportFields}/><ol><li><span>1</span><div><strong>Validate before import</strong><p>Review fields, row counts and records without usable identity data.</p></div></li><li><span>2</span><div><strong>Control field mapping</strong><p>Map unusual CSV headers without losing the original source fields.</p></div></li><li><span>3</span><div><strong>Sync with rollback</strong><p>Existing prospects are linked, new records are added once, and imports can be undone.</p></div></li></ol></div>
     <div className="import-card">
       <div className="form-field"><label htmlFor="import-client">Client</label><select id="import-client" value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></div>
       {!clientId && <div className="form-field"><label htmlFor="new-client-name">New client name</label><input id="new-client-name" value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}
       <label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void pickFile(event)}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to review</small></> : <><strong>Choose a CSV file</strong><small>Download your Google Sheet as .csv</small></>}</label>
       <div className="form-field"><label htmlFor="list-name">List name</label><input id="list-name" value={listName} onChange={(event) => setListName(event.target.value)} placeholder="Auto-filled from the CSV filename" /></div>
-      {fileAudit && <><div className="file-audit"><div><span className="audit-check">✓</span><p><strong>{formatNumber(fileAudit.headers.length)} fields detected</strong><small>{formatNumber(fileAudit.rows)} rows · {formatNumber(fileAudit.populatedCells)} populated cells</small></p></div><div className="audit-fields">{fileAudit.headers.slice(0, 8).map((header) => <span key={header}>{header}</span>)}{fileAudit.headers.length > 8 && <span>+{fileAudit.headers.length - 8} more</span>}</div><p>{fileAudit.invalidRows ? `${fileAudit.invalidRows} rows do not currently contain email, LinkedIn, or name plus company domain and will be preserved without a master link.` : "Every row has sufficient identity data for master matching."}</p></div><ImportMappingPanel audit={fileAudit} fieldMap={fieldMap} onChange={(header, value) => setFieldMap((current) => ({ ...current, [header]: value }))}/></>}
+      {fileAudit && <><div className="file-audit"><div><span className="audit-check">✓</span><p><strong>{formatNumber(fileAudit.headers.length)} fields detected</strong><small>{formatNumber(fileAudit.rows)} rows · {formatNumber(fileAudit.populatedCells)} populated cells</small></p></div><div className="audit-fields">{fileAudit.headers.slice(0, 8).map((header) => <span key={header}>{header}</span>)}{fileAudit.headers.length > 8 && <span>+{fileAudit.headers.length - 8} more</span>}</div><p>{fileAudit.invalidRows ? `${fileAudit.invalidRows} rows do not currently contain email, LinkedIn, or name plus company domain and will be preserved without a master link.` : "Every row has sufficient identity data for master matching."}</p></div><ImportMappingPanel audit={fileAudit} fieldMap={fieldMap} onChange={(header, value) => setFieldMap((current) => ({ ...current, [header]: value }))}/><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Map required columns: ${missingFields.join(", ")}.` : "All required person columns are mapped."}</p></>}
       {phase !== "idle" && <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div>}
       {message && phase === "idle" && <p className="form-error" role="alert">{message}</p>}
       <button className="primary import-button" disabled={!canSubmit} onClick={startImport}>{phase === "idle" ? "Start import & sync" : "Processing…"}</button><p className="privacy-note">Original rows and fields remain stored in your private database.</p>

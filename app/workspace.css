@@ -446,6 +446,7 @@ main { min-width: 0; grid-column: 2; }
 .import-source-fields select, .import-source-fields input { width: 100%; height: 36px; padding: 0 9px; border: 1px solid var(--ph-border-strong); border-radius: 7px; background: #fff; font-size: 11px; }
 .source-required-note, .source-selected-note { grid-column: 3; }.source-required-note { color: var(--ph-danger) !important; }.source-selected-note { color: var(--ph-success) !important; }
 .company-import-mapping { margin-top: 13px; }.company-import-mapping select { width: 100%; height: 38px; margin-top: 5px; border: 1px solid var(--ph-border-strong); border-radius: 7px; background: #fff; }.company-import-layout .import-copy { padding-top: 24px; }
+.required-field-list { margin-top: 18px; padding: 14px; border: 1px solid #dbe7e3; border-radius: 12px; background: #f7fbfa; }.required-field-list > strong { display: block; margin-bottom: 10px; color: #173f36; }.required-field-list > div { display: flex; flex-wrap: wrap; gap: 7px; }.required-field-list span { padding: 5px 8px; border-radius: 999px; background: #e8f4ef; color: #246552; font-size: 10px; }.company-required-mapping { max-height: 410px; margin-top: 13px; overflow: auto; padding-right: 4px; border: 1px solid var(--ph-border); border-radius: 10px; }
 @media (max-width: 900px) { .import-setup { grid-template-columns: 1fr; }.source-required-note, .source-selected-note { grid-column: 1; }.entity-pivot-actions, .company-filter-head-actions { width: 100%; flex-wrap: wrap; } }
 
 /* Respect users who prefer less motion — kill transforms/entrances,

@@ -29,7 +29,7 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
   const requiresV6 = query.filters.some((filter) => v6OnlyFields.has(filter.field) || filter.field.startsWith("custom:") || ["boolean", "number_ranges"].includes(filter.operator));
   // v7 reads the flat prospect_index (fast at any size); v6 is the identical-semantics fallback
   // used automatically until the search-index migration is applied.
-  let workspace = query.companyScope ? await supabase.rpc("search_prospect_workspace_v8", {
+  let workspace = query.companyScope ? await supabase.rpc("search_prospect_workspace_v10", {
     p_search: query.search,
     p_filters: query.filters,
     p_sort: query.sort,

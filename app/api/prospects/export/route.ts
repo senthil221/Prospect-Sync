@@ -63,7 +63,7 @@ export async function POST(request: Request) {
 
   const supabase = createAdminClient();
   const [page, fieldRows] = await Promise.all([
-    supabase.rpc(companyScope ? "search_prospect_export_v2" : "search_prospect_export_v1", {
+    supabase.rpc(companyScope ? "search_prospect_export_v4" : "search_prospect_export_v1", {
       p_search: search,
       p_filters: filters,
       p_client_id: clientId,
