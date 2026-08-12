@@ -11,7 +11,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   const affected = await supabase.from("list_rows").select("prospect_id").eq("import_id", id);
   const { data, error } = await supabase.rpc("delete_import_with_cleanup", {
     p_import_id: id,
-    p_delete_orphans: payload.deleteOrphans !== false,
+    p_delete_orphans: payload.deleteOrphans === true,
   });
   if (error) return Response.json({ error: error.message }, { status: error.code === "P0002" ? 404 : 500 });
   await reindexProspects(supabase, (affected.data ?? []).map((row) => row.prospect_id));

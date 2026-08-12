@@ -2,6 +2,7 @@ import { authorizeApi } from "../../../lib/auth";
 import { csvDocument } from "../../../lib/csv";
 import { normalizeDomain } from "../../../db/normalize";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { parsePeopleScope, type PeopleScope } from "../../../lib/workspace-scopes";
 
 function parseList(raw: string | null, transform: (value: string) => string = (value) => value.trim()) {
   const seen = new Set<string>();
@@ -23,10 +24,10 @@ function websiteUrl(domain: string) {
   return /^https?:\/\//i.test(domain) ? domain : `https://${domain}`;
 }
 
-async function exportCompanies(search: string, websitesOnly: boolean, domains: string[], seniority: string[], locations: string[]) {
+async function exportCompanies(search: string, websitesOnly: boolean, names: string[], domains: string[], seniority: string[], locations: string[], peopleScope: PeopleScope | null) {
   const supabase = createAdminClient();
   const rows: Array<{ name: string; domain: string }> = [];
-  const hasFilters = domains.length > 0 || seniority.length > 0 || locations.length > 0;
+  const hasFilters = names.length > 0 || domains.length > 0 || seniority.length > 0 || locations.length > 0 || Boolean(peopleScope);
   let offset = 0;
 
   for (;;) {
@@ -34,9 +35,9 @@ async function exportCompanies(search: string, websitesOnly: boolean, domains: s
     let batch: Array<{ name?: string | null; domain?: string | null }>;
     if (hasFilters) {
       // Honour the on-screen filters by paging through the same function the UI uses.
-      const { data, error } = await supabase.rpc("filter_companies", {
-        p_search: search, p_domains: domains, p_seniority: seniority, p_locations: locations,
-        p_client_id: null, p_limit: exportBatchSize, p_offset: offset,
+      const { data, error } = await supabase.rpc("filter_companies_v3", {
+        p_search: search, p_names: names, p_domains: domains, p_seniority: seniority, p_locations: locations,
+        p_client_id: null, p_people_scope: peopleScope, p_limit: exportBatchSize, p_offset: offset,
       });
       if (error) return { error: error.message, csv: "", count: 0 };
       const summary = Array.isArray(data) ? data[0] : data;
@@ -80,13 +81,18 @@ export async function GET(request: Request) {
   const from = (page - 1) * pageSize;
   const exportCsv = url.searchParams.get("export") === "csv";
   const websitesOnly = url.searchParams.get("website") === "required";
+  const names = parseList(url.searchParams.get("names"));
   const domains = parseList(url.searchParams.get("domains"), (value) => normalizeDomain(value));
   const seniority = parseList(url.searchParams.get("seniority"));
   const locations = parseList(url.searchParams.get("locations"));
 
+  let peopleScope: PeopleScope | null;
+  try { peopleScope = parsePeopleScope(url.searchParams.get("peopleScope")); }
+  catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Invalid people navigation scope." }, { status: 400 }); }
+
   if (exportCsv) {
     if (clientId) return Response.json({ error: "Client-scoped company export is not available." }, { status: 400 });
-    const result = await exportCompanies(search, websitesOnly, domains, seniority, locations);
+    const result = await exportCompanies(search, websitesOnly, names, domains, seniority, locations, peopleScope);
     if (result.error) return Response.json({ error: result.error }, { status: 500 });
     return new Response(result.csv, {
       headers: {
@@ -103,13 +109,15 @@ export async function GET(request: Request) {
   // Domain / seniority / location filters run through filter_companies, which
   // also handles client scoping via p_client_id — so a filtered client-company
   // view goes here too, while the unfiltered client view keeps its dedicated RPC.
-  if (domains.length || seniority.length || locations.length) {
-    const { data, error } = await supabase.rpc("filter_companies", {
+  if (names.length || domains.length || seniority.length || locations.length || peopleScope) {
+    const { data, error } = await supabase.rpc("filter_companies_v3", {
       p_search: search,
+      p_names: names,
       p_domains: domains,
       p_seniority: seniority,
       p_locations: locations,
       p_client_id: clientId || null,
+      p_people_scope: peopleScope,
       p_limit: pageSize,
       p_offset: from,
     });

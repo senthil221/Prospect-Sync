@@ -11,7 +11,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   const affected = await supabase.from("list_memberships").select("prospect_id").eq("list_id", id);
   const { data, error } = await supabase.rpc("delete_list_with_cleanup", {
     p_list_id: id,
-    p_delete_orphans: payload.deleteOrphans !== false,
+    p_delete_orphans: payload.deleteOrphans === true,
   });
   if (error) return Response.json({ error: error.message }, { status: error.code === "P0002" ? 404 : 500 });
   // Survivors keep their index rows but lost a membership; deleted prospects cascade out.

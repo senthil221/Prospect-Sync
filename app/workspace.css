@@ -210,7 +210,7 @@ main { min-width: 0; grid-column: 2; }
 .company-filter-head small { color: #8a93a1; font-size: 11px; }
 .company-filter-clear { padding: 6px 10px; border: 1px solid #d9d9f0; border-radius: 999px; background: #f2f1ff; color: #4a4aa9; font-size: 11px; font-weight: 650; }
 .company-filter-clear:hover { background: var(--ph-brand-soft); border-color: #c7c7e9; }
-.company-filter-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.company-filter-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .company-filter-field { display: flex; flex-direction: column; gap: 6px; }
 .company-filter-field-head { min-height: 18px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .company-filter-field-head > span { color: #555f70; font-size: 10px; font-weight: 720; letter-spacing: .5px; text-transform: uppercase; }
@@ -428,6 +428,25 @@ main { min-width: 0; grid-column: 2; }
 .empty > span, .coverage-placeholder > span { box-shadow: inset 0 0 0 1px rgba(91, 91, 214, .08), 0 8px 20px -8px rgba(91, 91, 214, .35); }
 .empty { animation: ph-rise .42s var(--ph-ease-out) both; }
 .loading-bar, .loading-grid span { background-color: #eef0f4; }
+
+/* Request 2: import lineage and filter-preserving entity pivots. */
+.entity-pivot-actions, .company-filter-head-actions { display: flex; align-items: center; gap: 8px; }
+.cross-scope-banner { margin: 0 0 14px; padding: 10px 13px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #d8d8f0; border-radius: 10px; background: #f5f4ff; color: #4f4f91; font-size: 11px; }
+.cross-scope-banner button { padding: 4px 8px; border: 0; border-radius: 6px; background: #fff; color: var(--ph-brand); font-size: 10px; font-weight: 700; }
+.company-filter-import { padding: 6px 10px; border: 1px solid #d9d9f0; border-radius: 999px; background: #fff; color: var(--ph-brand); cursor: pointer; font-size: 11px; font-weight: 650; }
+.company-filter-import:hover { background: var(--ph-brand-soft); }.company-filter-import input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.client-remove-prospect { padding: 5px 7px; border: 1px solid #e5c8c5; border-radius: 6px; background: #fff7f6; text-decoration: none; white-space: nowrap; }
+.data-source-badge { display: inline-flex; padding: 4px 7px; border-radius: 999px; background: #eeedff; color: #5252ad; font-size: 10px; font-weight: 700; }
+.import-workspace { display: flex; flex-direction: column; gap: 4px; }
+.import-setup { max-width: 1160px; width: 100%; margin: 0 auto; padding: 16px 18px; display: grid; grid-template-columns: minmax(240px, 1fr) auto minmax(220px, .8fr); align-items: center; gap: 20px; }
+.import-setup h2 { margin: 1px 0 3px; font-size: 18px; }.import-setup p { margin: 0; color: var(--ph-muted); font-size: 11px; }
+.import-kind-switch { padding: 4px; display: flex; border: 1px solid var(--ph-border); border-radius: 9px; background: #f7f8fb; }
+.import-kind-switch button { padding: 8px 11px; border: 0; border-radius: 6px; background: transparent; color: var(--ph-muted); font-size: 11px; font-weight: 700; }.import-kind-switch button.active { background: #fff; color: var(--ph-brand); box-shadow: var(--ph-shadow); }
+.import-source-fields { display: flex; gap: 8px; }.import-source-fields label { flex: 1; }.import-source-fields label > span { display: block; margin-bottom: 4px; color: #555f70; font-size: 10px; font-weight: 700; }.import-source-fields b { color: var(--ph-danger); }
+.import-source-fields select, .import-source-fields input { width: 100%; height: 36px; padding: 0 9px; border: 1px solid var(--ph-border-strong); border-radius: 7px; background: #fff; font-size: 11px; }
+.source-required-note, .source-selected-note { grid-column: 3; }.source-required-note { color: var(--ph-danger) !important; }.source-selected-note { color: var(--ph-success) !important; }
+.company-import-mapping { margin-top: 13px; }.company-import-mapping select { width: 100%; height: 38px; margin-top: 5px; border: 1px solid var(--ph-border-strong); border-radius: 7px; background: #fff; }.company-import-layout .import-copy { padding-top: 24px; }
+@media (max-width: 900px) { .import-setup { grid-template-columns: 1fr; }.source-required-note, .source-selected-note { grid-column: 1; }.entity-pivot-actions, .company-filter-head-actions { width: 100%; flex-wrap: wrap; } }
 
 /* Respect users who prefer less motion — kill transforms/entrances,
    keep instant, legible state changes. */

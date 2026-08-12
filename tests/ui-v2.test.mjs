@@ -35,7 +35,7 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
   assert.doesNotMatch(dashboard, /Reuse eligibility/);
   assert.match(companiesRoute, /\.range\(from, from \+ pageSize - 1\)/);
   assert.match(companiesRoute, /prospectTotal/);
-  assert.match(companiesRoute, /exportCompanies\(search, websitesOnly\)/);
+  assert.match(companiesRoute, /exportCompanies\(search, websitesOnly,/);
   assert.match(companiesRoute, /website.*required/);
   assert.match(companiesRoute, /\.neq\("domain", ""\)/);
   assert.match(companiesRoute, /\.range\(offset, offset \+ exportBatchSize - 1\)/);

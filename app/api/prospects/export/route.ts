@@ -2,6 +2,7 @@ import { authorizeApi } from "../../../../lib/auth";
 import { parseFilters } from "../../../../lib/prospect-filters";
 import { availableExportFieldIds, buildExportColumns, csvHeaderLine, csvRowsBody, type ProspectRow } from "../../../../lib/prospect-export";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { parseCompanyScope } from "../../../../lib/workspace-scopes";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -35,6 +36,7 @@ export async function POST(request: Request) {
     cursor?: { createdAt?: unknown; id?: unknown } | null;
     limit?: unknown;
     withTotal?: unknown;
+    companyScope?: unknown;
   } | null;
   if (!payload) return Response.json({ error: "Invalid export request." }, { status: 400 });
 
@@ -43,6 +45,9 @@ export async function POST(request: Request) {
   try { filters = parseFilters(JSON.stringify(payload.filters ?? [])); }
   catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Invalid Boolean filter." }, { status: 400 }); }
   const clientId = String(payload.clientId ?? "").trim() || null;
+  let companyScope;
+  try { companyScope = parseCompanyScope(payload.companyScope ? JSON.stringify(payload.companyScope) : null); }
+  catch { return Response.json({ error: "Invalid company navigation scope." }, { status: 400 }); }
   const requestedFields = Array.isArray(payload.fields)
     ? [...new Set(payload.fields.map((field) => String(field).trim()).filter(Boolean))].slice(0, 600)
     : [];
@@ -58,10 +63,11 @@ export async function POST(request: Request) {
 
   const supabase = createAdminClient();
   const [page, fieldRows] = await Promise.all([
-    supabase.rpc("search_prospect_export_v1", {
+    supabase.rpc(companyScope ? "search_prospect_export_v2" : "search_prospect_export_v1", {
       p_search: search,
       p_filters: filters,
       p_client_id: clientId,
+      ...(companyScope ? { p_company_scope: companyScope } : {}),
       p_after_created_at: cursor?.createdAt ?? null,
       p_after_id: cursor?.id ?? null,
       p_limit: limit,

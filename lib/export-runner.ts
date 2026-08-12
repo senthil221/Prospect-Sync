@@ -1,5 +1,6 @@
 import { buildExportColumns, csvHeaderLine, csvRowsBody, type ProspectRow } from "./prospect-export";
 import type { ProspectFilter } from "./prospect-filters";
+import type { CompanyScope } from "./workspace-scopes";
 
 const BOM = "﻿";
 const CRLF = "\r\n";
@@ -31,6 +32,7 @@ export type ExportOptions = {
   search: string;
   filters: ProspectFilter[];
   clientId: string | null;
+  companyScope?: CompanyScope | null;
   fields: string[];               // requested export field ids
   customFieldNames: string[];     // available uploaded field names (for custom columns)
   mode: ExportMode;
@@ -61,6 +63,7 @@ async function* streamMatchingPages(options: ExportOptions, pageSize: number): A
         search: options.search,
         filters: options.filters,
         clientId: options.clientId,
+        companyScope: options.companyScope,
         fields: options.fields,
         excludedIds: options.excludedIds ?? [],
         cursor,

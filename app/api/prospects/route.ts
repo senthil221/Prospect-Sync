@@ -2,6 +2,7 @@ import { authorizeApi } from "../../../lib/auth";
 import { parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
 import { availableExportFieldIds, prospectsCsv, type ProspectRow } from "../../../lib/prospect-export";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { parseCompanyScope, type CompanyScope } from "../../../lib/workspace-scopes";
 
 type WorkspaceQuery = {
   search: string;
@@ -11,6 +12,7 @@ type WorkspaceQuery = {
   limit: number;
   offset: number;
   clientId: string | null;
+  companyScope: CompanyScope | null;
 };
 
 const missingFunctionCodes = new Set(["PGRST202", "42883"]);
@@ -27,7 +29,16 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
   const requiresV6 = query.filters.some((filter) => v6OnlyFields.has(filter.field) || filter.field.startsWith("custom:") || ["boolean", "number_ranges"].includes(filter.operator));
   // v7 reads the flat prospect_index (fast at any size); v6 is the identical-semantics fallback
   // used automatically until the search-index migration is applied.
-  let workspace = await supabase.rpc("search_prospect_workspace_v7", {
+  let workspace = query.companyScope ? await supabase.rpc("search_prospect_workspace_v8", {
+    p_search: query.search,
+    p_filters: query.filters,
+    p_sort: query.sort,
+    p_direction: query.direction,
+    p_limit: query.limit,
+    p_offset: query.offset,
+    p_client_id: query.clientId,
+    p_company_scope: query.companyScope,
+  }) : await supabase.rpc("search_prospect_workspace_v7", {
     p_search: query.search,
     p_filters: query.filters,
     p_sort: query.sort,
@@ -36,6 +47,7 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
     p_offset: query.offset,
     p_client_id: query.clientId,
   });
+  if (query.companyScope) return workspace;
   if (isMissingFunction(workspace.error)) {
     workspace = await supabase.rpc("search_prospect_workspace_v6", {
       p_search: query.search,
@@ -143,6 +155,9 @@ export async function GET(request: Request) {
   const sort = ["created_at", "name", "company", "title", "last_contacted"].includes(url.searchParams.get("sort") ?? "") ? String(url.searchParams.get("sort")) : "created_at";
   const direction = url.searchParams.get("direction") === "asc" ? "asc" : "desc";
   const clientId = (url.searchParams.get("clientId") ?? "").trim() || null;
+  let companyScope: CompanyScope | null;
+  try { companyScope = parseCompanyScope(url.searchParams.get("companyScope")); }
+  catch { return Response.json({ error: "Invalid company navigation scope." }, { status: 400 }); }
   const includeFields = url.searchParams.get("includeFields") !== "0";
   const exportCsv = url.searchParams.get("export") === "csv";
   const limit = 50;
@@ -152,7 +167,7 @@ export async function GET(request: Request) {
   const supabase = createAdminClient();
 
   if (exportCsv) {
-    const result = await exportProspects(supabase, { search, filters, sort, direction, clientId });
+    const result = await exportProspects(supabase, { search, filters, sort, direction, clientId, companyScope });
     if (isMissingFunction(result.error)) {
       return Response.json({ error: "Apply the latest database migration to enable the new prospect filters." }, { status: 503 });
     }
@@ -168,6 +183,7 @@ export async function GET(request: Request) {
     limit,
     offset: (page - 1) * limit,
     clientId,
+    companyScope,
   });
   const fieldsRequest = includeFields
     ? supabase.from("prospect_fields").select("field_name").order("field_name").limit(500)
@@ -198,6 +214,7 @@ export async function POST(request: Request) {
     direction?: unknown;
     clientId?: unknown;
     fields?: unknown;
+    companyScope?: unknown;
     selection?: { mode?: unknown; ids?: unknown; excludedIds?: unknown };
   } | null;
   if (!payload) return Response.json({ error: "Invalid export request." }, { status: 400 });
@@ -209,11 +226,14 @@ export async function POST(request: Request) {
   const sort = ["created_at", "name", "company", "title", "last_contacted"].includes(sortValue) ? sortValue : "created_at";
   const direction = payload.direction === "asc" ? "asc" : "desc";
   const clientId = String(payload.clientId ?? "").trim() || null;
+  let companyScope: CompanyScope | null;
+  try { companyScope = parseCompanyScope(payload.companyScope ? JSON.stringify(payload.companyScope) : null); }
+  catch { return Response.json({ error: "Invalid company navigation scope." }, { status: 400 }); }
   const requestedFields = Array.isArray(payload.fields) ? [...new Set(payload.fields.map((field) => String(field).trim()).filter(Boolean))].slice(0, 600) : [];
   if (!requestedFields.length) return Response.json({ error: "Choose at least one field to export." }, { status: 400 });
 
   const supabase = createAdminClient();
-  const result = await exportProspects(supabase, { search, filters, sort, direction, clientId });
+  const result = await exportProspects(supabase, { search, filters, sort, direction, clientId, companyScope });
   if (isMissingFunction(result.error)) {
     return Response.json({ error: "Apply the latest database migration to enable the new prospect filters." }, { status: 503 });
   }

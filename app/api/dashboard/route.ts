@@ -21,7 +21,7 @@ export async function GET() {
     supabase.from("clients").select("id", { count: "exact", head: true }),
     supabase.from("lists").select("id", { count: "exact", head: true }),
     supabase.from("imports").select("processed_rows, duplicates_linked"),
-    supabase.from("imports").select("id,file_name,status,processed_rows,unique_added,duplicates_linked,created_at,client:clients(name),list:lists(name)").order("created_at", { ascending: false }).limit(6),
+    supabase.from("imports").select("id,file_name,data_source,status,processed_rows,unique_added,duplicates_linked,created_at,client:clients(name),list:lists(name)").order("created_at", { ascending: false }).limit(6),
   ]);
   const failure = [prospects, companies, clients, lists, importTotals, recent].find((result) => result.error)?.error;
   if (failure) return Response.json({ error: failure.message }, { status: 500 });

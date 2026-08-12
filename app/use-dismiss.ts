@@ -9,7 +9,10 @@ import { RefObject, useEffect, useRef } from "react";
  */
 export function useDismiss<T extends HTMLElement>(ref: RefObject<T | null>, onDismiss: () => void, active = true) {
   const onDismissRef = useRef(onDismiss);
-  onDismissRef.current = onDismiss;
+
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
 
   useEffect(() => {
     if (!active) return;
