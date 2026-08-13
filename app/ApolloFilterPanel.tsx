@@ -47,7 +47,7 @@ const employeeRanges = [
   ["5001:10000", "5,001–10,000"], ["10001:", "10,001+"],
 ] as const;
 
-function filterId(field: string, operator: ProspectFilterOperator) {
+export function filterId(field: string, operator: ProspectFilterOperator) {
   return `${field}:${operator}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`;
 }
 
@@ -111,10 +111,11 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, onC
   </aside>;
 }
 
-function TextBooleanFilter({ definition, filters, clientId, onChange }: {
-  definition: FilterDefinition;
+export function TextBooleanFilter({ definition, filters, clientId, valuesEndpoint, onChange }: {
+  definition: { id: string; label: string };
   filters: ProspectFilter[];
   clientId?: string;
+  valuesEndpoint?: string;
   onChange: (filters: ProspectFilter[]) => void;
 }) {
   const existingBoolean = filters.find((filter) => filter.operator === "boolean");
@@ -124,7 +125,7 @@ function TextBooleanFilter({ definition, filters, clientId, onChange }: {
 
   if (mode === "simple") return <>
     <div className="apollo-mode-tabs"><button className="active" type="button">Simple</button><button type="button" onClick={() => setMode("advanced")}>Advanced</button></div>
-    <IncludeExcludeFilter field={definition.id} filters={filters.filter((filter) => filter.operator !== "boolean")} clientId={clientId} onChange={onChange} />
+    <IncludeExcludeFilter field={definition.id} filters={filters.filter((filter) => filter.operator !== "boolean")} clientId={clientId} valuesEndpoint={valuesEndpoint} onChange={onChange} />
   </>;
 
   function applyBoolean() {
@@ -149,10 +150,11 @@ function TextBooleanFilter({ definition, filters, clientId, onChange }: {
   </>;
 }
 
-function IncludeExcludeFilter({ field, filters, clientId, onChange }: {
+export function IncludeExcludeFilter({ field, filters, clientId, valuesEndpoint, onChange }: {
   field: string;
   filters: ProspectFilter[];
   clientId?: string;
+  valuesEndpoint?: string;
   onChange: (filters: ProspectFilter[]) => void;
 }) {
   const includeRule = filters.find((filter) => filter.operator === "contains" || filter.operator === "equals");
@@ -170,16 +172,17 @@ function IncludeExcludeFilter({ field, filters, clientId, onChange }: {
   }
 
   return <div className="include-exclude-grid">
-    <div><span className="include-exclude-label">Include</span><TokenValuePicker field={field} values={includeRule?.values ?? []} clientId={clientId} placeholder="Type or paste comma-separated values" onChange={(values) => setValues("include", values)} /></div>
-    <div><span className="include-exclude-label">Exclude</span><TokenValuePicker field={field} values={excludeRule?.values ?? []} clientId={clientId} placeholder="Values to leave out" onChange={(values) => setValues("exclude", values)} /></div>
+    <div><span className="include-exclude-label">Include</span><TokenValuePicker field={field} values={includeRule?.values ?? []} clientId={clientId} valuesEndpoint={valuesEndpoint} placeholder="Type or paste comma-separated values" onChange={(values) => setValues("include", values)} /></div>
+    <div><span className="include-exclude-label">Exclude</span><TokenValuePicker field={field} values={excludeRule?.values ?? []} clientId={clientId} valuesEndpoint={valuesEndpoint} placeholder="Values to leave out" onChange={(values) => setValues("exclude", values)} /></div>
   </div>;
 }
 
-export function TokenValuePicker({ field, values, clientId, placeholder, onChange }: {
+export function TokenValuePicker({ field, values, clientId, placeholder, valuesEndpoint = "/api/prospects/filter-values", onChange }: {
   field?: string;
   values: string[];
   clientId?: string;
   placeholder: string;
+  valuesEndpoint?: string;
   onChange: (values: string[]) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -197,14 +200,14 @@ export function TokenValuePicker({ field, values, clientId, placeholder, onChang
       const params = new URLSearchParams({ field, search: query.trim(), limit: "30" });
       if (clientId) params.set("clientId", clientId);
       try {
-        const response = await fetch(`/api/prospects/filter-values?${params}`, { signal: controller.signal });
+        const response = await fetch(`${valuesEndpoint}?${params}`, { signal: controller.signal });
         const data = await response.json() as { values?: Array<{ value: string; count: number }> };
         setOptions(response.ok ? data.values ?? [] : []);
       } catch { if (!controller.signal.aborted) setOptions([]); }
       finally { if (!controller.signal.aborted) setLoading(false); }
     }, 180);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [clientId, field, open, query]);
+  }, [clientId, field, open, query, valuesEndpoint]);
 
   function addMany(raw: string) {
     const seen = new Set(values.map((value) => value.toLocaleLowerCase()));
