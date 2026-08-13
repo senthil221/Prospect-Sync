@@ -17,16 +17,17 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
-  const payload = await request.json().catch(() => ({})) as { deleteOrphans?: boolean };
   const supabase = createAdminClient();
   const clientLists = await supabase.from("lists").select("id").eq("client_id", id);
   const listIds = (clientLists.data ?? []).map((row) => row.id);
   const affected = listIds.length
     ? await supabase.from("list_memberships").select("prospect_id").in("list_id", listIds)
     : { data: [] as Array<{ prospect_id: string }> };
+  // Client-side deletes never touch the People/Company databases: only the
+  // client, its lists, imports, and membership links are removed.
   const { data, error } = await supabase.rpc("delete_client_with_cleanup", {
     p_client_id: id,
-    p_delete_orphans: payload.deleteOrphans === true,
+    p_delete_orphans: false,
   });
   if (error) return Response.json({ error: error.message }, { status: error.code === "P0002" ? 404 : 500 });
   await reindexProspects(supabase, (affected.data ?? []).map((row) => row.prospect_id));

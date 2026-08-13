@@ -167,7 +167,7 @@ const navGroups: Array<{ label: string; items: Array<{ id: Section; label: strin
     label: "Workspace",
     items: [
       { id: "overview", label: "Overview", mark: "home" },
-      { id: "prospects", label: "Master database", mark: "database" },
+      { id: "prospects", label: "People database", mark: "database" },
       { id: "companies", label: "Companies", mark: "company" },
       { id: "clients", label: "Clients & lists", mark: "clients" },
     ],
@@ -296,7 +296,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
     setPeopleCompanyScope(scope); setCompanyFilters([]); setCompanyPage(1); setSearch(""); setSection("companies"); setSelectedClient(null);
   }
 
-  async function confirmDelete(deleteOrphans: boolean) {
+  async function confirmDelete() {
     if (!deleteRequest) return;
     setDeleting(true); setError("");
     try {
@@ -304,7 +304,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
       await api(`/api/${endpoint}/${encodeURIComponent(deleteRequest.id)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deleteOrphans }),
+        body: JSON.stringify({}),
       });
       const refreshedClients = await refreshDashboard();
       if (deleteRequest.kind === "client") {
@@ -381,36 +381,25 @@ function Overview({ stats, recentImports, clients, onImport, onViewMaster, onDel
   const uniqueRate = stats.rowsImported ? Math.round((stats.prospects / stats.rowsImported) * 100) : 0;
   const reuseRate = stats.rowsImported ? Math.round((stats.duplicatesDetected / stats.rowsImported) * 100) : 0;
   return <>
-    <div className="welcome"><div><div className="hero-status"><span/><strong>Database healthy</strong><small>Live sync active</small></div><p className="eyebrow">MASTER DATABASE</p><h2>All your prospects, organized in one place.</h2><p>Search the master database, review client coverage, or import a new list.</p></div><div className="welcome-actions"><button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import client list</button><button className="secondary" onClick={onViewMaster}>Open master database <AppIcon name="arrow" size={15}/></button></div></div>
+    <div className="welcome"><div><div className="hero-status"><span/><strong>Database healthy</strong><small>Live sync active</small></div><p className="eyebrow">PEOPLE DATABASE</p><h2>All your prospects, organized in one place.</h2><p>Search the people database, review client coverage, or import a new list.</p></div><div className="welcome-actions"><button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import client list</button><button className="secondary" onClick={onViewMaster}>Open people database <AppIcon name="arrow" size={15}/></button></div></div>
     <div className="metric-grid">{cards.map((card) => <article className={`metric-card ${card.color}`} key={card.label}><div className="metric-icon"><AppIcon name={card.icon} size={17}/></div><p>{card.label}</p><strong>{formatNumber(card.value)}</strong><small>{card.note}</small><span className="metric-arrow"><AppIcon name="arrow" size={14}/></span></article>)}</div>
     <div className="dashboard-grid"><article className="panel"><div className="panel-head"><div><h3>Recent imports</h3><p>Lists you imported recently</p></div><button onClick={onImport}>Import CSV</button></div>{recentImports.length ? <div className="activity-list">{recentImports.map((item) => <div className="activity" key={item.id}><span className="csv-icon">CSV</span><div><strong>{item.file_name}</strong><small>{item.client_name} · {item.list_name} · {item.data_source}</small></div><div className="activity-result"><strong>{formatNumber(item.processed_rows)} rows</strong><small>{formatNumber(item.duplicates_linked)} cross-client overlaps</small></div><div className="activity-actions"><span className="status">Complete</span><button className="text-danger" onClick={() => onDeleteImport(item)}>Undo</button></div></div>)}</div> : <EmptyCompact text="Your completed imports will appear here." action="Import a CSV" onAction={onImport} />}</article>
       <article className="panel coverage"><div className="panel-head"><div><h3>Time and money saved</h3><p>See how often existing data was reused</p></div><span className="health-badge"><i/> Healthy</span></div><div className="coverage-spotlight"><strong>{reuseRate}%</strong><span>of imported rows matched data you already owned</span></div><div className="coverage-row"><span>Rows processed</span><strong>{formatNumber(stats.rowsImported)}</strong></div><div className="coverage-row"><span>Unique-record ratio</span><strong>{uniqueRate}%</strong></div><div className="coverage-row"><span>Known companies</span><strong>{formatNumber(stats.companies)}</strong></div><div className="coverage-track"><i style={{ width: `${Math.min(100, reuseRate)}%` }}/></div><p className="coverage-note">Each match means one less prospect you need to scrape again.</p><div className="client-mini"><span>Active client workspaces</span><div>{clients.slice(0, 4).map((client) => <i key={client.id}>{initials(client.name)}</i>)}{clients.length > 4 && <i>+{clients.length - 4}</i>}</div></div></article></div>
   </>;
 }
 
+// The People database shows exactly these mandatory fields as columns.
 const standardProspectFields = [
   { id: "__name", label: "Name" },
-  { id: "__first_name", label: "First name" },
-  { id: "__last_name", label: "Last name" },
-  { id: "__company", label: "Company" },
+  { id: "__company", label: "Company Name" },
   { id: "__email", label: "Email" },
-  { id: "__title", label: "Title" },
-  { id: "__keywords", label: "Keywords" },
-  { id: "__lists", label: "List names" },
-  { id: "__clients", label: "Clients" },
-  { id: "__linkedin", label: "LinkedIn" },
-  { id: "__country", label: "Country" },
-  { id: "__person_location", label: "Person location" },
-  { id: "__company_location", label: "Company location" },
-  { id: "__employee_count", label: "# Employees" },
+  { id: "__linkedin", label: "Personal LinkedIn URL" },
+  { id: "__title", label: "Job Title" },
   { id: "__seniority", label: "Seniority" },
-  { id: "__department", label: "Department" },
-  { id: "__esp", label: "ESP" },
-  { id: "__email_provider_type", label: "Email provider type" },
-  { id: "__tags", label: "Tags" },
-  { id: "__last_contacted", label: "Last contacted" },
+  { id: "__department", label: "Departments" },
+  { id: "__sub_department", label: "Sub Departments" },
 ];
-const defaultProspectColumns = ["__name", "__company", "__email", "__esp", "__title", "__lists"];
+const defaultProspectColumns = standardProspectFields.map((field) => field.id);
 const standardProspectExportFields = [
   { id: "__name", label: "Full Name" },
   { id: "__first_name", label: "First Name" },
@@ -473,6 +462,11 @@ function prospectFieldValue(prospect: Prospect, field: string) {
   }
   if (field === "__seniority") return String(prospect.seniority || "");
   if (field === "__department") return String(prospect.department || "");
+  if (field === "__sub_department") {
+    const data = parseAllData(prospect.all_data);
+    const key = Object.keys(data).find((candidate) => { const normalized = candidate.toLowerCase().replace(/[^a-z0-9]/g, ""); return normalized === "subdepartments" || normalized === "subdepartment" || normalized === "subdepartmentname"; });
+    return key ? String(data[key] || "") : "";
+  }
   if (field === "__esp") return String(prospect.esp || "");
   if (field === "__email_provider_type") return String(prospect.email_provider_type || "Unknown");
   if (field === "__tags") return Array.isArray(prospect.tags) ? prospect.tags.map((tag) => tag.name).join(", ") : "";
@@ -544,9 +538,13 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
       try {
         const saved = JSON.parse(localStorage.getItem("prospecthub-visible-columns") || "[]") as string[];
         if (Array.isArray(saved) && saved.length) {
-          const withListNames = saved.includes("__lists") ? saved : [...saved, "__lists"];
-          setVisibleColumns(withListNames);
-          localStorage.setItem("prospecthub-visible-columns", JSON.stringify(withListNames));
+          // Drop any columns that are no longer part of the mandatory People set
+          // (e.g. previously-saved ESP/Lists/Tags) while keeping uploaded custom fields.
+          const allowed = new Set(standardProspectFields.map((field) => field.id));
+          const filtered = saved.filter((id) => allowed.has(id) || id.startsWith("custom:"));
+          const next = filtered.length ? filtered : defaultProspectColumns;
+          setVisibleColumns(next);
+          localStorage.setItem("prospecthub-visible-columns", JSON.stringify(next));
         }
       } catch { /* Keep the standard columns. */ }
     }, 0);
@@ -779,7 +777,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
 
   return <section className="people-workspace">
     <div className="people-heading">
-      <div><p className="eyebrow">PROSPECTS</p><h2>Find people</h2><p>Search and filter every prospect saved in your master database.</p></div>
+      <div><p className="eyebrow">PROSPECTS</p><h2>Find people</h2><p>Search and filter every prospect saved in your people database.</p></div>
       <div className="entity-pivot-actions"><button className="secondary" onClick={() => onSeeCompanies({ search: search.trim(), filters: effectiveFilters.map(({ field, operator, values }) => ({ field, operator, values })) })}>See Companies <AppIcon name="arrow" size={14}/></button><button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import prospects</button></div>
     </div>
     {companyScope ? <div className="cross-scope-banner" role="status"><span>Showing people inside the companies from your previous Company DB search.</span><button onClick={onClearCompanyScope}>Clear company scope</button></div> : null}
@@ -793,7 +791,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
     </article> : <div className={`people-layout ${filtersOpen ? "" : "filters-collapsed"}`}>
       <article className="panel results-panel">
         <div className="results-toolbar">
-          <div className="results-count"><strong>{formatNumber(total)} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "Master database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `✓ All ${formatNumber(total)} selected` : `Select all ${formatNumber(total)} across pages`}</button> : null}</div>
+          <div className="results-count"><strong>{formatNumber(total)} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `✓ All ${formatNumber(total)} selected` : `Select all ${formatNumber(total)} across pages`}</button> : null}</div>
           <div className="workspace-actions">
             <label><span className="sr-only">Saved ICP view</span><select defaultValue="" onChange={(event) => applyView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label>
             <button className="outline-button" onClick={() => void saveCurrentView()}>☆ Save view</button>
@@ -943,7 +941,7 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
     catch (caught) { setCooldownState(caught instanceof Error ? caught.message : "Unable to save"); }
   }
   return <><button className="back" onClick={onBack}>← All clients</button><div className="client-hero"><span className="client-logo tone-0">{initials(client.name)}</span><div><p className="eyebrow">CLIENT WORKSPACE</p><h2>{client.name}</h2><p>{formatNumber(client.prospect_count)} prospects across {formatNumber(client.list_count)} lists</p></div><div className="cooldown-setting"><label htmlFor="cooldown-days">Contact cooldown</label><div><input id="cooldown-days" type="number" min="0" max="730" value={cooldown} onChange={(event) => setCooldown(Number(event.target.value))}/><span>days</span><button onClick={() => void saveCooldown()}>Save</button></div><small role="status">{cooldownState || "Used when checking reuse eligibility"}</small></div><div className="client-actions"><button className="primary" onClick={onImport}>＋ Import another list</button><button className="danger-button" onClick={onDeleteClient}>Delete client</button></div></div>
-    <div className="client-database-tabs" role="tablist" aria-label={`${client.name} databases`}><button role="tab" aria-selected={tab === "lists"} className={tab === "lists" ? "active" : ""} onClick={() => setTab("lists")}><AppIcon name="upload" size={15}/> Uploaded lists <span>{formatNumber(client.list_count)}</span></button><button role="tab" aria-selected={tab === "prospects"} className={tab === "prospects" ? "active" : ""} onClick={() => setTab("prospects")}><AppIcon name="database" size={15}/> Master DB <span>{formatNumber(client.prospect_count)}</span></button><button role="tab" aria-selected={tab === "companies"} className={tab === "companies" ? "active" : ""} onClick={() => setTab("companies")}><AppIcon name="company" size={15}/> Company DB</button></div>
+    <div className="client-database-tabs" role="tablist" aria-label={`${client.name} databases`}><button role="tab" aria-selected={tab === "lists"} className={tab === "lists" ? "active" : ""} onClick={() => setTab("lists")}><AppIcon name="upload" size={15}/> Uploaded lists <span>{formatNumber(client.list_count)}</span></button><button role="tab" aria-selected={tab === "prospects"} className={tab === "prospects" ? "active" : ""} onClick={() => setTab("prospects")}><AppIcon name="database" size={15}/> People DB <span>{formatNumber(client.prospect_count)}</span></button><button role="tab" aria-selected={tab === "companies"} className={tab === "companies" ? "active" : ""} onClick={() => setTab("companies")}><AppIcon name="company" size={15}/> Company DB</button></div>
     <div className={`client-tab-panel ${tab === "lists" ? "active" : ""}`}><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Open any list to search its original rows and inspect preserved fields.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Data source</th><th>Source file</th><th>Rows</th><th>Fields preserved</th><th>New to master</th><th>Cross-client duplicates</th><th>Imported</th><th>Actions</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><button className="list-open-button" onClick={() => onOpenList(list)}><strong>{list.name}</strong><span>Open →</span></button></td><td><span className="data-source-badge">{list.data_source}</span></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="field-verified">✓ {formatNumber(list.field_count)} fields</span></td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><button className="row-danger" onClick={() => onDeleteList(list)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></div>
     <div className={`client-tab-panel ${tab === "prospects" ? "active" : ""}`}><ClientMasterDatabase key={`people:${JSON.stringify(companyPeopleScope)}`} client={client} clients={clients} active={tab === "prospects"} companyScope={companyPeopleScope} onClearCompanyScope={() => setCompanyPeopleScope(null)} onSeeCompanies={(scope) => { setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/></div>
     <div className={`client-tab-panel ${tab === "companies" ? "active" : ""}`}><ClientCompanyDatabase key={`companies:${JSON.stringify(peopleCompanyScope)}`} client={client} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onSeePeople={(scope) => { setCompanyPeopleScope(scope); setTab("prospects"); }} onImport={onImport}/></div>
@@ -974,13 +972,13 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
       try {
         const data = await api<{ prospects: Prospect[]; total: number; fields?: string[] }>(path);
         if (current) { setProspects(data.prospects); setTotal(data.total); if (data.fields?.length) { fieldsLoaded.current = true; setFields(data.fields); } setError(""); }
-      } catch (caught) { if (current) setError(caught instanceof Error ? caught.message : "Unable to load the client master database."); }
+      } catch (caught) { if (current) setError(caught instanceof Error ? caught.message : "Unable to load the client people database."); }
       finally { if (current) { setLoading(false); setRefreshing(false); } }
     })();
     return () => { current = false; };
   }, [client.id, client.prospect_count, deferredSearch, page, sort, direction, encodedFilters, refresh, companyScope]);
   async function removeFromClient(prospect: Prospect) {
-    if (!window.confirm(`Remove ${prospect.full_name || "this prospect"} from ${client.name}? The Master DB record will be preserved.`)) return;
+    if (!window.confirm(`Remove ${prospect.full_name || "this prospect"} from ${client.name}? The People DB record will be preserved.`)) return;
     try {
       await api(`/api/clients/${encodeURIComponent(client.id)}/prospects/${encodeURIComponent(prospect.id)}`, { method: "DELETE" });
       setRefresh((value) => value + 1);
@@ -1077,7 +1075,7 @@ function CoverageChecker() {
   }
 
   return <section className="operations-page"><div className="section-intro compact-intro"><div><p className="eyebrow">BEFORE YOU SCRAPE</p><h2>Company coverage checker</h2><p>Check a company list against your database before paying for employee emails.</p></div></div>
-    <div className="coverage-workspace"><article className="panel coverage-upload"><label className={`dropzone small ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void selectCoverageFile(event)}/><span className="upload-mark">↑</span><strong>{file ? file.name : "Upload a company CSV"}</strong><small>Up to 5,000 companies per check</small></label>{headers.length ? <div className="mapping-grid"><label>Company name<select value={nameField} onChange={(event) => setNameField(event.target.value)}><option value="">Not mapped</option>{headers.map((header) => <option key={header}>{header}</option>)}</select></label><label>Website or domain<select value={domainField} onChange={(event) => setDomainField(event.target.value)}><option value="">Not mapped</option>{headers.map((header) => <option key={header}>{header}</option>)}</select></label></div> : null}{error ? <p className="form-error" role="alert">{error}</p> : null}<button className="primary" disabled={!file || (!nameField && !domainField) || busy} onClick={() => void checkCoverage()}>{busy ? "Checking master database…" : "Check company coverage"}</button></article>
+    <div className="coverage-workspace"><article className="panel coverage-upload"><label className={`dropzone small ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void selectCoverageFile(event)}/><span className="upload-mark">↑</span><strong>{file ? file.name : "Upload a company CSV"}</strong><small>Up to 5,000 companies per check</small></label>{headers.length ? <div className="mapping-grid"><label>Company name<select value={nameField} onChange={(event) => setNameField(event.target.value)}><option value="">Not mapped</option>{headers.map((header) => <option key={header}>{header}</option>)}</select></label><label>Website or domain<select value={domainField} onChange={(event) => setDomainField(event.target.value)}><option value="">Not mapped</option>{headers.map((header) => <option key={header}>{header}</option>)}</select></label></div> : null}{error ? <p className="form-error" role="alert">{error}</p> : null}<button className="primary" disabled={!file || (!nameField && !domainField) || busy} onClick={() => void checkCoverage()}>{busy ? "Checking database…" : "Check company coverage"}</button></article>
       <article className="panel coverage-results">{summary ? <><div className="quality-metrics four"><div><span>Total companies</span><strong>{formatNumber(summary.total)}</strong></div><div><span>Already known</span><strong>{formatNumber(summary.known)}</strong></div><div><span>Net new</span><strong>{formatNumber(summary.new)}</strong></div><div><span>Existing prospects</span><strong>{formatNumber(summary.existingProspects)}</strong></div></div><div className="panel-head"><div><h3>Coverage results</h3><p>{summary.covered} companies already contain prospects</p></div><button onClick={exportNewCompanies}>Export net-new CSV</button></div><div className="table-wrap coverage-table"><table><thead><tr><th>Company</th><th>Domain</th><th>Status</th><th>Matched by</th><th>Prospects</th><th>Clients</th></tr></thead><tbody>{rows.map((row) => <tr key={`${row.row}-${row.domain}-${row.name}`}><td><strong>{row.name || row.matchedCompany || "Unnamed"}</strong></td><td>{row.domain || "-"}</td><td><span className={`coverage-status ${row.status}`}>{row.status === "known" ? "Known" : "Net new"}</span></td><td>{row.matchedBy || "-"}</td><td>{formatNumber(row.prospectCount)}</td><td>{formatNumber(row.clientCount)}</td></tr>)}</tbody></table></div></> : <div className="coverage-placeholder"><span>◫</span><h3>Know what already exists</h3><p>Upload company names or domains to see database coverage and export only net-new companies.</p></div>}</article></div>
   </section>;
 }
@@ -1243,7 +1241,7 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
       const parsed = parseCsv(await file.text());
       if (!parsed.headers.length || !parsed.rows.length) throw new Error("The CSV needs a header row and at least one data row.");
       const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: clientId || undefined, clientName: newClient || undefined, listName, dataSource, fileName: file.name, totalRows: parsed.rows.length, headers: parsed.headers, fieldMap }) });
-      setPhase("uploading"); setMessage(`Synchronizing ${formatNumber(parsed.rows.length)} rows with the master database…`);
+      setPhase("uploading"); setMessage(`Synchronizing ${formatNumber(parsed.rows.length)} rows with the people database…`);
       const chunkSize = 100;
       for (let index = 0; index < parsed.rows.length; index += chunkSize) {
         const chunk = parsed.rows.slice(index, index + chunkSize);
@@ -1252,14 +1250,14 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
         setProgress(Math.round(((index + chunk.length) / parsed.rows.length) * 100));
       }
       const completed = await api<{ summary: { processed_rows: number; unique_added: number; duplicates_linked: number } }>("/api/imports/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId, listId: started.listId }) });
-      setSummary(completed.summary); setPhase("done"); setMessage("Import complete. Your list is ready and the master database is up to date.");
+      setSummary(completed.summary); setPhase("done"); setMessage("Import complete. Your list is ready and the people database is up to date.");
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Import failed."); setPhase("idle"); }
   }
 
   if (phase === "done" && summary) return <div className="import-success"><span className="success-mark">✓</span><p className="eyebrow">IMPORT COMPLETE</p><h2>Your list is ready.</h2><p>{message}</p><div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(fileAudit?.headers.length)}</strong><span>Fields preserved</span></div><div><strong>{formatNumber(summary.unique_added)}</strong><span>Added to master</span></div><div><strong>{formatNumber(summary.duplicates_linked)}</strong><span>Existing prospects linked</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
 
   return <div className="import-layout">
-    <div className="import-copy"><p className="eyebrow">CSV IMPORT</p><h2>Bring every list into one clean database.</h2><p>Preview the file, confirm field mapping, choose the client, and synchronize it safely with your master database.</p><RequiredFieldList title="Required person columns" fields={requiredPersonImportFields}/><ol><li><span>1</span><div><strong>Validate before import</strong><p>Review fields, row counts and records without usable identity data.</p></div></li><li><span>2</span><div><strong>Control field mapping</strong><p>Map unusual CSV headers without losing the original source fields.</p></div></li><li><span>3</span><div><strong>Sync with rollback</strong><p>Existing prospects are linked, new records are added once, and imports can be undone.</p></div></li></ol></div>
+    <div className="import-copy"><p className="eyebrow">CSV IMPORT</p><h2>Bring every list into one clean database.</h2><p>Preview the file, confirm field mapping, choose the client, and synchronize it safely with your people database.</p><RequiredFieldList title="Required person columns" fields={requiredPersonImportFields}/><ol><li><span>1</span><div><strong>Validate before import</strong><p>Review fields, row counts and records without usable identity data.</p></div></li><li><span>2</span><div><strong>Control field mapping</strong><p>Map unusual CSV headers without losing the original source fields.</p></div></li><li><span>3</span><div><strong>Sync with rollback</strong><p>Existing prospects are linked, new records are added once, and imports can be undone.</p></div></li></ol></div>
     <div className="import-card">
       <div className="form-field"><label htmlFor="import-client">Client</label><select id="import-client" value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></div>
       {!clientId && <div className="form-field"><label htmlFor="new-client-name">New client name</label><input id="new-client-name" value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}
@@ -1288,15 +1286,14 @@ function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onClose: ()
   return <div className="drawer-backdrop"><button className="drawer-dismiss" aria-label="Close prospect details" onClick={onClose}/><aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="prospect-drawer-title"><button className="drawer-close" aria-label="Close prospect details" onClick={onClose}>×</button><div className="drawer-person"><span>{initials(prospect.full_name)}</span><div><p className="eyebrow">PROSPECT DETAILS</p><h2 id="prospect-drawer-title">{prospect.full_name || "Unnamed prospect"}</h2><p>{prospect.title || "No title"} {prospect.company_name ? `at ${prospect.company_name}` : ""}</p></div></div><div className="drawer-summary"><span><b>{formatNumber(prospect.client_count)}</b>clients</span><span><b>{formatNumber(prospect.list_count)}</b>lists</span><span><b>{Object.keys(data).length}</b>data fields</span></div><div className="drawer-tabs" role="tablist"><button role="tab" aria-selected={tab === "data"} className={tab === "data" ? "active" : ""} onClick={() => setTab("data")}>Saved data</button><button role="tab" aria-selected={tab === "history"} className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>Contact history <span>{events.length}</span></button></div>{tab === "data" ? <div className="drawer-saved-data"><section className="drawer-memberships"><div><span>LIST MEMBERSHIPS</span><strong>{formatNumber(memberships.length)} linked</strong><small className={membershipCountMatches ? "verified" : "review"}>{membershipCountMatches ? "✓ Tag count verified" : "Review membership count"}</small></div>{memberships.length ? <div className="drawer-membership-list">{memberships.map((membership) => <div key={membership.key}><span>{membership.clientName || "Client"}</span><strong>{membership.listName}</strong></div>)}</div> : <p>No master-list membership is linked to this prospect.</p>}</section><div className="field-list">{Object.entries(data).map(([field, value]) => <div key={field}><span>{field}</span><strong>{value || "-"}</strong></div>)}</div></div> : <div className="contact-timeline">{events.length ? events.map((event) => { const client = Array.isArray(event.client) ? event.client[0] : event.client; return <div key={event.id}><i/><span>{new Date(event.contacted_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span><strong>{client?.name || "Unknown client"}</strong><p>{event.campaign_name || event.outcome || "Contacted"}</p></div>; }) : <div className="drawer-empty">No contact history recorded yet.</div>}</div>}</aside></div>;
 }
 
-function DeleteConfirmation({ target, busy, onCancel, onConfirm }: { target: DeleteRequest; busy: boolean; onCancel: () => void; onConfirm: (deleteOrphans: boolean) => Promise<void> }) {
-  const [deleteOrphans, setDeleteOrphans] = useState(false);
+function DeleteConfirmation({ target, busy, onCancel, onConfirm }: { target: DeleteRequest; busy: boolean; onCancel: () => void; onConfirm: () => Promise<void> }) {
   const action = target.kind === "import" ? "Undo import" : target.kind === "list" ? "Delete list" : "Delete client";
   const explanation = target.kind === "import"
     ? "This removes the import and its client-list links. The list is also removed when nothing else uses it."
     : target.kind === "list"
-      ? "This removes the list, its import history, and all links between this list and the master database."
-      : "This removes the client workspace, every list under it, its import history, and its master-database links.";
-  return <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="delete-title">{action}?</h2><p>{explanation}</p><div className="delete-target"><strong>{target.name}</strong><span>{target.context}</span></div><div className="cleanup-choice"><input id="delete-unused-master-records" type="checkbox" checked={deleteOrphans} onChange={(event) => setDeleteOrphans(event.target.checked)} /><label htmlFor="delete-unused-master-records"><strong>Remove unused master records (optional)</strong><small>Delete prospects and companies only when no other client list uses them.</small></label></div><p className="shared-safety">Shared prospects remain untouched. Default behavior preserves every Master DB prospect and company while removing only client/list links.</p><div className="modal-actions"><button className="secondary" disabled={busy} onClick={onCancel}>Cancel</button><button className="danger-button solid" disabled={busy} onClick={() => void onConfirm(deleteOrphans)}>{busy ? "Working…" : action}</button></div></section></div>;
+      ? "This removes the list and its import history — only the links between this list and the People database."
+      : "This removes the client workspace, every list under it, and its import history — only the client-side links.";
+  return <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="delete-title">{action}?</h2><p>{explanation}</p><div className="delete-target"><strong>{target.name}</strong><span>{target.context}</span></div><p className="shared-safety">Your People and Company databases are never affected by this. Every prospect and company stays in place — only this client-side data is removed.</p><div className="modal-actions"><button className="secondary" disabled={busy} onClick={onCancel}>Cancel</button><button className="danger-button solid" disabled={busy} onClick={() => void onConfirm()}>{busy ? "Working…" : action}</button></div></section></div>;
 }
 
 function parseAllData(data: Prospect["all_data"]) {
