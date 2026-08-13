@@ -9,11 +9,14 @@ export const requiredPersonImportFields = [
   "Sub Departments",
 ] as const;
 
+// A company row is identifiable by either its name or its website; at least one
+// of these must be mapped, but not both. The remaining fields are still required
+// so imported companies carry the full canonical profile.
+export const companyIdentityFields = ["Company Name", "Website"] as const;
+
 export const requiredCompanyImportFields = [
-  "Company Name",
   "#employees",
   "Industry",
-  "Website",
   "Company City",
   "Company State",
   "Company Country",
@@ -23,6 +26,9 @@ export const requiredCompanyImportFields = [
   "Technologies",
   "Total Funding",
 ] as const;
+
+// Every mappable company target, for the import column picker (identity first).
+export const companyImportFields = [...companyIdentityFields, ...requiredCompanyImportFields] as const;
 
 const personAliases: Record<string, string> = {
   name: "Name", fullname: "Name", firstname: "First Name", lastname: "Last Name",
@@ -77,4 +83,14 @@ export function resolvedImportFields(headers: string[], fieldMap: Record<string,
 export function missingRequiredFields(required: readonly string[], mapped: string[]) {
   const present = new Set(mapped);
   return required.filter((field) => !present.has(field));
+}
+
+// Company imports need every detail field plus at least one identity column
+// (Company Name or Website) — a website-only or name-only list is valid.
+export function missingCompanyImportFields(mapped: string[]) {
+  const missing = missingRequiredFields(requiredCompanyImportFields, mapped);
+  if (!companyIdentityFields.some((field) => mapped.includes(field))) {
+    missing.unshift(companyIdentityFields.join(" or "));
+  }
+  return missing;
 }

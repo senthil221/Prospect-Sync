@@ -1,6 +1,6 @@
 import { authorizeApi } from "../../../../lib/auth";
 import { normalizeDataSource } from "../../../../lib/data-source";
-import { missingRequiredFields, requiredCompanyImportFields, resolvedImportFields, suggestedCompanyImportField } from "../../../../lib/import-schema";
+import { missingCompanyImportFields, resolvedImportFields, suggestedCompanyImportField } from "../../../../lib/import-schema";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
 export async function POST(request: Request) {
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   if (!dataSource) return Response.json({ error: "Choose a data source before importing." }, { status: 400 });
   const headers = Array.isArray(payload.headers) ? payload.headers.map(String).slice(0, 500) : [];
   const fieldMap = payload.fieldMap && typeof payload.fieldMap === "object" ? payload.fieldMap as Record<string, string> : undefined;
-  const missingFields = missingRequiredFields(requiredCompanyImportFields, resolvedImportFields(headers, fieldMap, suggestedCompanyImportField));
+  const missingFields = missingCompanyImportFields(resolvedImportFields(headers, fieldMap, suggestedCompanyImportField));
   if (missingFields.length) return Response.json({ error: `Map all required company columns: ${missingFields.join(", ")}.` }, { status: 400 });
   const totalRows = Math.max(0, Math.min(100_000, Math.round(Number(payload.totalRows ?? 0))));
   if (!totalRows) return Response.json({ error: "The company CSV has no rows." }, { status: 400 });

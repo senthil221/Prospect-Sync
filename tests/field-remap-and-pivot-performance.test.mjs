@@ -50,7 +50,9 @@ test("people and company imports require the approved schemas", async () => {
   for (const field of ["Name", "Company Name", "Email", "Personal LinkedIn URL", "Job Title", "Seniority", "Departments", "Sub Departments"]) assert.match(schema, new RegExp(`"${field}"`));
   for (const field of ["#employees", "Industry", "Website", "Company City", "Company State", "Company Country", "Keywords", "Short Description", "Founded Year", "Technologies", "Total Funding"]) assert.match(schema, new RegExp(`"${field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
   assert.match(peopleStart, /missingRequiredFields/);
-  assert.match(companyStart, /missingRequiredFields/);
+  assert.match(companyStart, /missingCompanyImportFields/);
+  // A company row is valid with either a name or a website (not both required).
+  assert.match(schema, /companyIdentityFields = \["Company Name", "Website"\]/);
   assert.match(companyChunk, /employeeCountMin/);
   assert.match(companyChunk, /shortDescription/);
   assert.match(companyChunk, /technologies/);
