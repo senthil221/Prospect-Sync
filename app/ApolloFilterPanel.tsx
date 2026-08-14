@@ -13,32 +13,19 @@ type FilterDefinition = ProspectFieldDefinition & {
   description?: string;
 };
 
+// Only the mandatory person fields are offered as filters. Industry (and any other
+// kept field) arrives through the whitelisted custom fields in "MORE FILTERS".
 const mainFilters: FilterDefinition[] = [
-  { id: "__keywords", label: "Keywords", kind: "text", advanced: true, description: "Search the prospect Keywords column." },
-  { id: "__title", label: "Job titles", kind: "text", advanced: true, description: "Job Title is kept separate from Keywords." },
-  { id: "__seniority", label: "Seniority" },
-  { id: "__department", label: "Department" },
-  { id: "__person_location", label: "Person location", description: "Matches the person's city, state, or country." },
-  { id: "__company_location", label: "Company location", description: "Matches company headquarters, city, state, or country." },
-  { id: "__employee_count", label: "# Employees", kind: "employee" },
-  { id: "__first_name", label: "First name" },
-  { id: "__last_name", label: "Last name" },
-  { id: "__company", label: "Company" },
+  { id: "__name", label: "Name" },
+  { id: "__company", label: "Company Name" },
   { id: "__email", label: "Email" },
-  { id: "__clients", label: "Client" },
-  { id: "__esp", label: "ESP" },
-  { id: "__email_provider_type", label: "Email provider type" },
-  { id: "__lists", label: "List names" },
+  { id: "__linkedin", label: "Personal LinkedIn URL" },
+  { id: "__title", label: "Job Title", kind: "text", advanced: true, description: "Simple include/exclude, or Boolean with AND/OR/NOT." },
+  { id: "__seniority", label: "Seniority" },
+  { id: "__department", label: "Departments" },
 ];
 
-const optionalFilters: FilterDefinition[] = [
-  { id: "__name", label: "Full name" },
-  { id: "__work_email", label: "Work email" },
-  { id: "__personal_email", label: "Personal email" },
-  { id: "__linkedin", label: "LinkedIn" },
-  { id: "__tags", label: "Tags" },
-  { id: "__last_contacted", label: "Last contacted" },
-];
+const optionalFilters: FilterDefinition[] = [];
 
 const employeeRanges = [
   ["1:10", "1–10"], ["11:20", "11–20"], ["21:50", "21–50"], ["51:100", "51–100"],

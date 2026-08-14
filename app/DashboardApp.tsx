@@ -534,9 +534,15 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
   const [filtersOpen, setFiltersOpen] = useState(true);
   // Deleting from the master People DB is only offered on the main tab, never a client-scoped view.
   const canDeleteMaster = !clientId;
-  const customFields = useMemo(() => buildCustomFieldDefinitions(fields), [fields]);
-  const allColumns = useMemo(() => [...standardProspectFields, ...customFields], [customFields]);
-  const exportFieldCatalog = useMemo(() => [...standardProspectExportFields, ...customFields], [customFields]);
+  const allCustomFields = useMemo(() => buildCustomFieldDefinitions(fields), [fields]);
+  // Only Industry (and the mandatory Sub Departments) survive in the People filters/columns;
+  // every other imported column is dropped from the panel and picker.
+  const customFields = useMemo(() => allCustomFields.filter((field) => ["custom:industry", "custom:companyindustry", "custom:subdepartments", "custom:subdepartment"].includes(field.id)), [allCustomFields]);
+  // Sub Departments is already a standard column (__sub_department), so keep only Industry among the custom columns.
+  const columnCustomFields = useMemo(() => customFields.filter((field) => !["custom:subdepartments", "custom:subdepartment"].includes(field.id)), [customFields]);
+  const allColumns = useMemo(() => [...standardProspectFields, ...columnCustomFields], [columnCustomFields]);
+  // Export can still reach every preserved field — the trim is only for the on-screen filters/columns.
+  const exportFieldCatalog = useMemo(() => [...standardProspectExportFields, ...allCustomFields], [allCustomFields]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -830,7 +836,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
         {notice ? <div className="inline-notice" role="status">{notice}<button aria-label="Dismiss notification" onClick={() => setNotice("")}>×</button></div> : null}
         {selectedCount ? <div className="bulk-bar"><strong>{formatNumber(selectedCount)} selected {selectionMode === "all_matching" ? "across all pages" : "across pages"}</strong>{selectionMode === "explicit" && selectedCount < total ? <button onClick={selectAllMatching}>Select all {formatNumber(total)}</button> : null}<button onClick={() => openExportDialog("selected")}>↓ Export selected</button>{selectionMode === "explicit" ? <><button disabled={bulkBusy} onClick={() => void bulkAction("tag")}>＋ Add tag</button><select aria-label="Client for contact history" value={bulkClientId} onChange={(event) => setBulkClientId(event.target.value)}><option value="">Choose client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><button disabled={bulkBusy || !bulkClientId} onClick={() => void bulkAction("mark_contacted")}>✓ Mark contacted</button></> : <span className="selection-scope-note">Database-wide selection is ready to export</span>}{canDeleteMaster ? <button className="row-danger bulk-delete" disabled={deletingProspects} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? formatNumber(selectedCount) : "selected"}</button> : null}<button onClick={clearSelection}>Clear</button></div> : null}
         {effectiveFilters.length ? <div className="active-filter-strip">{effectiveFilters.flatMap((filter) => {
-          const label = filterLabel(filter.field, customFields);
+          const label = filterLabel(filter.field, allCustomFields);
           if (filter.operator === "empty" || filter.operator === "not_empty") return [<button key={filter.id} onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>{label}: {filter.operator === "empty" ? "Empty" : "Not empty"} <span>×</span></button>];
           const prefix = filter.operator === "not_contains" || filter.operator === "not_equals" ? "Exclude " : filter.operator === "boolean" ? "Boolean " : "";
           return filter.values.map((value) => <button key={`${filter.id}-${value}`} onClick={() => updateFilter(filter.id, { values: filter.values.filter((item) => item !== value) })}>{prefix}{label}: {filterChipValue(filter.field, value)} <span>×</span></button>);
