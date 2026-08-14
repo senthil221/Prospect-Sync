@@ -201,6 +201,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   const [companyPage, setCompanyPage] = useState(1);
   const [companySummary, setCompanySummary] = useState({ total: 0, covered: 0, prospectTotal: 0, pageSize: 50 });
   const [companyFilters, setCompanyFilters] = useState<ProspectFilter[]>([]);
+  const [companyRefresh, setCompanyRefresh] = useState(0);
   const [companyPeopleScope, setCompanyPeopleScope] = useState<CompanyScope | null>(null);
   const [peopleCompanyScope, setPeopleCompanyScope] = useState<PeopleScope | null>(null);
   const [lists, setLists] = useState<ListRecord[]>([]);
@@ -271,7 +272,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
       finally { if (active) setWorkspaceLoading(false); }
     })();
     return () => { active = false; };
-  }, [section, deferredSearch, stats.prospects, prospectPage, encodedProspectFilters, prospectSort, prospectDirection, prospectRefresh, companyPage, companyFilters, companyPeopleScope, peopleCompanyScope]);
+  }, [section, deferredSearch, stats.prospects, prospectPage, encodedProspectFilters, prospectSort, prospectDirection, prospectRefresh, companyPage, companyFilters, companyRefresh, companyPeopleScope, peopleCompanyScope]);
 
   async function openClient(client: ClientRecord) {
     setSelectedClient(client);
@@ -352,7 +353,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
           {!loading && workspaceLoading ? <div className="workspace-progress" role="status"><span/>Updating {title.toLowerCase()}…</div> : null}
           {!loading && section === "overview" && <Overview stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name} · ${item.list_name}` })} />}
           {!loading && section === "prospects" && <ProspectTable prospects={prospects} total={prospectTotal} fields={prospectFields} filters={prospectFilters} page={prospectPage} clients={clients} search={deferredSearch} sort={prospectSort} direction={prospectDirection} companyScope={companyPeopleScope} onClearCompanyScope={() => setCompanyPeopleScope(null)} onSeeCompanies={(scope) => seeCompanies(scope)} onSortChange={(nextSort, nextDirection) => { setProspectSort(nextSort); setProspectDirection(nextDirection); setProspectPage(1); }} onFiltersChange={(next) => { setProspectFilters(next); setProspectPage(1); }} onPageChange={setProspectPage} onSelect={setSelectedProspect} onImport={() => navigate("imports")} onRefresh={() => setProspectRefresh((current) => current + 1)} />}
-          {!loading && section === "companies" && <CompanyTable companies={companies} total={companySummary.total} covered={companySummary.covered} prospectTotal={companySummary.prospectTotal} page={companyPage} pageSize={companySummary.pageSize} search={deferredSearch} filters={companyFilters} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onSeePeople={seePeople} onFilters={(next) => { setCompanyFilters(next); setCompanyPage(1); }} onPageChange={setCompanyPage} onImport={() => navigate("imports")} />}
+          {!loading && section === "companies" && <CompanyTable companies={companies} total={companySummary.total} covered={companySummary.covered} prospectTotal={companySummary.prospectTotal} page={companyPage} pageSize={companySummary.pageSize} search={deferredSearch} filters={companyFilters} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onSeePeople={seePeople} onFilters={(next) => { setCompanyFilters(next); setCompanyPage(1); }} onPageChange={setCompanyPage} onImport={() => navigate("imports")} onRefresh={() => setCompanyRefresh((current) => current + 1)} />}
           {!loading && section === "clients" && !selectedClient && <ClientsView clients={clients} onOpen={openClient} onImport={() => navigate("imports")} />}
           {!loading && section === "clients" && selectedClient && !selectedList && <ClientDetail client={selectedClient} clients={clients} lists={lists} onBack={() => setSelectedClient(null)} onOpenList={setSelectedList} onSelectProspect={setSelectedProspect} onImport={() => navigate("imports")} onDeleteClient={() => setDeleteRequest({ kind: "client", id: selectedClient.id, name: selectedClient.name, context: `${selectedClient.list_count} lists · ${selectedClient.prospect_count} linked prospects` })} onDeleteList={(list) => setDeleteRequest({ kind: "list", id: list.id, name: list.name, context: `${list.source_file_name} · ${list.prospect_count} linked prospects` })} />}
           {!loading && section === "clients" && selectedClient && selectedList && <ListWorkspace client={selectedClient} list={selectedList} onBack={() => setSelectedList(null)} onSelect={setSelectedProspect} />}
@@ -845,7 +846,7 @@ function ProspectTable({ prospects, total, fields, filters, page, clients, searc
 
 
 
-function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize, clientId = "", search = "", filters = [], peopleScope = null, onClearPeopleScope, onSeePeople, onFilters, onPageChange, onImport }: { companies: Company[]; total: number; covered: number; prospectTotal: number; page: number; pageSize: number; clientId?: string; search?: string; filters?: ProspectFilter[]; peopleScope?: PeopleScope | null; onClearPeopleScope?: () => void; onSeePeople: (scope: CompanyScope) => void; onFilters?: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onImport: () => void }) {
+function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize, clientId = "", search = "", filters = [], peopleScope = null, onClearPeopleScope, onSeePeople, onFilters, onPageChange, onImport, onRefresh }: { companies: Company[]; total: number; covered: number; prospectTotal: number; page: number; pageSize: number; clientId?: string; search?: string; filters?: ProspectFilter[]; peopleScope?: PeopleScope | null; onClearPeopleScope?: () => void; onSeePeople: (scope: CompanyScope) => void; onFilters?: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onImport: () => void; onRefresh?: () => void }) {
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [prospectsByCompany, setProspectsByCompany] = useState<Record<string, Prospect[]>>({});
   const [prospectTotalsByCompany, setProspectTotalsByCompany] = useState<Record<string, number>>({});
@@ -859,6 +860,62 @@ function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const resultStart = total ? (page - 1) * pageSize + 1 : 0;
   const resultEnd = Math.min(page * pageSize, total);
+
+  // Deleting companies is offered only on the main Company DB, never a client-scoped view.
+  const canDelete = !clientId;
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState<"explicit" | "all_matching">("explicit");
+  const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
+  const [selectionQueryKey, setSelectionQueryKey] = useState("");
+  const [deleteRequest, setDeleteRequest] = useState<{ mode: "ids" | "all_matching"; count: number; ids?: string[] } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const selectionKey = JSON.stringify({ search: search.trim(), filters: filters.map(({ field, operator, values }) => ({ field, operator, values })), peopleScope });
+  const selectionMatchesQuery = selectionQueryKey === selectionKey;
+  const selectedCount = !selectionMatchesQuery ? 0 : selectionMode === "all_matching" ? Math.max(0, total - excludedIds.size) : selectedIds.size;
+
+  function isSelected(id: string) {
+    if (!selectionMatchesQuery) return false;
+    return selectionMode === "all_matching" ? !excludedIds.has(id) : selectedIds.has(id);
+  }
+  function clearSelection() {
+    setSelectionMode("explicit"); setSelectedIds(new Set()); setExcludedIds(new Set()); setSelectionQueryKey(selectionKey);
+  }
+  function selectAllMatching() {
+    setSelectionMode("all_matching"); setSelectedIds(new Set()); setExcludedIds(new Set()); setSelectionQueryKey(selectionKey);
+  }
+  function toggleSelected(id: string) {
+    if (!selectionMatchesQuery) { setSelectionMode("explicit"); setSelectedIds(new Set([id])); setExcludedIds(new Set()); setSelectionQueryKey(selectionKey); return; }
+    if (selectionMode === "all_matching") { setExcludedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; }); return; }
+    setSelectedIds((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  }
+  function togglePageSelection() {
+    const pageIds = companies.map((company) => company.id);
+    const allSelected = pageIds.length > 0 && pageIds.every(isSelected);
+    if (!selectionMatchesQuery || selectionMode === "explicit") {
+      setSelectionMode("explicit"); setExcludedIds(new Set()); setSelectionQueryKey(selectionKey);
+      setSelectedIds((current) => { const next = selectionMatchesQuery ? new Set(current) : new Set<string>(); pageIds.forEach((id) => allSelected ? next.delete(id) : next.add(id)); return next; });
+      return;
+    }
+    setExcludedIds((current) => { const next = new Set(current); pageIds.forEach((id) => allSelected ? next.add(id) : next.delete(id)); return next; });
+  }
+  function requestDeleteSelected() {
+    if (!selectedCount) return;
+    if (selectionMode === "all_matching") setDeleteRequest({ mode: "all_matching", count: selectedCount });
+    else setDeleteRequest({ mode: "ids", count: selectedIds.size, ids: [...selectedIds] });
+  }
+  async function deleteCompanies() {
+    if (!deleteRequest) return;
+    setDeleting(true); setCompanyError(""); setCompanyNotice("");
+    try {
+      const body = deleteRequest.mode === "ids"
+        ? { ids: deleteRequest.ids }
+        : { allMatching: true, search: search.trim(), filters: filters.map(({ field, operator, values }) => ({ field, operator, values })), excludedIds: [...excludedIds] };
+      const result = await api<{ deleted: number }>("/api/companies", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      setCompanyNotice(`Deleted ${formatNumber(result.deleted)} compan${result.deleted === 1 ? "y" : "ies"} from the Company database.`);
+      setDeleteRequest(null); clearSelection(); onRefresh?.();
+    } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to delete companies."); }
+    finally { setDeleting(false); }
+  }
 
   async function openCompany(company: Company) {
     setSelectedCompany(company);
@@ -920,10 +977,11 @@ function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize
     {companyError ? <div className="inline-error" role="alert">{companyError}</div> : null}
     {companyNotice ? <div className="inline-notice company-export-notice" role="status">{companyNotice}<button aria-label="Dismiss export notification" onClick={() => setCompanyNotice("")}>×</button></div> : null}
     <div className={`people-layout ${onFilters && filtersOpen ? "" : "filters-collapsed"}`}>
-    <article className="panel company-table-panel"><div className="panel-head company-panel-head"><div><h3>Company database</h3><p>Showing {formatNumber(resultStart)}–{formatNumber(resultEnd)} of {formatNumber(total)} companies. Click any row to open its details.</p></div><span className="directory-badge">{formatNumber(total)} total</span></div>{companies.length ? <><div className="table-wrap"><table className="company-table"><thead><tr><th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th></tr></thead><tbody>{companies.map((company) => { const tone = colorTone(company.id); return <tr className={`company-row tone-${tone}`} key={company.id} onClick={() => void openCompany(company)}><td><div className="company-identity"><button className="company-open" aria-label={`Open ${company.name || company.domain || "company"} details`} onClick={(event) => { event.stopPropagation(); void openCompany(company); }}><AppIcon name="arrow" size={15}/></button><span className={`company-logo tone-${tone}`}>{initials(company.name)}</span><div><strong>{company.name || company.domain || "Unnamed company"}</strong><small>{company.prospect_count ? `${formatNumber(company.prospect_count)} people available` : "No prospects linked"}</small></div></div></td><td onClick={(event) => event.stopPropagation()}>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain}</a> : <span className="missing-value">No domain</span>}</td><td><span className="prospect-count-badge">{formatNumber(company.prospect_count)}</span></td><td>{formatNumber(company.client_count)} {company.client_count === 1 ? "client" : "clients"}</td><td>{new Date(company.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><span className={`coverage-status ${company.prospect_count ? "known" : "new"}`}>{company.prospect_count ? "Covered" : "Needs prospects"}</span></td></tr>; })}</tbody></table></div><div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article>
+    <article className="panel company-table-panel"><div className="panel-head company-panel-head"><div><h3>Company database</h3><p>Showing {formatNumber(resultStart)}–{formatNumber(resultEnd)} of {formatNumber(total)} companies. Click any row to open its details.</p></div><span className="directory-badge">{formatNumber(total)} total</span></div>{canDelete && selectedCount ? <div className="bulk-bar company-bulk-bar"><strong>{formatNumber(selectedCount)} selected {selectionMode === "all_matching" ? "across all pages" : "across pages"}</strong>{selectionMode === "explicit" && selectedCount < total ? <button onClick={selectAllMatching}>Select all {formatNumber(total)}</button> : null}<button className="row-danger bulk-delete" disabled={deleting} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? formatNumber(selectedCount) : "selected"}</button><button onClick={clearSelection}>Clear</button></div> : null}{companies.length ? <><div className="table-wrap"><table className="company-table"><thead><tr>{canDelete ? <th className="select-column"><input aria-label="Select all companies on this page" title="Select all companies on this page" type="checkbox" checked={companies.length > 0 && companies.every((company) => isSelected(company.id))} onChange={togglePageSelection}/></th> : null}<th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th>{canDelete ? <th className="row-detail-column">Actions</th> : null}</tr></thead><tbody>{companies.map((company) => { const tone = colorTone(company.id); return <tr className={`company-row tone-${tone} ${isSelected(company.id) ? "selected" : ""}`} key={company.id} onClick={() => void openCompany(company)}>{canDelete ? <td className="select-column" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${company.name || company.domain || "company"}`} type="checkbox" checked={isSelected(company.id)} onChange={() => toggleSelected(company.id)}/></td> : null}<td><div className="company-identity"><button className="company-open" aria-label={`Open ${company.name || company.domain || "company"} details`} onClick={(event) => { event.stopPropagation(); void openCompany(company); }}><AppIcon name="arrow" size={15}/></button><span className={`company-logo tone-${tone}`}>{initials(company.name)}</span><div><strong>{company.name || company.domain || "Unnamed company"}</strong><small>{company.prospect_count ? `${formatNumber(company.prospect_count)} people available` : "No prospects linked"}</small></div></div></td><td onClick={(event) => event.stopPropagation()}>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain}</a> : <span className="missing-value">No domain</span>}</td><td><span className="prospect-count-badge">{formatNumber(company.prospect_count)}</span></td><td>{formatNumber(company.client_count)} {company.client_count === 1 ? "client" : "clients"}</td><td>{new Date(company.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><span className={`coverage-status ${company.prospect_count ? "known" : "new"}`}>{company.prospect_count ? "Covered" : "Needs prospects"}</span></td>{canDelete ? <td className="row-detail-column" onClick={(event) => event.stopPropagation()}><button className="row-danger" title={`Delete ${company.name || company.domain || "this company"} from the Company database`} onClick={() => setDeleteRequest({ mode: "ids", count: 1, ids: [company.id] })}>Delete</button></td> : null}</tr>; })}</tbody></table></div><div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article>
     {onFilters && filtersOpen ? <CompanyFilterPanel filters={filters} onChange={onFilters} /> : null}
     </div>
     {selectedCompany ? <CompanyDrawer company={selectedCompany} prospects={prospectsByCompany[selectedCompany.id] ?? []} total={prospectTotalsByCompany[selectedCompany.id] ?? selectedCompany.prospect_count} loading={loadingCompany === selectedCompany.id} error={companyError} onLoadMore={() => void loadMoreProspects(selectedCompany)} onClose={() => { setSelectedCompany(null); setCompanyError(""); }} /> : null}
+    {deleteRequest ? <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="company-delete-title"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="company-delete-title">Delete {formatNumber(deleteRequest.count)} {deleteRequest.count === 1 ? "company" : "companies"}?</h2><p>This permanently removes {deleteRequest.count === 1 ? "this company" : "these companies"} from the Company database. Any linked people stay in the People database — they just lose the company link. This cannot be undone.</p>{deleteRequest.mode === "all_matching" && !search.trim() && !filters.length && !excludedIds.size ? <p className="form-error" role="alert">⚠ No search or filters are applied — this will empty your entire Company database.</p> : null}<div className="modal-actions"><button className="secondary" disabled={deleting} onClick={() => setDeleteRequest(null)}>Cancel</button><button className="danger-button solid" disabled={deleting} onClick={() => void deleteCompanies()}>{deleting ? "Deleting…" : `Delete ${formatNumber(deleteRequest.count)}`}</button></div></section></div> : null}
   </section>;
 }
 

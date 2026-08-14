@@ -56,6 +56,42 @@ async function exportCompanies(search: string, websitesOnly: boolean, filters: P
   return { error: "", csv, count: rows.length };
 }
 
+export async function DELETE(request: Request) {
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
+  const payload = await request.json().catch(() => null) as {
+    ids?: unknown;
+    allMatching?: unknown;
+    search?: unknown;
+    filters?: unknown;
+    excludedIds?: unknown;
+  } | null;
+  if (!payload) return Response.json({ error: "Invalid delete request." }, { status: 400 });
+  const supabase = createAdminClient();
+  const missing = (error: { code?: string } | null) => error?.code === "PGRST202" || error?.code === "42883";
+
+  if (Array.isArray(payload.ids) && payload.ids.length) {
+    const ids = [...new Set(payload.ids.map((id) => String(id).trim()).filter(Boolean))].slice(0, 50000);
+    if (!ids.length) return Response.json({ error: "No companies to delete." }, { status: 400 });
+    const { data, error } = await supabase.rpc("delete_companies_by_ids_v1", { p_ids: ids });
+    if (error) return Response.json({ error: missing(error) ? "Apply the latest database migration to enable company delete." : error.message }, { status: missing(error) ? 503 : 500 });
+    return Response.json({ deleted: Number(data ?? 0) });
+  }
+
+  if (payload.allMatching === true) {
+    const search = String(payload.search ?? "").trim().replace(/[,()]/g, " ");
+    let filters: ProspectFilter[];
+    try { filters = parseFilters(JSON.stringify(payload.filters ?? [])); }
+    catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Invalid company filters." }, { status: 400 }); }
+    const excludedIds = Array.isArray(payload.excludedIds) ? [...new Set(payload.excludedIds.map((id) => String(id).trim()).filter(Boolean))].slice(0, 50000) : [];
+    const { data, error } = await supabase.rpc("delete_companies_matching_v1", { p_search: search, p_filters: filters, p_excluded_ids: excludedIds });
+    if (error) return Response.json({ error: missing(error) ? "Apply the latest database migration to enable company delete." : error.message }, { status: missing(error) ? 503 : 500 });
+    return Response.json({ deleted: Number(data ?? 0) });
+  }
+
+  return Response.json({ error: "Nothing selected to delete." }, { status: 400 });
+}
+
 export async function GET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
