@@ -204,6 +204,54 @@ export async function GET(request: Request) {
   });
 }
 
+export async function DELETE(request: Request) {
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
+  const payload = await request.json().catch(() => null) as {
+    ids?: unknown;
+    allMatching?: unknown;
+    search?: unknown;
+    filters?: unknown;
+    excludedIds?: unknown;
+  } | null;
+  if (!payload) return Response.json({ error: "Invalid delete request." }, { status: 400 });
+  const supabase = createAdminClient();
+
+  // Explicit picks: delete the exact ids (batched so a big `in (...)` never blows the URL).
+  if (Array.isArray(payload.ids) && payload.ids.length) {
+    const ids = [...new Set(payload.ids.map((id) => String(id).trim()).filter(Boolean))].slice(0, 50000);
+    if (!ids.length) return Response.json({ error: "No prospects to delete." }, { status: 400 });
+    let deleted = 0;
+    for (let index = 0; index < ids.length; index += 500) {
+      const batch = ids.slice(index, index + 500);
+      const { error, count } = await supabase.from("prospects").delete({ count: "exact" }).in("id", batch);
+      if (error) return Response.json({ error: error.message }, { status: 500 });
+      deleted += Number(count ?? batch.length);
+    }
+    return Response.json({ deleted });
+  }
+
+  // Everything matching the current search/filters across all pages.
+  if (payload.allMatching === true) {
+    const search = String(payload.search ?? "").trim().slice(0, 300);
+    let filters: ProspectFilter[];
+    try { filters = parseFilters(JSON.stringify(payload.filters ?? [])); }
+    catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Invalid filter." }, { status: 400 }); }
+    const excludedIds = Array.isArray(payload.excludedIds) ? [...new Set(payload.excludedIds.map((id) => String(id).trim()).filter(Boolean))].slice(0, 50000) : [];
+    const { data, error } = await supabase.rpc("delete_prospects_matching_v1", {
+      p_search: search,
+      p_filters: filters,
+      p_excluded_ids: excludedIds,
+    });
+    if (error) {
+      return Response.json({ error: isMissingFunction(error) ? "Apply the latest database migration to enable bulk delete." : error.message }, { status: isMissingFunction(error) ? 503 : 500 });
+    }
+    return Response.json({ deleted: Number(data ?? 0) });
+  }
+
+  return Response.json({ error: "Nothing selected to delete." }, { status: 400 });
+}
+
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
