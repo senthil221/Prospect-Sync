@@ -20,9 +20,9 @@ const mainFilters: FilterDefinition[] = [
   { id: "__company", label: "Company Name" },
   { id: "__email", label: "Email" },
   { id: "__linkedin", label: "Personal LinkedIn URL" },
-  { id: "__title", label: "Job Title", kind: "text", advanced: true, description: "Simple include/exclude, or Boolean with AND/OR/NOT." },
-  { id: "__seniority", label: "Seniority" },
+  { id: "__title_seniority", label: "Job Title & Seniority", description: "Matches either the job title or the seniority." },
   { id: "__department", label: "Departments" },
+  { id: "__esp_type", label: "ESP", description: "Matches the ESP or the email provider type (e.g. SEG)." },
 ];
 
 const optionalFilters: FilterDefinition[] = [];
