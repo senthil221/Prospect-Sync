@@ -104,6 +104,10 @@ export function mapProspect(headers: string[], values: string[]): CanonicalProsp
   if (personalEmail) identifiers.push({ type: "personal_email", value: personalEmail });
   if (linkedinUrl) identifiers.push({ type: "linkedin", value: linkedinUrl });
   if (fullName && companyDomain) identifiers.push({ type: "name_company", value: `${normalizeText(fullName)}|${companyDomain}` });
+  // Fallback identity when there is no email/LinkedIn/domain: full name + company name.
+  // Matching still prefers email/LinkedIn (see the ordering in import_prospect_batch),
+  // so this only ever links rows that share no stronger signal.
+  if (fullName && companyName) identifiers.push({ type: "name_company_name", value: `${normalizeText(fullName)}|${normalizeText(companyName)}` });
 
   return {
     firstName,

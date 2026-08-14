@@ -1212,13 +1212,14 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
   const [summary, setSummary] = useState<{ processed_rows: number; unique_added: number; duplicates_linked: number } | null>(null);
   const [fileAudit, setFileAudit] = useState<FileAudit | null>(null);
   const [fieldMap, setFieldMap] = useState<Record<string, string>>({});
+  const [allowMissing, setAllowMissing] = useState(false);
   const mappedFields = fileAudit ? resolvedImportFields(fileAudit.headers, fieldMap, suggestedPersonImportField) : [];
   const missingFields = missingRequiredFields(requiredPersonImportFields, mappedFields);
-  const canSubmit = file && fileAudit && dataSource && listName.trim() && (clientId || newClient.trim()) && !missingFields.length && phase === "idle";
+  const canSubmit = file && fileAudit && dataSource && listName.trim() && (clientId || newClient.trim()) && (!missingFields.length || allowMissing) && phase === "idle";
 
   async function pickFile(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0] ?? null;
-    setFile(next); setFileAudit(null); setFieldMap({}); setMessage("");
+    setFile(next); setFileAudit(null); setFieldMap({}); setMessage(""); setAllowMissing(false);
     if (next) setListName(deriveListName(next.name));
     if (!next) return;
     try {
@@ -1240,7 +1241,7 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
       setPhase("reading"); setMessage("Reading CSV and checking the columns…");
       const parsed = parseCsv(await file.text());
       if (!parsed.headers.length || !parsed.rows.length) throw new Error("The CSV needs a header row and at least one data row.");
-      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: clientId || undefined, clientName: newClient || undefined, listName, dataSource, fileName: file.name, totalRows: parsed.rows.length, headers: parsed.headers, fieldMap }) });
+      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: clientId || undefined, clientName: newClient || undefined, listName, dataSource, fileName: file.name, totalRows: parsed.rows.length, headers: parsed.headers, fieldMap, allowMissingFields: allowMissing }) });
       setPhase("uploading"); setMessage(`Synchronizing ${formatNumber(parsed.rows.length)} rows with the people database…`);
       const chunkSize = 100;
       for (let index = 0; index < parsed.rows.length; index += chunkSize) {
@@ -1263,7 +1264,7 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
       {!clientId && <div className="form-field"><label htmlFor="new-client-name">New client name</label><input id="new-client-name" value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}
       <label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void pickFile(event)}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to review</small></> : <><strong>Choose a CSV file</strong><small>Download your Google Sheet as .csv</small></>}</label>
       <div className="form-field"><label htmlFor="list-name">List name</label><input id="list-name" value={listName} onChange={(event) => setListName(event.target.value)} placeholder="Auto-filled from the CSV filename" /></div>
-      {fileAudit && <><div className="file-audit"><div><span className="audit-check">✓</span><p><strong>{formatNumber(fileAudit.headers.length)} fields detected</strong><small>{formatNumber(fileAudit.rows)} rows · {formatNumber(fileAudit.populatedCells)} populated cells</small></p></div><div className="audit-fields">{fileAudit.headers.slice(0, 8).map((header) => <span key={header}>{header}</span>)}{fileAudit.headers.length > 8 && <span>+{fileAudit.headers.length - 8} more</span>}</div><p>{fileAudit.invalidRows ? `${fileAudit.invalidRows} rows do not currently contain email, LinkedIn, or name plus company domain and will be preserved without a master link.` : "Every row has sufficient identity data for master matching."}</p></div><ImportMappingPanel audit={fileAudit} fieldMap={fieldMap} onChange={(header, value) => setFieldMap((current) => ({ ...current, [header]: value }))}/><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Map required columns: ${missingFields.join(", ")}.` : "All required person columns are mapped."}</p></>}
+      {fileAudit && <><div className="file-audit"><div><span className="audit-check">✓</span><p><strong>{formatNumber(fileAudit.headers.length)} fields detected</strong><small>{formatNumber(fileAudit.rows)} rows · {formatNumber(fileAudit.populatedCells)} populated cells</small></p></div><div className="audit-fields">{fileAudit.headers.slice(0, 8).map((header) => <span key={header}>{header}</span>)}{fileAudit.headers.length > 8 && <span>+{fileAudit.headers.length - 8} more</span>}</div><p>{fileAudit.invalidRows ? `${fileAudit.invalidRows} rows have no email, LinkedIn, or name plus company and will be preserved without a People DB link.` : "Every row has enough identity data (email, LinkedIn, or name plus company) to match the People DB."}</p></div><ImportMappingPanel audit={fileAudit} fieldMap={fieldMap} onChange={(header, value) => setFieldMap((current) => ({ ...current, [header]: value }))}/><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Missing mandatory columns: ${missingFields.join(", ")}.` : "All required person columns are mapped."}</p>{missingFields.length ? <div className="cleanup-choice import-override"><input id="import-allow-missing" type="checkbox" checked={allowMissing} onChange={(event) => setAllowMissing(event.target.checked)} /><label htmlFor="import-allow-missing"><strong>Import anyway without all mandatory fields</strong><small>Rows import with whatever identity they have; those missing name/company and email/LinkedIn are preserved without a People DB link.</small></label></div> : null}</>}
       {phase !== "idle" && <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div>}
       {message && phase === "idle" && <p className="form-error" role="alert">{message}</p>}
       <button className="primary import-button" disabled={!canSubmit} onClick={startImport}>{phase === "idle" ? "Start import & sync" : "Processing…"}</button><p className="privacy-note">Original rows and fields remain stored in your private database.</p>

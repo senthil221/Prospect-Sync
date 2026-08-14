@@ -7,13 +7,17 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const payload = await request.json() as { clientId?: string; clientName?: string; listName?: string; fileName?: string; totalRows?: number; headers?: string[]; fieldMap?: Record<string, string>; dataSource?: string };
+  const payload = await request.json() as { clientId?: string; clientName?: string; listName?: string; fileName?: string; totalRows?: number; headers?: string[]; fieldMap?: Record<string, string>; dataSource?: string; allowMissingFields?: boolean };
   const supabase = createAdminClient();
   const dataSource = normalizeDataSource(payload.dataSource);
   if (!dataSource) return Response.json({ error: "Choose a data source before importing." }, { status: 400 });
   const importHeaders = Array.isArray(payload.headers) ? payload.headers.map(String) : [];
   const missingFields = missingRequiredFields(requiredPersonImportFields, resolvedImportFields(importHeaders, payload.fieldMap, suggestedPersonImportField));
-  if (missingFields.length) return Response.json({ error: `Map all required person columns: ${missingFields.join(", ")}.` }, { status: 400 });
+  // Missing mandatory columns normally block the import; the UI can override with an
+  // explicit warning + confirm, in which case rows import with whatever identity they have.
+  if (missingFields.length && payload.allowMissingFields !== true) {
+    return Response.json({ error: `Map all required person columns: ${missingFields.join(", ")}.`, missingFields }, { status: 400 });
+  }
   let clientId = payload.clientId ?? "";
   if (!clientId) {
     const clientName = String(payload.clientName ?? "").trim();
