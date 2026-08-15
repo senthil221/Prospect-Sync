@@ -435,6 +435,12 @@ main { min-width: 0; grid-column: 2; }
 .cross-scope-banner button { padding: 4px 8px; border: 0; border-radius: 6px; background: #fff; color: var(--ph-brand); font-size: 10px; font-weight: 700; }
 .company-filter-import { padding: 6px 10px; border: 1px solid #d9d9f0; border-radius: 999px; background: #fff; color: var(--ph-brand); cursor: pointer; font-size: 11px; font-weight: 650; }
 .company-filter-import:hover { background: var(--ph-brand-soft); }.company-filter-import input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.bulk-domain-paste { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.bulk-domain-paste textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--ph-border-strong); border-radius: 7px; background: #fff; font-size: 11px; font-family: inherit; resize: vertical; }
+.bulk-domain-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bulk-domain-actions button { padding: 6px 11px; border: 1px solid #d9d9f0; border-radius: 999px; background: var(--ph-brand); color: #fff; cursor: pointer; font-size: 11px; font-weight: 650; }
+.bulk-domain-actions button:disabled { opacity: .5; cursor: not-allowed; }
+.bulk-domain-note { color: var(--ph-success); font-size: 10px; }
 .client-remove-prospect { padding: 5px 7px; border: 1px solid #e5c8c5; border-radius: 6px; background: #fff7f6; text-decoration: none; white-space: nowrap; }
 .data-source-badge { display: inline-flex; padding: 4px 7px; border-radius: 999px; background: #eeedff; color: #5252ad; font-size: 10px; font-weight: 700; }
 .import-workspace { display: flex; flex-direction: column; gap: 4px; }

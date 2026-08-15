@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, useRef, useState } from "react";
+import { normalizeDomain } from "../db/normalize";
 import { filterId, IncludeExcludeFilter, TextBooleanFilter, type ProspectFilter } from "./ApolloFilterPanel";
 import { useDismiss } from "./use-dismiss";
 
@@ -13,12 +14,13 @@ type CompanyFilterDefinition = {
   kind: CompanyFieldKind;
   autocomplete?: boolean;
   description?: string;
+  bulkPaste?: boolean;
 };
 
 // Every one of these maps to a real companies column populated on import.
 const companyFilters: CompanyFilterDefinition[] = [
   { id: "__company", label: "Company name", kind: "text", autocomplete: true, description: "Simple include/exclude, or Boolean with AND/OR/NOT." },
-  { id: "__website", label: "Website", kind: "token", autocomplete: true, description: "Matches the company domain." },
+  { id: "__website", label: "Website", kind: "token", autocomplete: true, bulkPaste: true, description: "Matches the company domain. Paste a list of domains to filter in bulk." },
   { id: "__industry", label: "Industry", kind: "token", autocomplete: true },
   { id: "__employee_count", label: "# Employees", kind: "employee" },
   { id: "__company_city", label: "Company city", kind: "token", autocomplete: true },
@@ -135,6 +137,7 @@ export default function CompanyFilterPanel({ filters, onChange }: {
       </button>
       {isExpanded ? <div className="apollo-filter-content">
         {definition.description ? <p className="apollo-filter-description">{definition.description}</p> : null}
+        {definition.bulkPaste ? <BulkDomainPaste onAdd={(domains) => addIncludeValues(definition.id, domains)} /> : null}
         {definition.kind === "employee"
           ? <RangeFilter field={definition.id} filters={fieldFilters} presets={employeeRanges} unknownLabel="# of employees is unknown" onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "year"
@@ -159,6 +162,37 @@ export default function CompanyFilterPanel({ filters, onChange }: {
       {visible.length ? <div className="apollo-filter-group"><small>COMPANY FILTERS</small>{visible.map(renderDefinition)}</div> : <p className="filter-search-empty">No filters match “{search}”.</p>}
     </div>
   </aside>;
+}
+
+function BulkDomainPaste({ onAdd }: { onAdd: (domains: string[]) => void }) {
+  const [text, setText] = useState("");
+  const [note, setNote] = useState("");
+
+  function apply() {
+    const raw = text.split(/[\s,;]+/).map((item) => item.trim()).filter(Boolean);
+    // Normalize each entry the same way imports do (strip protocol, www, path),
+    // so pasted URLs match the stored company domain.
+    const unique = [...new Set(raw.map((item) => normalizeDomain(item)).filter(Boolean))];
+    if (!unique.length) { setNote("No valid domains found."); return; }
+    onAdd(unique);
+    const ignored = raw.length - unique.length;
+    setNote(`Added ${unique.length} domain${unique.length === 1 ? "" : "s"}${ignored > 0 ? ` · ${ignored} duplicate/invalid ignored` : ""}.`);
+    setText("");
+  }
+
+  return <div className="bulk-domain-paste">
+    <textarea
+      value={text}
+      onChange={(event) => { setText(event.target.value); if (note) setNote(""); }}
+      rows={4}
+      aria-label="Bulk paste domains"
+      placeholder={"Paste domains to filter in bulk\none per line or comma-separated\ne.g. https://www.acme.com, stripe.com"}
+    />
+    <div className="bulk-domain-actions">
+      <button type="button" onClick={apply} disabled={!text.trim()}>Add domains</button>
+      {note ? <span className="bulk-domain-note">{note}</span> : null}
+    </div>
+  </div>;
 }
 
 function RangeFilter({ field, filters, presets, unknownLabel, minPlaceholder = "e.g. 50", maxPlaceholder = "No maximum", onChange }: {
