@@ -5,7 +5,7 @@ import { mapProspect } from "../db/normalize";
 import { buildCustomFieldDefinitions, customFieldValue } from "../lib/prospect-fields";
 import { runProspectExport, fileSystemAccessSupported, type ExportFormat } from "../lib/export-runner";
 import { commonDataSources } from "../lib/data-source";
-import { companyImportFields, missingCompanyImportFields, missingRequiredFields, requiredPersonImportFields, resolvedImportFields, suggestedCompanyImportField, suggestedPersonImportField } from "../lib/import-schema";
+import { companyImportFields, missingCompanyImportFields, missingRequiredFields, requiredPersonImportFields, resolvedImportFields, skipImportField, suggestedCompanyImportField, suggestedPersonImportField } from "../lib/import-schema";
 import type { CompanyScope, PeopleScope } from "../lib/workspace-scopes";
 import ApolloFilterPanel, { filterLabel, type ProspectFilter } from "./ApolloFilterPanel";
 import CompanyFilterPanel from "./CompanyFilterPanel";
@@ -84,7 +84,7 @@ function deriveListName(fileName: string) {
     .trim();
 }
 
-const canonicalImportFields = ["Auto detect", ...requiredPersonImportFields, "First Name", "Last Name", "Personal Email", "Mobile Number", "Keywords", "City", "State", "Country", "Person Location", "Company Website", "Company Employee Count", "Company Location", "Company City", "Company State", "Company Country"];
+const canonicalImportFields = ["Auto detect", skipImportField, ...requiredPersonImportFields, "First Name", "Last Name", "Personal Email", "Mobile Number", "Keywords", "City", "State", "Country", "Person Location", "Company Website", "Company Employee Count", "Company Location", "Company City", "Company State", "Company Country"];
 
 function parseCsv(text: string) {
   const rows: string[][] = [];
@@ -1206,7 +1206,7 @@ function ProspectCompareCard({ prospect }: { prospect: Prospect }) {
 }
 
 function ImportMappingPanel({ audit, fieldMap, onChange }: { audit: FileAudit; fieldMap: Record<string, string>; onChange: (header: string, value: string) => void }) {
-  return <div className="import-mapping"><div className="mapping-head"><div><strong>Field mapping</strong><small>Review how CSV columns map to master fields</small></div><span>{audit.invalidRows ? `${audit.invalidRows} rows need identity data` : "All rows identifiable"}</span></div><div className="mapping-list">{audit.headers.map((header) => <label key={header}><span title={header}>{header}</span><b>→</b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Auto detect"} onChange={(event) => onChange(header, event.target.value)}>{canonicalImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p>Original headers and values are always preserved, even when mapped to a standard field.</p></div>;
+  return <div className="import-mapping"><div className="mapping-head"><div><strong>Field mapping</strong><small>Review how CSV columns map to master fields</small></div><span>{audit.invalidRows ? `${audit.invalidRows} rows need identity data` : "All rows identifiable"}</span></div><div className="mapping-list">{audit.headers.map((header) => <label key={header}><span title={header}>{header}</span><b>→</b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Auto detect"} onChange={(event) => onChange(header, event.target.value)}>{canonicalImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p>Original headers and values are preserved when mapped or auto-detected. Set a column to “{skipImportField}” to drop it entirely — it won’t be stored or added to the field catalog.</p></div>;
 }
 
 function ImportView({ clients, onComplete }: { clients: ClientRecord[]; onComplete: () => Promise<void> }) {
@@ -1274,7 +1274,7 @@ function CompanyImportView({ dataSource, onComplete }: { dataSource: string; onC
           foundedYear: valueFor(row, "Founded Year"),
           technologies: valueFor(row, "Technologies"),
           totalFunding: valueFor(row, "Total Funding"),
-          raw: Object.fromEntries(parsed.headers.map((header, column) => [header, String(row[column] ?? "").trim()])),
+          raw: Object.fromEntries(parsed.headers.map((header, column) => [header, String(row[column] ?? "").trim()]).filter(([header]) => fieldMap[header] !== skipImportField)),
           sourceRowNumber: index + chunkIndex + 2,
         }));
         await api("/api/company-imports/chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId, rows }) });
@@ -1287,7 +1287,7 @@ function CompanyImportView({ dataSource, onComplete }: { dataSource: string; onC
 
   if (phase === "done" && summary) return <div className="import-success"><span className="success-mark">✓</span><p className="eyebrow">COMPANY IMPORT COMPLETE</p><h2>Your Company DB is updated.</h2><p>{message}</p><div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(summary.added_count)}</strong><span>Companies added</span></div><div><strong>{formatNumber(summary.updated_count)}</strong><span>Companies matched</span></div><div><strong>{formatNumber(summary.skipped_count)}</strong><span>Rows skipped</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
 
-  return <div className="import-layout company-import-layout"><div className="import-copy"><p className="eyebrow">COMPANY CSV IMPORT</p><h2>Import a complete company dataset.</h2><p>Map a company name or a website (either works), plus the company detail columns. Companies are matched by normalized website first and company name second.</p><RequiredFieldList title="Company columns" fields={companyImportFields}/></div><div className="import-card"><label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void pickCompanyFile(event)}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{formatNumber(parsed?.rows.length)} company rows ready</small></> : <><strong>Choose a company CSV</strong><small>A company name or website is required</small></>}</label>{parsed ? <><div className="mapping-list company-required-mapping">{parsed.headers.map((header) => <label key={header}><span title={header}>{header}</span><b>→</b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Not mapped"} onChange={(event) => setFieldMap((current) => ({ ...current, [header]: event.target.value }))}><option>Not mapped</option>{companyImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Map required columns: ${missingFields.join(", ")}.` : "All required company columns are mapped."}</p></> : null}{phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="primary import-button" disabled={!canSubmit} onClick={() => void startCompanyImport()}>{phase === "uploading" ? "Processing…" : "Import companies"}</button></div></div>;
+  return <div className="import-layout company-import-layout"><div className="import-copy"><p className="eyebrow">COMPANY CSV IMPORT</p><h2>Import a complete company dataset.</h2><p>Map a company name or a website (either works), plus the company detail columns. Companies are matched by normalized website first and company name second.</p><RequiredFieldList title="Company columns" fields={companyImportFields}/></div><div className="import-card"><label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void pickCompanyFile(event)}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{formatNumber(parsed?.rows.length)} company rows ready</small></> : <><strong>Choose a company CSV</strong><small>A company name or website is required</small></>}</label>{parsed ? <><div className="mapping-list company-required-mapping">{parsed.headers.map((header) => <label key={header}><span title={header}>{header}</span><b>→</b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Not mapped"} onChange={(event) => setFieldMap((current) => ({ ...current, [header]: event.target.value }))}><option>Not mapped</option><option>{skipImportField}</option>{companyImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Map required columns: ${missingFields.join(", ")}.` : "All required company columns are mapped."}</p></> : null}{phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="primary import-button" disabled={!canSubmit} onClick={() => void startCompanyImport()}>{phase === "uploading" ? "Processing…" : "Import companies"}</button></div></div>;
 }
 
 function ProspectImportView({ clients, onComplete, dataSource }: { clients: ClientRecord[]; onComplete: () => Promise<void>; dataSource: string }) {
@@ -1330,13 +1330,17 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
       setPhase("reading"); setMessage("Reading CSV and checking the columns…");
       const parsed = parseCsv(await file.text());
       if (!parsed.headers.length || !parsed.rows.length) throw new Error("The CSV needs a header row and at least one data row.");
-      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: clientId || undefined, clientName: newClient || undefined, listName, dataSource, fileName: file.name, totalRows: parsed.rows.length, headers: parsed.headers, fieldMap, allowMissingFields: allowMissing }) });
+      // Columns set to "Skip column" are dropped here so they never reach the DB —
+      // not stored in raw all_data, not registered in the field catalog.
+      const keptColumns = parsed.headers.map((header, column) => ({ header, column })).filter(({ header }) => fieldMap[header] !== skipImportField);
+      const keptHeaders = keptColumns.map(({ header }) => header);
+      const resolvedFieldMap = Object.fromEntries(Object.entries(fieldMap).filter(([header, value]) => value && value !== "Auto detect" && value !== skipImportField && keptHeaders.includes(header)));
+      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: clientId || undefined, clientName: newClient || undefined, listName, dataSource, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, fieldMap: resolvedFieldMap, allowMissingFields: allowMissing }) });
       setPhase("uploading"); setMessage(`Synchronizing ${formatNumber(parsed.rows.length)} rows with the people database…`);
       const chunkSize = 100;
       for (let index = 0; index < parsed.rows.length; index += chunkSize) {
-        const chunk = parsed.rows.slice(index, index + chunkSize);
-        const resolvedFieldMap = Object.fromEntries(Object.entries(fieldMap).filter(([, value]) => value && value !== "Auto detect"));
-        await api("/api/imports/chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId, listId: started.listId, headers: parsed.headers, rows: chunk, rowOffset: index, fieldMap: resolvedFieldMap }) });
+        const chunk = parsed.rows.slice(index, index + chunkSize).map((row) => keptColumns.map(({ column }) => row[column] ?? ""));
+        await api("/api/imports/chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId, listId: started.listId, headers: keptHeaders, rows: chunk, rowOffset: index, fieldMap: resolvedFieldMap }) });
         setProgress(Math.round(((index + chunk.length) / parsed.rows.length) * 100));
       }
       const completed = await api<{ summary: { processed_rows: number; unique_added: number; duplicates_linked: number } }>("/api/imports/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId, listId: started.listId }) });

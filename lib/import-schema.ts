@@ -76,8 +76,12 @@ export function suggestedCompanyImportField(header: string) {
   return companyAliases[normalizeImportHeader(header)] ?? "Not mapped";
 }
 
+// Sentinel a user can pick in the mapping UI to drop an unwanted column entirely
+// (from the mapped fields, the preserved raw all_data, and the field catalog).
+export const skipImportField = "Skip column";
+
 export function resolvedImportFields(headers: string[], fieldMap: Record<string, string> | undefined, suggest: (header: string) => string) {
-  return headers.map((header) => fieldMap?.[header] || suggest(header)).filter((field) => field !== "Auto detect" && field !== "Not mapped");
+  return headers.map((header) => fieldMap?.[header] || suggest(header)).filter((field) => field !== "Auto detect" && field !== "Not mapped" && field !== skipImportField);
 }
 
 export function missingRequiredFields(required: readonly string[], mapped: string[]) {
