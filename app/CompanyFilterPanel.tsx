@@ -14,13 +14,12 @@ type CompanyFilterDefinition = {
   kind: CompanyFieldKind;
   autocomplete?: boolean;
   description?: string;
-  bulkPaste?: boolean;
 };
 
 // Every one of these maps to a real companies column populated on import.
 const companyFilters: CompanyFilterDefinition[] = [
   { id: "__company", label: "Company name", kind: "text", autocomplete: true, description: "Simple include/exclude, or Boolean with AND/OR/NOT." },
-  { id: "__website", label: "Website", kind: "token", autocomplete: true, bulkPaste: true, description: "Matches the company domain. Paste a list of domains to filter in bulk." },
+  { id: "__website", label: "Website", kind: "token", autocomplete: true, description: "Matches the company domain. Use the Bulk domains tab to paste a list." },
   { id: "__industry", label: "Industry", kind: "token", autocomplete: true },
   { id: "__employee_count", label: "# Employees", kind: "employee" },
   { id: "__company_city", label: "Company city", kind: "token", autocomplete: true },
@@ -137,7 +136,6 @@ export default function CompanyFilterPanel({ filters, onChange }: {
       </button>
       {isExpanded ? <div className="apollo-filter-content">
         {definition.description ? <p className="apollo-filter-description">{definition.description}</p> : null}
-        {definition.bulkPaste ? <BulkDomainPaste onAdd={(domains) => addIncludeValues(definition.id, domains)} /> : null}
         {definition.kind === "employee"
           ? <RangeFilter field={definition.id} filters={fieldFilters} presets={employeeRanges} unknownLabel="# of employees is unknown" onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "year"
@@ -164,7 +162,28 @@ export default function CompanyFilterPanel({ filters, onChange }: {
   </aside>;
 }
 
-function BulkDomainPaste({ onAdd }: { onAdd: (domains: string[]) => void }) {
+// Merge a list of (already-normalized) domains into the __website include filter,
+// deduping case-insensitively against whatever is already there. Pure so the
+// Company DB "Bulk domains" tab can call it without the panel being mounted.
+export function addDomainsToWebsiteFilter(filters: ProspectFilter[], domains: string[]): ProspectFilter[] {
+  const field = "__website";
+  const additions = domains.map((domain) => domain.trim()).filter(Boolean);
+  if (!additions.length) return filters;
+  const fieldFilters = filters.filter((filter) => filter.field === field);
+  const include = fieldFilters.find((filter) => filter.operator === "contains" || filter.operator === "equals");
+  const others = fieldFilters.filter((filter) => filter !== include);
+  const seen = new Set((include?.values ?? []).map((value) => value.toLocaleLowerCase()));
+  const merged = [...(include?.values ?? [])];
+  for (const value of additions) {
+    const key = value.toLocaleLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(value);
+  }
+  return [...filters.filter((filter) => filter.field !== field), ...others, { id: include?.id ?? filterId(field, "contains"), field, operator: "contains", values: merged }];
+}
+
+export function BulkDomainPaste({ onAdd }: { onAdd: (domains: string[]) => void }) {
   const [text, setText] = useState("");
   const [note, setNote] = useState("");
 
