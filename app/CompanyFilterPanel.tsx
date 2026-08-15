@@ -2,6 +2,7 @@
 
 import { ChangeEvent, useRef, useState } from "react";
 import { normalizeDomain } from "../db/normalize";
+import { isXlsxFile, readXlsxRows } from "../lib/spreadsheet";
 import { filterId, IncludeExcludeFilter, TextBooleanFilter, type ProspectFilter } from "./ApolloFilterPanel";
 import { useDismiss } from "./use-dismiss";
 
@@ -73,6 +74,14 @@ function parseCsv(text: string) {
   return { headers: rows[0], rows: rows.slice(1) };
 }
 
+// Accept a CSV or .xlsx for the name/website import.
+async function readImportTable(file: File) {
+  if (!isXlsxFile(file)) return parseCsv(await file.text());
+  const rows = (await readXlsxRows(file)).filter((row) => row.some((cell) => cell.trim()));
+  if (!rows.length) throw new Error("The spreadsheet is empty.");
+  return { headers: rows[0], rows: rows.slice(1) };
+}
+
 export default function CompanyFilterPanel({ filters, onChange }: {
   filters: ProspectFilter[];
   onChange: (filters: ProspectFilter[]) => void;
@@ -111,7 +120,7 @@ export default function CompanyFilterPanel({ filters, onChange }: {
     event.target.value = "";
     if (!file) return;
     try {
-      const parsed = parseCsv(await file.text());
+      const parsed = await readImportTable(file);
       const normalized = parsed.headers.map((header) => header.toLocaleLowerCase().replace(/[^a-z0-9]/g, ""));
       const nameIndex = normalized.findIndex((header) => ["company", "companyname", "name", "organization", "accountname"].includes(header));
       const domainIndex = normalized.findIndex((header) => ["website", "domain", "companywebsite", "companydomain", "url"].includes(header));
@@ -153,7 +162,7 @@ export default function CompanyFilterPanel({ filters, onChange }: {
       <div><span className="filter-icon">⌁</span><div><strong>Filters</strong><small>Apollo-style company filters</small></div></div>
       {total ? <button onClick={() => onChange([])}>Clear all</button> : null}
     </div>
-    <label className="company-filter-import"><input type="file" accept=".csv,text/csv" onChange={(event) => void importNamesWebsites(event)}/>Import names &amp; websites</label>
+    <label className="company-filter-import"><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void importNamesWebsites(event)}/>Import names &amp; websites</label>
     {importError ? <p className="form-error" role="alert">{importError}</p> : null}
     <label className="filter-panel-search"><span>⌕</span><input aria-label="Search company filters" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search all filters…"/></label>
     <div className="apollo-filter-scroll">

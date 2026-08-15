@@ -9,6 +9,7 @@ import { companyImportFields, missingCompanyImportFields, missingRequiredFields,
 import type { CompanyScope, PeopleScope } from "../lib/workspace-scopes";
 import ApolloFilterPanel, { filterLabel, type ProspectFilter } from "./ApolloFilterPanel";
 import CompanyFilterPanel, { BulkDomainPaste, addDomainsToWebsiteFilter } from "./CompanyFilterPanel";
+import { isXlsxFile, readXlsxRows } from "../lib/spreadsheet";
 import { useDismiss } from "./use-dismiss";
 
 type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" | "quality" | "imports";
@@ -108,6 +109,14 @@ function parseCsv(text: string) {
   row.push(value);
   if (row.some((cell) => cell.trim())) rows.push(row);
   if (!rows.length) throw new Error("The CSV is empty.");
+  return { headers: uniqueHeaders(rows[0]), rows: rows.slice(1) };
+}
+
+// Parse an uploaded CSV or .xlsx into the same { headers, rows } shape.
+async function readImportTable(file: File): Promise<{ headers: string[]; rows: string[][] }> {
+  if (!isXlsxFile(file)) return parseCsv(await file.text());
+  const rows = (await readXlsxRows(file)).filter((row) => row.some((cell) => cell.trim()));
+  if (!rows.length) throw new Error("The spreadsheet is empty.");
   return { headers: uniqueHeaders(rows[0]), rows: rows.slice(1) };
 }
 
@@ -1140,7 +1149,7 @@ function CoverageChecker() {
     const next = event.target.files?.[0] ?? null; setFile(next); setRows([]); setSummary(null); setError("");
     if (!next) { setHeaders([]); return; }
     try {
-      const parsed = parseCsv(await next.text()); setHeaders(parsed.headers);
+      const parsed = await readImportTable(next); setHeaders(parsed.headers);
       const normalized = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
       setDomainField(parsed.headers.find((header) => ["companywebsite", "website", "domain", "companydomain"].includes(normalized(header))) ?? "");
       setNameField(parsed.headers.find((header) => ["company", "companyname", "casualcompanyname", "organization"].includes(normalized(header))) ?? "");
@@ -1151,7 +1160,7 @@ function CoverageChecker() {
     if (!file || (!nameField && !domainField)) return;
     setBusy(true); setError("");
     try {
-      const parsed = parseCsv(await file.text());
+      const parsed = await readImportTable(file);
       const nameIndex = parsed.headers.indexOf(nameField); const domainIndex = parsed.headers.indexOf(domainField);
       const companies = parsed.rows.map((row, index) => ({ row: index + 2, name: nameIndex >= 0 ? row[nameIndex] : "", domain: domainIndex >= 0 ? row[domainIndex] : "" }));
       const data = await api<{ rows: CoverageRow[]; summary: NonNullable<typeof summary> }>("/api/coverage", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ companies }) });
@@ -1167,7 +1176,7 @@ function CoverageChecker() {
   }
 
   return <section className="operations-page"><div className="section-intro compact-intro"><div><p className="eyebrow">BEFORE YOU SCRAPE</p><h2>Company coverage checker</h2><p>Check a company list against your database before paying for employee emails.</p></div></div>
-    <div className="coverage-workspace"><article className="panel coverage-upload"><label className={`dropzone small ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void selectCoverageFile(event)}/><span className="upload-mark">↑</span><strong>{file ? file.name : "Upload a company CSV"}</strong><small>Up to 5,000 companies per check</small></label>{headers.length ? <div className="mapping-grid"><label>Company name<select value={nameField} onChange={(event) => setNameField(event.target.value)}><option value="">Not mapped</option>{headers.map((header) => <option key={header}>{header}</option>)}</select></label><label>Website or domain<select value={domainField} onChange={(event) => setDomainField(event.target.value)}><option value="">Not mapped</option>{headers.map((header) => <option key={header}>{header}</option>)}</select></label></div> : null}{error ? <p className="form-error" role="alert">{error}</p> : null}<button className="primary" disabled={!file || (!nameField && !domainField) || busy} onClick={() => void checkCoverage()}>{busy ? "Checking database…" : "Check company coverage"}</button></article>
+    <div className="coverage-workspace"><article className="panel coverage-upload"><label className={`dropzone small ${file ? "has-file" : ""}`}><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void selectCoverageFile(event)}/><span className="upload-mark">↑</span><strong>{file ? file.name : "Upload a company CSV or Excel file"}</strong><small>Up to 5,000 companies per check</small></label>{headers.length ? <div className="mapping-grid"><label>Company name<select value={nameField} onChange={(event) => setNameField(event.target.value)}><option value="">Not mapped</option>{headers.map((header) => <option key={header}>{header}</option>)}</select></label><label>Website or domain<select value={domainField} onChange={(event) => setDomainField(event.target.value)}><option value="">Not mapped</option>{headers.map((header) => <option key={header}>{header}</option>)}</select></label></div> : null}{error ? <p className="form-error" role="alert">{error}</p> : null}<button className="primary" disabled={!file || (!nameField && !domainField) || busy} onClick={() => void checkCoverage()}>{busy ? "Checking database…" : "Check company coverage"}</button></article>
       <article className="panel coverage-results">{summary ? <><div className="quality-metrics four"><div><span>Total companies</span><strong>{formatNumber(summary.total)}</strong></div><div><span>Already known</span><strong>{formatNumber(summary.known)}</strong></div><div><span>Net new</span><strong>{formatNumber(summary.new)}</strong></div><div><span>Existing prospects</span><strong>{formatNumber(summary.existingProspects)}</strong></div></div><div className="panel-head"><div><h3>Coverage results</h3><p>{summary.covered} companies already contain prospects</p></div><button onClick={exportNewCompanies}>Export net-new CSV</button></div><div className="table-wrap coverage-table"><table><thead><tr><th>Company</th><th>Domain</th><th>Status</th><th>Matched by</th><th>Prospects</th><th>Clients</th></tr></thead><tbody>{rows.map((row) => <tr key={`${row.row}-${row.domain}-${row.name}`}><td><strong>{row.name || row.matchedCompany || "Unnamed"}</strong></td><td>{row.domain || "-"}</td><td><span className={`coverage-status ${row.status}`}>{row.status === "known" ? "Known" : "Net new"}</span></td><td>{row.matchedBy || "-"}</td><td>{formatNumber(row.prospectCount)}</td><td>{formatNumber(row.clientCount)}</td></tr>)}</tbody></table></div></> : <div className="coverage-placeholder"><span>◫</span><h3>Know what already exists</h3><p>Upload company names or domains to see database coverage and export only net-new companies.</p></div>}</article></div>
   </section>;
 }
@@ -1249,7 +1258,7 @@ function CompanyImportView({ dataSource, onComplete }: { dataSource: string; onC
     setFile(next); setParsed(null); setFieldMap({}); setMessage(""); setSummary(null); setProgress(0);
     if (!next) return;
     try {
-      const nextParsed = parseCsv(await next.text());
+      const nextParsed = await readImportTable(next);
       setFieldMap(Object.fromEntries(nextParsed.headers.map((header) => [header, suggestedCompanyImportField(header)])));
       setParsed(nextParsed);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Unable to read this company CSV."); }
@@ -1290,7 +1299,7 @@ function CompanyImportView({ dataSource, onComplete }: { dataSource: string; onC
 
   if (phase === "done" && summary) return <div className="import-success"><span className="success-mark">✓</span><p className="eyebrow">COMPANY IMPORT COMPLETE</p><h2>Your Company DB is updated.</h2><p>{message}</p><div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(summary.added_count)}</strong><span>Companies added</span></div><div><strong>{formatNumber(summary.updated_count)}</strong><span>Companies matched</span></div><div><strong>{formatNumber(summary.skipped_count)}</strong><span>Rows skipped</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
 
-  return <div className="import-layout company-import-layout"><div className="import-copy"><p className="eyebrow">COMPANY CSV IMPORT</p><h2>Import a complete company dataset.</h2><p>Map a company name or a website (either works), plus the company detail columns. Companies are matched by normalized website first and company name second.</p><RequiredFieldList title="Company columns" fields={companyImportFields}/></div><div className="import-card"><label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void pickCompanyFile(event)}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{formatNumber(parsed?.rows.length)} company rows ready</small></> : <><strong>Choose a company CSV</strong><small>A company name or website is required</small></>}</label>{parsed ? <><div className="mapping-list company-required-mapping">{parsed.headers.map((header) => <label key={header}><span title={header}>{header}</span><b>→</b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Not mapped"} onChange={(event) => setFieldMap((current) => ({ ...current, [header]: event.target.value }))}><option>Not mapped</option><option>{skipImportField}</option>{companyImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Map required columns: ${missingFields.join(", ")}.` : "All required company columns are mapped."}</p></> : null}{phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="primary import-button" disabled={!canSubmit} onClick={() => void startCompanyImport()}>{phase === "uploading" ? "Processing…" : "Import companies"}</button></div></div>;
+  return <div className="import-layout company-import-layout"><div className="import-copy"><p className="eyebrow">COMPANY CSV IMPORT</p><h2>Import a complete company dataset.</h2><p>Map a company name or a website (either works), plus the company detail columns. Companies are matched by normalized website first and company name second.</p><RequiredFieldList title="Company columns" fields={companyImportFields}/></div><div className="import-card"><label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void pickCompanyFile(event)}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{formatNumber(parsed?.rows.length)} company rows ready</small></> : <><strong>Choose a company CSV or Excel file</strong><small>A company name or website is required</small></>}</label>{parsed ? <><div className="mapping-list company-required-mapping">{parsed.headers.map((header) => <label key={header}><span title={header}>{header}</span><b>→</b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Not mapped"} onChange={(event) => setFieldMap((current) => ({ ...current, [header]: event.target.value }))}><option>Not mapped</option><option>{skipImportField}</option>{companyImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Map required columns: ${missingFields.join(", ")}.` : "All required company columns are mapped."}</p></> : null}{phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="primary import-button" disabled={!canSubmit} onClick={() => void startCompanyImport()}>{phase === "uploading" ? "Processing…" : "Import companies"}</button></div></div>;
 }
 
 function ProspectImportView({ clients, onComplete, dataSource }: { clients: ClientRecord[]; onComplete: () => Promise<void>; dataSource: string }) {
@@ -1315,7 +1324,7 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
     if (next) setListName(deriveListName(next.name));
     if (!next) return;
     try {
-      const parsed = parseCsv(await next.text());
+      const parsed = await readImportTable(next);
       const populatedCells = parsed.rows.reduce((count, row) => count + row.filter((value) => value.trim()).length, 0);
       const nextFieldMap = Object.fromEntries(parsed.headers.map((header) => [header, suggestedPersonImportField(header)]));
       const mappedHeaders = parsed.headers.map((header) => nextFieldMap[header] === "Auto detect" ? header : nextFieldMap[header]);
@@ -1331,7 +1340,7 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
     if (!file || !canSubmit) return;
     try {
       setPhase("reading"); setMessage("Reading CSV and checking the columns…");
-      const parsed = parseCsv(await file.text());
+      const parsed = await readImportTable(file);
       if (!parsed.headers.length || !parsed.rows.length) throw new Error("The CSV needs a header row and at least one data row.");
       // Columns set to "Skip column" are dropped here so they never reach the DB —
       // not stored in raw all_data, not registered in the field catalog.
@@ -1358,7 +1367,7 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
     <div className="import-card">
       <div className="form-field"><label htmlFor="import-client">Client</label><select id="import-client" value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></div>
       {!clientId && <div className="form-field"><label htmlFor="new-client-name">New client name</label><input id="new-client-name" value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}
-      <label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void pickFile(event)}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to review</small></> : <><strong>Choose a CSV file</strong><small>Download your Google Sheet as .csv</small></>}</label>
+      <label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void pickFile(event)}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to review</small></> : <><strong>Choose a CSV or Excel file</strong><small>CSV or .xlsx from Excel / Google Sheets</small></>}</label>
       <div className="form-field"><label htmlFor="list-name">List name</label><input id="list-name" value={listName} onChange={(event) => setListName(event.target.value)} placeholder="Auto-filled from the CSV filename" /></div>
       {fileAudit && <><div className="file-audit"><div><span className="audit-check">✓</span><p><strong>{formatNumber(fileAudit.headers.length)} fields detected</strong><small>{formatNumber(fileAudit.rows)} rows · {formatNumber(fileAudit.populatedCells)} populated cells</small></p></div><div className="audit-fields">{fileAudit.headers.slice(0, 8).map((header) => <span key={header}>{header}</span>)}{fileAudit.headers.length > 8 && <span>+{fileAudit.headers.length - 8} more</span>}</div><p>{fileAudit.invalidRows ? `${fileAudit.invalidRows} rows have no email, LinkedIn, or name plus company and will be preserved without a People DB link.` : "Every row has enough identity data (email, LinkedIn, or name plus company) to match the People DB."}</p></div><ImportMappingPanel audit={fileAudit} fieldMap={fieldMap} onChange={(header, value) => setFieldMap((current) => ({ ...current, [header]: value }))}/><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Missing mandatory columns: ${missingFields.join(", ")}.` : "All required person columns are mapped."}</p>{missingFields.length ? <div className="cleanup-choice import-override"><input id="import-allow-missing" type="checkbox" checked={allowMissing} onChange={(event) => setAllowMissing(event.target.checked)} /><label htmlFor="import-allow-missing"><strong>Import anyway without all mandatory fields</strong><small>Rows import with whatever identity they have; those missing name/company and email/LinkedIn are preserved without a People DB link.</small></label></div> : null}</>}
       {phase !== "idle" && <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div>}
