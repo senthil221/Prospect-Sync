@@ -17,6 +17,7 @@ language sql
 stable
 security definer
 set search_path = public
+set statement_timeout = '15s'
 as $$
   with filtered as (
     select ps.*
@@ -150,3 +151,166 @@ $$;
 
 revoke execute on function public.search_prospect_workspace_v11(text, jsonb, text, text, integer, integer, text, jsonb, boolean) from public, anon, authenticated;
 grant execute on function public.search_prospect_workspace_v11(text, jsonb, text, text, integer, integer, text, jsonb, boolean) to service_role;
+
+-- Bound the write-side hot paths without changing their behavior.
+create or replace function public.import_prospect_batch_v5(p_import_id text, p_list_id text, p_rows jsonb)
+returns table(processed integer, unique_added integer, duplicates_linked integer, skipped integer)
+language plpgsql
+security definer
+set search_path = public
+set statement_timeout = '15s'
+as $function$
+declare
+  base_result record;
+begin
+  select * into base_result
+  from public.import_prospect_batch_v4(p_import_id, p_list_id, p_rows);
+
+  -- Only the prospects touched by THIS chunk, not every row of the import.
+  perform public.reindex_prospects(array(
+    select distinct lr.prospect_id
+    from public.list_rows lr
+    where lr.import_id = p_import_id
+      and lr.prospect_id is not null
+      and lr.source_row_number = any(
+        select (elem->>'sourceRowNumber')::integer
+        from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) as elem
+        where nullif(elem->>'sourceRowNumber', '') is not null
+      )
+  ));
+
+  processed := base_result.processed;
+  unique_added := base_result.unique_added;
+  duplicates_linked := base_result.duplicates_linked;
+  skipped := base_result.skipped;
+  return next;
+end;
+$function$;
+
+create or replace function public.reindex_prospects(p_ids text[])
+returns integer
+language plpgsql
+security definer
+set search_path = public
+set statement_timeout = '15s'
+as $$
+declare
+  affected integer;
+begin
+  if p_ids is null or array_length(p_ids, 1) is null then
+    return 0;
+  end if;
+
+  with computed as (
+    select
+      p.id,
+      p.first_name, p.last_name, p.full_name, p.work_email, p.personal_email,
+      p.mobile_number, p.linkedin_url, p.title, p.seniority, p.department,
+      p.city, p.state, p.country, p.company_id, p.all_data, p.created_at, p.updated_at,
+      coalesce(co.name, '') as company_name,
+      coalesce(co.domain, '') as company_domain,
+      count(distinct lm.list_id)::integer as list_count,
+      count(distinct l.client_id)::integer as client_count,
+      coalesce(array_agg(distinct l.name order by l.name) filter (where l.id is not null), '{}'::text[]) as list_names,
+      coalesce(array_agg(distinct cl.name order by cl.name) filter (where cl.id is not null), '{}'::text[]) as client_names,
+      coalesce(array_agg(distinct l.id order by l.id) filter (where l.id is not null), '{}'::text[]) as list_ids,
+      coalesce(array_agg(distinct cl.id order by cl.id) filter (where cl.id is not null), '{}'::text[]) as client_ids,
+      coalesce(jsonb_agg(distinct jsonb_build_object(
+        'listId', l.id, 'listName', l.name, 'clientId', cl.id, 'clientName', cl.name
+      )) filter (where l.id is not null), '[]'::jsonb) as list_memberships,
+      coalesce(co.esp, '') as esp,
+      coalesce(co.email_provider_type, 'Unknown') as email_provider_type,
+      coalesce(co.mx_records, '{}'::text[]) as mx_records,
+      co.mx_status, co.mx_checked_at,
+      coalesce(p.keywords, '{}'::text[]) as keywords,
+      co.employee_count_min, co.employee_count_max,
+      coalesce(co.location, '') as company_location,
+      coalesce(co.city, '') as company_city,
+      coalesce(co.state, '') as company_state,
+      coalesce(co.country, '') as company_country,
+      coalesce((
+        select jsonb_agg(jsonb_build_object('id', pt.id, 'name', pt.name, 'color', pt.color) order by pt.name)
+        from public.prospect_tag_links ptl join public.prospect_tags pt on pt.id = ptl.tag_id
+        where ptl.prospect_id = p.id
+      ), '[]'::jsonb) as tags,
+      coalesce((
+        select string_agg(pt.name, ' ' order by pt.name)
+        from public.prospect_tag_links ptl join public.prospect_tags pt on pt.id = ptl.tag_id
+        where ptl.prospect_id = p.id
+      ), '') as tag_text,
+      (select max(ce.contacted_at) from public.contact_events ce where ce.prospect_id = p.id) as last_contacted_at,
+      coalesce((select count(*) from public.contact_events ce where ce.prospect_id = p.id), 0)::integer as contact_count
+    from public.prospects p
+    left join public.companies co on co.id = p.company_id
+    left join public.list_memberships lm on lm.prospect_id = p.id
+    left join public.lists l on l.id = lm.list_id
+    left join public.clients cl on cl.id = l.client_id
+    where p.id = any(p_ids)
+    group by p.id, co.id
+  ), upserted as (
+    insert into public.prospect_index (
+      id, first_name, last_name, full_name, work_email, personal_email, mobile_number,
+      linkedin_url, title, seniority, department, city, state, country, company_id,
+      company_name, company_domain, all_data, created_at, updated_at, list_count, client_count,
+      list_names, client_names, list_ids, client_ids, list_memberships, esp, email_provider_type,
+      mx_records, mx_status, mx_checked_at, keywords, employee_count_min, employee_count_max,
+      company_location, company_city, company_state, company_country, tags, tag_text,
+      last_contacted_at, contact_count, search_text
+    )
+    select
+      c.id, c.first_name, c.last_name, c.full_name, c.work_email, c.personal_email, c.mobile_number,
+      c.linkedin_url, c.title, c.seniority, c.department, c.city, c.state, c.country, c.company_id,
+      c.company_name, c.company_domain, c.all_data, c.created_at, c.updated_at, c.list_count, c.client_count,
+      c.list_names, c.client_names, c.list_ids, c.client_ids, c.list_memberships, c.esp, c.email_provider_type,
+      c.mx_records, c.mx_status, c.mx_checked_at, c.keywords, c.employee_count_min, c.employee_count_max,
+      c.company_location, c.company_city, c.company_state, c.company_country, c.tags, c.tag_text,
+      c.last_contacted_at, c.contact_count,
+      concat_ws(' ',
+        c.full_name, c.work_email, c.personal_email, c.title, array_to_string(c.keywords, ' '),
+        c.company_name, c.company_domain, c.linkedin_url, c.city, c.state, c.country,
+        c.company_location, c.company_city, c.company_state, c.company_country,
+        c.all_data::text, c.esp, c.email_provider_type, array_to_string(c.mx_records, ' '),
+        array_to_string(c.list_names, ' '), array_to_string(c.client_names, ' '), c.tag_text
+      )
+    from computed c
+    on conflict (id) do update set
+      first_name = excluded.first_name, last_name = excluded.last_name, full_name = excluded.full_name,
+      work_email = excluded.work_email, personal_email = excluded.personal_email, mobile_number = excluded.mobile_number,
+      linkedin_url = excluded.linkedin_url, title = excluded.title, seniority = excluded.seniority,
+      department = excluded.department, city = excluded.city, state = excluded.state, country = excluded.country,
+      company_id = excluded.company_id, company_name = excluded.company_name, company_domain = excluded.company_domain,
+      all_data = excluded.all_data, created_at = excluded.created_at, updated_at = excluded.updated_at,
+      list_count = excluded.list_count, client_count = excluded.client_count, list_names = excluded.list_names,
+      client_names = excluded.client_names, list_ids = excluded.list_ids, client_ids = excluded.client_ids,
+      list_memberships = excluded.list_memberships, esp = excluded.esp, email_provider_type = excluded.email_provider_type,
+      mx_records = excluded.mx_records, mx_status = excluded.mx_status, mx_checked_at = excluded.mx_checked_at,
+      keywords = excluded.keywords, employee_count_min = excluded.employee_count_min, employee_count_max = excluded.employee_count_max,
+      company_location = excluded.company_location, company_city = excluded.company_city, company_state = excluded.company_state,
+      company_country = excluded.company_country, tags = excluded.tags, tag_text = excluded.tag_text,
+      last_contacted_at = excluded.last_contacted_at, contact_count = excluded.contact_count,
+      search_text = excluded.search_text
+    returning 1
+  )
+  select count(*)::integer into affected from upserted;
+
+  return affected;
+end;
+$$;
+
+create or replace function public.reindex_all()
+returns integer
+language sql
+security definer
+set search_path = public
+set statement_timeout = '15s'
+as $$
+  select public.reindex_prospects(array(select id from public.prospects));
+$$;
+
+revoke execute on function public.import_prospect_batch_v5(text, text, jsonb) from public, anon, authenticated;
+revoke execute on function public.reindex_prospects(text[]) from public, anon, authenticated;
+revoke execute on function public.reindex_all() from public, anon, authenticated;
+
+grant execute on function public.import_prospect_batch_v5(text, text, jsonb) to service_role;
+grant execute on function public.reindex_prospects(text[]) to service_role;
+grant execute on function public.reindex_all() to service_role;

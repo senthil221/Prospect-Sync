@@ -21,3 +21,10 @@ test("uses conditional totals in the v11 workspace RPC", async () => {
   assert.match(dashboard, /withTotal: prospectPage === 1 && !prospectTotalCache\.current\.has/);
   assert.match(dashboard, /totalEstimated \? "≈"/);
 });
+
+test("bounds every hot database function to 15 seconds", async () => {
+  const migration = await readFile(migrationUrl, "utf8");
+  for (const name of ["search_prospect_workspace_v11", "import_prospect_batch_v5", "reindex_prospects", "reindex_all"]) {
+    assert.match(migration, new RegExp(`create or replace function public\\.${name}\\([\\s\\S]*?set statement_timeout = '15s'`));
+  }
+});
