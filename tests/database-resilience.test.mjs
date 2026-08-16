@@ -28,3 +28,20 @@ test("bounds every hot database function to 15 seconds", async () => {
     assert.match(migration, new RegExp(`create or replace function public\\.${name}\\([\\s\\S]*?set statement_timeout = '15s'`));
   }
 });
+
+test("analyzes planner statistics after both import completion paths", async () => {
+  const [migration, prospectCompletion, companyCompletion] = await Promise.all([
+    readFile(migrationUrl, "utf8"),
+    readFile(new URL("../app/api/imports/complete/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/company-imports/complete/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(migration, /create or replace function public\.analyze_prospect_index\(\)[\s\S]*analyze public\.prospect_index;[\s\S]*analyze public\.companies;/);
+  assert.match(migration, /revoke execute on function public\.analyze_prospect_index\(\) from public, anon, authenticated/);
+  assert.match(migration, /grant execute on function public\.analyze_prospect_index\(\) to service_role/);
+  for (const route of [prospectCompletion, companyCompletion]) {
+    assert.match(route, /after\(async \(\) =>/);
+    assert.match(route, /rpc\("analyze_prospect_index"\)/);
+    assert.match(route, /catch \(analyzeError\)/);
+  }
+});

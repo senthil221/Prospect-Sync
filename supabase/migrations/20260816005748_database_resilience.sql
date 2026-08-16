@@ -314,3 +314,18 @@ revoke execute on function public.reindex_all() from public, anon, authenticated
 grant execute on function public.import_prospect_batch_v5(text, text, jsonb) to service_role;
 grant execute on function public.reindex_prospects(text[]) to service_role;
 grant execute on function public.reindex_all() to service_role;
+
+create or replace function public.analyze_prospect_index()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  analyze public.prospect_index;
+  analyze public.companies;
+end;
+$$;
+
+revoke execute on function public.analyze_prospect_index() from public, anon, authenticated;
+grant execute on function public.analyze_prospect_index() to service_role;

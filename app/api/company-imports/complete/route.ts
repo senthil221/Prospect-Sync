@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { authorizeApi } from "../../../../lib/auth";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
@@ -10,5 +11,13 @@ export async function POST(request: Request) {
   const supabase = createAdminClient();
   const { data, error } = await supabase.rpc("complete_company_import_v1", { p_import_id: importId });
   if (error) return Response.json({ error: error.message }, { status: 500 });
+  after(async () => {
+    try {
+      const { error: analyzeError } = await supabase.rpc("analyze_prospect_index");
+      if (analyzeError) console.error("Post-import ANALYZE failed", analyzeError);
+    } catch (analyzeError) {
+      console.error("Post-import ANALYZE failed", analyzeError);
+    }
+  });
   return Response.json({ summary: data?.[0] ?? null });
 }
