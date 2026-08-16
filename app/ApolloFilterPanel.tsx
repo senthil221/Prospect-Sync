@@ -2,10 +2,10 @@
 
 import { ClipboardEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { ProspectFieldDefinition } from "../lib/prospect-fields";
+import type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
 
-export type ProspectFilterOperator = "contains" | "equals" | "not_contains" | "not_equals" | "empty" | "not_empty" | "boolean" | "number_ranges";
-export type ProspectFilter = { id: string; field: string; operator: ProspectFilterOperator; values: string[] };
+export type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 
 type FilterDefinition = ProspectFieldDefinition & {
   kind?: "text" | "employee";
