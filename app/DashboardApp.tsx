@@ -154,7 +154,11 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
         {!loading && section === "clients" && <ClientsPanel clients={clients} selectedClient={selectedClient} selectedList={selectedList} lists={lists} onOpenClient={(client) => void openClient(client)} onCloseClient={() => setSelectedClient(null)} onOpenList={setSelectedList} onCloseList={() => setSelectedList(null)} onSelectProspect={setSelectedProspect} onImport={() => navigate("imports")} onDeleteClient={(client) => setDeleteRequest({ kind: "client", id: client.id, name: client.name, context: `${client.list_count} lists · ${client.prospect_count} linked prospects` })} onDeleteList={(list) => setDeleteRequest({ kind: "list", id: list.id, name: list.name, context: `${list.source_file_name} · ${list.prospect_count} linked prospects` })}/>}
         {!loading && section === "coverage" && <CoveragePanel/>}
         {!loading && section === "quality" && <DataQualityPanel onMerged={() => void refreshDashboard()}/>}
-        {!loading && section === "imports" && <ImportsPanel clients={clients} onComplete={async () => { await refreshDashboard(); navigate("overview"); }}/>}
+        {!loading && section === "imports" && <ImportsPanel
+          clients={clients}
+          onChanged={async () => { await refreshDashboard(); }}
+          onComplete={async () => { await refreshDashboard(); navigate("overview"); }}
+        />}
       </section>
     </main>
     {selectedProspect && <ProspectDrawer prospect={selectedProspect} onClose={() => setSelectedProspect(null)}/>}

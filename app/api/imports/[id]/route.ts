@@ -48,6 +48,31 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
   const supabase = createAdminClient();
+  const payload = await request.json().catch(() => null) as { cancel?: unknown; kind?: unknown } | null;
+
+  if (payload?.cancel === true) {
+    if (payload.kind !== "prospects" && payload.kind !== "companies") {
+      return Response.json({ error: "Invalid import type." }, { status: 400 });
+    }
+
+    if (payload.kind === "companies") {
+      const existing = await supabase.from("company_imports").select("id,file_name,status").eq("id", id).maybeSingle();
+      if (existing.error) return Response.json({ error: existing.error.message }, { status: 500 });
+      if (!existing.data) return Response.json({ error: "Import not found." }, { status: 404 });
+      if (existing.data.status !== "processing") return Response.json({ error: "Only unfinished imports can be cancelled." }, { status: 409 });
+
+      const cancelled = await supabase.from("company_imports").delete().eq("id", id).eq("status", "processing").select("id").maybeSingle();
+      if (cancelled.error) return Response.json({ error: cancelled.error.message }, { status: 500 });
+      if (!cancelled.data) return Response.json({ error: "This import is no longer unfinished." }, { status: 409 });
+      return Response.json({ result: { kind: "company_import", name: existing.data.file_name, importsDeleted: 1 } });
+    }
+
+    const existing = await supabase.from("imports").select("id,status").eq("id", id).maybeSingle();
+    if (existing.error) return Response.json({ error: existing.error.message }, { status: 500 });
+    if (!existing.data) return Response.json({ error: "Import not found." }, { status: 404 });
+    if (existing.data.status !== "processing") return Response.json({ error: "Only unfinished imports can be cancelled." }, { status: 409 });
+  }
+
   const affected = await supabase.from("list_rows").select("prospect_id").eq("import_id", id);
   // Client-side deletes never touch the People/Company databases: only the
   // import and its membership links are removed.

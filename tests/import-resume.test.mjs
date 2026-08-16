@@ -34,13 +34,14 @@ test("chunk routes pass row offsets into both resumable RPCs", async () => {
   assert.match(companyRoute, /p_row_offset: rowOffset/);
 });
 
-test("the imports panel discovers and validates interrupted imports", async () => {
-  const [listRoute, detailRoute, prospectStart, companyStart, dashboard] = await Promise.all([
+test("the imports panel discovers, validates, and cancels interrupted imports", async () => {
+  const [listRoute, detailRoute, prospectStart, companyStart, dashboard, importsPanel] = await Promise.all([
     readFile(new URL("../app/api/imports/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/imports/[id]/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/imports/start/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/company-imports/start/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/DashboardApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ImportsPanel.tsx", import.meta.url), "utf8"),
   ]);
   assert.match(listRoute, /\.eq\("status", "processing"\)/);
   assert.match(listRoute, /committed_row_offset/);
@@ -52,4 +53,9 @@ test("the imports panel discovers and validates interrupted imports", async () =
   assert.match(dashboard, /Interrupted — resume from row/);
   assert.match(dashboard, /importHeadersMatch/);
   assert.match(dashboard, /Start a new import instead/);
+  assert.match(importsPanel, /Cancel import/);
+  assert.match(importsPanel, /cancel: true, kind: cancelImport\.kind/);
+  assert.match(detailRoute, /payload\?\.cancel === true/);
+  assert.match(detailRoute, /existing\.data\.status !== "processing"/);
+  assert.match(detailRoute, /from\("company_imports"\)\.delete\(\)\.eq\("id", id\)\.eq\("status", "processing"\)/);
 });

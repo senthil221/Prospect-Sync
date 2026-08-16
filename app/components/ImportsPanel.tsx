@@ -13,12 +13,15 @@ import type { ClientRecord, FileAudit, ImportResumeDetail, InterruptedImport } f
 function ImportMappingPanel({ audit, fieldMap, onChange }: { audit: FileAudit; fieldMap: Record<string, string>; onChange: (header: string, value: string) => void }) {
   return <div className="import-mapping"><div className="mapping-head"><div><strong>Field mapping</strong><small>Review how CSV columns map to master fields</small></div><span>{audit.invalidRows ? `${audit.invalidRows} rows need identity data` : "All rows identifiable"}</span></div><div className="mapping-list">{audit.headers.map((header) => <label key={header}><span title={header}>{header}</span><b>→</b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Auto detect"} onChange={(event) => onChange(header, event.target.value)}>{canonicalImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p>Original headers and values are preserved when mapped or auto-detected. Set a column to “{skipImportField}” to drop it entirely — it won’t be stored or added to the field catalog.</p></div>;
 }
-export default function ImportsPanel({ clients, onComplete }: { clients: ClientRecord[]; onComplete: () => Promise<void> }) {
+export default function ImportsPanel({ clients, onComplete, onChanged }: { clients: ClientRecord[]; onComplete: () => Promise<void>; onChanged: () => Promise<void> }) {
   const [kind, setKind] = useState<"prospects" | "companies">("prospects");
   const [sourceChoice, setSourceChoice] = useState("");
   const [customSource, setCustomSource] = useState("");
   const [interruptedImports, setInterruptedImports] = useState<InterruptedImport[]>([]);
   const [resumeImport, setResumeImport] = useState<InterruptedImport | null>(null);
+  const [cancelImport, setCancelImport] = useState<InterruptedImport | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelError, setCancelError] = useState("");
   const dataSource = sourceChoice === "Other" ? customSource.trim() : sourceChoice;
   const activeDataSource = resumeImport?.dataSource ?? dataSource;
   useEffect(() => {
@@ -33,15 +36,30 @@ export default function ImportsPanel({ clients, onComplete }: { clients: ClientR
     setInterruptedImports((current) => current.filter((item) => item.id !== id));
     setResumeImport(null);
   };
+  async function confirmCancelImport() {
+    if (!cancelImport) return;
+    setCancelBusy(true); setCancelError("");
+    try {
+      await api(`/api/imports/${encodeURIComponent(cancelImport.id)}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cancel: true, kind: cancelImport.kind }) });
+      setInterruptedImports((current) => current.filter((item) => item.id !== cancelImport.id));
+      if (resumeImport?.id === cancelImport.id) setResumeImport(null);
+      setCancelImport(null);
+      void onChanged().catch(() => undefined);
+    } catch (caught) { setCancelError(caught instanceof Error ? caught.message : "Unable to cancel this import."); }
+    finally { setCancelBusy(false); }
+  }
   return <section className="import-workspace">
-    {interruptedImports.length ? <div className="interrupted-imports panel"><div><p className="eyebrow">INTERRUPTED IMPORTS</p><h3>Continue an unfinished import</h3><p>Re-select the original file; committed rows will not be imported twice.</p></div>{interruptedImports.map((item) => <div className="interrupted-import" key={item.id}><div><strong>{item.fileName}</strong><small>Interrupted — resume from row {formatNumber(item.resumeFromRow)} of {formatNumber(item.totalRows)}</small></div><button className="secondary" onClick={() => chooseResume(item)}>Resume</button></div>)}</div> : null}
+    {interruptedImports.length ? <div className="interrupted-imports panel"><div><p className="eyebrow">INTERRUPTED IMPORTS</p><h3>Continue an unfinished import</h3><p>Re-select the original file; committed rows will not be imported twice.</p></div>{interruptedImports.map((item) => <div className="interrupted-import" key={item.id}><div><strong>{item.fileName}</strong><small>Interrupted — resume from row {formatNumber(item.resumeFromRow)} of {formatNumber(item.totalRows)}</small></div><span className="interrupted-import-actions"><button className="secondary" onClick={() => chooseResume(item)}>Resume</button><button className="interrupted-cancel" onClick={() => { setCancelError(""); setCancelImport(item); }}>Cancel import</button></span></div>)}</div> : null}
     <div className="import-setup panel">
       <div><p className="eyebrow">IMPORT SETUP</p><h2>What are you importing?</h2><p>Every import must have a data source so its lineage remains auditable.</p></div>
       <div className="import-kind-switch" role="tablist" aria-label="Import type"><button role="tab" aria-selected={kind === "prospects"} className={kind === "prospects" ? "active" : ""} onClick={() => { setKind("prospects"); setResumeImport(null); }}>People / prospects</button><button role="tab" aria-selected={kind === "companies"} className={kind === "companies" ? "active" : ""} onClick={() => { setKind("companies"); setResumeImport(null); }}>Companies</button></div>
       <div className="import-source-fields"><label><span>Data source <b>*</b></span><select aria-label="Data source" value={sourceChoice} onChange={(event) => setSourceChoice(event.target.value)}><option value="">Choose source</option>{commonDataSources.map((source) => <option key={source}>{source}</option>)}<option>Other</option></select></label>{sourceChoice === "Other" ? <label><span>Custom source <b>*</b></span><input value={customSource} maxLength={80} onChange={(event) => setCustomSource(event.target.value)} placeholder="Enter the source name"/></label> : null}</div>
       {!activeDataSource ? <p className="source-required-note">A data source is required before the import can start.</p> : <p className="source-selected-note">Source: <strong>{activeDataSource}</strong></p>}
     </div>
-    {kind === "prospects" ? <ProspectImportView key="prospects" clients={clients} dataSource={activeDataSource} resumeImport={resumeImport?.kind === "prospects" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onComplete={onComplete}/> : <CompanyImportView key="companies" dataSource={activeDataSource} resumeImport={resumeImport?.kind === "companies" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onComplete={onComplete}/>}
+    {kind === "prospects"
+      ? <ProspectImportView key="prospects" clients={clients} dataSource={activeDataSource} resumeImport={resumeImport?.kind === "prospects" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onComplete={onComplete}/>
+      : <CompanyImportView key="companies" dataSource={activeDataSource} resumeImport={resumeImport?.kind === "companies" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onComplete={onComplete}/>}
+    {cancelImport ? <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-import-title"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="cancel-import-title">Cancel unfinished import?</h2><p>The unfinished session and any client-list links it created will be removed. Records already added to the People or Company database stay in place.</p><div className="delete-target"><strong>{cancelImport.fileName}</strong><span>{formatNumber(cancelImport.committedRowOffset)} of {formatNumber(cancelImport.totalRows)} rows committed</span></div>{cancelError ? <p className="form-error" role="alert">{cancelError}</p> : null}<div className="modal-actions"><button className="secondary" disabled={cancelBusy} onClick={() => setCancelImport(null)}>Keep import</button><button className="danger-button solid" disabled={cancelBusy} onClick={() => void confirmCancelImport()}>{cancelBusy ? "Cancelling…" : "Cancel import"}</button></div></section></div> : null}
   </section>;
 }
 
