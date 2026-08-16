@@ -45,3 +45,13 @@ test("analyzes planner statistics after both import completion paths", async () 
     assert.match(route, /catch \(analyzeError\)/);
   }
 });
+
+test("debounces and cancels superseded workspace searches", async () => {
+  const dashboard = await readFile(new URL("../app/DashboardApp.tsx", import.meta.url), "utf8");
+  assert.match(dashboard, /useDebouncedValue\(deferredSearch, 300\)/);
+  assert.match(dashboard, /new AbortController\(\)/);
+  assert.match(dashboard, /signal: controller\.signal/);
+  assert.match(dashboard, /controller\.abort\(\)/);
+  assert.match(dashboard, /!isAbortError\(caught\)/);
+  assert.match(dashboard, /const deferredSearch = useDeferredValue\(search\)/);
+});

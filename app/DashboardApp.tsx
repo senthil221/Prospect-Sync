@@ -26,6 +26,19 @@ type SavedView = { id: string; name: string; definition: { filters: ProspectFilt
 
 const emptyStats = { prospects: 0, companies: 0, clients: 0, lists: 0, rowsImported: 0, duplicatesDetected: 0 };
 
+function useDebouncedValue<T>(value: T, delay: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedValue(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [delay, value]);
+  return debouncedValue;
+}
+
+function isAbortError(error: unknown) {
+  return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
+}
+
 function formatNumber(value: unknown) {
   return new Intl.NumberFormat("en-IN").format(Number(value ?? 0));
 }
@@ -129,7 +142,8 @@ function clearApiCache() {
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const method = String(options?.method ?? "GET").toUpperCase();
-  if (method === "GET") {
+  const cacheable = method === "GET" && !options?.signal;
+  if (cacheable) {
     const cached = apiResponseCache.get(path);
     if (cached && cached.expiresAt > Date.now()) return cached.data as T;
     const pending = apiRequests.get(path);
@@ -139,13 +153,13 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
     const response = await fetch(path, options);
     const data = await response.json() as T & { error?: string };
     if (!response.ok) throw new Error(data.error || "Something went wrong.");
-    if (method === "GET") apiResponseCache.set(path, { data, expiresAt: Date.now() + 5 * 60_000 });
-    else clearApiCache();
+    if (cacheable) apiResponseCache.set(path, { data, expiresAt: Date.now() + 5 * 60_000 });
+    else if (method !== "GET") clearApiCache();
     return data;
   })();
-  if (method === "GET") apiRequests.set(path, request);
+  if (cacheable) apiRequests.set(path, request);
   try { return await request; }
-  finally { if (method === "GET") apiRequests.delete(path); }
+  finally { if (cacheable) apiRequests.delete(path); }
 }
 
 function prefetchApi(path: string) {
@@ -227,8 +241,9 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   const prospectFieldsLoaded = useRef(false);
   const prospectTotalCache = useRef(new Map<string, { total: number; estimated: boolean }>());
   const deferredSearch = useDeferredValue(search);
+  const debouncedSearch = useDebouncedValue(deferredSearch, 300);
   const encodedProspectFilters = useMemo(() => JSON.stringify(prospectFilters.map(({ field, operator, values }) => ({ field, operator, values }))), [prospectFilters]);
-  const prospectCountKey = useMemo(() => JSON.stringify([deferredSearch.trim(), encodedProspectFilters, companyPeopleScope, prospectRefresh, stats.prospects]), [companyPeopleScope, deferredSearch, encodedProspectFilters, prospectRefresh, stats.prospects]);
+  const prospectCountKey = useMemo(() => JSON.stringify([debouncedSearch.trim(), encodedProspectFilters, companyPeopleScope, prospectRefresh, stats.prospects]), [companyPeopleScope, debouncedSearch, encodedProspectFilters, prospectRefresh, stats.prospects]);
 
   const prefetchSection = useCallback((next: Section) => {
     if (next === "prospects") prefetchApi(prospectApiPath({ filters: encodedProspectFilters, sort: prospectSort, direction: prospectDirection, includeFields: prospectFields.length === 0 }));
@@ -265,15 +280,17 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     if (section !== "prospects" && section !== "companies") {
-      return () => { active = false; };
+      return () => { active = false; controller.abort(); };
     }
+    if (deferredSearch !== debouncedSearch) return () => { active = false; controller.abort(); };
     void (async () => {
       setWorkspaceLoading(true);
       setError("");
       try {
         if (section === "prospects") {
-          const data = await api<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; fields?: string[] }>(prospectApiPath({ search: deferredSearch, page: prospectPage, sort: prospectSort, direction: prospectDirection, filters: encodedProspectFilters, includeFields: !prospectFieldsLoaded.current, companyScope: companyPeopleScope, withTotal: prospectPage === 1 && !prospectTotalCache.current.has(prospectCountKey) }));
+          const data = await api<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; fields?: string[] }>(prospectApiPath({ search: debouncedSearch, page: prospectPage, sort: prospectSort, direction: prospectDirection, filters: encodedProspectFilters, includeFields: !prospectFieldsLoaded.current, companyScope: companyPeopleScope, withTotal: prospectPage === 1 && !prospectTotalCache.current.has(prospectCountKey) }), { signal: controller.signal });
           if (active) {
             setProspects(data.prospects);
             if (data.total !== null) {
@@ -288,14 +305,14 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
           }
         }
         if (section === "companies") {
-          const data = await api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(companyApiPath({ search: deferredSearch, page: companyPage, filters: companyFilters, peopleScope: peopleCompanyScope }));
+          const data = await api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(companyApiPath({ search: debouncedSearch, page: companyPage, filters: companyFilters, peopleScope: peopleCompanyScope }), { signal: controller.signal });
           if (active) { setCompanies(data.companies); setCompanySummary({ total: data.total, covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); }
         }
-      } catch (caught) { if (active) setError(caught instanceof Error ? caught.message : "Unable to load workspace data."); }
+      } catch (caught) { if (active && !isAbortError(caught)) setError(caught instanceof Error ? caught.message : "Unable to load workspace data."); }
       finally { if (active) setWorkspaceLoading(false); }
     })();
-    return () => { active = false; };
-  }, [section, deferredSearch, stats.prospects, prospectPage, encodedProspectFilters, prospectSort, prospectDirection, prospectRefresh, companyPage, companyFilters, companyRefresh, companyPeopleScope, peopleCompanyScope, prospectCountKey]);
+    return () => { active = false; controller.abort(); };
+  }, [section, deferredSearch, debouncedSearch, stats.prospects, prospectPage, encodedProspectFilters, prospectSort, prospectDirection, prospectRefresh, companyPage, companyFilters, companyRefresh, companyPeopleScope, peopleCompanyScope, prospectCountKey]);
 
   async function openClient(client: ClientRecord) {
     setSelectedClient(client);
@@ -1080,15 +1097,18 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
   const fieldsLoaded = useRef(false);
   const totalCache = useRef(new Map<string, number>());
   const deferredSearch = useDeferredValue(search);
+  const debouncedSearch = useDebouncedValue(deferredSearch, 300);
   const encodedFilters = useMemo(() => JSON.stringify(filters.map(({ field, operator, values }) => ({ field, operator, values }))), [filters]);
-  const countKey = useMemo(() => JSON.stringify([client.id, deferredSearch.trim(), encodedFilters, companyScope, refresh, client.prospect_count]), [client.id, client.prospect_count, companyScope, deferredSearch, encodedFilters, refresh]);
+  const countKey = useMemo(() => JSON.stringify([client.id, debouncedSearch.trim(), encodedFilters, companyScope, refresh, client.prospect_count]), [client.id, client.prospect_count, companyScope, debouncedSearch, encodedFilters, refresh]);
   useEffect(() => {
     let current = true;
-    const path = prospectApiPath({ search: deferredSearch, page, sort, direction, filters: encodedFilters, clientId: client.id, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !totalCache.current.has(countKey) });
+    const controller = new AbortController();
+    if (deferredSearch !== debouncedSearch) return () => { current = false; controller.abort(); };
+    const path = prospectApiPath({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, clientId: client.id, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !totalCache.current.has(countKey) });
     void (async () => {
       setRefreshing(true);
       try {
-        const data = await api<{ prospects: Prospect[]; total: number | null; fields?: string[] }>(path);
+        const data = await api<{ prospects: Prospect[]; total: number | null; fields?: string[] }>(path, { signal: controller.signal });
         if (current) {
           setProspects(data.prospects);
           if (data.total !== null) { totalCache.current.set(countKey, data.total); setTotal(data.total); }
@@ -1096,11 +1116,11 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
           if (data.fields?.length) { fieldsLoaded.current = true; setFields(data.fields); }
           setError("");
         }
-      } catch (caught) { if (current) setError(caught instanceof Error ? caught.message : "Unable to load the client people database."); }
+      } catch (caught) { if (current && !isAbortError(caught)) setError(caught instanceof Error ? caught.message : "Unable to load the client people database."); }
       finally { if (current) { setLoading(false); setRefreshing(false); } }
     })();
-    return () => { current = false; };
-  }, [client.id, client.prospect_count, deferredSearch, page, sort, direction, encodedFilters, refresh, companyScope, countKey]);
+    return () => { current = false; controller.abort(); };
+  }, [client.id, client.prospect_count, deferredSearch, debouncedSearch, page, sort, direction, encodedFilters, refresh, companyScope, countKey]);
   async function removeFromClient(prospect: Prospect) {
     if (!window.confirm(`Remove ${prospect.full_name || "this prospect"} from ${client.name}? The People DB record will be preserved.`)) return;
     try {
@@ -1121,19 +1141,22 @@ function ClientCompanyDatabase({ client, peopleScope, onClearPeopleScope, onSeeP
   const [error, setError] = useState("");
   const [filters, setFilters] = useState<ProspectFilter[]>([]);
   const deferredSearch = useDeferredValue(search);
+  const debouncedSearch = useDebouncedValue(deferredSearch, 300);
   useEffect(() => {
     let current = true;
-    const path = companyApiPath({ search: deferredSearch, clientId: client.id, page, filters, peopleScope });
+    const controller = new AbortController();
+    if (deferredSearch !== debouncedSearch) return () => { current = false; controller.abort(); };
+    const path = companyApiPath({ search: debouncedSearch, clientId: client.id, page, filters, peopleScope });
     void (async () => {
       setRefreshing(true);
       try {
-        const data = await api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(path);
+        const data = await api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(path, { signal: controller.signal });
         if (current) { setCompanies(data.companies); setSummary({ total: data.total, covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); setError(""); }
-      } catch (caught) { if (current) setError(caught instanceof Error ? caught.message : "Unable to load the client company database."); }
+      } catch (caught) { if (current && !isAbortError(caught)) setError(caught instanceof Error ? caught.message : "Unable to load the client company database."); }
       finally { if (current) { setLoading(false); setRefreshing(false); } }
     })();
-    return () => { current = false; };
-  }, [client.id, client.prospect_count, deferredSearch, page, filters, peopleScope]);
+    return () => { current = false; controller.abort(); };
+  }, [client.id, client.prospect_count, deferredSearch, debouncedSearch, page, filters, peopleScope]);
   return <section className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT COMPANY DB</p><h3>{client.name} companies</h3><p>Companies represented by prospects in this client workspace.</p></div><button className="secondary" onClick={() => onSeePeople({ search: deferredSearch.trim(), filters })}>See People <AppIcon name="arrow" size={14}/></button><label className="workspace-search"><span>⌕</span><input aria-label={`Search ${client.name} companies`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search client companies…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client companies…</div> : null}{loading ? <div className="workspace-loading">Preparing company database…</div> : <CompanyTable companies={companies} total={summary.total} covered={summary.covered} prospectTotal={summary.prospectTotal} page={page} pageSize={summary.pageSize} clientId={client.id} search={deferredSearch} filters={filters} peopleScope={peopleScope} onClearPeopleScope={onClearPeopleScope} onSeePeople={onSeePeople} onFilters={(next) => { setFilters(next); setPage(1); }} onPageChange={setPage} onImport={onImport}/>}</section>;
 }
 
