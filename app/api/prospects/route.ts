@@ -13,6 +13,7 @@ type WorkspaceQuery = {
   offset: number;
   clientId: string | null;
   companyScope: CompanyScope | null;
+  withTotal: boolean;
 };
 
 const missingFunctionCodes = new Set(["PGRST202", "42883"]);
@@ -27,9 +28,8 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
   const legacyFilters = query.filters.filter((filter) => !["__esp", "__email_provider_type"].includes(filter.field));
   const v6OnlyFields = new Set(["__first_name", "__last_name", "__keywords", "__person_location", "__company_location", "__company_city", "__company_state", "__company_country", "__employee_count"]);
   const requiresV6 = query.filters.some((filter) => v6OnlyFields.has(filter.field) || filter.field.startsWith("custom:") || ["boolean", "number_ranges"].includes(filter.operator));
-  // v7 reads the flat prospect_index (fast at any size); v6 is the identical-semantics fallback
-  // used automatically until the search-index migration is applied.
-  let workspace = query.companyScope ? await supabase.rpc("search_prospect_workspace_v10", {
+  let version = "v11";
+  let workspace = await supabase.rpc("search_prospect_workspace_v11", {
     p_search: query.search,
     p_filters: query.filters,
     p_sort: query.sort,
@@ -37,18 +37,37 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
     p_limit: query.limit,
     p_offset: query.offset,
     p_client_id: query.clientId,
-    p_company_scope: query.companyScope,
-  }) : await supabase.rpc("search_prospect_workspace_v7", {
-    p_search: query.search,
-    p_filters: query.filters,
-    p_sort: query.sort,
-    p_direction: query.direction,
-    p_limit: query.limit,
-    p_offset: query.offset,
-    p_client_id: query.clientId,
+    p_company_scope: query.companyScope ?? {},
+    p_with_total: query.withTotal,
   });
-  if (query.companyScope) return workspace;
+  if (isMissingFunction(workspace.error) && query.companyScope) {
+    version = "v10";
+    workspace = await supabase.rpc("search_prospect_workspace_v10", {
+      p_search: query.search,
+      p_filters: query.filters,
+      p_sort: query.sort,
+      p_direction: query.direction,
+      p_limit: query.limit,
+      p_offset: query.offset,
+      p_client_id: query.clientId,
+      p_company_scope: query.companyScope,
+    });
+  }
+  if (isMissingFunction(workspace.error) && !query.companyScope) {
+    version = "v7";
+    workspace = await supabase.rpc("search_prospect_workspace_v7", {
+      p_search: query.search,
+      p_filters: query.filters,
+      p_sort: query.sort,
+      p_direction: query.direction,
+      p_limit: query.limit,
+      p_offset: query.offset,
+      p_client_id: query.clientId,
+    });
+  }
+  if (query.companyScope) return { ...workspace, version };
   if (isMissingFunction(workspace.error)) {
+    version = "v6";
     workspace = await supabase.rpc("search_prospect_workspace_v6", {
       p_search: query.search,
       p_filters: query.filters,
@@ -60,7 +79,8 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
     });
   }
   if (isMissingFunction(workspace.error)) {
-    if (requiresV6) return workspace;
+    if (requiresV6) return { ...workspace, version };
+    version = "v5";
     workspace = await supabase.rpc("search_prospect_workspace_v5", {
       p_search: query.search,
       p_filters: legacyFilters.filter((filter) => !["boolean", "number_ranges"].includes(filter.operator)),
@@ -72,6 +92,7 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
     });
   }
   if (isMissingFunction(workspace.error)) {
+    version = "v4";
     workspace = await supabase.rpc("search_prospect_workspace_v4", {
       p_search: query.search,
       p_filters: legacyFilters,
@@ -83,7 +104,8 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
     });
   }
   if (isMissingFunction(workspace.error)) {
-    if (query.clientId) return workspace;
+    if (query.clientId) return { ...workspace, version };
+    version = "v3";
     workspace = await supabase.rpc("search_prospect_workspace_v3", {
       p_search: query.search,
       p_filters: legacyFilters,
@@ -94,6 +116,7 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
     });
   }
   if (isMissingFunction(workspace.error)) {
+    version = "legacy";
     workspace = await supabase.rpc("search_prospect_workspace", {
       p_search: query.search,
       p_filters: legacyFilters.filter((filter) => !["not_contains", "not_equals"].includes(filter.operator)),
@@ -101,7 +124,7 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
       p_offset: query.offset,
     });
   }
-  return workspace;
+  return { ...workspace, version };
 }
 
 function workspaceSummary(data: unknown) {
@@ -114,8 +137,8 @@ function workspaceRows(data: unknown): ProspectRow[] {
   return Array.isArray(rows) ? rows.filter((row): row is ProspectRow => Boolean(row) && typeof row === "object") : [];
 }
 
-async function exportProspects(supabase: ReturnType<typeof createAdminClient>, query: Omit<WorkspaceQuery, "limit" | "offset">) {
-  const firstPageRequest = runProspectWorkspace(supabase, { ...query, limit: exportPageSize, offset: 0 });
+async function exportProspects(supabase: ReturnType<typeof createAdminClient>, query: Omit<WorkspaceQuery, "limit" | "offset" | "withTotal">) {
+  const firstPageRequest = runProspectWorkspace(supabase, { ...query, limit: exportPageSize, offset: 0, withTotal: true });
   const fieldsRequest = supabase.from("prospect_fields").select("field_name").order("field_name").limit(500);
   const [firstPage, fields] = await Promise.all([firstPageRequest, fieldsRequest]);
   const firstError = firstPage.error ?? fields.error;
@@ -124,13 +147,38 @@ async function exportProspects(supabase: ReturnType<typeof createAdminClient>, q
   const total = Number(workspaceSummary(firstPage.data).total_count ?? 0);
   const rows = workspaceRows(firstPage.data);
   const offsets = Array.from({ length: Math.max(0, Math.ceil(total / exportPageSize) - 1) }, (_, index) => (index + 1) * exportPageSize);
+  let lastPageSize = rows.length;
   for (let index = 0; index < offsets.length; index += exportConcurrency) {
     const pages = await Promise.all(offsets.slice(index, index + exportConcurrency).map((offset) =>
-      runProspectWorkspace(supabase, { ...query, limit: exportPageSize, offset }),
+      runProspectWorkspace(supabase, { ...query, limit: exportPageSize, offset, withTotal: false }),
     ));
     const failure = pages.find((page) => page.error)?.error;
     if (failure) return { error: failure, rows: [] as ProspectRow[], fields: [] as string[] };
-    pages.forEach((page) => rows.push(...workspaceRows(page.data)));
+    pages.forEach((page) => {
+      const pageRows = workspaceRows(page.data);
+      rows.push(...pageRows);
+      lastPageSize = pageRows.length;
+    });
+  }
+
+  // The unscoped total is an estimate, so continue until a short page proves
+  // the export reached the end rather than trusting an underestimated count.
+  let nextOffset = Math.max(exportPageSize, Math.ceil(total / exportPageSize) * exportPageSize);
+  while (lastPageSize === exportPageSize) {
+    const batchOffsets = Array.from({ length: exportConcurrency }, (_, index) => nextOffset + index * exportPageSize);
+    const pages = await Promise.all(batchOffsets.map((offset) =>
+      runProspectWorkspace(supabase, { ...query, limit: exportPageSize, offset, withTotal: false }),
+    ));
+    const failure = pages.find((page) => page.error)?.error;
+    if (failure) return { error: failure, rows: [] as ProspectRow[], fields: [] as string[] };
+    lastPageSize = 0;
+    for (const page of pages) {
+      const pageRows = workspaceRows(page.data);
+      rows.push(...pageRows);
+      lastPageSize = pageRows.length;
+      if (pageRows.length < exportPageSize) break;
+    }
+    nextOffset += exportConcurrency * exportPageSize;
   }
   return { error: null, rows, fields: (fields.data ?? []).map((field) => String(field.field_name ?? "")).filter(Boolean) };
 }
@@ -159,6 +207,7 @@ export async function GET(request: Request) {
   try { companyScope = parseCompanyScope(url.searchParams.get("companyScope")); }
   catch { return Response.json({ error: "Invalid company navigation scope." }, { status: 400 }); }
   const includeFields = url.searchParams.get("includeFields") !== "0";
+  const withTotal = url.searchParams.get("withTotal") === null ? page === 1 : url.searchParams.get("withTotal") !== "0";
   const exportCsv = url.searchParams.get("export") === "csv";
   const limit = 50;
   let filters: ProspectFilter[];
@@ -184,6 +233,7 @@ export async function GET(request: Request) {
     offset: (page - 1) * limit,
     clientId,
     companyScope,
+    withTotal,
   });
   const fieldsRequest = includeFields
     ? supabase.from("prospect_fields").select("field_name").order("field_name").limit(500)
@@ -195,9 +245,11 @@ export async function GET(request: Request) {
   const error = workspace.error ?? fields.error;
   if (error) return Response.json({ error: error.message }, { status: 500 });
   const summary = workspaceSummary(workspace.data);
+  const totalEstimated = workspace.version === "v11" && withTotal && !search && filters.length === 0 && !clientId && !companyScope;
   return Response.json({
     prospects: summary.result_rows ?? [],
-    total: Number(summary.total_count ?? 0),
+    total: summary.total_count === null || summary.total_count === undefined ? null : Number(summary.total_count),
+    totalEstimated,
     page,
     limit,
     fields: (fields.data ?? []).map((item) => item.field_name),
