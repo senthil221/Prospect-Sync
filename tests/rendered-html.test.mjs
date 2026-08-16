@@ -11,7 +11,7 @@ test("ships the Prospect Sync product instead of the starter", async () => {
   ]);
   assert.match(page, /<DashboardApp currentUserEmail=/);
   assert.match(layout, /Prospect Sync/);
-  assert.match(dashboard, /Master database/);
+  assert.match(dashboard, /People database/);
   assert.match(dashboard, /Import CSV/);
   assert.match(dashboard, /currentUserEmail/);
   assert.match(login, /signInWithPassword/);
