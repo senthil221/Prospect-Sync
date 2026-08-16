@@ -6,6 +6,7 @@ import { buildCustomFieldDefinitions, customFieldValue } from "../lib/prospect-f
 import { runProspectExport, fileSystemAccessSupported, type ExportFormat } from "../lib/export-runner";
 import { commonDataSources } from "../lib/data-source";
 import { companyImportFields, missingCompanyImportFields, missingRequiredFields, requiredPersonImportFields, resolvedImportFields, skipImportField, suggestedCompanyImportField, suggestedPersonImportField } from "../lib/import-schema";
+import { importHeadersMatch } from "../lib/import-resume";
 import type { CompanyScope, PeopleScope } from "../lib/workspace-scopes";
 import ApolloFilterPanel, { filterLabel, type ProspectFilter } from "./ApolloFilterPanel";
 import CompanyFilterPanel, { BulkDomainPaste, addDomainsToWebsiteFilter } from "./CompanyFilterPanel";
@@ -22,6 +23,8 @@ type ImportRecord = { id: string; file_name: string; data_source: string; client
 type DeleteKind = "import" | "list" | "client";
 type DeleteRequest = { kind: DeleteKind; id: string; name: string; context: string };
 type FileAudit = { headers: string[]; rows: number; populatedCells: number; invalidRows: number };
+type InterruptedImport = { id: string; kind: "prospects" | "companies"; fileName: string; dataSource: string; status: string; committedRowOffset: number; totalRows: number; resumeFromRow: number; createdAt: string };
+type ImportResumeDetail = { id: string; kind: "prospects" | "companies"; listId: string | null; fileName: string; dataSource: string; status: string; committedRowOffset: number; totalRows: number | null; headers: string[]; fieldMap: Record<string, string>; headerSignature: string };
 type SavedView = { id: string; name: string; definition: { filters: ProspectFilter[]; columns: string[]; sort: string; direction: "asc" | "desc" } };
 
 const emptyStats = { prospects: 0, companies: 0, clients: 0, lists: 0, rowsImported: 0, duplicatesDetected: 0 };
@@ -1271,15 +1274,31 @@ function ImportView({ clients, onComplete }: { clients: ClientRecord[]; onComple
   const [kind, setKind] = useState<"prospects" | "companies">("prospects");
   const [sourceChoice, setSourceChoice] = useState("");
   const [customSource, setCustomSource] = useState("");
+  const [interruptedImports, setInterruptedImports] = useState<InterruptedImport[]>([]);
+  const [resumeImport, setResumeImport] = useState<InterruptedImport | null>(null);
   const dataSource = sourceChoice === "Other" ? customSource.trim() : sourceChoice;
+  const activeDataSource = resumeImport?.dataSource ?? dataSource;
+  useEffect(() => {
+    let active = true;
+    void api<{ imports: InterruptedImport[] }>("/api/imports")
+      .then((result) => { if (active) setInterruptedImports(result.imports); })
+      .catch(() => { if (active) setInterruptedImports([]); });
+    return () => { active = false; };
+  }, []);
+  const chooseResume = (item: InterruptedImport) => { setKind(item.kind); setResumeImport(item); };
+  const finishResume = (id: string) => {
+    setInterruptedImports((current) => current.filter((item) => item.id !== id));
+    setResumeImport(null);
+  };
   return <section className="import-workspace">
+    {interruptedImports.length ? <div className="interrupted-imports panel"><div><p className="eyebrow">INTERRUPTED IMPORTS</p><h3>Continue an unfinished import</h3><p>Re-select the original file; committed rows will not be imported twice.</p></div>{interruptedImports.map((item) => <div className="interrupted-import" key={item.id}><div><strong>{item.fileName}</strong><small>Interrupted — resume from row {formatNumber(item.resumeFromRow)} of {formatNumber(item.totalRows)}</small></div><button className="secondary" onClick={() => chooseResume(item)}>Resume</button></div>)}</div> : null}
     <div className="import-setup panel">
       <div><p className="eyebrow">IMPORT SETUP</p><h2>What are you importing?</h2><p>Every import must have a data source so its lineage remains auditable.</p></div>
-      <div className="import-kind-switch" role="tablist" aria-label="Import type"><button role="tab" aria-selected={kind === "prospects"} className={kind === "prospects" ? "active" : ""} onClick={() => setKind("prospects")}>People / prospects</button><button role="tab" aria-selected={kind === "companies"} className={kind === "companies" ? "active" : ""} onClick={() => setKind("companies")}>Companies</button></div>
+      <div className="import-kind-switch" role="tablist" aria-label="Import type"><button role="tab" aria-selected={kind === "prospects"} className={kind === "prospects" ? "active" : ""} onClick={() => { setKind("prospects"); setResumeImport(null); }}>People / prospects</button><button role="tab" aria-selected={kind === "companies"} className={kind === "companies" ? "active" : ""} onClick={() => { setKind("companies"); setResumeImport(null); }}>Companies</button></div>
       <div className="import-source-fields"><label><span>Data source <b>*</b></span><select aria-label="Data source" value={sourceChoice} onChange={(event) => setSourceChoice(event.target.value)}><option value="">Choose source</option>{commonDataSources.map((source) => <option key={source}>{source}</option>)}<option>Other</option></select></label>{sourceChoice === "Other" ? <label><span>Custom source <b>*</b></span><input value={customSource} maxLength={80} onChange={(event) => setCustomSource(event.target.value)} placeholder="Enter the source name"/></label> : null}</div>
-      {!dataSource ? <p className="source-required-note">A data source is required before the import can start.</p> : <p className="source-selected-note">Source: <strong>{dataSource}</strong></p>}
+      {!activeDataSource ? <p className="source-required-note">A data source is required before the import can start.</p> : <p className="source-selected-note">Source: <strong>{activeDataSource}</strong></p>}
     </div>
-    {kind === "prospects" ? <ProspectImportView key="prospects" clients={clients} dataSource={dataSource} onComplete={onComplete}/> : <CompanyImportView key="companies" dataSource={dataSource} onComplete={onComplete}/>}
+    {kind === "prospects" ? <ProspectImportView key="prospects" clients={clients} dataSource={activeDataSource} resumeImport={resumeImport?.kind === "prospects" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onComplete={onComplete}/> : <CompanyImportView key="companies" dataSource={activeDataSource} resumeImport={resumeImport?.kind === "companies" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onComplete={onComplete}/>}
   </section>;
 }
 
@@ -1287,7 +1306,7 @@ function RequiredFieldList({ title, fields }: { title: string; fields: readonly 
   return <div className="required-field-list"><strong>{title}</strong><div>{fields.map((field) => <span key={field}>✓ {field}</span>)}</div></div>;
 }
 
-function CompanyImportView({ dataSource, onComplete }: { dataSource: string; onComplete: () => Promise<void> }) {
+function CompanyImportView({ dataSource, onComplete, resumeImport, onCancelResume, onResumed }: { dataSource: string; onComplete: () => Promise<void>; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [parsed, setParsed] = useState<{ headers: string[]; rows: string[][] } | null>(null);
   const [fieldMap, setFieldMap] = useState<Record<string, string>>({});
@@ -1310,45 +1329,70 @@ function CompanyImportView({ dataSource, onComplete }: { dataSource: string; onC
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Unable to read this company CSV."); }
   }
 
+  async function uploadCompanyRows(importId: string, table: { headers: string[]; rows: string[][] }, savedFieldMap: Record<string, string>, rowOffset: number) {
+    const columnFor = (field: string) => table.headers.findIndex((header) => savedFieldMap[header] === field);
+    const valueFor = (row: string[], field: string) => { const column = columnFor(field); return column >= 0 ? String(row[column] ?? "").trim() : ""; };
+    const chunkSize = 100;
+    setPhase("uploading");
+    setProgress(Math.round((rowOffset / table.rows.length) * 100));
+    setMessage(rowOffset ? `Resuming company import from row ${formatNumber(rowOffset + 1)}…` : "Importing companies into the master Company DB…");
+    for (let index = rowOffset; index < table.rows.length; index += chunkSize) {
+      const rows = table.rows.slice(index, index + chunkSize).map((row, chunkIndex) => ({
+        name: valueFor(row, "Company Name"),
+        website: valueFor(row, "Website"),
+        employeeCount: valueFor(row, "#employees"),
+        industry: valueFor(row, "Industry"),
+        city: valueFor(row, "Company City"),
+        state: valueFor(row, "Company State"),
+        country: valueFor(row, "Company Country"),
+        keywords: valueFor(row, "Keywords"),
+        shortDescription: valueFor(row, "Short Description"),
+        foundedYear: valueFor(row, "Founded Year"),
+        technologies: valueFor(row, "Technologies"),
+        totalFunding: valueFor(row, "Total Funding"),
+        raw: Object.fromEntries(table.headers.map((header, column) => [header, String(row[column] ?? "").trim()]).filter(([header]) => savedFieldMap[header] !== skipImportField)),
+        sourceRowNumber: index + chunkIndex + 2,
+      }));
+      await api("/api/company-imports/chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId, rows, rowOffset: index }) });
+      setProgress(Math.round(((index + rows.length) / table.rows.length) * 100));
+    }
+    const completed = await api<{ summary: { processed_rows: number; added_count: number; updated_count: number; skipped_count: number } }>("/api/company-imports/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId }) });
+    setSummary(completed.summary); setPhase("done"); setMessage("Company import complete. Names and websites are now available in the Company DB.");
+  }
+
   async function startCompanyImport() {
     if (!file || !parsed || !canSubmit) return;
-    setPhase("uploading"); setMessage("Importing companies into the master Company DB…");
     try {
       const started = await api<{ importId: string }>("/api/company-imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, totalRows: parsed.rows.length, dataSource, headers: parsed.headers, fieldMap }) });
-      const columnFor = (field: string) => parsed.headers.findIndex((header) => fieldMap[header] === field);
-      const valueFor = (row: string[], field: string) => { const column = columnFor(field); return column >= 0 ? String(row[column] ?? "").trim() : ""; };
-      const chunkSize = 100;
-      for (let index = 0; index < parsed.rows.length; index += chunkSize) {
-        const rows = parsed.rows.slice(index, index + chunkSize).map((row, chunkIndex) => ({
-          name: valueFor(row, "Company Name"),
-          website: valueFor(row, "Website"),
-          employeeCount: valueFor(row, "#employees"),
-          industry: valueFor(row, "Industry"),
-          city: valueFor(row, "Company City"),
-          state: valueFor(row, "Company State"),
-          country: valueFor(row, "Company Country"),
-          keywords: valueFor(row, "Keywords"),
-          shortDescription: valueFor(row, "Short Description"),
-          foundedYear: valueFor(row, "Founded Year"),
-          technologies: valueFor(row, "Technologies"),
-          totalFunding: valueFor(row, "Total Funding"),
-          raw: Object.fromEntries(parsed.headers.map((header, column) => [header, String(row[column] ?? "").trim()]).filter(([header]) => fieldMap[header] !== skipImportField)),
-          sourceRowNumber: index + chunkIndex + 2,
-        }));
-        await api("/api/company-imports/chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId, rows }) });
-        setProgress(Math.round(((index + rows.length) / parsed.rows.length) * 100));
-      }
-      const completed = await api<{ summary: { processed_rows: number; added_count: number; updated_count: number; skipped_count: number } }>("/api/company-imports/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId }) });
-      setSummary(completed.summary); setPhase("done"); setMessage("Company import complete. Names and websites are now available in the Company DB.");
+      await uploadCompanyRows(started.importId, parsed, fieldMap, 0);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Company import failed."); setPhase("idle"); }
+  }
+
+  async function resumeCompanyFile(event: ChangeEvent<HTMLInputElement>) {
+    const selected = event.target.files?.[0];
+    if (!selected || !resumeImport) return;
+    try {
+      setPhase("uploading"); setMessage(`Validating ${selected.name} before resuming…`);
+      const [detail, table] = await Promise.all([
+        api<ImportResumeDetail>(`/api/imports/${encodeURIComponent(resumeImport.id)}`),
+        readImportTable(selected),
+      ]);
+      if (!detail.headerSignature || !importHeadersMatch(table.headers, detail.headerSignature)) throw new Error("The selected file headers do not match the interrupted import. Re-select the original file or start a new import instead.");
+      if (detail.totalRows !== table.rows.length) throw new Error(`The selected file has ${formatNumber(table.rows.length)} rows; the interrupted import expected ${formatNumber(detail.totalRows)}. Re-select the same file or start a new import instead.`);
+      setFile(selected); setParsed(table); setFieldMap(detail.fieldMap);
+      await uploadCompanyRows(detail.id, table, detail.fieldMap, detail.committedRowOffset);
+      onResumed(detail.id);
+    } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Unable to resume the company import."); setPhase("idle"); }
   }
 
   if (phase === "done" && summary) return <div className="import-success"><span className="success-mark">✓</span><p className="eyebrow">COMPANY IMPORT COMPLETE</p><h2>Your Company DB is updated.</h2><p>{message}</p><div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(summary.added_count)}</strong><span>Companies added</span></div><div><strong>{formatNumber(summary.updated_count)}</strong><span>Companies matched</span></div><div><strong>{formatNumber(summary.skipped_count)}</strong><span>Rows skipped</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
 
+  if (resumeImport) return <div className="resume-import-card panel"><p className="eyebrow">RESUME COMPANY IMPORT</p><h3>{resumeImport.fileName}</h3><p>Interrupted — resume from row {formatNumber(resumeImport.resumeFromRow)} of {formatNumber(resumeImport.totalRows)}.</p><label className="dropzone"><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={phase !== "idle"} onChange={(event) => void resumeCompanyFile(event)}/><span className="upload-mark">↑</span><strong>Re-select the same file</strong><small>Its headers and row count will be verified before upload resumes.</small></label>{phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="secondary" disabled={phase !== "idle"} onClick={onCancelResume}>Start a new import instead</button></div>;
+
   return <div className="import-layout company-import-layout"><div className="import-copy"><p className="eyebrow">COMPANY CSV IMPORT</p><h2>Import a complete company dataset.</h2><p>Map a company name or a website (either works), plus the company detail columns. Companies are matched by normalized website first and company name second.</p><RequiredFieldList title="Company columns" fields={companyImportFields}/></div><div className="import-card"><label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void pickCompanyFile(event)}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{formatNumber(parsed?.rows.length)} company rows ready</small></> : <><strong>Choose a company CSV or Excel file</strong><small>A company name or website is required</small></>}</label>{parsed ? <><div className="mapping-list company-required-mapping">{parsed.headers.map((header) => <label key={header}><span title={header}>{header}</span><b>→</b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Not mapped"} onChange={(event) => setFieldMap((current) => ({ ...current, [header]: event.target.value }))}><option>Not mapped</option><option>{skipImportField}</option>{companyImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Map required columns: ${missingFields.join(", ")}.` : "All required company columns are mapped."}</p></> : null}{phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="primary import-button" disabled={!canSubmit} onClick={() => void startCompanyImport()}>{phase === "uploading" ? "Processing…" : "Import companies"}</button></div></div>;
 }
 
-function ProspectImportView({ clients, onComplete, dataSource }: { clients: ClientRecord[]; onComplete: () => Promise<void>; dataSource: string }) {
+function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onCancelResume, onResumed }: { clients: ClientRecord[]; onComplete: () => Promise<void>; dataSource: string; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [clientId, setClientId] = useState("");
   const [newClient, setNewClient] = useState("");
@@ -1382,6 +1426,20 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
     }
   }
 
+  async function uploadProspectRows(table: { headers: string[]; rows: string[][] }, session: { importId: string; listId: string }, keptColumns: Array<{ header: string; column: number }>, keptHeaders: string[], resolvedFieldMap: Record<string, string>, rowOffset: number) {
+    setPhase("uploading");
+    setProgress(Math.round((rowOffset / table.rows.length) * 100));
+    setMessage(rowOffset ? `Resuming from row ${formatNumber(rowOffset + 1)}…` : `Synchronizing ${formatNumber(table.rows.length)} rows with the people database…`);
+    const chunkSize = 100;
+    for (let index = rowOffset; index < table.rows.length; index += chunkSize) {
+      const chunk = table.rows.slice(index, index + chunkSize).map((row) => keptColumns.map(({ column }) => row[column] ?? ""));
+      await api("/api/imports/chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: session.importId, listId: session.listId, headers: keptHeaders, rows: chunk, rowOffset: index, fieldMap: resolvedFieldMap }) });
+      setProgress(Math.round(((index + chunk.length) / table.rows.length) * 100));
+    }
+    const completed = await api<{ summary: { processed_rows: number; unique_added: number; duplicates_linked: number } }>("/api/imports/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(session) });
+    setSummary(completed.summary); setPhase("done"); setMessage("Import complete. Your list is ready and the people database is up to date.");
+  }
+
   async function startImport() {
     if (!file || !canSubmit) return;
     try {
@@ -1393,20 +1451,37 @@ function ProspectImportView({ clients, onComplete, dataSource }: { clients: Clie
       const keptColumns = parsed.headers.map((header, column) => ({ header, column })).filter(({ header }) => fieldMap[header] !== skipImportField);
       const keptHeaders = keptColumns.map(({ header }) => header);
       const resolvedFieldMap = Object.fromEntries(Object.entries(fieldMap).filter(([header, value]) => value && value !== "Auto detect" && value !== skipImportField && keptHeaders.includes(header)));
-      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: clientId || undefined, clientName: newClient || undefined, listName, dataSource, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, fieldMap: resolvedFieldMap, allowMissingFields: allowMissing }) });
-      setPhase("uploading"); setMessage(`Synchronizing ${formatNumber(parsed.rows.length)} rows with the people database…`);
-      const chunkSize = 100;
-      for (let index = 0; index < parsed.rows.length; index += chunkSize) {
-        const chunk = parsed.rows.slice(index, index + chunkSize).map((row) => keptColumns.map(({ column }) => row[column] ?? ""));
-        await api("/api/imports/chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId, listId: started.listId, headers: keptHeaders, rows: chunk, rowOffset: index, fieldMap: resolvedFieldMap }) });
-        setProgress(Math.round(((index + chunk.length) / parsed.rows.length) * 100));
-      }
-      const completed = await api<{ summary: { processed_rows: number; unique_added: number; duplicates_linked: number } }>("/api/imports/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId: started.importId, listId: started.listId }) });
-      setSummary(completed.summary); setPhase("done"); setMessage("Import complete. Your list is ready and the people database is up to date.");
+      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: clientId || undefined, clientName: newClient || undefined, listName, dataSource, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, sourceHeaders: parsed.headers, fieldMap, allowMissingFields: allowMissing }) });
+      await uploadProspectRows(parsed, started, keptColumns, keptHeaders, resolvedFieldMap, 0);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Import failed."); setPhase("idle"); }
   }
 
+  async function resumeProspectFile(event: ChangeEvent<HTMLInputElement>) {
+    const selected = event.target.files?.[0];
+    if (!selected || !resumeImport) return;
+    try {
+      setPhase("reading"); setMessage(`Validating ${selected.name} before resuming…`);
+      const [detail, table] = await Promise.all([
+        api<ImportResumeDetail>(`/api/imports/${encodeURIComponent(resumeImport.id)}`),
+        readImportTable(selected),
+      ]);
+      if (!detail.headerSignature || !importHeadersMatch(table.headers, detail.headerSignature)) throw new Error("The selected file headers do not match the interrupted import. Re-select the original file or start a new import instead.");
+      if (detail.totalRows !== table.rows.length) throw new Error(`The selected file has ${formatNumber(table.rows.length)} rows; the interrupted import expected ${formatNumber(detail.totalRows)}. Re-select the same file or start a new import instead.`);
+      if (!detail.listId) throw new Error("The interrupted import no longer has a destination list.");
+      const keptColumns = table.headers.map((header, column) => ({ header, column })).filter(({ header }) => detail.fieldMap[header] !== skipImportField);
+      const keptHeaders = keptColumns.map(({ header }) => header);
+      if (JSON.stringify(keptHeaders) !== JSON.stringify(detail.headers)) throw new Error("The selected file headers do not match the interrupted import. Re-select the original file or start a new import instead.");
+      const resolvedFieldMap = Object.fromEntries(Object.entries(detail.fieldMap).filter(([header, value]) => value && value !== "Auto detect" && value !== skipImportField && keptHeaders.includes(header)));
+      const populatedCells = table.rows.reduce((count, row) => count + row.filter((value) => value.trim()).length, 0);
+      setFile(selected); setFieldMap(detail.fieldMap); setFileAudit({ headers: table.headers, rows: table.rows.length, populatedCells, invalidRows: 0 });
+      await uploadProspectRows(table, { importId: detail.id, listId: detail.listId }, keptColumns, keptHeaders, resolvedFieldMap, detail.committedRowOffset);
+      onResumed(detail.id);
+    } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Unable to resume the import."); setPhase("idle"); }
+  }
+
   if (phase === "done" && summary) return <div className="import-success"><span className="success-mark">✓</span><p className="eyebrow">IMPORT COMPLETE</p><h2>Your list is ready.</h2><p>{message}</p><div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(fileAudit?.headers.length)}</strong><span>Fields preserved</span></div><div><strong>{formatNumber(summary.unique_added)}</strong><span>Added to master</span></div><div><strong>{formatNumber(summary.duplicates_linked)}</strong><span>Existing prospects linked</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
+
+  if (resumeImport) return <div className="resume-import-card panel"><p className="eyebrow">RESUME PROSPECT IMPORT</p><h3>{resumeImport.fileName}</h3><p>Interrupted — resume from row {formatNumber(resumeImport.resumeFromRow)} of {formatNumber(resumeImport.totalRows)}.</p><label className="dropzone"><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={phase !== "idle"} onChange={(event) => void resumeProspectFile(event)}/><span className="upload-mark">↑</span><strong>Re-select the same file</strong><small>Its headers and row count will be verified before upload resumes.</small></label>{phase !== "idle" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="secondary" disabled={phase !== "idle"} onClick={onCancelResume}>Start a new import instead</button></div>;
 
   return <div className="import-layout">
     <div className="import-copy"><p className="eyebrow">CSV IMPORT</p><h2>Bring every list into one clean database.</h2><p>Preview the file, confirm field mapping, choose the client, and synchronize it safely with your people database.</p><RequiredFieldList title="Required person columns" fields={requiredPersonImportFields}/><ol><li><span>1</span><div><strong>Validate before import</strong><p>Review fields, row counts and records without usable identity data.</p></div></li><li><span>2</span><div><strong>Control field mapping</strong><p>Map unusual CSV headers without losing the original source fields.</p></div></li><li><span>3</span><div><strong>Sync with rollback</strong><p>Existing prospects are linked, new records are added once, and imports can be undone.</p></div></li></ol></div>

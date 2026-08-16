@@ -2,6 +2,47 @@ import { authorizeApi } from "../../../../lib/auth";
 import { reindexProspects } from "../../../../lib/reindex";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
+export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
+  const { id } = await context.params;
+  const supabase = createAdminClient();
+  const prospectImport = await supabase
+    .from("imports")
+    .select("id,list_id,file_name,data_source,status,committed_row_offset,total_rows,field_headers,field_map,header_signature")
+    .eq("id", id)
+    .maybeSingle();
+  if (prospectImport.error) return Response.json({ error: prospectImport.error.message }, { status: 500 });
+
+  let kind: "prospects" | "companies" = "prospects";
+  let row = prospectImport.data;
+  if (!row) {
+    kind = "companies";
+    const companyImport = await supabase
+      .from("company_imports")
+      .select("id,file_name,data_source,status,committed_row_offset,total_rows,field_headers,field_map,header_signature")
+      .eq("id", id)
+      .maybeSingle();
+    if (companyImport.error) return Response.json({ error: companyImport.error.message }, { status: 500 });
+    row = companyImport.data ? { ...companyImport.data, list_id: null } : null;
+  }
+  if (!row) return Response.json({ error: "Import not found." }, { status: 404 });
+
+  return Response.json({
+    id: row.id,
+    kind,
+    listId: row.list_id,
+    fileName: row.file_name,
+    dataSource: row.data_source,
+    status: row.status,
+    committedRowOffset: Number(row.committed_row_offset ?? 0),
+    totalRows: row.total_rows === null ? null : Number(row.total_rows),
+    headers: Array.isArray(row.field_headers) ? row.field_headers.map(String) : [],
+    fieldMap: row.field_map && typeof row.field_map === "object" ? row.field_map : {},
+    headerSignature: String(row.header_signature ?? ""),
+  }, { headers: { "Cache-Control": "no-store" } });
+}
+
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;

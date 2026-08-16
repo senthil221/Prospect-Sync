@@ -1,6 +1,7 @@
 import { authorizeApi } from "../../../../lib/auth";
 import { normalizeDataSource } from "../../../../lib/data-source";
 import { missingCompanyImportFields, resolvedImportFields, suggestedCompanyImportField } from "../../../../lib/import-schema";
+import { importHeaderSignature } from "../../../../lib/import-resume";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
 export async function POST(request: Request) {
@@ -22,6 +23,9 @@ export async function POST(request: Request) {
     file_name: String(payload.fileName ?? "").trim().slice(0, 240),
     data_source: dataSource,
     total_rows: totalRows,
+    field_headers: headers,
+    field_map: fieldMap ?? {},
+    header_signature: importHeaderSignature(headers),
   });
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ importId: id }, { status: 201 });

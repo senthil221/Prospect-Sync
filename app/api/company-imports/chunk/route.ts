@@ -11,10 +11,12 @@ function listValue(value: unknown) {
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const payload = await request.json().catch(() => null) as { importId?: unknown; rows?: CompanyImportRow[] } | null;
+  const payload = await request.json().catch(() => null) as { importId?: unknown; rows?: CompanyImportRow[]; rowOffset?: unknown } | null;
   const importId = String(payload?.importId ?? "").trim();
   if (!importId || !Array.isArray(payload?.rows) || !payload.rows.length) return Response.json({ error: "Invalid company import chunk." }, { status: 400 });
   if (payload.rows.length > 250) return Response.json({ error: "Company import chunks cannot exceed 250 rows." }, { status: 400 });
+  const rowOffset = Number(payload.rowOffset);
+  if (!Number.isSafeInteger(rowOffset) || rowOffset < 0) return Response.json({ error: "A non-negative rowOffset is required." }, { status: 400 });
   const rows = payload.rows.map((row, index) => {
     const name = String(row.name ?? "").trim().slice(0, 300);
     const domain = normalizeDomain(String(row.website ?? ""));
@@ -37,10 +39,10 @@ export async function POST(request: Request) {
       technologies: listValue(row.technologies),
       totalFunding: String(row.totalFunding ?? "").trim().slice(0, 200),
       raw: row.raw && typeof row.raw === "object" ? row.raw : {},
-      sourceRowNumber: Math.max(2, Math.round(Number(row.sourceRowNumber ?? index + 2))),
+      sourceRowNumber: Math.max(2, Math.round(Number(row.sourceRowNumber ?? rowOffset + index + 2))),
     };
   });
-  const { data, error } = await createAdminClient().rpc("import_company_batch_v2", { p_import_id: importId, p_rows: rows });
+  const { data, error } = await createAdminClient().rpc("import_company_batch_v2", { p_import_id: importId, p_rows: rows, p_row_offset: rowOffset });
   if (error) {
     const missing = error.code === "PGRST202" || error.code === "42883";
     return Response.json({ error: missing ? "Apply the latest database migration to enable company imports." : error.message }, { status: missing ? 503 : 500 });
@@ -51,5 +53,6 @@ export async function POST(request: Request) {
     added: Number(summary?.added ?? 0),
     updated: Number(summary?.updated ?? 0),
     skipped: Number(summary?.skipped ?? 0),
+    committedRowOffset: rowOffset + rows.length,
   });
 }
