@@ -7,6 +7,7 @@ import { api } from "../../lib/dashboard-api";
 import { deriveListName, formatNumber, readImportTable } from "../../lib/dashboard-helpers";
 import { companyImportFields, missingCompanyImportFields, missingRequiredFields, requiredPersonImportFields, resolvedImportFields, skipImportField, suggestedCompanyImportField, suggestedPersonImportField } from "../../lib/import-schema";
 import { importHeadersMatch } from "../../lib/import-resume";
+import { unassignedClientId } from "../../lib/import-owner";
 import { canonicalImportFields } from "../../lib/prospect-field-definitions";
 import type { ClientRecord, FileAudit, ImportResumeDetail, InterruptedImport } from "../../lib/types";
 
@@ -212,7 +213,8 @@ function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onC
       const keptColumns = parsed.headers.map((header, column) => ({ header, column })).filter(({ header }) => fieldMap[header] !== skipImportField);
       const keptHeaders = keptColumns.map(({ header }) => header);
       const resolvedFieldMap = Object.fromEntries(Object.entries(fieldMap).filter(([header, value]) => value && value !== "Auto detect" && value !== skipImportField && keptHeaders.includes(header)));
-      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: clientId || undefined, clientName: newClient || undefined, listName, dataSource, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, sourceHeaders: parsed.headers, fieldMap, allowMissingFields: allowMissing }) });
+      const withoutClient = clientId === unassignedClientId;
+      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, sourceHeaders: parsed.headers, fieldMap, allowMissingFields: allowMissing }) });
       await uploadProspectRows(parsed, started, keptColumns, keptHeaders, resolvedFieldMap, 0);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Import failed."); setPhase("idle"); }
   }
@@ -247,7 +249,7 @@ function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onC
   return <div className="import-layout">
     <div className="import-copy"><p className="eyebrow">CSV IMPORT</p><h2>Bring every list into one clean database.</h2><p>Preview the file, confirm field mapping, choose the client, and synchronize it safely with your people database.</p><RequiredFieldList title="Required person columns" fields={requiredPersonImportFields}/><ol><li><span>1</span><div><strong>Validate before import</strong><p>Review fields, row counts and records without usable identity data.</p></div></li><li><span>2</span><div><strong>Control field mapping</strong><p>Map unusual CSV headers without losing the original source fields.</p></div></li><li><span>3</span><div><strong>Sync with rollback</strong><p>Existing prospects are linked, new records are added once, and imports can be undone.</p></div></li></ol></div>
     <div className="import-card">
-      <div className="form-field"><label htmlFor="import-client">Client</label><select id="import-client" value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></div>
+      <div className="form-field"><label htmlFor="import-client">Client</label><select id="import-client" value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option><option value={unassignedClientId}>No client (list only)</option>{clients.filter((client) => client.id !== unassignedClientId).map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><small>Choose “No client” to import the list without entering a client name.</small></div>
       {!clientId && <div className="form-field"><label htmlFor="new-client-name">New client name</label><input id="new-client-name" value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}
       <label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void pickFile(event)}/><span className="upload-mark">↑</span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to review</small></> : <><strong>Choose a CSV or Excel file</strong><small>CSV or .xlsx from Excel / Google Sheets</small></>}</label>
       <div className="form-field"><label htmlFor="list-name">List name</label><input id="list-name" value={listName} onChange={(event) => setListName(event.target.value)} placeholder="Auto-filled from the CSV filename" /></div>

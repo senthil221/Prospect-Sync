@@ -6,6 +6,8 @@ const contentSecurityPolicy = [
   // Next.js emits inline bootstrap scripts for App Router pages in production.
   // A nonce requires per-request CSP generation, so static headers require unsafe-inline.
   "script-src 'self' 'unsafe-inline'",
+  // read-excel-file delegates larger XLSX archives to a Blob-backed Web Worker.
+  "worker-src 'self' blob:",
   "img-src 'self' data:",
   "style-src 'self' 'unsafe-inline'",
   "frame-ancestors 'none'",

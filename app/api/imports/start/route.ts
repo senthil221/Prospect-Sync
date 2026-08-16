@@ -2,13 +2,14 @@ import { authorizeApi } from "../../../../lib/auth";
 import { normalizeText } from "../../../../db/normalize";
 import { normalizeDataSource } from "../../../../lib/data-source";
 import { missingRequiredFields, requiredPersonImportFields, resolvedImportFields, suggestedPersonImportField } from "../../../../lib/import-schema";
+import { unassignedClientId, unassignedClientName, unassignedClientNormalizedName } from "../../../../lib/import-owner";
 import { importHeaderSignature } from "../../../../lib/import-resume";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const payload = await request.json() as { clientId?: string; clientName?: string; listName?: string; fileName?: string; totalRows?: number; headers?: string[]; sourceHeaders?: string[]; fieldMap?: Record<string, string>; dataSource?: string; allowMissingFields?: boolean };
+  const payload = await request.json() as { clientId?: string; clientName?: string; withoutClient?: boolean; listName?: string; fileName?: string; totalRows?: number; headers?: string[]; sourceHeaders?: string[]; fieldMap?: Record<string, string>; dataSource?: string; allowMissingFields?: boolean };
   const supabase = createAdminClient();
   const dataSource = normalizeDataSource(payload.dataSource);
   if (!dataSource) return Response.json({ error: "Choose a data source before importing." }, { status: 400 });
@@ -20,7 +21,11 @@ export async function POST(request: Request) {
     return Response.json({ error: `Map all required person columns: ${missingFields.join(", ")}.`, missingFields }, { status: 400 });
   }
   let clientId = payload.clientId ?? "";
-  if (!clientId) {
+  if (payload.withoutClient === true) {
+    const owner = await supabase.from("clients").upsert({ id: unassignedClientId, name: unassignedClientName, normalized_name: unassignedClientNormalizedName }, { onConflict: "id" }).select("id").single();
+    if (owner.error) return Response.json({ error: owner.error.message }, { status: 500 });
+    clientId = owner.data.id;
+  } else if (!clientId) {
     const clientName = String(payload.clientName ?? "").trim();
     if (!clientName) return Response.json({ error: "Choose or create a client." }, { status: 400 });
     const normalizedName = normalizeText(clientName);

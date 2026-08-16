@@ -36,7 +36,7 @@ export function uniqueHeaders(headers: string[]) {
 export function deriveListName(fileName: string) {
   return fileName
     .replace(/^.*[\\/]/, "")
-    .replace(/\.csv$/i, "")
+    .replace(/\.(?:csv|xlsx)$/i, "")
     .replace(/[_]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
