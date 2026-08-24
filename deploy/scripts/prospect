@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# One command for everything. Installed to /usr/local/bin/prospect, so it works
+# from any directory and over a bare ssh call:
+#
+#   prospect status
+#   ssh deploy@<server> prospect status
+#
+# Its job is to remove the two things that actually go wrong day to day:
+# forgetting to cd into the deploy directory first, and half-remembering which
+# docker incantation does what.
+set -uo pipefail
+
+DEPLOY_DIR="${PROSPECT_DIR:-/opt/prospect/deploy}"
+cd "$DEPLOY_DIR" 2>/dev/null || { echo "Cannot find $DEPLOY_DIR" >&2; exit 1; }
+
+if [[ -t 1 ]]; then B=$'\e[1m'; DIM=$'\e[2m'; R=$'\e[0m'; else B=""; DIM=""; R=""; fi
+
+usage() {
+  cat <<EOF
+${B}prospect${R} — Prospect Sync control
+
+  ${B}prospect status${R}              Is everything OK? Start here.
+  ${B}prospect logs${R} [service]      Follow the logs (Ctrl+C to stop)
+  ${B}prospect restart${R} [service]   Restart one service, or all of them
+  ${B}prospect update${R}              Pull the latest build and deploy it
+  ${B}prospect rollback${R}            Undo the last deploy
+  ${B}prospect migrate${R}             Apply pending database changes
+  ${B}prospect user${R} <email>        Create a login
+  ${B}prospect users${R}               List who can log in
+  ${B}prospect allow${R} <email>       Add someone to the access list
+  ${B}prospect db${R}                  Open a SQL prompt
+  ${B}prospect backup${R}              Back up now
+  ${B}prospect drill${R}               Prove a backup restores (safe)
+  ${B}prospect health${R}              Deep check: table sizes, slow queries
+  ${B}prospect config${R}              Show settings (secrets masked)
+  ${B}prospect version${R}             What is deployed
+
+  ${DIM}services: app  db  auth  rest  caddy  studio  meta${R}
+EOF
+}
+
+need() { [[ -n "${1:-}" ]] || { echo "Missing argument. See: prospect help" >&2; exit 1; }; }
+
+case "${1:-status}" in
+  status|st)   ./scripts/status.sh ;;
+  health)      ./scripts/maintenance.sh ;;
+  logs)        docker compose logs -f --tail "${3:-80}" ${2:-} ;;
+  restart)     docker compose restart ${2:-}; echo; docker compose ps --format 'table {{.Service}}\t{{.Status}}' ;;
+  update|deploy) ./scripts/update.sh "${2:-}" ;;
+  rollback)    ./scripts/update.sh --rollback ;;
+  migrate)     ./scripts/migrate.sh "${2:-}" ;;
+  backup)      ./scripts/backup.sh ;;
+  drill)       ./scripts/restore.sh --verify-only ;;
+  user)        need "${2:-}"; ./scripts/create-user.sh "$2" "${3:-}" ;;
+
+  users)
+    source ./scripts/_env.sh; load_env .env
+    echo "${B}Accounts in the database:${R}"
+    docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" db psql -tAq -U postgres \
+      -d "$POSTGRES_DB" -h 127.0.0.1 </dev/null \
+      -c "select '  '||email||coalesce('   last seen '||to_char(last_sign_in_at,'YYYY-MM-DD'),'   never signed in') from auth.users order by email;"
+    echo
+    echo "${B}Allowed to actually use the app:${R}"
+    echo "  ${ALLOWED_USER_EMAILS//,/$'\n  '}"
+    echo
+    echo "${DIM}An account missing from the second list can sign in but gets errors everywhere.${R}"
+    ;;
+
+  allow)
+    need "${2:-}"
+    source ./scripts/_env.sh; load_env .env
+    if [[ ",$ALLOWED_USER_EMAILS," == *",$2,"* ]]; then
+      echo "$2 is already allowed."
+    else
+      awk -v v="${ALLOWED_USER_EMAILS},$2" -F= \
+        '$1=="ALLOWED_USER_EMAILS"{print "ALLOWED_USER_EMAILS="v; next}{print}' .env > .env.tmp
+      mv .env.tmp .env && chmod 600 .env
+      echo "Added $2. Restarting the app..."
+      docker compose up -d app
+      echo "Done. They still need an account: prospect user $2"
+    fi
+    ;;
+
+  db|psql)
+    source ./scripts/_env.sh; load_env .env
+    echo "${DIM}Type \\q to quit, \\dt to list tables.${R}"
+    docker compose exec -e PGPASSWORD="$POSTGRES_PASSWORD" db psql -U postgres -d "$POSTGRES_DB" -h 127.0.0.1
+    ;;
+
+  config)
+    # Masked: this is the command you reach for while someone is looking over
+    # your shoulder, or pasting output into a chat.
+    sed -E 's/^(POSTGRES_PASSWORD|JWT_SECRET|SERVICE_ROLE_KEY|ANON_KEY|STUDIO_BASIC_AUTH_HASH|RESTIC_PASSWORD|SMTP_PASS|REALTIME_ENC_KEY|REALTIME_SECRET_KEY_BASE|AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID)=.+/\1=••••••••/' .env \
+      | grep -vE '^\s*$|^#'
+    echo
+    echo "${DIM}Values are masked. To read one for real: grep '^JWT_SECRET=' ${DEPLOY_DIR}/.env${R}"
+    ;;
+
+  version)
+    source ./scripts/_env.sh; load_env .env
+    echo "deployed:  ${APP_IMAGE}"
+    echo "commit:    $(git -C .. log --oneline -1 2>/dev/null || echo unknown)"
+    echo "rollback:  $(cat .last-image 2>/dev/null || echo 'none yet')"
+    ;;
+
+  help|-h|--help) usage ;;
+  *) echo "Unknown command: $1" >&2; echo; usage; exit 1 ;;
+esac
