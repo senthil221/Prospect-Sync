@@ -95,7 +95,7 @@ zstd -dc "${BACKUP}/database.dump.zst" \
   | grep -vi 'warning\|already exists' || true
 
 echo "Re-applying role passwords and settings"
-docker compose exec -T db bash /docker-entrypoint-initdb.d/zz-00-prospect-bootstrap.sh
+docker compose exec -T db bash -s < postgres/init/00-prospect-bootstrap.sh
 
 echo "Restarting services"
 docker compose up -d

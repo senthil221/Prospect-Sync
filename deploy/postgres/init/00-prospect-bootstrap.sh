@@ -3,7 +3,7 @@
 #
 # Idempotent — safe to re-run against a live database, which is what
 # scripts/restore.sh does after a recovery:
-#   docker compose exec -T db bash /docker-entrypoint-initdb.d/zz-00-prospect-bootstrap.sh
+#   docker compose exec -T db bash -s < postgres/init/00-prospect-bootstrap.sh
 set -euo pipefail
 
 DB="${POSTGRES_DB:-postgres}"
