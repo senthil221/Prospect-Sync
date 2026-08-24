@@ -29,7 +29,26 @@ ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL} \
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# Fail loudly rather than shipping a broken bundle.
+#
+# A missing build-arg is an empty string, not an error, so `next build` happily
+# produces an image whose login page points at undefined. That image looks
+# healthy, passes its healthcheck, serves HTML — and cannot reach Supabase at
+# all. Catching it here costs one line; catching it in production costs an
+# afternoon.
+RUN if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ] || [ -z "$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" ]; then \
+      echo "ERROR: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY must be" >&2; \
+      echo "       passed as build args. In CI they come from repository secrets of the" >&2; \
+      echo "       same name — check they exist and are not empty." >&2; \
+      exit 1; \
+    fi
+
 RUN npm run build
+
+# The values must actually reach the client bundle, not just the build env.
+RUN grep -rq "$NEXT_PUBLIC_SUPABASE_URL" .next/static \
+    || { echo "ERROR: NEXT_PUBLIC_SUPABASE_URL is not present in the built client bundle." >&2; exit 1; }
 
 # ── runtime ────────────────────────────────────────────────────────────────
 FROM node:22.13-alpine AS runner
