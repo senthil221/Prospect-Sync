@@ -1,0 +1,413 @@
+name: prospect
+
+# Lean self-hosted Supabase + Prospect Sync, sized for a 2 vCPU / 8 GB VPS.
+#
+# Default `docker compose up -d` starts only what Prospect Sync uses today:
+#   db, auth, rest, meta, studio, app, caddy
+#
+# Optional services are behind Compose profiles. Turn them on by editing
+# COMPOSE_PROFILES in .env (e.g. COMPOSE_PROFILES=storage,realtime,functions).
+#
+# NOTE: every container port is bound to 127.0.0.1 on purpose. Docker writes its
+# own iptables rules and BYPASSES ufw, so a plain "8000:8000" would be exposed to
+# the whole internet regardless of your firewall. Only Caddy publishes 80/443.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-restart: &default-restart
+  restart: unless-stopped
+
+services:
+  # ─────────────────────────────────────────────────────────────────────────
+  # PostgreSQL — the actual product. Everything else is replaceable.
+  # ─────────────────────────────────────────────────────────────────────────
+  db:
+    image: supabase/postgres:${POSTGRES_IMAGE_TAG}
+    container_name: prospect-db
+    <<: [*default-restart]
+    logging: *default-logging
+    # Tuning is passed as -c flags rather than a mounted postgresql.conf on
+    # purpose: the supabase/postgres image ships its own conf with supautils and
+    # a shared_preload_libraries list that a wholesale override silently breaks.
+    # Sized for 8 GB total RAM shared with the rest of this stack.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=2GB
+      - -c
+      - effective_cache_size=4GB
+      - -c
+      - maintenance_work_mem=512MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - max_connections=100
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - effective_io_concurrency=200
+      - -c
+      - max_worker_processes=8
+      - -c
+      - max_parallel_workers=2
+      - -c
+      - max_parallel_workers_per_gather=1
+      - -c
+      - max_parallel_maintenance_workers=1
+      - -c
+      - wal_compression=on
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - min_wal_size=1GB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - default_statistics_target=200
+      - -c
+      - autovacuum_max_workers=2
+      - -c
+      - autovacuum_vacuum_scale_factor=0.05
+      - -c
+      - autovacuum_analyze_scale_factor=0.02
+      - -c
+      - autovacuum_vacuum_cost_limit=2000
+      # JIT costs more than it saves on short queries with 2 vCPU.
+      - -c
+      - jit=off
+      - -c
+      - track_io_timing=on
+      - -c
+      - log_min_duration_statement=2000
+      - -c
+      - timezone=UTC
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: ${JWT_EXPIRY}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Runs once, only when the data directory is empty.
+      - ./postgres/init/00-prospect-bootstrap.sh:/docker-entrypoint-initdb.d/zz-00-prospect-bootstrap.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    ports:
+      # Local-only. Reach it from your laptop over the Tailscale/SSH tunnel:
+      #   ssh -N -L 5432:127.0.0.1:5432 deploy@your-vps
+      - "127.0.0.1:5432:5432"
+    shm_size: 512mb
+    stop_grace_period: 60s
+    networks: [internal]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # GoTrue — email/password auth. This is the ONLY Supabase service that the
+  # browser talks to directly (see deploy/README.md § "Why the API is safe").
+  # ─────────────────────────────────────────────────────────────────────────
+  auth:
+    image: supabase/gotrue:${GOTRUE_IMAGE_TAG}
+    container_name: prospect-auth
+    <<: [*default-restart]
+    logging: *default-logging
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${SUPABASE_PUBLIC_URL}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+
+      GOTRUE_SITE_URL: ${APP_PUBLIC_URL}
+      GOTRUE_URI_ALLOW_LIST: ${APP_PUBLIC_URL},${APP_PUBLIC_URL}/**
+
+      # Internal app: nobody self-registers. You create users in Studio.
+      GOTRUE_DISABLE_SIGNUP: "true"
+
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY}
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "false"
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+      GOTRUE_MAILER_AUTOCONFIRM: ${GOTRUE_MAILER_AUTOCONFIRM}
+
+      GOTRUE_SMTP_HOST: ${SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT}
+      GOTRUE_SMTP_USER: ${SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME}
+
+      GOTRUE_SECURITY_REFRESH_TOKEN_ROTATION_ENABLED: "true"
+      GOTRUE_SECURITY_REFRESH_TOKEN_REUSE_INTERVAL: "10"
+      GOTRUE_SECURITY_MANUAL_LINKING_ENABLED: "false"
+      GOTRUE_PASSWORD_MIN_LENGTH: "12"
+
+      GOTRUE_RATE_LIMIT_TOKEN_REFRESH: "150"
+      GOTRUE_RATE_LIMIT_VERIFY: "30"
+      GOTRUE_RATE_LIMIT_EMAIL_SENT: "10"
+
+      GOTRUE_LOG_LEVEL: info
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [internal]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # PostgREST — the Data API. Prospect Sync reaches this ONLY from its server
+  # routes using the service-role key; Caddy blocks it from the public internet.
+  # ─────────────────────────────────────────────────────────────────────────
+  rest:
+    image: postgrest/postgrest:${POSTGREST_IMAGE_TAG}
+    container_name: prospect-rest
+    <<: [*default-restart]
+    logging: *default-logging
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
+      # 2 vCPU box: a big pool just causes context-switch thrash.
+      PGRST_DB_POOL: "15"
+      PGRST_DB_POOL_ACQUISITION_TIMEOUT: "10"
+      PGRST_ADMIN_SERVER_PORT: "3001"
+      PGRST_LOG_LEVEL: error
+    command: ["postgrest"]
+    networks: [internal]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # postgres-meta + Studio — admin UI. NEVER exposed publicly; Caddy serves it
+  # on a separate hostname behind basic auth, and ideally only over Tailscale.
+  # ─────────────────────────────────────────────────────────────────────────
+  meta:
+    image: supabase/postgres-meta:${POSTGRES_META_IMAGE_TAG}
+    container_name: prospect-meta
+    <<: [*default-restart]
+    logging: *default-logging
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PG_META_PORT: "8080"
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: "5432"
+      PG_META_DB_NAME: ${POSTGRES_DB}
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+    networks: [internal]
+
+  studio:
+    image: supabase/studio:${STUDIO_IMAGE_TAG}
+    container_name: prospect-studio
+    <<: [*default-restart]
+    logging: *default-logging
+    depends_on:
+      - meta
+      - rest
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_ORGANIZATION_NAME: ${STUDIO_ORG_NAME}
+      DEFAULT_PROJECT_NAME: ${STUDIO_PROJECT_NAME}
+      SUPABASE_URL: http://rest:3000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      # Logflare/analytics is not deployed — keep the Logs pages hidden.
+      NEXT_PUBLIC_ENABLE_LOGS: "false"
+      NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
+    networks: [internal]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Prospect Sync (Next.js). Image is built by GitHub Actions and pulled here.
+  # ─────────────────────────────────────────────────────────────────────────
+  app:
+    image: ${APP_IMAGE}
+    container_name: prospect-app
+    <<: [*default-restart]
+    logging: *default-logging
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+      NEXT_TELEMETRY_DISABLED: "1"
+      # Must match the value baked in at build time (see .github/workflows/deploy.yml).
+      NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      ALLOWED_USER_EMAILS: ${ALLOWED_USER_EMAILS}
+      # Node heap ceiling so a runaway CSV import cannot OOM the whole box.
+      NODE_OPTIONS: "--max-old-space-size=1024"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    mem_limit: 1500m
+    networks: [internal]
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Caddy — TLS, HTTP routing, and the public/private boundary.
+  # This replaces Supabase's Kong gateway: one less service, one less config
+  # file, and the routing rules live next to the TLS config.
+  # ─────────────────────────────────────────────────────────────────────────
+  caddy:
+    image: caddy:${CADDY_IMAGE_TAG}
+    container_name: prospect-caddy
+    <<: [*default-restart]
+    logging: *default-logging
+    depends_on:
+      - app
+      - auth
+      - rest
+      - studio
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+      STUDIO_DOMAIN: ${STUDIO_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+      STUDIO_BASIC_AUTH_USER: ${STUDIO_BASIC_AUTH_USER}
+      STUDIO_BASIC_AUTH_HASH: ${STUDIO_BASIC_AUTH_HASH}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      internal:
+        aliases:
+          # Lets containers resolve the public API hostname without leaving the
+          # box. Server-side Supabase calls stay on the Docker bridge.
+          - ${API_DOMAIN}
+
+  # ═════════════════════════════════════════════════════════════════════════
+  # OPTIONAL — enable via COMPOSE_PROFILES in .env
+  # ═════════════════════════════════════════════════════════════════════════
+
+  storage:
+    profiles: ["storage"]
+    image: supabase/storage-api:${STORAGE_IMAGE_TAG}
+    container_name: prospect-storage
+    <<: [*default-restart]
+    logging: *default-logging
+    depends_on:
+      db: { condition: service_healthy }
+      rest: { condition: service_started }
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      POSTGREST_URL: http://rest:3000
+      FILE_SIZE_LIMIT: "52428800"
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: prospect
+      REGION: local
+      GLOBAL_S3_BUCKET: prospect
+      ENABLE_IMAGE_TRANSFORMATION: "true"
+      IMGPROXY_URL: http://imgproxy:5001
+    volumes:
+      - storage-data:/var/lib/storage
+    networks: [internal]
+
+  imgproxy:
+    profiles: ["storage"]
+    image: darthsim/imgproxy:${IMGPROXY_IMAGE_TAG}
+    container_name: prospect-imgproxy
+    <<: [*default-restart]
+    logging: *default-logging
+    environment:
+      IMGPROXY_BIND: ":5001"
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: /
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_ENABLE_WEBP_DETECTION: "true"
+    volumes:
+      - storage-data:/var/lib/storage
+    networks: [internal]
+
+  realtime:
+    profiles: ["realtime"]
+    image: supabase/realtime:${REALTIME_IMAGE_TAG}
+    container_name: prospect-realtime
+    <<: [*default-restart]
+    logging: *default-logging
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      PORT: "4000"
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
+      DB_ENC_KEY: ${REALTIME_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${REALTIME_SECRET_KEY_BASE}
+      ERL_AFLAGS: "-proto_dist inet_tcp"
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: "true"
+      RUN_JANITOR: "true"
+    networks: [internal]
+
+  functions:
+    profiles: ["functions"]
+    image: supabase/edge-runtime:${EDGE_RUNTIME_IMAGE_TAG}
+    container_name: prospect-functions
+    <<: [*default-restart]
+    logging: *default-logging
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: http://rest:3000
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_DB_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      VERIFY_JWT: "true"
+    volumes:
+      - ./functions:/home/deno/functions:ro
+    command: ["start", "--main-service", "/home/deno/functions/main"]
+    networks: [internal]
+
+volumes:
+  db-data:
+  storage-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  internal:
+    driver: bridge

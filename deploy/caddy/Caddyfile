@@ -1,0 +1,164 @@
+{
+	email {$ACME_EMAIL}
+	# Uncomment to test against Let's Encrypt staging (avoids rate-limit lockout
+	# while you get DNS right), then comment it out and `docker compose restart caddy`.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+# Proxy to {args[0]}, but only for callers on a private or tailnet address.
+#
+# The `route` wrapper is load-bearing: Caddy sorts directives into a canonical
+# order rather than running them top-down, and `route` is the way to say "these
+# two, in exactly this sequence". Without it the deny check is not guaranteed to
+# run before the proxy.
+(internal_upstream) {
+	@external not remote_ip 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 127.0.0.1/32 ::1
+	route {
+		respond @external 403
+		reverse_proxy {args[0]} {
+			transport http {
+				read_timeout 300s
+				write_timeout 300s
+			}
+		}
+	}
+}
+
+# ───────────────────────────────────────────────────────────────────────────
+# Prospect Sync app
+# ───────────────────────────────────────────────────────────────────────────
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	# CSV/XLSX uploads are chunked by the app, but leave real headroom.
+	request_body {
+		max_size 100MB
+	}
+
+	reverse_proxy app:3000 {
+		header_up X-Forwarded-Proto https
+		# Long imports and exports: don't cut them off at the proxy.
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	log {
+		output file /data/logs/app.log {
+			roll_size 20MB
+			roll_keep 5
+		}
+		format json
+	}
+}
+
+# ───────────────────────────────────────────────────────────────────────────
+# Supabase API
+#
+# PUBLIC:   /auth/v1/*  — the browser needs this to sign in and refresh tokens.
+# INTERNAL: everything else — Prospect Sync's server routes reach these over the
+#           Docker bridge. The `internal_only` snippet 403s the public internet.
+#
+# Loosening this is a deliberate act: if you later expose /rest/v1 for an MCP
+# server or a partner integration, add that source IP to the snippet above and
+# write real RLS policies first. Right now every table has RLS on with zero
+# policies and zero grants to anon/authenticated, so the Data API returns
+# nothing without the service-role key — but don't rely on that alone.
+# ───────────────────────────────────────────────────────────────────────────
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	# One authoritative set of CORS headers. `defer` makes these replace, rather
+	# than duplicate, anything the upstream emits — duplicated
+	# Access-Control-Allow-Origin headers are rejected by every browser.
+	header {
+		defer
+		Access-Control-Allow-Origin "https://{$APP_DOMAIN}"
+		Access-Control-Allow-Credentials "true"
+		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "authorization, apikey, content-type, x-client-info, x-supabase-api-version, accept-profile, content-profile, prefer, range"
+		Access-Control-Expose-Headers "content-range, x-supabase-api-version"
+		Access-Control-Max-Age "86400"
+		Vary "Origin"
+		-Server
+	}
+
+	# Answer preflights here rather than proxying them. This is a `handle` block,
+	# not a bare `respond`, so it wins by position: handle blocks are mutually
+	# exclusive and evaluated top-down, whereas a bare `respond` would be sorted
+	# after the handle_path blocks below and never be reached.
+	@preflight method OPTIONS
+	handle @preflight {
+		respond 204
+	}
+
+	# --- public ---
+	handle_path /auth/v1/* {
+		reverse_proxy auth:9999
+	}
+
+	# --- internal only ---
+	# Upstreams that are not running (Compose profiles are off) simply 502 here.
+	# Caddy resolves them lazily, so it still starts cleanly.
+	handle_path /rest/v1/* {
+		import internal_upstream rest:3000
+	}
+
+	handle_path /storage/v1/* {
+		import internal_upstream storage:5000
+	}
+
+	handle_path /realtime/v1/* {
+		import internal_upstream realtime:4000
+	}
+
+	handle_path /functions/v1/* {
+		import internal_upstream functions:9000
+	}
+
+	handle_path /pg/* {
+		import internal_upstream meta:8080
+	}
+
+	handle {
+		respond "Prospect Sync API" 404
+	}
+
+	log {
+		output file /data/logs/api.log {
+			roll_size 20MB
+			roll_keep 5
+		}
+		format json
+	}
+}
+
+# ───────────────────────────────────────────────────────────────────────────
+# Supabase Studio — full database admin. Two locks: source-IP and basic auth.
+#
+# Best practice for an internal tool: install Tailscale on the VPS and point
+# studio.<domain> at the tailnet IP so it is not resolvable from the internet
+# at all. Until then, the basic_auth below is what stands between a scanner and
+# your entire prospect database.
+# ───────────────────────────────────────────────────────────────────────────
+{$STUDIO_DOMAIN} {
+	encode zstd gzip
+
+	basic_auth {
+		{$STUDIO_BASIC_AUTH_USER} {$STUDIO_BASIC_AUTH_HASH}
+	}
+
+	reverse_proxy studio:3000
+
+	log {
+		output file /data/logs/studio.log {
+			roll_size 10MB
+			roll_keep 3
+		}
+		format json
+	}
+}

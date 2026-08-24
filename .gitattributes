@@ -1,0 +1,15 @@
+* text=auto eol=lf
+
+# These run on Linux. A CRLF line ending turns the shebang into
+# `/usr/bin/env bash\r` and every script dies with "bad interpreter" — the
+# classic failure when a repo is edited on Windows and deployed to a VPS.
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+Caddyfile       text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+.env.example    text eol=lf
+
+*.png           binary
+*.ttf           binary
+*.svg           text eol=lf

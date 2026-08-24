@@ -1,8 +1,21 @@
 import type { NextConfig } from "next";
 
+// Self-hosted Supabase lives on our own domain, so the CSP has to name it.
+// `headers()` runs when the server boots, not at build time, which means this
+// reads the deployed value rather than whatever was set on the build machine.
+function supabaseOrigin() {
+  const configured = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!configured) return "https://*.supabase.co";
+  try {
+    return new URL(configured).origin;
+  } catch {
+    return "https://*.supabase.co";
+  }
+}
+
 const contentSecurityPolicy = [
   "default-src 'self'",
-  "connect-src 'self' https://*.supabase.co",
+  `connect-src 'self' ${supabaseOrigin()}`,
   // Next.js emits inline bootstrap scripts for App Router pages in production.
   // A nonce requires per-request CSP generation, so static headers require unsafe-inline.
   "script-src 'self' 'unsafe-inline'",
@@ -16,7 +29,9 @@ const contentSecurityPolicy = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Emits .next/standalone: a self-contained server with only the traced
+  // dependencies, which is what deploy/Dockerfile ships.
+  output: "standalone",
   async headers() {
     return [
       {

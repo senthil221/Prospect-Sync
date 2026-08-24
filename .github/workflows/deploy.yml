@@ -1,0 +1,119 @@
+name: Deploy
+
+# Builds the production image on GitHub's runners and deploys it to the VPS.
+# The VPS never compiles anything: `next build` on 2 vCPU would compete with
+# PostgreSQL for the same cores, and a broken build must not be able to take
+# the running app down.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_deploy:
+        description: "Build and push the image, but do not deploy it"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Reuse the existing quality gate rather than duplicating it here.
+  quality:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build and push image
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image reference
+        id: meta
+        run: |
+          repo="${GITHUB_REPOSITORY,,}"
+          echo "image=${REGISTRY}/${repo}:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "latest=${REGISTRY}/${repo}:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ steps.meta.outputs.latest }}
+          # These are compiled into the client bundle. They are public values —
+          # the anon key grants nothing, because every table has RLS enabled
+          # with no policies and no grants to anon.
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+  deploy:
+    name: Deploy to VPS
+    needs: build
+    if: ${{ !inputs.skip_deploy }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+
+    steps:
+      - name: Install SSH key
+        run: |
+          install -d -m 700 ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Pinned host key, not ssh-keyscan: keyscan trusts whatever answers,
+          # which defeats the point of checking.
+          echo "${{ secrets.VPS_SSH_HOST_KEY }}" > ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          HOST: ${{ secrets.VPS_HOST }}
+          USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -o BatchMode=yes "${USER}@${HOST}" bash -euo pipefail <<EOF
+            cd /opt/prospect
+            git fetch --quiet origin main
+            git reset --quiet --hard origin/main
+            cd deploy
+            ./scripts/update.sh "${IMAGE}"
+          EOF
+
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ secrets.APP_PUBLIC_URL }}/login" || echo 000)
+            if [ "$code" = "200" ]; then echo "Login page is serving."; exit 0; fi
+            echo "attempt $i: HTTP $code"; sleep 10
+          done
+          echo "Login page never returned 200." >&2
+          exit 1
