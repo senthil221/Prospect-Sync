@@ -108,9 +108,9 @@ and to rewrite indexes. `scripts/maintenance.sh` warns you past 75%.
 Three A records at your registrar, all pointing at the VPS IPv4:
 
 ```
-app.yourdomain.com      → <vps-ip>
-api.yourdomain.com      → <vps-ip>
-studio.yourdomain.com   → <vps-ip>
+app.clearroadco.link      → <vps-ip>
+api.clearroadco.link      → <vps-ip>
+studio.clearroadco.link   → <vps-ip>
 ```
 
 Wait for propagation before step 4 — Caddy asks Let's Encrypt for certificates
@@ -162,7 +162,7 @@ docker compose ps
 Give Caddy a minute to get certificates, then confirm:
 
 ```bash
-curl -I https://api.yourdomain.com/auth/v1/health
+curl -I https://api.clearroadco.link/auth/v1/health
 ```
 
 ### 5. Load the schema
@@ -189,8 +189,8 @@ them, and forcing one version's schema onto another breaks login in ways that
 are miserable to debug. You have two users; recreate them:
 
 ```bash
-./scripts/create-user.sh owner@yourdomain.com
-./scripts/create-user.sh boss@yourdomain.com
+./scripts/create-user.sh owner@clearroadco.link
+./scripts/create-user.sh boss@clearroadco.link
 ```
 
 Both addresses must also appear in `ALLOWED_USER_EMAILS`.
@@ -202,9 +202,9 @@ Actions):
 
 | Secret | Value |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | `https://api.yourdomain.com` |
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://api.clearroadco.link` |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `ANON_KEY` from `.env` |
-| `APP_PUBLIC_URL` | `https://app.yourdomain.com` |
+| `APP_PUBLIC_URL` | `https://app.clearroadco.link` |
 | `VPS_HOST` | VPS IPv4 |
 | `VPS_USER` | `deploy` |
 | `VPS_SSH_KEY` | private key whose public half you passed to bootstrap |
@@ -310,7 +310,7 @@ a much smaller thing to reason about than opening up what you have now.
 ## Troubleshooting
 
 **Caddy will not get a certificate.** DNS has not propagated, or ports 80/443
-are blocked. `dig +short app.yourdomain.com` and `sudo ufw status`.
+are blocked. `dig +short app.clearroadco.link` and `sudo ufw status`.
 `docker compose logs caddy` names the actual ACME error.
 
 **Auth works, but every API call 401s.** The email is not in
@@ -329,7 +329,7 @@ does not pick the alias up, requests hairpin out to your own public IP and back
 — still correct, just an extra round trip. Confirm with:
 
 ```bash
-docker compose exec app node -e "require('dns').lookup('api.yourdomain.com',console.log)"
+docker compose exec app node -e "require('dns').lookup('api.clearroadco.link',console.log)"
 ```
 
 A `172.x` address is the alias working; your public IP means it is hairpinning.
@@ -345,7 +345,7 @@ docker compose exec -T db bash < postgres/init/00-prospect-bootstrap.sh
 `prospect_index` or `list_rows`, and check whether the disk crossed 75%.
 
 **Something is exposed that should not be.** From a machine that is *not* the
-VPS: `curl -I https://api.yourdomain.com/rest/v1/prospects` must return 403.
+VPS: `curl -I https://api.clearroadco.link/rest/v1/prospects` must return 403.
 `sudo ss -tlnp` on the VPS should show only 22, 80, and 443 on 0.0.0.0.
 
 ---
