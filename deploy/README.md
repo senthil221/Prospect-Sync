@@ -338,7 +338,7 @@ A `172.x` address is the alias working; your public IP means it is hairpinning.
 init script, which runs only on an empty data directory. Re-apply by hand:
 
 ```bash
-docker compose exec -T db bash < postgres/init/00-prospect-bootstrap.sh
+docker compose exec -T db bash /docker-entrypoint-initdb.d/zz-00-prospect-bootstrap.sh
 ```
 
 **Imports got slow.** `./scripts/maintenance.sh` — look for a high `dead_pct` on
