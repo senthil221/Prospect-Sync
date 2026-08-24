@@ -18,7 +18,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-set -a; source .env; set +a
+source "$(dirname "$0")/_env.sh"
+load_env .env
 
 HOSTED_URL="${1:-}"
 [[ -n "$HOSTED_URL" ]] || { echo "Usage: $0 '<hosted postgres URI>'" >&2; exit 1; }

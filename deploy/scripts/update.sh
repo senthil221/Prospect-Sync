@@ -13,7 +13,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-set -a; source .env; set +a
+source "$(dirname "$0")/_env.sh"
+load_env .env
 
 STATE_FILE=".last-image"
 

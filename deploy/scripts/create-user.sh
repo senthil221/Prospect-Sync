@@ -11,7 +11,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-set -a; source .env; set +a
+source "$(dirname "$0")/_env.sh"
+load_env .env
 
 EMAIL="${1:-}"
 [[ -n "$EMAIL" ]] || { echo "Usage: $0 <email> [password]" >&2; exit 1; }

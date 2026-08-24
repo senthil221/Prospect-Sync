@@ -19,7 +19,8 @@ MIGRATIONS_DIR="../supabase/migrations"
 DRY_RUN=0
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=1
 
-set -a; source .env; set +a
+source "$(dirname "$0")/_env.sh"
+load_env .env
 
 psql_run() {
   docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" db \
