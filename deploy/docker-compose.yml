@@ -30,12 +30,22 @@ services:
     container_name: prospect-db
     <<: [*default-restart]
     logging: *default-logging
-    # Tuning is passed as -c flags rather than a mounted postgresql.conf on
-    # purpose: the supabase/postgres image ships its own conf with supautils and
-    # a shared_preload_libraries list that a wholesale override silently breaks.
+    # config_file MUST come first and MUST point at the image's own conf.
+    #
+    # Without it PostgreSQL falls back to the file initdb generated inside
+    # PGDATA, which sets listen_addresses='localhost' and an empty
+    # shared_preload_libraries. The container then starts, reports healthy, and
+    # accepts psql over its own loopback — while every other service in the
+    # stack gets "connection refused", and pgsodium/supabase_vault/pg_cron/
+    # pg_net are silently absent.
+    #
+    # The -c flags after it are our tuning; a command-line -c beats the file, so
+    # we inherit Supabase's baseline and override only what we mean to.
     # Sized for 8 GB total RAM shared with the rest of this stack.
     command:
       - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
       - -c
       - shared_buffers=2GB
       - -c
