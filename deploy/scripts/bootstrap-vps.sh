@@ -39,7 +39,13 @@ echo "${DEPLOY_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/90-${DEPLOY_USER}
 chmod 440 "/etc/sudoers.d/90-${DEPLOY_USER}"
 
 log "SSH hardening"
-cat > /etc/ssh/sshd_config.d/99-prospect.conf <<'EOF'
+# The 00- prefix is load-bearing. sshd takes the FIRST occurrence of each
+# keyword, and drop-ins load in lexical order, so Ubuntu cloud images silently
+# win with /etc/ssh/sshd_config.d/50-cloud-init.conf containing
+# "PasswordAuthentication yes". A 99- file is read but never applied — the box
+# looks hardened and still accepts passwords.
+rm -f /etc/ssh/sshd_config.d/99-prospect.conf
+cat > /etc/ssh/sshd_config.d/00-prospect.conf <<'EOF'
 PermitRootLogin no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -50,9 +56,30 @@ MaxAuthTries 3
 ClientAliveInterval 300
 ClientAliveCountMax 2
 EOF
+
+# cloud-init rewrites its own drop-in on boot, so also tell it to stop asking
+# for password auth in the first place.
+cat > /etc/cloud/cloud.cfg.d/99-disable-password-auth.cfg <<'EOF'
+ssh_pwauth: false
+EOF
+
 # Verify before restarting — a bad config here locks you out permanently.
 sshd -t
 systemctl restart ssh
+
+# Assert the settings actually took effect. Writing a config file is not the
+# same as it winning, and a silent failure here is the difference between a
+# hardened box and one that still accepts passwords on a public port.
+for setting in "permitrootlogin no" "passwordauthentication no"; do
+  key="${setting%% *}"
+  want="${setting##* }"
+  got="$(sshd -T | grep -i "^${key} " | awk '{print $2}')"
+  if [[ "$got" != "$want" ]]; then
+    echo "FATAL: sshd ${key} is '${got}', expected '${want}'." >&2
+    echo "Something else in /etc/ssh/sshd_config.d/ is taking precedence." >&2
+    exit 1
+  fi
+done
 
 log "Firewall"
 # IMPORTANT: Docker inserts its own iptables rules ahead of ufw's, so a
