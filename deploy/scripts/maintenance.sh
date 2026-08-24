@@ -42,7 +42,17 @@ psql_run -c "reindex table concurrently public.prospect_index;" \
 
 echo
 echo "=== Refreshing planner statistics ==="
-psql_run -c "analyze;"
+# Scoped to public — see the note in migrate.sh about the shared-catalog warnings.
+psql_run -q <<'SQL'
+do $$
+declare
+  t record;
+begin
+  for t in select tablename from pg_tables where schemaname = 'public' loop
+    execute format('analyze public.%I', t.tablename);
+  end loop;
+end $$;
+SQL
 
 echo
 echo "=== Slowest statements this week ==="

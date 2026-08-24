@@ -81,5 +81,20 @@ done
 
 echo
 echo "Refreshing planner statistics on the tables that just changed."
-psql_run -q -c "analyze;"
+# Scoped to public on purpose. A bare `analyze` also walks shared catalogs that
+# `postgres` does not own, emitting ~45 "only superuser can analyze it" warnings
+# that bury whatever actually mattered in the output.
+#
+# Quoted heredoc: the $$ dollar-quoting must reach psql intact, and inside a
+# double-quoted shell string bash would substitute it with its own PID.
+psql_run -q <<'SQL'
+do $$
+declare
+  t record;
+begin
+  for t in select tablename from pg_tables where schemaname = 'public' loop
+    execute format('analyze public.%I', t.tablename);
+  end loop;
+end $$;
+SQL
 echo "Done."
