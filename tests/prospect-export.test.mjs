@@ -31,15 +31,18 @@ test("bulk prospect export shares the full workspace query contract", async () =
   assert.match(dashboard, /fields: exportFields/);
   assert.match(dashboard, /excludedIds/);
   assert.match(dashboard, /search=\{deferredSearch\}/);
-  // Legacy single-shot export path is retained (now backed by the fast v7 read).
+  // Exports go through exactly one path: the keyset endpoint that streams bounded
+  // pages to disk. The old single-shot route buffered every matching row in memory
+  // before writing a byte, so it must not come back.
   assert.match(route, /async function runProspectWorkspace/);
-  assert.match(route, /async function exportProspects/);
-  assert.match(route, /from\("prospect_fields"\)/);
-  assert.match(route, /"X-Exported-Rows"/);
-  assert.match(route, /export async function POST/);
-  assert.match(route, /requestedFields/);
-  assert.match(route, /availableExportFieldIds/);
-  assert.match(route, /selectionMode === "ids"/);
+  assert.doesNotMatch(route, /exportProspects|prospectsCsv|X-Exported-Rows|export === "csv"/);
+  assert.doesNotMatch(route, /export async function POST/);
+  const exportRoute = await readFile(new URL("../app/api/prospects/export/route.ts", import.meta.url), "utf8");
+  assert.match(exportRoute, /p_after_created_at/);
+  assert.match(exportRoute, /nextCursor/);
+  assert.match(exportRoute, /availableExportFieldIds/);
+  assert.match(exportRoute, /from\("prospect_fields"\)/);
+  assert.match(dashboard, /selectionMode === "ids"|selectionMode === "all_matching"/);
   // Shared export column contract lives in the reusable module.
   assert.match(exportLib, /row\.all_data/);
   assert.match(exportLib, /buildCustomFieldDefinitions/);

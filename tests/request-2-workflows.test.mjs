@@ -15,8 +15,11 @@ test("company DB supports name/website filters and direct company CSV imports", 
   assert.match(dashboard, /Import names &amp; websites/);
   assert.match(dashboard, /Company Name and\/or Website column/);
   assert.match(dashboard, /Import companies/);
-  assert.match(companiesRoute, /p_names: names/);
-  assert.match(companiesRoute, /filter_companies_v3/);
+  // Names and websites are no longer separate RPC arguments: both arrive as
+  // ordinary __company / __website filters in the shared filter payload, which
+  // filter_companies_v4 resolves through the indexed company pre-filter.
+  assert.match(companiesRoute, /filter_companies_v4/);
+  assert.match(companiesRoute, /p_filters: filters/);
   assert.match(startRoute, /Choose a data source before importing/);
   assert.match(chunkRoute, /import_company_batch_v2/);
   assert.match(migration, /primary key \(import_id, source_row_number\)/);
@@ -54,7 +57,13 @@ test("client prospect removal preserves the canonical Master DB record by defaul
   assert.match(removeRoute, /masterProspectPreserved: true/);
   assert.match(migration, /delete from public\.list_memberships/);
   assert.doesNotMatch(migration.slice(migration.indexOf("remove_prospect_from_client_v1"), migration.indexOf("prospect_index_matches_v1")), /delete from public\.prospects/);
-  for (const route of [clientRoute, listRoute, importRoute]) assert.match(route, /payload\.deleteOrphans === true/);
+  // Orphan cleanup is no longer caller-controlled. Every client-side delete route
+  // hardcodes p_delete_orphans: false, so a client, list, or import can never take
+  // a master People/Company record down with it — not even by a malformed request.
+  for (const route of [clientRoute, listRoute, importRoute]) {
+    assert.match(route, /p_delete_orphans:\s*false/);
+    assert.doesNotMatch(route, /p_delete_orphans:(?!\s*false\b)/);
+  }
 });
 
 test("People and Company DB pivots preserve the source filter contract", async () => {
@@ -69,7 +78,7 @@ test("People and Company DB pivots preserve the source filter contract", async (
   assert.match(dashboard, /See Companies/);
   assert.match(dashboard, /companyScope/);
   assert.match(dashboard, /peopleScope/);
-  assert.match(prospectsRoute, /search_prospect_workspace_v10/);
+  assert.match(prospectsRoute, /search_prospect_workspace_v12/);
   assert.match(companiesRoute, /p_people_scope: peopleScope/);
   assert.match(exportRoute, /search_prospect_export_v4/);
   assert.match(migration, /company_matches_scope_v1/);

@@ -1,6 +1,6 @@
-import { buildExportColumns, csvHeaderLine, csvRowsBody, type ProspectRow } from "./prospect-export";
-import type { ProspectFilter } from "./prospect-filters";
-import type { CompanyScope } from "./workspace-scopes";
+import { buildExportColumns, csvHeaderLine, csvRowsBody, type ProspectRow } from "./prospect-export.ts";
+import type { ProspectFilter } from "./prospect-filters.ts";
+import type { CompanyScope } from "./workspace-scopes.ts";
 
 const BOM = "﻿";
 const CRLF = "\r\n";

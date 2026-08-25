@@ -1,6 +1,6 @@
-import { customFieldValue } from "./prospect-fields";
-import { isXlsxFile, readXlsxRows } from "./spreadsheet";
-import type { Prospect } from "./types";
+import { customFieldValue } from "./prospect-fields.ts";
+import { isXlsxFile, readXlsxRows } from "./spreadsheet.ts";
+import type { Prospect } from "./types.ts";
 
 export function formatNumber(value: unknown) {
   return new Intl.NumberFormat("en-IN").format(Number(value ?? 0));
@@ -91,7 +91,10 @@ export function prospectFieldValue(prospect: Prospect, field: string) {
   if (field === "__clients") return Array.isArray(prospect.client_names) ? prospect.client_names.join(", ") : "";
   if (field === "__linkedin") return String(prospect.linkedin_url || "");
   if (field === "__country") return String(prospect.country || "");
-  if (field === "__person_location") return [prospect.city, prospect.state, prospect.country].filter(Boolean).join(", ");
+  if (field === "__city") return String(prospect.city || "");
+  if (field === "__state") return String(prospect.state || "");
+  // Stored location wins; the parts stay the fallback for rows indexed before it existed.
+  if (field === "__person_location") return String(prospect.location || "") || [prospect.city, prospect.state, prospect.country].filter(Boolean).join(", ");
   if (field === "__company_location") return [prospect.company_location, prospect.company_city, prospect.company_state, prospect.company_country].filter(Boolean).join(", ");
   if (field === "__employee_count") {
     const minimum = prospect.employee_count_min;

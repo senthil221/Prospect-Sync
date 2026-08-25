@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, useRef, useState } from "react";
-import { normalizeDomain } from "../db/normalize";
+import { describeBulkMerge, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
 import { isXlsxFile, readXlsxRows } from "../lib/spreadsheet";
 import { filterId, IncludeExcludeFilter, TextBooleanFilter, type ProspectFilter } from "./ApolloFilterPanel";
 import { useDismiss } from "./use-dismiss";
@@ -195,16 +195,15 @@ export function addDomainsToWebsiteFilter(filters: ProspectFilter[], domains: st
 export function BulkDomainPaste({ onAdd }: { onAdd: (domains: string[]) => void }) {
   const [text, setText] = useState("");
   const [note, setNote] = useState("");
+  const pending = splitPastedValues(text).length;
 
   function apply() {
-    const raw = text.split(/[\s,;]+/).map((item) => item.trim()).filter(Boolean);
-    // Normalize each entry the same way imports do (strip protocol, www, path),
-    // so pasted URLs match the stored company domain.
-    const unique = [...new Set(raw.map((item) => normalizeDomain(item)).filter(Boolean))];
-    if (!unique.length) { setNote("No valid domains found."); return; }
-    onAdd(unique);
-    const ignored = raw.length - unique.length;
-    setNote(`Added ${unique.length} domain${unique.length === 1 ? "" : "s"}${ignored > 0 ? ` · ${ignored} duplicate/invalid ignored` : ""}.`);
+    // Shares the parser the filter pickers and the client blocklist use, so a
+    // pasted URL is trimmed to the stored domain identically everywhere.
+    const result = mergeBulkValues([], text, "domain");
+    if (!result.added) { setNote(describeBulkMerge(result, "domain")); return; }
+    onAdd(result.values);
+    setNote(describeBulkMerge(result, "domain"));
     setText("");
   }
 
@@ -212,12 +211,12 @@ export function BulkDomainPaste({ onAdd }: { onAdd: (domains: string[]) => void 
     <textarea
       value={text}
       onChange={(event) => { setText(event.target.value); if (note) setNote(""); }}
-      rows={4}
       aria-label="Bulk paste domains"
-      placeholder={"Paste domains to filter in bulk\none per line or comma-separated\ne.g. https://www.acme.com, stripe.com"}
+      spellCheck={false}
+      placeholder={"acme.com\nhttps://www.stripe.com/pricing\ncontoso.co.uk\n\nOne per line, or comma-separated. URLs are trimmed to the domain."}
     />
     <div className="bulk-domain-actions">
-      <button type="button" onClick={apply} disabled={!text.trim()}>Add domains</button>
+      <button type="button" onClick={apply} disabled={!pending}>Add {pending ? pending.toLocaleString("en-IN") : ""} domains</button>
       {note ? <span className="bulk-domain-note">{note}</span> : null}
     </div>
   </div>;

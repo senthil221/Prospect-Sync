@@ -1,4 +1,4 @@
-import { parseFilters, type ProspectFilter } from "./prospect-filters";
+import { parseFilters, type ProspectFilter } from "./prospect-filters.ts";
 
 export type CompanyScope = {
   search: string;

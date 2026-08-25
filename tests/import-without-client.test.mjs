@@ -9,7 +9,7 @@ test("prospect lists can be imported without entering a client name", async () =
     readFile(new URL("../lib/import-owner.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(panel, /No client \(list only\)/);
+  assert.match(panel, /Unassigned \(list only\)/);
   assert.match(panel, /withoutClient = clientId === unassignedClientId/);
   assert.match(route, /payload\.withoutClient === true/);
   assert.match(route, /from\("clients"\)\.upsert/);

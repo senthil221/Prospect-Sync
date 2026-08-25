@@ -1,4 +1,4 @@
-import type { createAdminClient } from "./supabase/admin";
+import type { createAdminClient } from "./supabase/admin.ts";
 
 type Admin = ReturnType<typeof createAdminClient>;
 

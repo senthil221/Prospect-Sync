@@ -1,5 +1,5 @@
-import type { ProspectFilter } from "./types";
-import type { CompanyScope, PeopleScope } from "./workspace-scopes";
+import type { ProspectFilter } from "./types.ts";
+import type { CompanyScope, PeopleScope } from "./workspace-scopes.ts";
 
 const apiResponseCache = new Map<string, { data: unknown; expiresAt: number }>();
 const apiRequests = new Map<string, Promise<unknown>>();

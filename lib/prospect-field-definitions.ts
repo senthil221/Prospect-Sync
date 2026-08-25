@@ -1,4 +1,4 @@
-import { requiredPersonImportFields, skipImportField } from "./import-schema";
+import { requiredPersonImportFields, skipImportField } from "./import-schema.ts";
 
 export const canonicalImportFields = ["Auto detect", skipImportField, ...requiredPersonImportFields, "First Name", "Last Name", "Personal Email", "Mobile Number", "Keywords", "City", "State", "Country", "Person Location", "Company Website", "Company Employee Count", "Company Location", "Company City", "Company State", "Company Country"];
 
@@ -11,6 +11,7 @@ export const standardProspectFields = [
   { id: "__seniority", label: "Seniority" },
   { id: "__department", label: "Departments" },
   { id: "__sub_department", label: "Sub Departments" },
+  { id: "__person_location", label: "Location" },
 ];
 
 export const defaultProspectColumns = standardProspectFields.map((field) => field.id);

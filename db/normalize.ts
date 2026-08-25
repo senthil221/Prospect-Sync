@@ -13,6 +13,7 @@ export type CanonicalProspect = {
   city: string;
   state: string;
   country: string;
+  location: string;
   companyName: string;
   companyDomain: string;
   companyEmployeeCountMin: number | null;
@@ -85,6 +86,13 @@ export function parseEmployeeCount(value: string): { min: number | null; max: nu
   return { min: numbers[0], max: numbers[0] };
 }
 
+// Apollo-style single location: an explicit column wins, otherwise compose it
+// from whichever parts the file supplied. Kept in sync with the same fallback in
+// import_prospect_batch_v2 so a row means the same thing on either write path.
+export function personLocation(explicit: string, city: string, state: string, country: string) {
+  return clean(explicit) || [city, state, country].map(clean).filter(Boolean).join(", ");
+}
+
 export function mapProspect(headers: string[], values: string[]): CanonicalProspect {
   const raw: Record<string, string> = {};
   headers.forEach((header, index) => { raw[header] = clean(values[index]); });
@@ -99,6 +107,9 @@ export function mapProspect(headers: string[], values: string[]): CanonicalProsp
   const companyName = findValue(raw, ["casual company name", "company name", "company", "organization"]);
   const companyDomain = normalizeDomain(findValue(raw, ["company website", "website", "company domain", "domain", "companywebsite"]));
   const employeeCount = parseEmployeeCount(findValue(raw, ["# employees", "number of employees", "employee count", "employees count", "employees", "company employee count", "company employees", "company headcount", "headcount"]));
+  const city = findValue(raw, ["city"]);
+  const state = findValue(raw, ["state", "region"]);
+  const country = findValue(raw, ["country"]);
   const identifiers: Array<{ type: string; value: string }> = [];
   if (workEmail) identifiers.push({ type: "work_email", value: workEmail });
   if (personalEmail) identifiers.push({ type: "personal_email", value: personalEmail });
@@ -121,9 +132,10 @@ export function mapProspect(headers: string[], values: string[]): CanonicalProsp
     keywords: parseKeywords(findValue(raw, ["keywords", "keyword", "person keywords", "prospect keywords"])),
     seniority: findValue(raw, ["seniority", "seniority level"]),
     department: findValue(raw, ["department", "departments", "function"]),
-    city: findValue(raw, ["city"]),
-    state: findValue(raw, ["state", "region"]),
-    country: findValue(raw, ["country"]),
+    city,
+    state,
+    country,
+    location: personLocation(findValue(raw, ["person location", "location", "contact location"]), city, state, country),
     companyName,
     companyDomain,
     companyEmployeeCountMin: employeeCount.min,

@@ -2,22 +2,28 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+// The main-filter list is deliberately narrow: only the mandatory person fields
+// plus Location are offered up front, and everything else arrives through the
+// whitelisted custom fields in "MORE FILTERS". Assert the fields that must be
+// reachable and the interaction modes each one supports.
 test("Apollo panel exposes the requested main filters and interaction modes", async () => {
   const panel = await readFile(new URL("../app/ApolloFilterPanel.tsx", import.meta.url), "utf8");
-  assert.match(panel, /id: "__keywords", label: "Keywords"/);
-  assert.match(panel, /id: "__title", label: "Job titles"/);
-  assert.match(panel, /description: "Job Title is kept separate from Keywords/);
+  for (const field of ["__name", "__company", "__email", "__linkedin", "__title_seniority", "__department", "__esp_type"]) {
+    assert.match(panel, new RegExp(`id: "${field}"`), `${field} is missing from the filter panel`);
+  }
   assert.match(panel, />Include</);
   assert.match(panel, />Exclude</);
   assert.match(panel, /Boolean Search/);
   assert.match(panel, /AND\/OR\/NOT/);
   assert.match(panel, /onPaste/);
-  assert.match(panel, /split\(\/\[,;\\n\|\]\//);
-  assert.match(panel, /Person location/);
-  assert.match(panel, /Company location/);
-  assert.match(panel, /Predefined range/);
-  assert.match(panel, /Custom range/);
-  assert.match(panel, /employees is unknown/);
+  // Pasted lists go through the shared parser so a URL is trimmed to the stored
+  // domain the same way in every picker, in the Company DB box, and the blocklist.
+  assert.match(panel, /mergeBulkValues/);
+  assert.match(panel, /splitPastedValues/);
+  // Bulk paste mode: a large textarea with its own scroll, not a one-line input.
+  assert.match(panel, /Paste list/);
+  assert.match(panel, /token-bulk/);
+  assert.match(panel, /chipCollapseThreshold/);
 });
 
 test("new filters are applied globally before pagination and are available to exports", async () => {
@@ -40,8 +46,10 @@ test("new filters are applied globally before pagination and are available to ex
   assert.ok(viewDefinition.indexOf("co.name as company_name") < viewDefinition.indexOf("p.keywords"), "new view columns must be appended after the existing view contract");
   assert.match(migration, /filtered as materialized/);
   assert.ok(migration.indexOf("filtered as materialized") < migration.indexOf("limit greatest", migration.indexOf("filtered as materialized")));
-  assert.match(route, /search_prospect_workspace_v7/);
-  assert.match(route, /search_prospect_workspace_v6/);
+  // The route calls exactly one workspace function — no version ladder to fall
+  // through, so a filter contract can never be silently downgraded.
+  assert.match(route, /search_prospect_workspace_v12/);
+  assert.equal(route.match(/search_prospect_workspace_v\d+/g).length, 1);
   assert.match(filtersLib, /compileBooleanSearch/);
   assert.match(filtersLib, /operator === "number_ranges"/);
   assert.match(exportLib, /header: "Keywords"/);

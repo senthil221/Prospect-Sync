@@ -1,5 +1,5 @@
-import { createClient } from "./supabase/server";
-import { isAllowedEmail } from "./supabase/env";
+import { createClient } from "./supabase/server.ts";
+import { isAllowedEmail } from "./supabase/env.ts";
 
 export async function getAuthorizedUser() {
   const supabase = await createClient();

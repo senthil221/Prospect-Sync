@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mapProspect, parseEmployeeCount } from "../db/normalize.ts";
+import { mapProspect, parseEmployeeCount, personLocation } from "../db/normalize.ts";
 import { buildCustomFieldDefinitions, customFieldValue } from "../lib/prospect-fields.ts";
 
 test("imports Keywords separately from Job Title and parses company fields", () => {
@@ -25,4 +25,30 @@ test("normalizes duplicate imported headers without discarding their values", ()
   const definitions = buildCustomFieldDefinitions(["Industry Type", "industry_type", "INDUSTRY-TYPE", "Job Title"]);
   assert.deepEqual(definitions, [{ id: "custom:industrytype", label: "Industry Type", sourceFields: ["Industry Type", "industry_type", "INDUSTRY-TYPE"] }]);
   assert.equal(customFieldValue({ "Industry Type": "SaaS", industry_type: "Technology" }, "industrytype"), "SaaS | Technology");
+});
+
+test("a single Location column is preserved verbatim, not re-derived from parts", () => {
+  const headers = ["Full Name", "Work Email", "Location", "City", "State", "Country"];
+  const prospect = mapProspect(headers, ["Ada Byron", "ada@example.com", "Greater London, United Kingdom", "London", "England", "United Kingdom"]);
+  // The file's own phrasing wins — re-joining the parts would produce
+  // "London, England, United Kingdom" and lose what the source actually said.
+  assert.equal(prospect.location, "Greater London, United Kingdom");
+  assert.equal(prospect.city, "London");
+  assert.equal(prospect.state, "England");
+  assert.equal(prospect.country, "United Kingdom");
+});
+
+test("Location is composed from whichever parts a file supplies", () => {
+  const both = mapProspect(["City", "Country"], ["Chennai", "India"]);
+  assert.equal(both.location, "Chennai, India");
+  const countryOnly = mapProspect(["Country"], ["India"]);
+  assert.equal(countryOnly.location, "India");
+  const none = mapProspect(["Full Name"], ["Ada Byron"]);
+  assert.equal(none.location, "");
+});
+
+test("personLocation matches the SQL fallback used by the import RPC", () => {
+  assert.equal(personLocation("Remote - EMEA", "Berlin", "", "Germany"), "Remote - EMEA");
+  assert.equal(personLocation("", "Berlin", "", "Germany"), "Berlin, Germany");
+  assert.equal(personLocation("   ", "", "", ""), "");
 });

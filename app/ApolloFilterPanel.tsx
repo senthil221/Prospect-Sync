@@ -1,6 +1,7 @@
 "use client";
 
 import { ClipboardEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { bulkFieldKind, describeBulkMerge, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
 import type { ProspectFieldDefinition } from "../lib/prospect-fields";
 import type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
@@ -22,10 +23,17 @@ const mainFilters: FilterDefinition[] = [
   { id: "__linkedin", label: "Personal LinkedIn URL" },
   { id: "__title_seniority", label: "Job Title & Seniority", description: "Matches either the job title or the seniority." },
   { id: "__department", label: "Departments" },
+  { id: "__person_location", label: "Location", description: "One field for city, state and country — e.g. “London”, “California”, “United Kingdom”." },
   { id: "__esp_type", label: "ESP", description: "Matches the ESP or the email provider type (e.g. SEG)." },
 ];
 
-const optionalFilters: FilterDefinition[] = [];
+// Reachable through "MORE FILTERS" for the rare case a single Location is too
+// coarse — Location itself covers all three for everyday filtering.
+const optionalFilters: FilterDefinition[] = [
+  { id: "__city", label: "City" },
+  { id: "__state", label: "State / Region" },
+  { id: "__country", label: "Country" },
+];
 
 const employeeRanges = [
   ["1:10", "1–10"], ["11:20", "11–20"], ["21:50", "21–50"], ["51:100", "51–100"],
@@ -164,6 +172,10 @@ export function IncludeExcludeFilter({ field, filters, clientId, valuesEndpoint,
   </div>;
 }
 
+// Past this many chips the box stops being readable, so it collapses to a count
+// and a Review button that opens the same list in the editable bulk textarea.
+const chipCollapseThreshold = 20;
+
 export function TokenValuePicker({ field, values, clientId, placeholder, valuesEndpoint = "/api/prospects/filter-values", onChange }: {
   field?: string;
   values: string[];
@@ -176,8 +188,26 @@ export function TokenValuePicker({ field, values, clientId, placeholder, valuesE
   const [options, setOptions] = useState<Array<{ value: string; count: number }>>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<"search" | "bulk">("search");
+  const [bulkText, setBulkText] = useState("");
+  const [bulkNote, setBulkNote] = useState("");
   const pickerRef = useRef<HTMLDivElement>(null);
   useDismiss(pickerRef, () => setOpen(false), open);
+  const kind = bulkFieldKind(field);
+
+  function openBulk(prefill: boolean) {
+    setBulkText(prefill ? values.join("\n") : "");
+    setBulkNote("");
+    setOpen(false);
+    setMode("bulk");
+  }
+
+  function applyBulk(replace: boolean) {
+    const result = mergeBulkValues(replace ? [] : values, bulkText, kind);
+    onChange(result.values);
+    setBulkNote(describeBulkMerge(result));
+    if (!replace) setBulkText("");
+  }
 
   useEffect(() => {
     if (!open || !field) return;
@@ -197,14 +227,8 @@ export function TokenValuePicker({ field, values, clientId, placeholder, valuesE
   }, [clientId, field, open, query, valuesEndpoint]);
 
   function addMany(raw: string) {
-    const seen = new Set(values.map((value) => value.toLocaleLowerCase()));
-    const additions = raw.split(/[,;\n|]/).map((value) => value.trim()).filter((value) => {
-      const normalized = value.toLocaleLowerCase();
-      if (!normalized || seen.has(normalized)) return false;
-      seen.add(normalized);
-      return true;
-    });
-    if (additions.length) onChange([...values, ...additions]);
+    const result = mergeBulkValues(values, raw, kind);
+    if (result.added) onChange(result.values);
     setQuery("");
   }
 
@@ -220,16 +244,51 @@ export function TokenValuePicker({ field, values, clientId, placeholder, valuesE
 
   const selected = new Set(values.map((value) => value.toLocaleLowerCase()));
   const visibleOptions = options.filter((option) => !selected.has(option.value.toLocaleLowerCase()));
+  const collapsed = values.length > chipCollapseThreshold;
+  const pendingCount = mode === "bulk" ? splitPastedValues(bulkText).length : 0;
+  const bulkPlaceholder = kind === "domain"
+    ? "acme.com\nhttps://www.stripe.com\ncontoso.co.uk\n\nOne per line, or comma-separated. URLs are trimmed to the domain."
+    : kind === "linkedin"
+      ? "https://linkedin.com/in/ada-byron\nlinkedin.com/in/grace-hopper\n\nOne per line, or comma-separated."
+      : kind === "email"
+        ? "ada@example.com\ngrace@example.com\n\nOne per line, or comma-separated."
+        : "One value per line, or comma-separated.\nPaste a whole spreadsheet column here.";
+
   return <div className="token-value-picker" ref={pickerRef}>
-    <div className="token-input">
-      {values.map((value) => <button type="button" key={value} onClick={(event) => { event.stopPropagation(); onChange(values.filter((item) => item !== value)); }}>{value}<span>×</span></button>)}
-      <input value={query} onFocus={() => setOpen(true)} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} onBlur={() => { if (query.trim()) addMany(query); window.setTimeout(() => setOpen(false), 150); }} placeholder={values.length ? "Add another…" : placeholder}/>
+    <div className="token-mode-tabs">
+      <button type="button" className={mode === "search" ? "active" : ""} onClick={() => setMode("search")}>Search</button>
+      <button type="button" className={mode === "bulk" ? "active" : ""} onClick={() => openBulk(false)}>Paste list</button>
     </div>
-    {open ? <div className="token-options" role="listbox" aria-multiselectable="true">
-      {loading ? <p>Searching all prospects…</p> : null}
-      {!loading && visibleOptions.map((option) => <button type="button" role="option" aria-selected="false" key={option.value} onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange([...values, option.value]); setQuery(""); }}><span>{option.value}</span><small>{option.count.toLocaleString("en-IN")}</small></button>)}
-      {!loading && !visibleOptions.length ? <p>{query.trim() ? "Press Enter to add this value." : "Type a value or paste a comma-separated list."}</p> : null}
-    </div> : null}
+
+    {mode === "bulk" ? <div className="token-bulk">
+      <textarea
+        aria-label={`Paste ${kind === "text" ? "values" : `${kind}s`} in bulk`}
+        value={bulkText}
+        onChange={(event) => { setBulkText(event.target.value); if (bulkNote) setBulkNote(""); }}
+        placeholder={bulkPlaceholder}
+        spellCheck={false}
+      />
+      <div className="token-bulk-actions">
+        <button type="button" disabled={!pendingCount} onClick={() => applyBulk(false)}>
+          Add {pendingCount ? pendingCount.toLocaleString("en-IN") : ""}
+        </button>
+        <button type="button" className="ghost" disabled={!pendingCount} onClick={() => applyBulk(true)}>Replace all</button>
+        {values.length ? <button type="button" className="ghost" onClick={() => openBulk(true)}>Load current {values.length.toLocaleString("en-IN")}</button> : null}
+      </div>
+      <p className="token-bulk-note" role="status">{bulkNote || (pendingCount ? `${pendingCount.toLocaleString("en-IN")} value${pendingCount === 1 ? "" : "s"} ready` : `${values.length.toLocaleString("en-IN")} currently applied`)}</p>
+    </div> : <>
+      <div className="token-input">
+        {collapsed
+          ? <button type="button" className="token-summary" onClick={() => openBulk(true)}>{values.length.toLocaleString("en-IN")} values · Review</button>
+          : values.map((value) => <button type="button" key={value} onClick={(event) => { event.stopPropagation(); onChange(values.filter((item) => item !== value)); }}>{value}<span>×</span></button>)}
+        <input value={query} onFocus={() => setOpen(true)} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} onBlur={() => { if (query.trim()) addMany(query); window.setTimeout(() => setOpen(false), 150); }} placeholder={values.length ? "Add another…" : placeholder}/>
+      </div>
+      {open ? <div className="token-options" role="listbox" aria-multiselectable="true">
+        {loading ? <p>Searching all prospects…</p> : null}
+        {!loading && visibleOptions.map((option) => <button type="button" role="option" aria-selected="false" key={option.value} onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange([...values, option.value]); setQuery(""); }}><span>{option.value}</span><small>{option.count.toLocaleString("en-IN")}</small></button>)}
+        {!loading && !visibleOptions.length ? <p>{query.trim() ? "Press Enter to add this value." : "Type a value, or use Paste list for a whole column."}</p> : null}
+      </div> : null}
+    </>}
   </div>;
 }
 

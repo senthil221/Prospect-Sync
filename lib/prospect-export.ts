@@ -1,5 +1,5 @@
-import { csvCell, csvDocument } from "./csv";
-import { buildCustomFieldDefinitions, customFieldValue } from "./prospect-fields";
+import { csvCell, csvDocument } from "./csv.ts";
+import { buildCustomFieldDefinitions, customFieldValue } from "./prospect-fields.ts";
 
 // A prospect row as returned by the workspace/export SQL functions (to_jsonb of prospect_index).
 export type ProspectRow = Record<string, unknown>;
@@ -60,7 +60,9 @@ export const standardExportColumns: Array<{ id: string; header: string; value: (
   { id: "__city", header: "City", value: (row) => row.city },
   { id: "__state", header: "State", value: (row) => row.state },
   { id: "__country", header: "Country", value: (row) => row.country },
-  { id: "__person_location", header: "Person Location", value: (row) => [row.city, row.state, row.country].filter(Boolean).join(", ") },
+  // Stored location wins; the parts remain the fallback for rows indexed before
+  // prospects.location existed.
+  { id: "__person_location", header: "Person Location", value: (row) => String(row.location ?? "").trim() || [row.city, row.state, row.country].filter(Boolean).join(", ") },
   { id: "__company", header: "Company", value: (row) => row.company_name },
   { id: "__website", header: "Website", value: (row) => websiteUrl(row.company_domain) },
   { id: "__employee_count", header: "# Employees", value: employeeCountText },

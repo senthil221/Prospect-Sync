@@ -32,7 +32,7 @@ test("Company to People pivot computes eligible companies once", async () => {
     readFile(migrationUrl, "utf8"),
     readFile(narrowMigrationUrl, "utf8"),
   ]);
-  assert.match(prospectsRoute, /search_prospect_workspace_v10/);
+  assert.match(prospectsRoute, /search_prospect_workspace_v12/);
   assert.match(exportRoute, /search_prospect_export_v4/);
   assert.match(migration, /eligible_companies as materialized/);
   assert.doesNotMatch(migration.slice(migration.indexOf("search_prospect_workspace_v9")), /company_matches_scope_v1/);
