@@ -1,0 +1,317 @@
+/* =============================================================================
+   Prospect Sync - Design System
+   -----------------------------------------------------------------------------
+   Direction: "precision instrument". Near-neutral surfaces, ONE accent reserved
+   for selection and primary action, hierarchy carried by typography and spacing
+   rather than colour. Every value below is a step on a scale - nothing in the
+   product should introduce a size, weight, radius or colour that is not here.
+
+   Layer order: design-system.css (this file) -> workspace.css (components).
+   ========================================================================== */
+
+:root {
+  /* ---------------------------------------------------------------------
+     1. Neutral ramp - faintly cool, low chroma. Carries 90% of the surface.
+     --------------------------------------------------------------------- */
+  --ds-neutral-0:   #ffffff;
+  --ds-neutral-25:  #fcfcfd;
+  --ds-neutral-50:  #f7f7f8;
+  --ds-neutral-100: #f0f0f2;
+  --ds-neutral-150: #e7e7ea;
+  --ds-neutral-200: #dcdce0;
+  --ds-neutral-300: #c6c6cc;
+  --ds-neutral-400: #9e9ea7;
+  --ds-neutral-500: #76767f;
+  --ds-neutral-600: #57575f;
+  --ds-neutral-700: #3e3e45;
+  --ds-neutral-800: #292930;
+  --ds-neutral-900: #18181c;
+  --ds-neutral-950: #0b0d12;
+
+  /* ---------------------------------------------------------------------
+     2. Accent - a single cobalt. Selection, primary action, active nav.
+        It is deliberately the only chromatic family in the chrome.
+     --------------------------------------------------------------------- */
+  --ds-accent-50:  #eff3fe;
+  --ds-accent-100: #dde6fd;
+  --ds-accent-200: #c0d0fa;
+  --ds-accent-300: #96b0f6;
+  --ds-accent-400: #6689ef;
+  --ds-accent-500: #4169e4;
+  --ds-accent-600: #2b59d9;
+  --ds-accent-700: #2247b5;
+  --ds-accent-800: #1e3c93;
+  --ds-accent-900: #1c3576;
+  --ds-accent-950: #142248;
+
+  /* ---------------------------------------------------------------------
+     3. Status - muted on purpose. These appear in data, never in chrome.
+     --------------------------------------------------------------------- */
+  --ds-success-600: #0f7a52;
+  --ds-success-700: #0b6041;
+  --ds-success-soft: #e8f5ef;
+  --ds-success-line: #c3e3d4;
+
+  --ds-warning-600: #8a5a00;
+  --ds-warning-700: #6e4800;
+  --ds-warning-soft: #fbf2df;
+  --ds-warning-line: #ecd9ab;
+
+  --ds-danger-600: #b3261e;
+  --ds-danger-700: #8f1d17;
+  --ds-danger-soft: #fbebe9;
+  --ds-danger-line: #eec9c5;
+
+  /* ---------------------------------------------------------------------
+     4. Type scale - 8 steps. 13px is the workhorse (controls, table cells).
+        Replaces the 27 ad-hoc sizes the product used to carry.
+     --------------------------------------------------------------------- */
+  --text-2xs:  11px;  /* tracked uppercase micro-labels only */
+  --text-xs:   12px;  /* secondary meta, timestamps, counts */
+  --text-sm:   13px;  /* controls, table cells, nav - the workhorse */
+  --text-base: 14px;  /* body copy, descriptions */
+  --text-md:   16px;  /* panel titles */
+  --text-lg:   20px;  /* page heading */
+  --text-xl:   26px;  /* metric values */
+  --text-2xl:  34px;  /* hero heading */
+
+  /* Weight scale - 4 steps, replacing 24 arbitrary variable-font weights. */
+  --weight-normal:   400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* Line height and tracking, paired to the scale. */
+  --leading-tight:   1.15;
+  --leading-snug:    1.35;
+  --leading-normal:  1.55;
+  --leading-relaxed: 1.7;
+
+  --tracking-tight:  -0.02em;  /* headings */
+  --tracking-normal: 0;
+  --tracking-wide:   0.06em;   /* uppercase micro-labels */
+
+  /* ---------------------------------------------------------------------
+     5. Space - strict 4px grid. Replaces 23 freehand gap values.
+     --------------------------------------------------------------------- */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Radius - 4 steps plus pill. Replaces 14 values. */
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   10px;
+  --radius-xl:   14px;
+  --radius-full: 999px;
+
+  /* ---------------------------------------------------------------------
+     6. Elevation - 4 levels. Tight, low-opacity, neutral-tinted.
+     --------------------------------------------------------------------- */
+  --elevation-1: 0 1px 2px rgba(11, 13, 18, .05);
+  --elevation-2: 0 1px 2px rgba(11, 13, 18, .04), 0 2px 6px -1px rgba(11, 13, 18, .06);
+  --elevation-3: 0 2px 4px -1px rgba(11, 13, 18, .05), 0 8px 20px -6px rgba(11, 13, 18, .10);
+  --elevation-4: 0 4px 10px -4px rgba(11, 13, 18, .08), 0 18px 44px -12px rgba(11, 13, 18, .18);
+
+  /* ---------------------------------------------------------------------
+     7. Motion - one easing language, three durations.
+     --------------------------------------------------------------------- */
+  --ease:      cubic-bezier(.4, 0, .2, 1);
+  --ease-out:  cubic-bezier(.16, 1, .3, 1);
+  --ease-in:   cubic-bezier(.4, 0, 1, 1);
+  --duration-instant: 100ms;  /* micro-interaction: hover, press */
+  --duration-fast:    160ms;  /* state change: tab, toggle, chip */
+  --duration-medium:  240ms;  /* surface: menu, drawer, panel */
+
+  /* ---------------------------------------------------------------------
+     8. Semantic aliases - everything downstream references these, never the
+        ramps above. Swapping a theme means redefining only this block.
+     --------------------------------------------------------------------- */
+  --canvas:          var(--ds-neutral-50);
+  --surface:         var(--ds-neutral-0);
+  --surface-raised:  var(--ds-neutral-0);
+  --surface-sunken:  var(--ds-neutral-25);
+  --surface-hover:   var(--ds-neutral-50);
+  --surface-active:  var(--ds-neutral-100);
+
+  --text-primary:    var(--ds-neutral-900);
+  --text-secondary:  var(--ds-neutral-600);
+  --text-tertiary:   var(--ds-neutral-500);
+  --text-disabled:   var(--ds-neutral-400);
+  --text-inverse:    var(--ds-neutral-0);
+
+  --border-subtle:   var(--ds-neutral-150);
+  --border-default:  var(--ds-neutral-200);
+  --border-strong:   var(--ds-neutral-300);
+
+  --accent:          var(--ds-accent-600);
+  --accent-hover:    var(--ds-accent-700);
+  --accent-text:     var(--ds-accent-700);
+  --accent-soft:     var(--ds-accent-50);
+  --accent-line:     var(--ds-accent-200);
+  --accent-ring:     rgba(43, 89, 217, .22);
+
+  --success:      var(--ds-success-600);
+  --success-soft: var(--ds-success-soft);
+  --success-line: var(--ds-success-line);
+  --warning:      var(--ds-warning-600);
+  --warning-soft: var(--ds-warning-soft);
+  --warning-line: var(--ds-warning-line);
+  --danger:       var(--ds-danger-600);
+  --danger-soft:  var(--ds-danger-soft);
+  --danger-line:  var(--ds-danger-line);
+
+  --scrollbar-thumb: var(--ds-neutral-300);
+  --scrollbar-track: transparent;
+  --overlay:         rgba(11, 13, 18, .32);
+
+  /* Channel values, for the few places that need alpha over a token colour
+     (focus rings, tinted shadows, pulse animations). */
+  --accent-rgb:  43, 89, 217;
+  --success-rgb: 15, 122, 82;
+  --shadow-rgb:  11, 13, 18;
+
+  /* Row density - driven by the density toggle, read by the data tables. */
+  --row-height: 44px;
+  --row-padding-y: var(--space-2);
+}
+
+/* ---------------------------------------------------------------------------
+   Dark theme. Only the semantic block is redefined - ramps stay put.
+   Surfaces lift as they stack; borders get lighter, not darker.
+   Both the system preference and an explicit [data-theme] are honoured, so an
+   in-app toggle works in both directions without touching this file.
+   --------------------------------------------------------------------------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --canvas:         #0b0d12;
+    --surface:        #131519;
+    --surface-raised: #191c21;
+    --surface-sunken: #0f1116;
+    --surface-hover:  #1e2127;
+    --surface-active: #24272e;
+
+    --text-primary:   #eceef2;
+    --text-secondary: #a7abb5;
+    --text-tertiary:  #868b96;
+    --text-disabled:  #5f646e;
+    --text-inverse:   #0b0d12;
+
+    --border-subtle:  #23262c;
+    --border-default: #2c3037;
+    --border-strong:  #3a3f48;
+
+    --accent:         var(--ds-accent-500);
+    --accent-hover:   var(--ds-accent-400);
+    --accent-text:    var(--ds-accent-300);
+    --accent-soft:    rgba(65, 105, 228, .14);
+    --accent-line:    rgba(65, 105, 228, .34);
+    --accent-ring:    rgba(102, 137, 239, .34);
+
+    --success:      #4fc79a;
+    --success-soft: rgba(79, 199, 154, .12);
+    --success-line: rgba(79, 199, 154, .28);
+    --warning:      #e0aa4a;
+    --warning-soft: rgba(224, 170, 74, .12);
+    --warning-line: rgba(224, 170, 74, .28);
+    --danger:       #f0776c;
+    --danger-soft:  rgba(240, 119, 108, .12);
+    --danger-line:  rgba(240, 119, 108, .28);
+
+    --elevation-1: 0 1px 2px rgba(0, 0, 0, .4);
+    --elevation-2: 0 1px 2px rgba(0, 0, 0, .35), 0 2px 6px -1px rgba(0, 0, 0, .45);
+    --elevation-3: 0 2px 4px -1px rgba(0, 0, 0, .4), 0 8px 20px -6px rgba(0, 0, 0, .5);
+    --elevation-4: 0 4px 10px -4px rgba(0, 0, 0, .45), 0 18px 44px -12px rgba(0, 0, 0, .6);
+
+    --scrollbar-thumb: #3a3f48;
+    --overlay:         rgba(0, 0, 0, .58);
+    --accent-rgb:  65, 105, 228;
+    --success-rgb: 79, 199, 154;
+    --shadow-rgb:  0, 0, 0;
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --canvas:         #0b0d12;
+  --surface:        #131519;
+  --surface-raised: #191c21;
+  --surface-sunken: #0f1116;
+  --surface-hover:  #1e2127;
+  --surface-active: #24272e;
+
+  --text-primary:   #eceef2;
+  --text-secondary: #a7abb5;
+  --text-tertiary:  #868b96;
+  --text-disabled:  #5f646e;
+  --text-inverse:   #0b0d12;
+
+  --border-subtle:  #23262c;
+  --border-default: #2c3037;
+  --border-strong:  #3a3f48;
+
+  --accent:         var(--ds-accent-500);
+  --accent-hover:   var(--ds-accent-400);
+  --accent-text:    var(--ds-accent-300);
+  --accent-soft:    rgba(65, 105, 228, .14);
+  --accent-line:    rgba(65, 105, 228, .34);
+  --accent-ring:    rgba(102, 137, 239, .34);
+
+  --success:      #4fc79a;
+  --success-soft: rgba(79, 199, 154, .12);
+  --success-line: rgba(79, 199, 154, .28);
+  --warning:      #e0aa4a;
+  --warning-soft: rgba(224, 170, 74, .12);
+  --warning-line: rgba(224, 170, 74, .28);
+  --danger:       #f0776c;
+  --danger-soft:  rgba(240, 119, 108, .12);
+  --danger-line:  rgba(240, 119, 108, .28);
+
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, .4);
+  --elevation-2: 0 1px 2px rgba(0, 0, 0, .35), 0 2px 6px -1px rgba(0, 0, 0, .45);
+  --elevation-3: 0 2px 4px -1px rgba(0, 0, 0, .4), 0 8px 20px -6px rgba(0, 0, 0, .5);
+  --elevation-4: 0 4px 10px -4px rgba(0, 0, 0, .45), 0 18px 44px -12px rgba(0, 0, 0, .6);
+
+  --scrollbar-thumb: #3a3f48;
+  --overlay:         rgba(0, 0, 0, .58);
+  --accent-rgb:  65, 105, 228;
+  --success-rgb: 79, 199, 154;
+  --shadow-rgb:  0, 0, 0;
+
+  color-scheme: dark;
+}
+
+/* Comfortable / compact density, set on the data table wrapper. */
+[data-density="compact"]     { --row-height: 36px; --row-padding-y: var(--space-1); }
+[data-density="comfortable"] { --row-height: 56px; --row-padding-y: var(--space-3); }
+
+/* ---------------------------------------------------------------------------
+   Focus. One ring for the whole product. Custom controls must never zero this
+   out without re-applying it - that was the single worst accessibility hole in
+   the previous stylesheet (outline: 0 appeared ten times).
+   --------------------------------------------------------------------------- */
+:where(button, input, select, textarea, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection { background: var(--accent-soft); color: var(--accent-text); }
+
+/* Respect reduced-motion globally rather than per-component. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

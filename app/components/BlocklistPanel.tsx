@@ -6,6 +6,7 @@ import { formatNumber } from "../../lib/dashboard-helpers";
 import { splitPastedValues } from "../../lib/bulk-values.ts";
 import type { BlocklistEntry, ClientRecord } from "../../lib/types";
 import { EmptyCompact } from "./DashboardUi";
+import { AppIcon } from "./DashboardUi";
 
 // The blocklist is per client and it suppresses rather than deletes: a blocked
 // record keeps its place in the client database with a badge, so the decision
@@ -98,7 +99,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
         <h3>Never contact for {client.name}</h3>
         <p>Domains and email addresses this client is off-limits for. Matching records stay in the database but are excluded from exports and pushes, so you keep the reason. Other clients are unaffected.</p>
       </div>
-      <label className="workspace-search"><span>⌕</span><input aria-label="Search the blocklist" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search blocked domains and emails…"/></label>
+      <label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label="Search the blocklist" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search blocked domains and emails…"/></label>
     </div>
 
     {error ? <div className="inline-error" role="alert">{error}</div> : null}

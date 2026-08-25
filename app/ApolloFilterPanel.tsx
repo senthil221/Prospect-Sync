@@ -5,6 +5,7 @@ import { bulkFieldKind, describeBulkMerge, mergeBulkValues, splitPastedValues } 
 import type { ProspectFieldDefinition } from "../lib/prospect-fields";
 import type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
+import { AppIcon } from "./components/DashboardUi";
 
 export type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 
@@ -75,10 +76,10 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, onC
     const isExpanded = expanded === definition.id;
     return <section className={`apollo-filter-section ${isExpanded ? "expanded" : ""}`} key={definition.id}>
       <button type="button" className="apollo-filter-summary" aria-expanded={isExpanded} onClick={() => setExpanded(isExpanded ? "" : definition.id)}>
-        <span className="apollo-filter-mark">{definition.kind === "employee" ? "#" : "⌾"}</span>
+        <span className="apollo-filter-mark"><AppIcon name={definition.kind === "employee" ? "hash" : "target"} size={14}/></span>
         <strong>{definition.label}</strong>
         {count ? <span className="filter-count">{count}</span> : null}
-        <span className="apollo-chevron">⌄</span>
+        <span className="apollo-chevron"><AppIcon name="chevron" size={14}/></span>
       </button>
       {isExpanded ? <div className="apollo-filter-content">
         {definition.description ? <p className="apollo-filter-description">{definition.description}</p> : null}
@@ -92,13 +93,22 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, onC
     </section>;
   }
 
+  const totalActive = activeCount(filters);
+  const fieldsInUse = new Set(filters.map((filter) => filter.field)).size;
+
   return <aside ref={panelRef} className="panel filter-panel apollo-filter-panel">
-    <div className="filter-panel-head"><div><span className="filter-icon">⌁</span><div><strong>Filters</strong><small>Apollo-style prospect filters</small></div></div>{filters.length ? <button onClick={() => onChange([])}>Clear all</button> : null}</div>
-    <label className="filter-panel-search"><span>⌕</span><input aria-label="Search filters" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search all filters…"/></label>
+    <div className="filter-panel-head"><div><span className="filter-icon"><AppIcon name="filter" size={16}/></span><div><strong>Filters</strong><small>Narrow the database</small></div></div>{filters.length ? <button onClick={() => onChange([])}>Clear all</button> : null}</div>
+    <label className="filter-panel-search"><span><AppIcon name="search" size={14}/></span><input aria-label="Search filters" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search all filters…"/></label>
     <div className="apollo-filter-scroll">
-      {visibleMain.length ? <div className="apollo-filter-group"><small>MAIN FILTERS</small>{visibleMain.map(renderDefinition)}</div> : null}
-      {visibleOptional.length ? <div className="apollo-filter-group optional"><small>MORE FILTERS</small>{visibleOptional.map(renderDefinition)}</div> : null}
+      {visibleMain.length ? <div className="apollo-filter-group"><small>Main filters</small>{visibleMain.map(renderDefinition)}</div> : null}
+      {visibleOptional.length ? <div className="apollo-filter-group optional"><small>More filters</small>{visibleOptional.map(renderDefinition)}</div> : null}
       {!visibleMain.length && !visibleOptional.length ? <p className="filter-search-empty">No filters match “{search}”.</p> : null}
+    </div>
+    {/* Applied state stays visible without scrolling the list back to the top. */}
+    <div className="filter-panel-footer" role="status">
+      {totalActive
+        ? <><span><strong>{totalActive}</strong> value{totalActive === 1 ? "" : "s"} across <strong>{fieldsInUse}</strong> field{fieldsInUse === 1 ? "" : "s"}</span><button type="button" className="clear-section-filter" onClick={() => onChange([])}>Reset</button></>
+        : <span>No filters applied</span>}
     </div>
   </aside>;
 }
@@ -277,7 +287,7 @@ export function TokenValuePicker({ field, values, clientId, placeholder, valuesE
       <div className="token-input">
         {collapsed
           ? <button type="button" className="token-summary" onClick={() => openBulk(true)}>{values.length.toLocaleString("en-IN")} values · Review</button>
-          : values.map((value) => <button type="button" key={value} onClick={(event) => { event.stopPropagation(); onChange(values.filter((item) => item !== value)); }}>{value}<span>×</span></button>)}
+          : values.map((value) => <button type="button" key={value} onClick={(event) => { event.stopPropagation(); onChange(values.filter((item) => item !== value)); }}>{value}<span><AppIcon name="close" size={14}/></span></button>)}
         <input value={query} onFocus={() => setOpen(true)} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} onBlur={() => { if (query.trim()) addMany(query); window.setTimeout(() => setOpen(false), 150); }} placeholder={values.length ? "Add another…" : placeholder}/>
       </div>
       {open ? <div className="token-options" role="listbox" aria-multiselectable="true">

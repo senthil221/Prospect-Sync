@@ -16,7 +16,7 @@ test("ships full-field preservation, filters, and configurable columns", async (
 
   assert.match(dashboard, /Field coverage/);
   assert.match(dashboard, /Choose columns/);
-  assert.match(filterPanel, /MAIN FILTERS/);
+  assert.match(filterPanel, /Main filters/);
   assert.match(filterPanel, /TokenValuePicker/);
   assert.match(filterPanel, /comma-separated values/);
   assert.match(dashboard, /master-scroll-top/);

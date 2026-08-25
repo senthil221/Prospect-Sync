@@ -1,0 +1,379 @@
+/* =============================================================================
+   Component layer — hand-built primitives.
+
+   Loaded after workspace.css so it wins on the surfaces it owns. Everything
+   here references design-system.css tokens only; no literal colours, sizes,
+   radii or spacing values are permitted in this file.
+   ========================================================================== */
+
+/* -----------------------------------------------------------------------------
+   Tabs
+   One control, two variants. Replaces .people-tabs and .client-database-tabs,
+   which were two unrelated blocks of CSS pretending to be the same component.
+   -------------------------------------------------------------------------- */
+.ds-tabs {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ds-tabs::-webkit-scrollbar { display: none; }
+
+.ds-tabs button {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  min-height: 36px;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  transition: color var(--duration-fast) var(--ease);
+}
+.ds-tabs button:hover { color: var(--text-primary); }
+.ds-tabs button.active { color: var(--text-primary); font-weight: var(--weight-semibold); }
+
+.ds-tab-icon { display: grid; place-items: center; color: var(--text-tertiary); transition: color var(--duration-fast) var(--ease); }
+.ds-tabs button.active .ds-tab-icon { color: var(--accent); }
+
+/* The count is a quiet companion to the label — it must never out-weigh it. */
+.ds-tab-count {
+  min-width: 20px;
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-full);
+  background: var(--surface-active);
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  transition: background-color var(--duration-fast) var(--ease), color var(--duration-fast) var(--ease);
+}
+.ds-tabs button.active .ds-tab-count { background: var(--accent-soft); color: var(--accent-text); }
+
+/* Indicator. Position comes from --indicator-x / --indicator-w, written by the
+   component. `.is-ready` gates the transition so it does not slide in on mount. */
+.ds-tabs-indicator {
+  position: absolute;
+  left: 0;
+  transform: translateX(var(--indicator-x, 0));
+  width: var(--indicator-w, 0);
+  pointer-events: none;
+}
+.ds-tabs.is-ready .ds-tabs-indicator {
+  transition: transform var(--duration-fast) var(--ease-out), width var(--duration-fast) var(--ease-out);
+}
+
+/* Variant: line — the workspace default. */
+.ds-tabs-line {
+  border-bottom: 1px solid var(--border-subtle);
+  gap: var(--space-4);
+}
+.ds-tabs-line button { padding-inline: 0; }
+.ds-tabs-line .ds-tabs-indicator {
+  bottom: -1px;
+  height: 2px;
+  border-radius: var(--radius-full) var(--radius-full) 0 0;
+  background: var(--accent);
+}
+
+/* Variant: segmented — enclosed switcher. */
+.ds-tabs-segmented {
+  width: fit-content;
+  max-width: 100%;
+  padding: var(--space-1);
+  gap: 0;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+}
+.ds-tabs-segmented .ds-tabs-indicator {
+  top: var(--space-1);
+  bottom: var(--space-1);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--elevation-1);
+}
+.ds-tabs-segmented button.active .ds-tab-count { background: var(--accent-soft); }
+
+/* -----------------------------------------------------------------------------
+   Filter panel
+   The surface a lead-gen team spends its day in, so it gets the most craft:
+   a sticky header that stays legible while the list scrolls, rows that respond
+   on hover, disclosure that animates, and a footer that summarises state.
+   -------------------------------------------------------------------------- */
+.apollo-filter-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - var(--filter-offset, 124px));
+  border-radius: var(--radius-xl);
+}
+
+.filter-panel-head {
+  flex: none;
+  min-height: 56px;
+  padding: var(--space-3) var(--space-4);
+  gap: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface);
+}
+.filter-panel-head strong { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--text-primary); }
+.filter-panel-head small { font-size: var(--text-xs); color: var(--text-tertiary); }
+.filter-panel-head > button {
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+.filter-panel-head > button:hover { background: var(--surface-hover); color: var(--danger); }
+
+.filter-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.filter-panel-search {
+  flex: none;
+  margin: var(--space-3) var(--space-4) var(--space-2);
+  padding: 0 var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  transition: border-color var(--duration-fast) var(--ease), background-color var(--duration-fast) var(--ease);
+}
+.filter-panel-search:focus-within { border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-ring); }
+.filter-panel-search > span { display: grid; place-items: center; flex: none; color: var(--text-tertiary); }
+.filter-panel-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+.filter-panel-search input::placeholder { color: var(--text-disabled); }
+
+.apollo-filter-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: var(--space-2); }
+
+.apollo-filter-group > small {
+  display: block;
+  padding: var(--space-4) var(--space-4) var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.apollo-filter-section { border-bottom: 1px solid var(--border-subtle); }
+.apollo-filter-section:last-child { border-bottom: 0; }
+
+.apollo-filter-summary {
+  width: 100%;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  text-align: left;
+  transition: background-color var(--duration-instant) var(--ease);
+}
+.apollo-filter-summary:hover { background: var(--surface-hover); }
+.apollo-filter-summary strong { flex: 1; min-width: 0; font-weight: var(--weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.apollo-filter-section.expanded .apollo-filter-summary strong { font-weight: var(--weight-semibold); }
+
+.apollo-filter-mark { display: grid; place-items: center; flex: none; color: var(--text-disabled); transition: color var(--duration-fast) var(--ease); }
+.apollo-filter-section.expanded .apollo-filter-mark { color: var(--accent); }
+
+/* An active count is the one thing in this panel worth an accent. */
+.apollo-filter-summary .filter-count {
+  min-width: 18px;
+  padding: 2px var(--space-1);
+  flex: none;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--text-inverse);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.apollo-chevron {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--text-disabled);
+  transition: transform var(--duration-fast) var(--ease), color var(--duration-fast) var(--ease);
+}
+.apollo-filter-section.expanded .apollo-chevron { transform: rotate(180deg); color: var(--text-secondary); }
+
+.apollo-filter-content {
+  padding: 0 var(--space-4) var(--space-3);
+  animation: ds-disclose var(--duration-medium) var(--ease-out);
+}
+@keyframes ds-disclose {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.apollo-filter-description {
+  margin: 0 0 var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.clear-section-filter {
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+.clear-section-filter:hover { background: var(--danger-soft); color: var(--danger); }
+
+.apollo-mode-tabs {
+  display: inline-flex;
+  margin-bottom: var(--space-2);
+  padding: 2px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+.apollo-mode-tabs button {
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+.apollo-mode-tabs button.active { background: var(--surface); color: var(--text-primary); box-shadow: var(--elevation-1); }
+
+.filter-search-empty {
+  margin: 0;
+  padding: var(--space-6) var(--space-4);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+/* Sticky summary of what is currently applied, so the state is legible without
+   scrolling the panel back to the top. */
+.filter-panel-footer {
+  flex: none;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.filter-panel-footer strong { color: var(--text-primary); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+
+/* -----------------------------------------------------------------------------
+   Results toolbar
+   Was a flex row of differently-sized controls. Now one control height, one
+   radius, and a clear split between the count (information) and the actions.
+   -------------------------------------------------------------------------- */
+.results-toolbar {
+  min-height: 56px;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  gap: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface);
+}
+.results-count strong { color: var(--text-primary); font-size: var(--text-base); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+.results-count span { color: var(--text-tertiary); font-size: var(--text-xs); }
+
+.workspace-actions { gap: var(--space-2); }
+
+/* One control height across every button and select in the toolbar. */
+.workspace-actions select,
+.bulk-bar select,
+.outline-button {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+.workspace-actions select { padding-right: var(--space-6); }
+.outline-button { display: inline-flex; align-items: center; gap: var(--space-2); }
+.outline-button:hover { border-color: var(--border-strong); background: var(--surface-hover); color: var(--text-primary); }
+.outline-button > span:first-child { color: var(--text-tertiary); display: grid; place-items: center; }
+.outline-button.active,
+.outline-button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
+.outline-button.active > span:first-child { color: var(--accent); }
+.outline-button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* -----------------------------------------------------------------------------
+   Data table
+   Row height is a token so the density toggle changes it without touching CSS.
+   -------------------------------------------------------------------------- */
+.master-data-table th {
+  height: 36px;
+  background: var(--surface-sunken);
+  color: var(--text-tertiary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  border-bottom: 1px solid var(--border-default);
+  border-right: 1px solid var(--border-subtle);
+}
+.master-data-table td {
+  height: var(--row-height);
+  padding-block: var(--row-padding-y);
+  border-right: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.master-data-table tbody tr { transition: background-color var(--duration-instant) var(--ease); }
+.master-data-table tbody tr:hover { background: var(--surface-hover); }
+.master-data-table tbody tr.selected { background: var(--accent-soft); }
+.master-data-table tbody tr.selected td:first-child { box-shadow: inset 2px 0 var(--accent); }
+
+/* Numbers in a data table should align on the decimal, always. */
+.master-data-table td { font-variant-numeric: tabular-nums; }
+
+.density-control { display: inline-flex; align-items: center; gap: var(--space-1); }

@@ -22,7 +22,7 @@ test("bulk prospect export shares the full workspace query contract", async () =
     readFile(new URL("../lib/prospect-export.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(dashboard, /↓ Export CSV/);
+  assert.match(dashboard, /Export CSV/);
   assert.match(dashboard, /Select all.*across pages/);
   assert.match(dashboard, /setSelectionMode\("all_matching"\)/);
   assert.match(dashboard, /Choose prospects and fields/);

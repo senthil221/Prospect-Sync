@@ -5,6 +5,7 @@ import { describeBulkMerge, mergeBulkValues, splitPastedValues } from "../lib/bu
 import { isXlsxFile, readXlsxRows } from "../lib/spreadsheet";
 import { filterId, IncludeExcludeFilter, TextBooleanFilter, type ProspectFilter } from "./ApolloFilterPanel";
 import { useDismiss } from "./use-dismiss";
+import { AppIcon } from "./components/DashboardUi";
 
 const COMPANY_VALUES_ENDPOINT = "/api/companies/filter-values";
 
@@ -143,10 +144,10 @@ export default function CompanyFilterPanel({ filters, onChange }: {
     const autocompleteField = definition.autocomplete ? definition.id : undefined;
     return <section className={`apollo-filter-section ${isExpanded ? "expanded" : ""}`} key={definition.id}>
       <button type="button" className="apollo-filter-summary" aria-expanded={isExpanded} onClick={() => setExpanded(isExpanded ? "" : definition.id)}>
-        <span className="apollo-filter-mark">{definition.kind === "employee" || definition.kind === "year" ? "#" : "⌾"}</span>
+        <span className="apollo-filter-mark"><AppIcon name={definition.kind === "employee" || definition.kind === "year" ? "hash" : "target"} size={14}/></span>
         <strong>{definition.label}</strong>
         {count ? <span className="filter-count">{count}</span> : null}
-        <span className="apollo-chevron">⌄</span>
+        <span className="apollo-chevron"><AppIcon name="chevron" size={14}/></span>
       </button>
       {isExpanded ? <div className="apollo-filter-content">
         {definition.description ? <p className="apollo-filter-description">{definition.description}</p> : null}
@@ -164,12 +165,12 @@ export default function CompanyFilterPanel({ filters, onChange }: {
 
   return <aside ref={panelRef} className="panel filter-panel apollo-filter-panel company-filter-panel">
     <div className="filter-panel-head">
-      <div><span className="filter-icon">⌁</span><div><strong>Filters</strong><small>Apollo-style company filters</small></div></div>
+      <div><span className="filter-icon"><AppIcon name="filter" size={14}/></span><div><strong>Filters</strong><small>Apollo-style company filters</small></div></div>
       {total ? <button onClick={() => onChange([])}>Clear all</button> : null}
     </div>
     <label className="company-filter-import"><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void importNamesWebsites(event)}/>Import names &amp; websites</label>
     {importError ? <p className="form-error" role="alert">{importError}</p> : null}
-    <label className="filter-panel-search"><span>⌕</span><input aria-label="Search company filters" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search all filters…"/></label>
+    <label className="filter-panel-search"><span><AppIcon name="search" size={14}/></span><input aria-label="Search company filters" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search all filters…"/></label>
     <div className="apollo-filter-scroll">
       {visible.length ? <div className="apollo-filter-group"><small>COMPANY FILTERS</small>{visible.map(renderDefinition)}</div> : null}
       {visibleDetail.length ? <div className="apollo-filter-group optional"><small>MORE FILTERS</small>{visibleDetail.map(renderDefinition)}</div> : null}

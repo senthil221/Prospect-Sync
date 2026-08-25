@@ -3,10 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("ships the readable Prospect Sync UI v2 system", async () => {
-  const [dashboard, filterPanel, styles, companiesRoute, companyProspectsRoute] = await Promise.all([
+  const [dashboard, filterPanel, styles, tokens, companiesRoute, companyProspectsRoute] = await Promise.all([
     readFile(new URL("../app/DashboardApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/ApolloFilterPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/workspace.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/design-system.css", import.meta.url), "utf8"),
     readFile(new URL("../app/api/companies/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/companies/[id]/prospects/route.ts", import.meta.url), "utf8"),
   ]);
@@ -44,8 +45,16 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
   assert.doesNotMatch(companiesRoute, /\.limit\(100\)/);
   assert.match(companyProspectsRoute, /prospect_summaries/);
   assert.match(companyProspectsRoute, /\.range\(from, from \+ pageSize - 1\)/);
-  assert.match(styles, /html, body[\s\S]*font-size: 14px/);
-  assert.match(styles, /\.master-data-table td[\s\S]*font-size: 13px/);
+  // Sizes now come from the design-system scale rather than literals, so the
+  // contract is checked in two halves: the component references the token, and
+  // the token resolves to the size the product is specified at.
+  assert.match(styles, /html, body[\s\S]*font-size: var\(--text-base\)/);
+  assert.match(tokens, /--text-base:\s*14px/);
+  assert.match(styles, /\.master-data-table td[\s\S]*font-size: var\(--text-sm\)/);
+  assert.match(tokens, /--text-sm:\s*13px/);
+  // No raw colour, size, weight or radius may re-enter the component sheet.
+  assert.doesNotMatch(styles, /#[0-9a-fA-F]{3,8}\b/);
+  assert.doesNotMatch(styles, /font-size:\s*[0-9.]+px/);
   assert.match(styles, /\.company-table/);
   assert.match(styles, /\.company-drawer/);
   assert.match(styles, /\.summary-violet/);
