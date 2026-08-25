@@ -1,8 +1,16 @@
 import type { NextConfig } from "next";
 
 // Self-hosted Supabase lives on our own domain, so the CSP has to name it.
-// `headers()` runs when the server boots, not at build time, which means this
-// reads the deployed value rather than whatever was set on the build machine.
+// Correction, verified empirically 2026-08-25 (build with one value for
+// NEXT_PUBLIC_SUPABASE_URL/APP_VERSION, start the standalone server with a
+// different one, observe which value the response actually carries): despite
+// what this comment used to claim, `headers()` runs once during `next build`
+// and is baked into .next/routes-manifest.json. The standalone server does
+// NOT call it again at boot or per request, so any process.env read in here
+// reflects the build machine, not the deployed one -- which is exactly right
+// for NEXT_PUBLIC_SUPABASE_URL, since the Dockerfile's builder stage bakes
+// the same value into both this and the client bundle. It is NOT what you
+// want for a value that legitimately differs between build and runtime.
 function supabaseOrigin() {
   const configured = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!configured) return "https://*.supabase.co";
@@ -49,11 +57,13 @@ const nextConfig: NextConfig = {
             key: "Permissions-Policy",
             value: "camera=(), microphone=(), geolocation=()",
           },
-          // Set from the git SHA at image build time (see Dockerfile). This is
-          // what lets the deploy pipeline's smoke test prove the container that
-          // answered is the one it just shipped, rather than an old one still
-          // running and happening to also return 200. Not sensitive: a commit
-          // SHA discloses nothing that isn't already public in the repo.
+          // Fixed at build time (see the note above and the Dockerfile's
+          // BUILDER stage, where APP_VERSION must be set -- the runner stage
+          // is too late, headers() has already run by then). This is what lets
+          // the deploy pipeline's smoke test prove the container that answered
+          // is the one it just shipped, rather than an old one still running
+          // and happening to also return 200. Not sensitive: a commit SHA
+          // discloses nothing that isn't already public in the repo.
           { key: "X-App-Version", value: process.env.APP_VERSION || "dev" },
         ],
       },

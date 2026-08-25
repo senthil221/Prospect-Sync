@@ -22,8 +22,16 @@ WORKDIR /app
 # an undefined Supabase URL and a login page that cannot reach anything.
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+# The git SHA this image is built from. next.config.ts's headers() runs here,
+# during `next build` -- it is baked into .next/routes-manifest.json and is
+# NOT re-evaluated by the standalone server at boot or per request (verified
+# empirically; see the comment in next.config.ts). Setting this in the runner
+# stage instead, where it looks like it should belong, has no effect: by the
+# time that stage exists, the manifest is already frozen.
+ARG APP_VERSION=unknown
 ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL} \
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY} \
+    APP_VERSION=${APP_VERSION} \
     NEXT_TELEMETRY_DISABLED=1 \
     NODE_ENV=production
 
@@ -54,19 +62,10 @@ RUN grep -rq "$NEXT_PUBLIC_SUPABASE_URL" .next/static \
 FROM node:22.13-alpine AS runner
 WORKDIR /app
 
-# The git SHA this image was built from. next.config.ts reads it at request
-# time to set X-App-Version, which is how the deploy pipeline's smoke test
-# tells "the new container is answering" from "a container is answering" — an
-# old container returns 200 on /login just as readily as a new one does.
-# ARGs don't cross build stages on their own, so this is redeclared here even
-# though the builder stage never needed it.
-ARG APP_VERSION=unknown
-
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    HOSTNAME=0.0.0.0 \
-    APP_VERSION=${APP_VERSION}
+    HOSTNAME=0.0.0.0
 
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 
