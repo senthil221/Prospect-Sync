@@ -31,13 +31,11 @@ const companyFilters: CompanyFilterDefinition[] = [
   { id: "__total_funding", label: "Total funding", kind: "token", autocomplete: true },
 ];
 
-// Reachable through "MORE FILTERS" for the rare case a single Location is too
-// coarse. Company location covers all three for everyday filtering.
-const companyDetailFilters: CompanyFilterDefinition[] = [
-  { id: "__company_city", label: "Company city", kind: "token", autocomplete: true },
-  { id: "__company_state", label: "Company state", kind: "token", autocomplete: true },
-  { id: "__company_country", label: "Company country", kind: "token", autocomplete: true },
-];
+// Company city / state / country are deliberately NOT filters. "Company
+// location" matches all three at once, which is the whole point of having it.
+// The columns still exist and are still exported and read by the
+// fill-from-company enrichment — they just are not three things to filter on.
+const companyDetailFilters: CompanyFilterDefinition[] = [];
 
 const employeeRanges = [
   ["1:10", "1–10"], ["11:20", "11–20"], ["21:50", "21–50"], ["51:100", "51–100"],

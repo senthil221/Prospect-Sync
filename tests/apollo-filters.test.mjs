@@ -57,3 +57,33 @@ test("new filters are applied globally before pagination and are available to ex
   assert.match(dashboard, /ApolloFilterPanel/);
   assert.match(dashboard, /Company Employee Count/);
 });
+
+test("geography is one filter, not three, in both panels", async () => {
+  const [people, companies, schema] = await Promise.all([
+    readFile(new URL("../app/ApolloFilterPanel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/CompanyFilterPanel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/import-schema.ts", import.meta.url), "utf8"),
+  ]);
+
+  // The single Location field is offered in both panels...
+  assert.match(people, /id: "__person_location", label: "Location"/);
+  assert.match(companies, /id: "__company_location", label: "Company location"/);
+
+  // ...and the three parts are not offered as separate filters anywhere. They
+  // remain real columns for exports and enrichment; they are just not three
+  // things to filter on.
+  assert.match(people, /const optionalFilters: FilterDefinition\[\] = \[\];/);
+  assert.match(companies, /const companyDetailFilters: CompanyFilterDefinition\[\] = \[\];/);
+
+  // A company file whose geography is a single Location column must import, so
+  // the three parts are no longer individually mandatory.
+  assert.match(schema, /companyGeographyFields/);
+  const requiredBlock = schema.slice(
+    schema.indexOf("requiredCompanyImportFields = ["),
+    schema.indexOf("] as const", schema.indexOf("requiredCompanyImportFields = [")),
+  );
+  for (const part of ["Company City", "Company State", "Company Country"]) {
+    assert.ok(!requiredBlock.includes(part), `${part} must not be individually required`);
+  }
+  assert.match(schema, /"Company Location \(or Company City \/ State \/ Country\)"/);
+});

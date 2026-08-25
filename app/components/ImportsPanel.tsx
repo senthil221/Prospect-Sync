@@ -104,6 +104,7 @@ function CompanyImportView({ dataSource, onComplete, resumeImport, onCancelResum
         website: valueFor(row, "Website"),
         employeeCount: valueFor(row, "#employees"),
         industry: valueFor(row, "Industry"),
+        location: valueFor(row, "Company Location"),
         city: valueFor(row, "Company City"),
         state: valueFor(row, "Company State"),
         country: valueFor(row, "Company Country"),

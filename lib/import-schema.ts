@@ -14,12 +14,15 @@ export const requiredPersonImportFields = [
 // so imported companies carry the full canonical profile.
 export const companyIdentityFields = ["Company Name", "Website"] as const;
 
+// Geography is one requirement, not three. A file that carries a single
+// "Location" column satisfies it just as well as one with city, state and
+// country — which is how most exports actually ship it. Whichever arrives, the
+// import stores both the composed location and any parts it was given.
+export const companyGeographyFields = ["Company Location", "Company City", "Company State", "Company Country"] as const;
+
 export const requiredCompanyImportFields = [
   "#employees",
   "Industry",
-  "Company City",
-  "Company State",
-  "Company Country",
   "Keywords",
   "Short Description",
   "Founded Year",
@@ -28,7 +31,7 @@ export const requiredCompanyImportFields = [
 ] as const;
 
 // Every mappable company target, for the import column picker (identity first).
-export const companyImportFields = [...companyIdentityFields, ...requiredCompanyImportFields] as const;
+export const companyImportFields = [...companyIdentityFields, ...companyGeographyFields, ...requiredCompanyImportFields] as const;
 
 const personAliases: Record<string, string> = {
   name: "Name", fullname: "Name", firstname: "First Name", lastname: "Last Name",
@@ -54,6 +57,7 @@ const companyAliases: Record<string, string> = {
   employees: "#employees", employeecount: "#employees", employeescount: "#employees", numberofemployees: "#employees", companyemployeecount: "#employees", companyemployees: "#employees", headcount: "#employees",
   industry: "Industry", companyindustry: "Industry",
   website: "Website", domain: "Website", companywebsite: "Website", companydomain: "Website", url: "Website",
+  companylocation: "Company Location", location: "Company Location", headquarters: "Company Location", hqlocation: "Company Location", accountlocation: "Company Location",
   companycity: "Company City", city: "Company City", accountcity: "Company City", hqcity: "Company City",
   companystate: "Company State", state: "Company State", accountstate: "Company State", hqstate: "Company State", companyregion: "Company State",
   companycountry: "Company Country", country: "Company Country", accountcountry: "Company Country", hqcountry: "Company Country",
@@ -89,10 +93,15 @@ export function missingRequiredFields(required: readonly string[], mapped: strin
   return required.filter((field) => !present.has(field));
 }
 
-// Company imports need every detail field plus at least one identity column
-// (Company Name or Website) — a website-only or name-only list is valid.
+// Company imports need every detail field, at least one identity column
+// (Company Name or Website) — a website-only or name-only list is valid — and
+// some geography, which a single Company Location column satisfies just as well
+// as separate city / state / country.
 export function missingCompanyImportFields(mapped: string[]) {
   const missing = missingRequiredFields(requiredCompanyImportFields, mapped);
+  if (!companyGeographyFields.some((field) => mapped.includes(field))) {
+    missing.unshift("Company Location (or Company City / State / Country)");
+  }
   if (!companyIdentityFields.some((field) => mapped.includes(field))) {
     missing.unshift(companyIdentityFields.join(" or "));
   }

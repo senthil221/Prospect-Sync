@@ -27,13 +27,10 @@ const mainFilters: FilterDefinition[] = [
   { id: "__esp_type", label: "ESP", description: "Matches the ESP or the email provider type (e.g. SEG)." },
 ];
 
-// Reachable through "MORE FILTERS" for the rare case a single Location is too
-// coarse — Location itself covers all three for everyday filtering.
-const optionalFilters: FilterDefinition[] = [
-  { id: "__city", label: "City" },
-  { id: "__state", label: "State / Region" },
-  { id: "__country", label: "Country" },
-];
+// City / state / country are deliberately NOT filters. "Location" matches all
+// three at once, which is the whole point of having it. The columns still exist
+// and are still exported — they just are not three things to filter on.
+const optionalFilters: FilterDefinition[] = [];
 
 const employeeRanges = [
   ["1:10", "1–10"], ["11:20", "11–20"], ["21:50", "21–50"], ["51:100", "51–100"],
