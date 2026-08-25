@@ -178,6 +178,12 @@
   --success-rgb: 15, 122, 82;
   --shadow-rgb:  11, 13, 18;
 
+  /* Translucent surfaces sitting over scrolling content — the sticky topbar,
+     progress strips, glass chips. These must be tokens: a literal white here
+     is a white bar floating on a dark page. */
+  --surface-veil:       rgba(255, 255, 255, .78);
+  --surface-veil-solid: rgba(255, 255, 255, .92);
+
   /* Row density - driven by the density toggle, read by the data tables. */
   --row-height: 44px;
   --row-padding-y: var(--space-2);
@@ -235,6 +241,8 @@
     --accent-rgb:  65, 105, 228;
     --success-rgb: 79, 199, 154;
     --shadow-rgb:  0, 0, 0;
+    --surface-veil:       rgba(19, 21, 25, .78);
+    --surface-veil-solid: rgba(19, 21, 25, .92);
 
     color-scheme: dark;
   }
@@ -285,6 +293,8 @@
   --accent-rgb:  65, 105, 228;
   --success-rgb: 79, 199, 154;
   --shadow-rgb:  0, 0, 0;
+  --surface-veil:       rgba(19, 21, 25, .78);
+  --surface-veil-solid: rgba(19, 21, 25, .92);
 
   color-scheme: dark;
 }

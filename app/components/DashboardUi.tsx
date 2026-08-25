@@ -6,7 +6,7 @@ import { formatNumber, initials, parseAllData, prospectMembershipItems } from ".
 import type { DeleteRequest, Prospect } from "../../lib/types";
 
 export type IconName = "home" | "database" | "company" | "clients" | "coverage" | "quality" | "upload" | "search" | "plus" | "filter" | "columns" | "check" | "arrow"
-  | "chevron" | "close" | "star" | "download" | "tag" | "target" | "hash" | "alert" | "back" | "rows" | "refresh" | "warning" | "grid";
+  | "chevron" | "close" | "star" | "download" | "tag" | "target" | "hash" | "alert" | "back" | "rows" | "refresh" | "warning" | "grid" | "sun" | "moon" | "monitor";
 
 export function AppIcon({ name, size = 18 }: { name: IconName; size?: number }) {
   const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
@@ -37,6 +37,9 @@ export function AppIcon({ name, size = 18 }: { name: IconName; size?: number }) 
   if (name === "refresh") return <svg {...common}><path d="M20 11a8 8 0 0 0-13.7-5.3L3 9"/><path d="M4 13a8 8 0 0 0 13.7 5.3L21 15"/><path d="M3 4v5h5M21 20v-5h-5"/></svg>;
   if (name === "warning") return <svg {...common}><path d="M12 4 2.8 20h18.4z"/><path d="M12 10v4"/><path d="M12 17v.2"/></svg>;
   if (name === "grid") return <svg {...common}><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>;
+  if (name === "sun") return <svg {...common}><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></svg>;
+  if (name === "moon") return <svg {...common}><path d="M20 13.5A8.2 8.2 0 0 1 10.5 4a8.2 8.2 0 1 0 9.5 9.5z"/></svg>;
+  if (name === "monitor") return <svg {...common}><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8.5 21h7M12 17v4"/></svg>;
   return <svg {...common}><path d="M5 12h14M13 6l6 6-6 6"/></svg>;
 }
 export function LoadingState() {

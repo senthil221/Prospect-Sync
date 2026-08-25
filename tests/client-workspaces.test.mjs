@@ -3,9 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("ships client-aware duplicates, memberships, and database tabs", async () => {
-  const [dashboard, styles, migration, prospectsRoute, companiesRoute, companyProspectsRoute, chunkRoute] = await Promise.all([
+  const [dashboard, clientsPanel, styles, componentStyles, migration, prospectsRoute, companiesRoute, companyProspectsRoute, chunkRoute] = await Promise.all([
     readFile(new URL("../app/DashboardApp.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ClientsPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/workspace.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/components.css", import.meta.url), "utf8"),
     readFile(new URL("../supabase/migrations/20260808010000_client_scoped_workspaces.sql", import.meta.url), "utf8"),
     readFile(new URL("../app/api/prospects/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/companies/route.ts", import.meta.url), "utf8"),
@@ -25,7 +27,10 @@ test("ships client-aware duplicates, memberships, and database tabs", async () =
   assert.match(dashboard, /apiResponseCache/);
   assert.match(dashboard, /prefetchApi/);
   assert.match(dashboard, /prefetchSection/);
-  assert.match(styles, /\.client-database-tabs/);
+  // The client database tabs are now the shared segmented control rather than a
+  // bespoke strip: assert the component ships and that the panel actually uses it.
+  assert.match(componentStyles, /\.ds-tabs-segmented/);
+  assert.match(clientsPanel, /variant="segmented"/);
   assert.match(styles, /\.membership-chips/);
   assert.match(styles, /\.drawer-memberships/);
   assert.match(migration, /create or replace view public\.prospect_summaries/);

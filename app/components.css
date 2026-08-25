@@ -378,6 +378,43 @@
 
 .density-control { display: inline-flex; align-items: center; gap: var(--space-1); }
 
+/* -----------------------------------------------------------------------------
+   Theme control
+   Three mutually exclusive choices. Dark is opt-in — the default is Light, and
+   System is there for people who want it to follow the OS.
+   -------------------------------------------------------------------------- */
+.theme-toggle {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  /* Takes over the bottom-anchoring that .profile used to do alone, so the two
+     stay paired at the foot of the sidebar instead of the toggle riding up
+     under the nav. */
+  margin: auto var(--space-1) 0;
+  padding: 2px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+.theme-toggle button {
+  display: grid;
+  place-items: center;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  transition: background-color var(--duration-fast) var(--ease), color var(--duration-fast) var(--ease);
+}
+.theme-toggle button:hover { color: var(--text-primary); background: var(--surface-hover); }
+.theme-toggle button.active {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--elevation-1);
+}
+/* .theme-toggle now owns the auto margin that anchors this pair to the bottom. */
+.sidebar .profile { margin-top: var(--space-3); }
+
 /* The actions column was sized for a single chevron glyph — 42px wide at 20px
    type. It now carries the word "Actions" and a delete control, so it needs
    header type like every other column and room to actually hold the label. */

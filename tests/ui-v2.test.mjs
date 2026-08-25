@@ -55,6 +55,37 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
   // No raw colour, size, weight or radius may re-enter the component sheet.
   assert.doesNotMatch(styles, /#[0-9a-fA-F]{3,8}\b/);
   assert.doesNotMatch(styles, /font-size:\s*[0-9.]+px/);
+
+  // Every themed token must be redefined in BOTH dark blocks. A token defined
+  // in only one of them keeps its light value in the other, which is how a
+  // white topbar ends up floating over a dark page.
+  const tokenNames = (source) => new Set(
+    [...source.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((match) => match[1]),
+  );
+  const section = (pattern) => (tokens.match(pattern)?.[1] ?? "");
+  const lightPalette = tokenNames(
+    tokens.slice(tokens.indexOf(":root {"), tokens.indexOf("@media (prefers-color-scheme: dark)")),
+  );
+  const systemDark = tokenNames(section(
+    /@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme="light"\]\) \{([\s\S]*?)\n {2}\}\n\}/,
+  ));
+  const explicitDark = tokenNames(section(/:root\[data-theme="dark"\] \{([\s\S]*?)\n\}/));
+  // The --ds-* ramps are raw scales and are deliberately theme-independent.
+  const themed = [...lightPalette].filter((name) => !name.startsWith("--ds-")
+    && /(canvas|surface|text-(primary|secondary|tertiary|disabled|inverse)|border-|accent|overlay|scrollbar-thumb|elevation|rgb|veil)/.test(name));
+  assert.ok(themed.length > 20, "expected the light palette to define the themed tokens");
+  for (const name of themed) {
+    assert.ok(systemDark.has(name), `${name} is missing from the prefers-color-scheme dark block`);
+    assert.ok(explicitDark.has(name), `${name} is missing from the [data-theme="dark"] block`);
+  }
+
+  // The sticky chrome sits over scrolling content and must take its translucent
+  // fill from a token, or dark mode shows a white bar over dark content. (The
+  // login brand panel is a deliberately dark surface in both themes, so its
+  // white-alpha highlights are correct and are not covered here.)
+  for (const rule of styles.split("\n").filter((line) => /^\.(topbar|workspace-progress|modal-backdrop|drawer-backdrop)\b/.test(line))) {
+    assert.doesNotMatch(rule, /rgba\(\s*255,\s*255,\s*255/, `sticky chrome must not hardcode white: ${rule.slice(0, 80)}`);
+  }
   assert.match(styles, /\.company-table/);
   assert.match(styles, /\.company-drawer/);
   assert.match(styles, /\.summary-violet/);
