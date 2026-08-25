@@ -377,3 +377,21 @@
 .master-data-table td { font-variant-numeric: tabular-nums; }
 
 .density-control { display: inline-flex; align-items: center; gap: var(--space-1); }
+
+/* The actions column was sized for a single chevron glyph — 42px wide at 20px
+   type. It now carries the word "Actions" and a delete control, so it needs
+   header type like every other column and room to actually hold the label. */
+.master-data-table th.row-detail-column,
+.master-data-table td.row-detail-column,
+.company-table th.row-detail-column,
+.company-table td.row-detail-column {
+  width: 88px;
+  min-width: 88px !important;
+  font-size: var(--text-2xs) !important;
+  color: var(--text-tertiary) !important;
+}
+.master-data-table td.row-detail-column,
+.company-table td.row-detail-column {
+  font-size: var(--text-xs) !important;
+  text-transform: none;
+}

@@ -165,16 +165,22 @@ export default function CompanyFilterPanel({ filters, onChange }: {
 
   return <aside ref={panelRef} className="panel filter-panel apollo-filter-panel company-filter-panel">
     <div className="filter-panel-head">
-      <div><span className="filter-icon"><AppIcon name="filter" size={14}/></span><div><strong>Filters</strong><small>Apollo-style company filters</small></div></div>
+      <div><span className="filter-icon"><AppIcon name="filter" size={16}/></span><div><strong>Filters</strong><small>Narrow the directory</small></div></div>
       {total ? <button onClick={() => onChange([])}>Clear all</button> : null}
     </div>
     <label className="company-filter-import"><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void importNamesWebsites(event)}/>Import names &amp; websites</label>
     {importError ? <p className="form-error" role="alert">{importError}</p> : null}
     <label className="filter-panel-search"><span><AppIcon name="search" size={14}/></span><input aria-label="Search company filters" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search all filters…"/></label>
     <div className="apollo-filter-scroll">
-      {visible.length ? <div className="apollo-filter-group"><small>COMPANY FILTERS</small>{visible.map(renderDefinition)}</div> : null}
-      {visibleDetail.length ? <div className="apollo-filter-group optional"><small>MORE FILTERS</small>{visibleDetail.map(renderDefinition)}</div> : null}
+      {visible.length ? <div className="apollo-filter-group"><small>Company filters</small>{visible.map(renderDefinition)}</div> : null}
+      {visibleDetail.length ? <div className="apollo-filter-group optional"><small>More filters</small>{visibleDetail.map(renderDefinition)}</div> : null}
       {!visible.length && !visibleDetail.length ? <p className="filter-search-empty">No filters match “{search}”.</p> : null}
+    </div>
+    {/* Same applied-state footer as the People panel, so both rails read alike. */}
+    <div className="filter-panel-footer" role="status">
+      {total
+        ? <><span><strong>{total}</strong> value{total === 1 ? "" : "s"} applied</span><button type="button" className="clear-section-filter" onClick={() => onChange([])}>Reset</button></>
+        : <span>No filters applied</span>}
     </div>
   </aside>;
 }
