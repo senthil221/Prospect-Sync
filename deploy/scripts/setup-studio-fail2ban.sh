@@ -16,7 +16,9 @@ PROJECT="$(docker compose config --format json | jq -r .name)"
 LOGDIR="$(docker volume inspect "${PROJECT}_caddy-data" --format '{{.Mountpoint}}')/logs"
 LOGPATH="${LOGDIR}/studio.log"
 
-[[ -d "$LOGDIR" ]] || { echo "No $LOGDIR yet — start the stack (docker compose up -d) first." >&2; exit 1; }
+# The volume is root-owned (Caddy runs as root in its container), so check as
+# root rather than as the deploy user, which can't even stat it.
+sudo test -d "$LOGDIR" || { echo "No $LOGDIR yet — start the stack (docker compose up -d) first." >&2; exit 1; }
 
 sudo tee /etc/fail2ban/filter.d/caddy-studio.conf >/dev/null <<'EOF'
 # Matches Caddy's JSON access log for the Studio site: a failed basic-auth

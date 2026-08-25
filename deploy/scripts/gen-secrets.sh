@@ -74,7 +74,11 @@ if [[ -z "$(current STUDIO_BASIC_AUTH_HASH)" ]]; then
   STUDIO_PW="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)"
   CADDY_TAG="$(current CADDY_IMAGE_TAG)"
   HASH="$(docker run --rm "caddy:${CADDY_TAG:-2-alpine}" caddy hash-password --plaintext "$STUDIO_PW")"
-  put STUDIO_BASIC_AUTH_HASH "$HASH"
+  # Escape $ as $$: docker compose re-interpolates .env values when it
+  # substitutes them into docker-compose.yml, so a bare bcrypt hash
+  # ($2a$14$...) gets treated as env-var references and silently truncated
+  # from the first $-prefixed segment that looks like a valid variable name.
+  put STUDIO_BASIC_AUTH_HASH "${HASH//\$/\$\$}"
   echo "  generated  STUDIO_BASIC_AUTH_HASH"
   echo
   echo "  ┌──────────────────────────────────────────────────────────────┐"
