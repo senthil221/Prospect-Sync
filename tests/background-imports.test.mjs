@@ -59,6 +59,7 @@ test("deployment runs storage and one bounded import worker", async () => {
   assert.match(compose, /UPLOAD_FILE_SIZE_LIMIT: "1073741824"/);
   assert.match(update, /docker compose up -d db auth rest storage meta studio/);
   assert.match(update, /docker compose exec -T db bash -s < postgres\/init\/00-prospect-bootstrap\.sh/);
+  assert.match(bootstrap, /export PGPASSWORD="\$\{POSTGRES_PASSWORD:\?POSTGRES_PASSWORD is required\}"/);
   assert.match(bootstrap, /create role prospect_importer nologin noinherit/i);
   assert.match(bootstrap, /grant prospect_importer to authenticator/i);
   assert.match(compose, /PGUSER: authenticator/);

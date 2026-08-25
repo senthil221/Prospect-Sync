@@ -7,6 +7,10 @@
 set -euo pipefail
 
 DB="${POSTGRES_DB:-postgres}"
+# During first initialization local connections use trust auth. During an
+# update or restore the same idempotent script runs against the live cluster,
+# whose pg_hba requires the password already supplied to the db container.
+export PGPASSWORD="${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
 
 # Connect as supabase_admin, NOT postgres.
 #
@@ -16,7 +20,8 @@ DB="${POSTGRES_DB:-postgres}"
 # file silently never executes: no pg_trgm, no timeouts, and a stack that only
 # breaks later during migration.
 #
-# Local connections use trust auth during init, so no password is needed.
+# PGPASSWORD is harmless during trust-based initialization and required when
+# this script is intentionally rerun against an existing data directory.
 psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
 	-- Role logins ----------------------------------------------------------
 	-- The supabase/postgres image already sets these from POSTGRES_PASSWORD.
