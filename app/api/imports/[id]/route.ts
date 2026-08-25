@@ -1,5 +1,5 @@
 import { authorizeApi } from "../../../../lib/auth";
-import { reindexProspects } from "../../../../lib/reindex";
+import { deleteAndReindex, queuedNotice } from "../../../../lib/delete-cleanup.ts";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
@@ -73,14 +73,10 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     if (existing.data.status !== "processing") return Response.json({ error: "Only unfinished imports can be cancelled." }, { status: 409 });
   }
 
-  const affected = await supabase.from("list_rows").select("prospect_id").eq("import_id", id);
   // Client-side deletes never touch the People/Company databases: only the
-  // import and its membership links are removed.
-  const { data, error } = await supabase.rpc("delete_import_with_cleanup", {
-    p_import_id: id,
-    p_delete_orphans: false,
-  });
+  // import and its membership links are removed. The affected prospects are
+  // re-indexed inside the same call, in bounded batches.
+  const { data, error } = await deleteAndReindex(supabase, "delete_import_and_reindex_v1", "delete_import_with_cleanup", { p_import_id: id });
   if (error) return Response.json({ error: error.message }, { status: error.code === "P0002" ? 404 : 500 });
-  await reindexProspects(supabase, (affected.data ?? []).map((row) => row.prospect_id));
-  return Response.json({ result: data });
+  return Response.json({ result: data, notice: queuedNotice(data) });
 }

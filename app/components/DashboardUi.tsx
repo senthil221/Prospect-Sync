@@ -58,6 +58,6 @@ export function EmptyState({ title, text, action, onAction }: { title: string; t
   return <div className="empty"><span>◎</span><h3>{title}</h3><p>{text}</p><button className="primary" onClick={onAction}>{action}</button></div>;
 }
 
-export function EmptyCompact({ text, action, onAction }: { text: string; action: string; onAction: () => void }) {
-  return <div className="empty compact"><span>↑</span><p>{text}</p><button onClick={onAction}>{action}</button></div>;
+export function EmptyCompact({ text, action, onAction }: { text: string; action?: string; onAction?: () => void }) {
+  return <div className="empty compact"><span>↑</span><p>{text}</p>{action && onAction ? <button onClick={onAction}>{action}</button> : null}</div>;
 }

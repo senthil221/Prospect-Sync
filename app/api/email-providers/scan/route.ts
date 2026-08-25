@@ -1,6 +1,6 @@
 import { authorizeApi } from "../../../../lib/auth";
 import { lookupEmailProvider } from "../../../../lib/email-provider";
-import { reindexProspectsOfCompanies } from "../../../../lib/reindex";
+import { indexNotice, reindexProspectsOfCompanies } from "../../../../lib/reindex.ts";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -53,7 +53,8 @@ export async function POST(request: Request) {
   }));
 
   // ESP fields live on companies, so refresh the flat index for their prospects.
-  await reindexProspectsOfCompanies(supabase, results.filter((result) => !result.error).map((result) => result.companyId));
+  const reindexed = await reindexProspectsOfCompanies(supabase, results.filter((result) => !result.error).map((result) => result.companyId));
+  const indexWarning = indexNotice(reindexed);
 
   const updated = results.filter((result) => !result.error).length;
   const failed = results.length - updated;
@@ -67,5 +68,6 @@ export async function POST(request: Request) {
     segs,
     nextCursor,
     hasMore: companies.length === limit,
+    notice: indexWarning,
   });
 }

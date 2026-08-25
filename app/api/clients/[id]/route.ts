@@ -1,5 +1,5 @@
 import { authorizeApi } from "../../../../lib/auth";
-import { reindexProspects } from "../../../../lib/reindex";
+import { deleteAndReindex, queuedNotice } from "../../../../lib/delete-cleanup.ts";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -18,18 +18,11 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
   const supabase = createAdminClient();
-  const clientLists = await supabase.from("lists").select("id").eq("client_id", id);
-  const listIds = (clientLists.data ?? []).map((row) => row.id);
-  const affected = listIds.length
-    ? await supabase.from("list_memberships").select("prospect_id").in("list_id", listIds)
-    : { data: [] as Array<{ prospect_id: string }> };
-  // Client-side deletes never touch the People/Company databases: only the
+  // Delete and re-index in one server-side call: a large client owns far too
+  // many prospects to ship their ids over HTTP just to hand straight back.
+  // Client-side deletes never touch the People/Company databases — only the
   // client, its lists, imports, and membership links are removed.
-  const { data, error } = await supabase.rpc("delete_client_with_cleanup", {
-    p_client_id: id,
-    p_delete_orphans: false,
-  });
+  const { data, error } = await deleteAndReindex(supabase, "delete_client_and_reindex_v1", "delete_client_with_cleanup", { p_client_id: id });
   if (error) return Response.json({ error: error.message }, { status: error.code === "P0002" ? 404 : 500 });
-  await reindexProspects(supabase, (affected.data ?? []).map((row) => row.prospect_id));
-  return Response.json({ result: data });
+  return Response.json({ result: data, notice: queuedNotice(data) });
 }

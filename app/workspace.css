@@ -490,3 +490,43 @@ main { min-width: 0; grid-column: 2; }
 .token-bulk-actions button.ghost { border-color: var(--ph-border-strong); background: #fff; color: #5b6472; }
 .token-bulk-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .token-bulk-note { margin: 0; color: #6b7280; font-size: 9.5px; }
+
+/* Search-index health: a denormalized index you cannot verify is one you cannot trust. */
+.index-health { margin-bottom: 14px; padding: 14px 16px; border-left: 3px solid var(--ph-success); }
+.index-health.degraded { border-left-color: #c08a2e; background: #fffaf0; }
+.index-health-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.index-health-head h3 { margin: 0 0 3px; font-size: 13px; }
+.index-health-head p { margin: 0; max-width: 60ch; color: #6b7280; font-size: 11px; line-height: 1.5; }
+.index-health-badge.ok { padding: 4px 10px; border-radius: 999px; background: #e6f4ec; color: var(--ph-success); font-size: 10px; font-weight: 650; white-space: nowrap; }
+.index-health-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
+.index-health-metrics > div { padding: 9px 11px; border: 1px solid var(--ph-border-strong); border-radius: 7px; background: #fff; display: flex; flex-direction: column; gap: 2px; }
+.index-health-metrics span { color: #6b7280; font-size: 9.5px; text-transform: uppercase; letter-spacing: .06em; }
+.index-health-metrics strong { font-size: 17px; font-variant-numeric: tabular-nums; }
+.index-health-metrics small { color: #9098a5; font-size: 9.5px; }
+.index-health-note { margin: 10px 0 0; color: #5b6472; font-size: 10.5px; }
+
+/* Per-client state: ICP verification and blocklist suppression. */
+.icp-column { width: 116px; white-space: nowrap; }
+.icp-toggle { padding: 3px 9px; border: 1px solid var(--ph-border-strong); border-radius: 999px; background: #fff; color: #6b7280; font-size: 9.5px; font-weight: 650; cursor: pointer; }
+.icp-toggle:hover { border-color: var(--ph-brand); color: var(--ph-brand); }
+.icp-toggle.verified { border-color: var(--ph-success); background: #e6f4ec; color: var(--ph-success); }
+.blocked-badge { padding: 3px 9px; border-radius: 999px; background: #fbe9e4; color: #9c3a1c; font-size: 9.5px; font-weight: 650; }
+tr.row-blocked { opacity: .62; }
+tr.row-blocked td:not(.select-column):not(.icp-column) { text-decoration: line-through; text-decoration-color: rgba(156,58,28,.35); }
+.icp-count { color: var(--ph-success); }
+.bulk-verify, .bulk-push { border-color: var(--ph-brand) !important; background: var(--ph-brand) !important; color: #fff !important; }
+
+/* Client blocklist */
+.blocklist-add { margin-bottom: 14px; padding: 14px 16px; }
+.blocklist-add textarea { width: 100%; min-height: 132px; max-height: 300px; margin-top: 10px; padding: 8px 9px; border: 1px solid var(--ph-border-strong); border-radius: 7px; background: #fff; color: #3e4756; font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 10.5px; line-height: 1.55; overflow-y: auto; resize: vertical; }
+.blocklist-add-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 9px; }
+.blocklist-add-actions input { flex: 1 1 220px; min-width: 180px; padding: 6px 9px; border: 1px solid var(--ph-border-strong); border-radius: 7px; font-size: 11px; }
+.blocklist-note { margin: 9px 0 0; color: var(--ph-success); font-size: 10.5px; }
+.data-source-badge.email { background: #eef2ff; color: #4c50a8; }
+
+/* Fill-from-company enrichment */
+.enrichment-panel { margin-bottom: 14px; padding: 14px 16px; border-left: 3px solid var(--ph-brand); }
+.enrichment-sample { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.enrichment-sample span { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 9px; border: 1px solid var(--ph-border-strong); border-radius: 999px; background: #fff; color: #6b7280; font-size: 9.5px; }
+.enrichment-sample strong { color: #3e4756; font-size: 10px; }
+.enrichment-sample .enrichment-more { border-style: dashed; }

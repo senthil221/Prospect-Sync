@@ -1,5 +1,5 @@
 import { authorizeApi } from "../../../lib/auth";
-import { reindexProspects } from "../../../lib/reindex";
+import { indexNotice, reindexProspects } from "../../../lib/reindex.ts";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
 export async function GET() {
@@ -20,6 +20,6 @@ export async function POST(request: Request) {
   const { data, error } = await supabase.rpc("merge_prospects", { p_keep_id: keepId, p_merge_id: mergeId });
   if (error) return Response.json({ error: error.message }, { status: 500 });
   // The merged prospect is removed (cascades out of the index); refresh the survivor.
-  await reindexProspects(supabase, [keepId]);
-  return Response.json({ result: data });
+  const outcome = await reindexProspects(supabase, [keepId]);
+  return Response.json({ result: data, notice: indexNotice(outcome) });
 }

@@ -33,6 +33,27 @@ psql_run -c "
   limit 15;"
 
 echo
+echo "=== Draining the re-index backlog ==="
+# A write whose index update failed queues the affected ids rather than losing
+# them. Drain in bounded slices until the queue empties or stops making
+# progress, so the search index converges without anyone opening the app.
+for _ in $(seq 1 40); do
+  drained="$(psql_run -tAq -c "select processed || ' ' || remaining from public.drain_reindex_backlog(2000);" 2>/dev/null || echo "")"
+  [[ -n "$drained" ]] || { echo "  drain function not present — skipping (apply migrations)"; break; }
+  processed="${drained%% *}"
+  remaining="${drained##* }"
+  echo "  re-indexed ${processed}, ${remaining} remaining"
+  # No progress means the queue is empty, or every row left in it is failing.
+  [[ "$processed" == "0" || "$remaining" == "0" ]] && break
+done
+
+echo
+echo "=== Search index drift ==="
+# A denormalized index you cannot verify is one you cannot trust.
+psql_run -c "select jsonb_pretty(public.prospect_index_drift());" 2>/dev/null \
+  || echo "  drift check not present — apply migrations"
+
+echo
 echo "=== Reindexing prospect_index ==="
 # This table is fully rewritten by reindex_all and every import. Its GIN/btree
 # indexes bloat faster than autovacuum reclaims. REINDEX takes an ACCESS

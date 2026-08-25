@@ -57,12 +57,22 @@ test("client prospect removal preserves the canonical Master DB record by defaul
   assert.match(removeRoute, /masterProspectPreserved: true/);
   assert.match(migration, /delete from public\.list_memberships/);
   assert.doesNotMatch(migration.slice(migration.indexOf("remove_prospect_from_client_v1"), migration.indexOf("prospect_index_matches_v1")), /delete from public\.prospects/);
-  // Orphan cleanup is no longer caller-controlled. Every client-side delete route
-  // hardcodes p_delete_orphans: false, so a client, list, or import can never take
-  // a master People/Company record down with it — not even by a malformed request.
+  // Orphan cleanup is not caller-controlled anywhere: a client, list, or import
+  // delete can never take a master People/Company record down with it, not even
+  // via a malformed request. The routes go through one shared helper, and both
+  // the helper's fallback and the server-side functions pin the flag to false.
   for (const route of [clientRoute, listRoute, importRoute]) {
-    assert.match(route, /p_delete_orphans:\s*false/);
-    assert.doesNotMatch(route, /p_delete_orphans:(?!\s*false\b)/);
+    assert.match(route, /deleteAndReindex\(/);
+    assert.doesNotMatch(route, /p_delete_orphans/, "routes must not choose the orphan policy themselves");
+  }
+  const [cleanup, reindexMigration] = await Promise.all([
+    readFile(new URL("../lib/delete-cleanup.ts", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260825020000_reindex_reliability.sql", import.meta.url), "utf8"),
+  ]);
+  assert.match(cleanup, /p_delete_orphans:\s*false/);
+  assert.doesNotMatch(cleanup, /p_delete_orphans:(?!\s*false\b)/);
+  for (const fn of ["delete_client_with_cleanup", "delete_list_with_cleanup", "delete_import_with_cleanup"]) {
+    assert.match(reindexMigration, new RegExp(`${fn}\\([^)]*false\\)`), `${fn} must be called with orphan cleanup disabled`);
   }
 });
 

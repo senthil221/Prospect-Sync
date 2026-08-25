@@ -29,6 +29,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const [selectionQueryKey, setSelectionQueryKey] = useState("");
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [bulkClientId, setBulkClientId] = useState("");
+  const [pushClientId, setPushClientId] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [exportingProspects, setExportingProspects] = useState(false);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
@@ -254,6 +255,50 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     finally { setBulkBusy(false); }
   }
 
+  // Client actions take the current selection as either explicit ids or the
+  // live search/filters, so "select all 40,000 matching" is one request rather
+  // than 40,000 ids — the same contract export already uses.
+  function selectionPayload() {
+    return selectionMode === "all_matching"
+      ? { search, filters: effectiveFilters.map(({ field, operator, values }) => ({ field, operator, values })), excludedIds: [...excludedIds] }
+      : { prospectIds: [...selectedIds] };
+  }
+
+  async function clientAction(action: "push" | "set_icp_verified" | "clear_icp_verified", targetClientId: string) {
+    if (!selectedCount || !targetClientId) return;
+    setBulkBusy(true); setNotice("");
+    try {
+      const data = await api<{ result: { added?: number; alreadyPresent?: number; blocked?: number; updated?: number; queued?: number } }>(
+        `/api/clients/${encodeURIComponent(targetClientId)}/prospects`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...selectionPayload() }) },
+      );
+      const result = data.result ?? {};
+      if (action === "push") {
+        const parts = [`${formatNumber(Number(result.added ?? 0))} pushed`];
+        if (result.alreadyPresent) parts.push(`${formatNumber(Number(result.alreadyPresent))} already there`);
+        if (result.blocked) parts.push(`${formatNumber(Number(result.blocked))} skipped — blocked for this client`);
+        setNotice(`${parts.join(" · ")}.`);
+      } else {
+        setNotice(`${formatNumber(Number(result.updated ?? 0))} prospects marked ${action === "set_icp_verified" ? "ICP verified" : "not verified"}.`);
+      }
+      clearSelection();
+      onRefresh();
+    } catch (caught) { setNotice(caught instanceof Error ? caught.message : "That action could not be completed."); }
+    finally { setBulkBusy(false); }
+  }
+
+  const toggleVerified = useCallback(async (prospect: Prospect, verified: boolean) => {
+    if (!clientId) return;
+    try {
+      await api(`/api/clients/${encodeURIComponent(clientId)}/prospects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: verified ? "set_icp_verified" : "clear_icp_verified", prospectIds: [prospect.id] }),
+      });
+      onRefresh();
+    } catch (caught) { setNotice(caught instanceof Error ? caught.message : "Unable to update ICP verification."); }
+  }, [clientId, onRefresh]);
+
   function requestDeleteSelected() {
     if (!selectedCount) return;
     if (selectionMode === "all_matching") setDeleteRequest({ mode: "all_matching", count: selectedCount });
@@ -350,14 +395,20 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
           </div>
         </div>
         {notice ? <div className="inline-notice" role="status">{notice}<button aria-label="Dismiss notification" onClick={() => setNotice("")}>×</button></div> : null}
-        {selectedCount ? <div className="bulk-bar"><strong>{formatNumber(selectedCount)} selected {selectionMode === "all_matching" ? "across all pages" : "across pages"}</strong>{selectionMode === "explicit" && selectedCount < total ? <button onClick={selectAllMatching}>Select all {displayedTotal}</button> : null}<button onClick={() => openExportDialog("selected")}>↓ Export selected</button>{selectionMode === "explicit" ? <><button disabled={bulkBusy} onClick={() => void bulkAction("tag")}>＋ Add tag</button><select aria-label="Client for contact history" value={bulkClientId} onChange={(event) => setBulkClientId(event.target.value)}><option value="">Choose client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><button disabled={bulkBusy || !bulkClientId} onClick={() => void bulkAction("mark_contacted")}>✓ Mark contacted</button></> : <span className="selection-scope-note">Database-wide selection is ready to export</span>}{canDeleteMaster ? <button className="row-danger bulk-delete" disabled={deletingProspects} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? formatNumber(selectedCount) : "selected"}</button> : null}<button onClick={clearSelection}>Clear</button></div> : null}
+        {selectedCount ? <div className="bulk-bar"><strong>{formatNumber(selectedCount)} selected {selectionMode === "all_matching" ? "across all pages" : "across pages"}</strong>{selectionMode === "explicit" && selectedCount < total ? <button onClick={selectAllMatching}>Select all {displayedTotal}</button> : null}<button onClick={() => openExportDialog("selected")}>↓ Export selected</button>{selectionMode === "explicit" ? <><button disabled={bulkBusy} onClick={() => void bulkAction("tag")}>＋ Add tag</button><select aria-label="Client for contact history" value={bulkClientId} onChange={(event) => setBulkClientId(event.target.value)}><option value="">Choose client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><button disabled={bulkBusy || !bulkClientId} onClick={() => void bulkAction("mark_contacted")}>✓ Mark contacted</button></> : null}
+          {/* Push and ICP verification take the filter payload, so they work for
+              a database-wide selection as well as an explicit one. */}
+          {clientId
+            ? <><button className="bulk-verify" disabled={bulkBusy} onClick={() => void clientAction("set_icp_verified", clientId)}>◉ Mark ICP verified</button><button disabled={bulkBusy} onClick={() => void clientAction("clear_icp_verified", clientId)}>○ Clear verified</button></>
+            : <><select aria-label="Client to push these prospects into" value={pushClientId} onChange={(event) => setPushClientId(event.target.value)}><option value="">Push to client…</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><button className="bulk-push" disabled={bulkBusy || !pushClientId} onClick={() => void clientAction("push", pushClientId)}>→ Push {selectionMode === "all_matching" ? formatNumber(selectedCount) : "selected"}</button></>}
+          {selectionMode === "all_matching" && !clientId ? <span className="selection-scope-note">Tagging and contact history need an explicit selection</span> : null}{canDeleteMaster ? <button className="row-danger bulk-delete" disabled={deletingProspects} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? formatNumber(selectedCount) : "selected"}</button> : null}<button onClick={clearSelection}>Clear</button></div> : null}
         {effectiveFilters.length ? <div className="active-filter-strip">{effectiveFilters.flatMap((filter) => {
           const label = filterLabel(filter.field, allCustomFields);
           if (filter.operator === "empty" || filter.operator === "not_empty") return [<button key={filter.id} onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}>{label}: {filter.operator === "empty" ? "Empty" : "Not empty"} <span>×</span></button>];
           const prefix = filter.operator === "not_contains" || filter.operator === "not_equals" ? "Exclude " : filter.operator === "boolean" ? "Boolean " : "";
           return filter.values.map((value) => <button key={`${filter.id}-${value}`} onClick={() => updateFilter(filter.id, { values: filter.values.filter((item) => item !== value) })}>{prefix}{label}: {filterChipValue(filter.field, value)} <span>×</span></button>);
         })}<button className="clear-filter-chip" onClick={() => onFiltersChange([])}>Clear all</button></div> : null}
-        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select all prospects on this page" title="Select all prospects on this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => isProspectSelected(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}<th className="row-detail-column">{onRemoveFromClient || canDeleteMaster ? "Actions" : ""}</th></tr></thead><tbody>{prospects.map((person) => <ProspectTableRow key={person.id} prospect={person} visibleDefinitions={visibleDefinitions} selected={isProspectSelected(person.id)} includeClient={!clientId} canDeleteMaster={canDeleteMaster} onSelect={onSelect} onToggleSelected={toggleSelected} onRemoveFromClient={onRemoveFromClient} onDelete={deleteProspect}/>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {displayedTotal} matching records</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalEstimated ? "≈" : ""}{totalPages}</span><button disabled={totalEstimated ? prospects.length < 50 : page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={effectiveFilters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and your unique prospects will appear here."} action={effectiveFilters.length ? "Clear filters" : "Import CSV"} onAction={effectiveFilters.length ? () => onFiltersChange([]) : onImport} />}
+        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select all prospects on this page" title="Select all prospects on this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => isProspectSelected(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}{clientId ? <th className="icp-column">ICP verified</th> : null}<th className="row-detail-column">{onRemoveFromClient || canDeleteMaster ? "Actions" : ""}</th></tr></thead><tbody>{prospects.map((person) => <ProspectTableRow key={person.id} prospect={person} visibleDefinitions={visibleDefinitions} selected={isProspectSelected(person.id)} includeClient={!clientId} canDeleteMaster={canDeleteMaster} clientId={clientId} onSelect={onSelect} onToggleSelected={toggleSelected} onRemoveFromClient={onRemoveFromClient} onToggleVerified={toggleVerified} onDelete={deleteProspect}/>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {displayedTotal} matching records</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>← Previous</button><span>Page {page} of {totalEstimated ? "≈" : ""}{totalPages}</span><button disabled={totalEstimated ? prospects.length < 50 : page >= totalPages} onClick={() => onPageChange(page + 1)}>Next →</button></div></div></> : <EmptyState title="No matching prospects" text={effectiveFilters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and your unique prospects will appear here."} action={effectiveFilters.length ? "Clear filters" : "Import CSV"} onAction={effectiveFilters.length ? () => onFiltersChange([]) : onImport} />}
       </article>
       {filtersOpen ? <ApolloFilterPanel filters={filters} customFields={customFields} clientId={clientId} onChange={onFiltersChange}/> : null}
     </div>}
