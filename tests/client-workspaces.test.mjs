@@ -12,7 +12,7 @@ test("ships client-aware duplicates, memberships, and database tabs", async () =
     readFile(new URL("../app/api/prospects/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/companies/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/companies/[id]/prospects/route.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/imports/chunk/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/import-batch.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(dashboard, /Uploaded lists/);
@@ -43,7 +43,7 @@ test("ships client-aware duplicates, memberships, and database tabs", async () =
   assert.match(prospectsRoute, /p_client_id/);
   assert.match(companiesRoute, /client_company_workspace/);
   assert.match(companyProspectsRoute, /client_company_prospects/);
-  assert.match(chunkRoute, /import_prospect_batch_v3/);
+  assert.match(chunkRoute, /import_prospect_batch_v5/);
 });
 
 test("ships the database and API performance hardening", async () => {

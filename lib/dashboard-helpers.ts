@@ -74,6 +74,12 @@ export async function readImportTable(file: File): Promise<{ headers: string[]; 
   return { headers: uniqueHeaders(rows[0]), rows: rows.slice(1) };
 }
 
+export async function readCsvPreview(file: File, maximumBytes = 8 * 1024 * 1024, maximumRows = 1000) {
+  if (isXlsxFile(file)) return { ...(await readImportTable(file)), sampled: false };
+  const parsed = parseCsv(await file.slice(0, maximumBytes).text());
+  return { headers: parsed.headers, rows: parsed.rows.slice(0, maximumRows), sampled: file.size > maximumBytes || parsed.rows.length > maximumRows };
+}
+
 export function parseAllData(data: Prospect["all_data"]) {
   if (typeof data === "object" && data) return data as Record<string, string>;
   try { return JSON.parse(String(data || "{}")) as Record<string, string>; } catch { return {}; }

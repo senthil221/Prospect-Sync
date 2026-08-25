@@ -3,7 +3,7 @@ name: prospect
 # Lean self-hosted Supabase + Prospect Sync, sized for a 2 vCPU / 8 GB VPS.
 #
 # Default `docker compose up -d` starts only what Prospect Sync uses today:
-#   db, auth, rest, meta, studio, app-router, caddy
+#   db, auth, rest, storage, meta, studio, import-worker, app-router, caddy
 # The application is deployed as one of two profiled services (app-blue or
 # app-green) by scripts/update.sh. Keeping the inactive slot out of the default
 # profile prevents a plain `docker compose up -d` from consuming extra RAM.
@@ -302,6 +302,31 @@ services:
     profiles: ["app-green"]
     container_name: prospect-app-green
 
+  # One job at a time protects interactive traffic on the 2-vCPU VPS.
+  import-worker:
+    image: ${APP_IMAGE}
+    container_name: prospect-import-worker
+    <<: [*default-restart]
+    logging: *default-logging
+    command: ["node", "worker/import-worker.mjs"]
+    depends_on:
+      db: { condition: service_healthy }
+      rest: { condition: service_started }
+      storage: { condition: service_started }
+      app-router: { condition: service_started }
+    environment:
+      NODE_ENV: production
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_REST_URL: http://rest:3000
+      SUPABASE_STORAGE_URL: http://storage:5000
+      IMPORT_APP_URL: http://app-router:3000
+      IMPORT_BATCH_SIZE: "250"
+      NODE_OPTIONS: "--max-old-space-size=384"
+    mem_limit: 512m
+    cpus: "0.75"
+    stop_grace_period: 30s
+    networks: [internal]
+
   # Stable internal proxy between the public Caddy listener and the two app
   # slots. Its configuration reload is graceful, so ports 80/443 and existing
   # public connections are never bounced during an application release.
@@ -363,7 +388,6 @@ services:
   # ═════════════════════════════════════════════════════════════════════════
 
   storage:
-    profiles: ["storage"]
     image: supabase/storage-api:${STORAGE_IMAGE_TAG}
     container_name: prospect-storage
     <<: [*default-restart]
@@ -377,14 +401,22 @@ services:
       PGRST_JWT_SECRET: ${JWT_SECRET}
       DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       POSTGREST_URL: http://rest:3000
-      FILE_SIZE_LIMIT: "52428800"
+      STORAGE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      FILE_SIZE_LIMIT: "1073741824"
+      UPLOAD_FILE_SIZE_LIMIT: "1073741824"
+      UPLOAD_FILE_SIZE_LIMIT_STANDARD: "52428800"
+      UPLOAD_SIGNED_URL_EXPIRATION_TIME: "300"
+      TUS_URL_PATH: /storage/v1/upload/resumable
+      TUS_URL_EXPIRY_MS: "86400000"
+      TUS_MAX_CONCURRENT_UPLOADS: "4"
+      TUS_PART_SIZE: "6"
       STORAGE_BACKEND: file
       FILE_STORAGE_BACKEND_PATH: /var/lib/storage
       TENANT_ID: prospect
       REGION: local
       GLOBAL_S3_BUCKET: prospect
-      ENABLE_IMAGE_TRANSFORMATION: "true"
-      IMGPROXY_URL: http://imgproxy:5001
+      ENABLE_IMAGE_TRANSFORMATION: "false"
     volumes:
       - storage-data:/var/lib/storage
     networks: [internal]

@@ -81,9 +81,9 @@
 		defer
 		Access-Control-Allow-Origin "https://{$APP_DOMAIN}"
 		Access-Control-Allow-Credentials "true"
-		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-		Access-Control-Allow-Headers "authorization, apikey, content-type, x-client-info, x-supabase-api-version, accept-profile, content-profile, prefer, range"
-		Access-Control-Expose-Headers "content-range, x-supabase-api-version"
+		Access-Control-Allow-Methods "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "authorization, apikey, content-type, x-client-info, x-signature, x-upsert, upload-length, upload-metadata, upload-offset, tus-resumable, accept-profile, content-profile, prefer, range"
+		Access-Control-Expose-Headers "content-range, location, upload-length, upload-offset, tus-resumable, x-supabase-api-version"
 		Access-Control-Max-Age "86400"
 		Vary "Origin"
 		-Server
@@ -101,6 +101,16 @@
 	# --- public ---
 	handle_path /auth/v1/* {
 		reverse_proxy auth:9999
+	}
+
+	# Signed TUS uploads are the only public Storage operation.
+	handle /storage/v1/upload/resumable* {
+		reverse_proxy storage:5000 {
+			transport http {
+				read_timeout 300s
+				write_timeout 300s
+			}
+		}
 	}
 
 	# --- internal only ---

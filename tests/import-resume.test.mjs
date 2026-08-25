@@ -28,7 +28,7 @@ test("batch RPCs skip fully committed retries and advance progress transactional
 
 test("chunk routes pass row offsets into both resumable RPCs", async () => {
   const [prospectRoute, companyRoute] = await Promise.all([
-    readFile(new URL("../app/api/imports/chunk/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/import-batch.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/company-imports/chunk/route.ts", import.meta.url), "utf8"),
   ]);
   assert.match(prospectRoute, /p_row_offset: normalizedRowOffset/);

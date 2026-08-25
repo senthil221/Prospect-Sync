@@ -304,9 +304,23 @@ backup, and set aside a real window.
 
 Edit `COMPOSE_PROFILES` in `.env`, then `docker compose up -d`.
 
-**File storage** (`storage`) — adds storage-api + imgproxy, ~200 MB. Files land
+**File storage** is always enabled because durable prospect imports upload CSVs
+with resumable TUS before the background worker processes them. Files land
 on the VPS disk, so they compete with the database for those 100 GB. If uploads
 become significant, point `STORAGE_BACKEND=s3` at R2 instead.
+
+The `import-worker` streams one CSV at a time, checkpoints every committed
+batch, and reclaims jobs whose lease expired after a restart. Useful checks:
+
+```bash
+docker compose ps storage import-worker
+docker compose logs --tail 100 import-worker
+docker stats --no-stream prospect-import-worker prospect-db
+df -h /var/lib/docker
+```
+
+Keep at least 20% disk free. A completed import removes its source object; a
+failed import keeps it so **Retry** can continue from the last committed row.
 
 **Realtime** (`realtime`) — ~300 MB. Only useful once you want live-updating
 tables across sessions.

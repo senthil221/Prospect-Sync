@@ -8,7 +8,7 @@ test("ships full-field preservation, filters, and configurable columns", async (
     readFile(new URL("../app/ApolloFilterPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/prospects/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/imports/start/route.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/imports/chunk/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/import-batch.ts", import.meta.url), "utf8"),
     readFile(new URL("../supabase/migrations/20260807020000_data_workspace.sql", import.meta.url), "utf8"),
     readFile(new URL("../supabase/migrations/20260807030000_multi_value_filters.sql", import.meta.url), "utf8"),
   ]);
@@ -28,7 +28,7 @@ test("ships full-field preservation, filters, and configurable columns", async (
   assert.match(prospectFilters, /contains.*equals.*empty.*not_empty/s);
   assert.match(startRoute, /field_headers/);
   assert.match(chunkRoute, /sourceRowNumber/);
-  assert.match(chunkRoute, /import_prospect_batch_v2/);
+  assert.match(chunkRoute, /import_prospect_batch_v5/);
   assert.match(migration, /create table if not exists public\.list_rows/);
   assert.match(migration, /unique\(import_id, source_row_number\)/);
   assert.match(migration, /create table if not exists public\.prospect_fields/);

@@ -267,7 +267,7 @@ docker pull "$NEW_IMAGE"
 set_app_image "$NEW_IMAGE"
 
 echo "==> Ensuring the database and Supabase services are up"
-docker compose up -d db auth rest meta studio
+docker compose up -d db auth rest storage meta studio
 
 echo "==> Applying pending backward-compatible migrations"
 ./scripts/migrate.sh
@@ -296,6 +296,9 @@ if ! verify_public_route "$EXPECTED_VERSION" 12; then
   echo "The candidate is healthy internally, but the public route failed verification." >&2
   rollback_on_error 1
 fi
+
+echo "==> Starting the durable import worker on ${NEW_IMAGE}"
+docker compose up -d --no-deps --pull always import-worker
 
 # Caddy reloads are graceful: requests already assigned to the previous config
 # retain it, while new requests use the candidate. Docker then gives any old

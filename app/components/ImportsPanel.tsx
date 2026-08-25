@@ -4,12 +4,13 @@ import { ChangeEvent, useEffect, useState } from "react";
 import { mapProspect } from "../../db/normalize";
 import { commonDataSources } from "../../lib/data-source";
 import { api } from "../../lib/dashboard-api";
-import { deriveListName, formatNumber, readImportTable } from "../../lib/dashboard-helpers";
+import { deriveListName, formatNumber, readCsvPreview, readImportTable } from "../../lib/dashboard-helpers";
 import { companyImportFields, missingCompanyImportFields, missingRequiredFields, requiredPersonImportFields, resolvedImportFields, skipImportField, suggestedCompanyImportField, suggestedPersonImportField } from "../../lib/import-schema";
 import { importHeadersMatch } from "../../lib/import-resume";
 import { unassignedClientId } from "../../lib/import-owner";
 import { canonicalImportFields } from "../../lib/prospect-field-definitions";
-import type { ClientRecord, FileAudit, ImportResumeDetail, InterruptedImport } from "../../lib/types";
+import { prospectUploadFingerprint, uploadProspectCsv } from "../../lib/resumable-upload.ts";
+import type { BackgroundImport, ClientRecord, FileAudit, ImportResumeDetail, InterruptedImport } from "../../lib/types";
 import { AppIcon } from "./DashboardUi";
 
 function ImportMappingPanel({ audit, fieldMap, onChange }: { audit: FileAudit; fieldMap: Record<string, string>; onChange: (header: string, value: string) => void }) {
@@ -20,6 +21,7 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
   const [sourceChoice, setSourceChoice] = useState("");
   const [customSource, setCustomSource] = useState("");
   const [interruptedImports, setInterruptedImports] = useState<InterruptedImport[]>([]);
+  const [backgroundImports, setBackgroundImports] = useState<BackgroundImport[]>([]);
   const [resumeImport, setResumeImport] = useState<InterruptedImport | null>(null);
   const [cancelImport, setCancelImport] = useState<InterruptedImport | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
@@ -28,16 +30,26 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
   const activeDataSource = resumeImport?.dataSource ?? dataSource;
   useEffect(() => {
     let active = true;
-    void api<{ imports: InterruptedImport[] }>("/api/imports")
-      .then((result) => { if (active) setInterruptedImports(result.imports); })
-      .catch(() => { if (active) setInterruptedImports([]); });
-    return () => { active = false; };
+    const load = () => void api<{ imports: InterruptedImport[]; backgroundImports?: BackgroundImport[] }>("/api/imports")
+      .then((result) => { if (active) { setInterruptedImports(result.imports); setBackgroundImports(result.backgroundImports ?? []); } })
+      .catch(() => { if (active) { setInterruptedImports([]); setBackgroundImports([]); } });
+    load();
+    const timer = window.setInterval(load, 5000);
+    return () => { active = false; window.clearInterval(timer); };
   }, []);
   const chooseResume = (item: InterruptedImport) => { setKind(item.kind); setResumeImport(item); };
   const finishResume = (id: string) => {
     setInterruptedImports((current) => current.filter((item) => item.id !== id));
     setResumeImport(null);
   };
+  async function retryBackgroundImport(id: string) {
+    try {
+      await api(`/api/imports/${encodeURIComponent(id)}`, { method: "PATCH" });
+      setBackgroundImports((current) => current.map((item) => item.id === id ? { ...item, status: "queued", lastError: "" } : item));
+    } catch (caught) {
+      setBackgroundImports((current) => current.map((item) => item.id === id ? { ...item, lastError: caught instanceof Error ? caught.message : "Unable to retry." } : item));
+    }
+  }
   async function confirmCancelImport() {
     if (!cancelImport) return;
     setCancelBusy(true); setCancelError("");
@@ -51,6 +63,7 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
     finally { setCancelBusy(false); }
   }
   return <section className="import-workspace">
+    {backgroundImports.length ? <div className="interrupted-imports panel"><div><p className="eyebrow">BACKGROUND IMPORTS</p><h3>Server-side processing</h3><p>These jobs continue even when this browser is closed.</p></div>{backgroundImports.map((item) => <div className="interrupted-import" key={item.id}><div><strong>{item.fileName}</strong><small>{item.status === "failed" ? `Failed after automatic retries — ${item.lastError}` : item.totalRows ? `${formatNumber(item.committedRowOffset)} of ${formatNumber(item.totalRows)} rows committed` : "Queued or validating the CSV"}</small></div><span className="interrupted-import-actions"><span>{item.status}</span>{item.status === "failed" ? <button className="secondary" onClick={() => void retryBackgroundImport(item.id)}>Retry</button> : null}</span></div>)}</div> : null}
     {interruptedImports.length ? <div className="interrupted-imports panel"><div><p className="eyebrow">INTERRUPTED IMPORTS</p><h3>Continue an unfinished import</h3><p>Re-select the original file; committed rows will not be imported twice.</p></div>{interruptedImports.map((item) => <div className="interrupted-import" key={item.id}><div><strong>{item.fileName}</strong><small>Interrupted — resume from row {formatNumber(item.resumeFromRow)} of {formatNumber(item.totalRows)}</small></div><span className="interrupted-import-actions"><button className="secondary" onClick={() => chooseResume(item)}>Resume</button><button className="interrupted-cancel" onClick={() => { setCancelError(""); setCancelImport(item); }}>Cancel import</button></span></div>)}</div> : null}
     <div className="import-setup panel">
       <div><p className="eyebrow">IMPORT SETUP</p><h2>What are you importing?</h2><p>Every import must have a data source so its lineage remains auditable.</p></div>
@@ -162,29 +175,62 @@ function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onC
   const [newClient, setNewClient] = useState("");
   const [listName, setListName] = useState("");
   const [progress, setProgress] = useState(0);
-  const [phase, setPhase] = useState<"idle" | "reading" | "uploading" | "done">("idle");
+  const [phase, setPhase] = useState<"idle" | "reading" | "uploading" | "queued" | "done">("idle");
   const [message, setMessage] = useState("");
   const [summary, setSummary] = useState<{ processed_rows: number; unique_added: number; duplicates_linked: number } | null>(null);
   const [fileAudit, setFileAudit] = useState<FileAudit | null>(null);
   const [fieldMap, setFieldMap] = useState<Record<string, string>>({});
   const [allowMissing, setAllowMissing] = useState(false);
+  const [activeBackgroundId, setActiveBackgroundId] = useState("");
   const mappedFields = fileAudit ? resolvedImportFields(fileAudit.headers, fieldMap, suggestedPersonImportField) : [];
   const missingFields = missingRequiredFields(requiredPersonImportFields, mappedFields);
   const canSubmit = file && fileAudit && dataSource && listName.trim() && (clientId || newClient.trim()) && (!missingFields.length || allowMissing) && phase === "idle";
+
+  useEffect(() => {
+    if (!activeBackgroundId) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const detail = await api<ImportResumeDetail>(`/api/imports/${encodeURIComponent(activeBackgroundId)}`);
+        if (!active) return;
+        if (detail.status === "failed") {
+          setActiveBackgroundId(""); setPhase("idle"); setMessage(detail.lastError || "Background import failed after automatic retries.");
+          return;
+        }
+        if (detail.status === "completed") {
+          setActiveBackgroundId("");
+          setSummary({ processed_rows: detail.processedRows ?? 0, unique_added: detail.uniqueAdded ?? 0, duplicates_linked: detail.duplicatesLinked ?? 0 });
+          setProgress(100); setPhase("done"); setMessage("Import complete. Your list is ready and the people database is up to date.");
+          return;
+        }
+        const completedRows = detail.processedRows ?? detail.committedRowOffset;
+        setMessage(detail.totalRows
+          ? `Processing ${formatNumber(completedRows)} of ${formatNumber(detail.totalRows)} rows in the background. You can close this tab safely.`
+          : "Inspecting the uploaded CSV before processing. You can close this tab safely.");
+        if (detail.totalRows) setProgress(Math.round(completedRows / detail.totalRows * 100));
+      } catch { /* The background panel remains the durable source of truth. */ }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 2000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [activeBackgroundId]);
 
   async function pickFile(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0] ?? null;
     setFile(next); setFileAudit(null); setFieldMap({}); setMessage(""); setAllowMissing(false);
     if (next) setListName(deriveListName(next.name));
     if (!next) return;
+    if (!/\.csv$/i.test(next.name)) {
+      setFile(null); setMessage("Prospect imports require CSV so large files can be streamed safely. Export this spreadsheet as CSV and try again."); return;
+    }
     try {
-      const parsed = await readImportTable(next);
+      const parsed = await readCsvPreview(next);
       const populatedCells = parsed.rows.reduce((count, row) => count + row.filter((value) => value.trim()).length, 0);
       const nextFieldMap = Object.fromEntries(parsed.headers.map((header) => [header, suggestedPersonImportField(header)]));
       const mappedHeaders = parsed.headers.map((header) => nextFieldMap[header] === "Auto detect" ? header : nextFieldMap[header]);
       const invalidRows = parsed.rows.filter((row) => mapProspect(mappedHeaders, row).identifiers.length === 0).length;
       setFieldMap(nextFieldMap);
-      setFileAudit({ headers: parsed.headers, rows: parsed.rows.length, populatedCells, invalidRows });
+      setFileAudit({ headers: parsed.headers, rows: parsed.rows.length, populatedCells, invalidRows, sampled: parsed.sampled });
     } catch (caught) {
       setMessage(caught instanceof Error ? caught.message : "Unable to read this CSV.");
     }
@@ -207,6 +253,32 @@ function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onC
   async function startImport() {
     if (!file || !canSubmit) return;
     try {
+      if (/\.csv$/i.test(file.name)) {
+        setPhase("uploading"); setProgress(0); setMessage("Uploading the CSV safely — this can resume after a network interruption…");
+        const fingerprint = await prospectUploadFingerprint(file);
+        const upload = await api<{ objectPath: string; token?: string; alreadyUploaded?: boolean }>("/api/imports/upload-token", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, fileSize: file.size, fingerprint }),
+        });
+        if (!upload.alreadyUploaded) {
+          if (!upload.token) throw new Error("The server did not issue an upload token.");
+          await uploadProspectCsv(file, upload.objectPath, upload.token, setProgress);
+        } else setProgress(100);
+        const sourceHeaders = fileAudit?.headers ?? [];
+        const keptHeaders = sourceHeaders.filter((header) => fieldMap[header] !== skipImportField);
+        const withoutClient = clientId === unassignedClientId;
+        const started = await api<{ importId: string; listId: string }>("/api/imports/start", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+            clientId: withoutClient ? undefined : clientId || undefined,
+            clientName: newClient || undefined, withoutClient, listName, dataSource,
+            fileName: file.name, headers: keptHeaders, sourceHeaders, fieldMap,
+            allowMissingFields: allowMissing, background: true,
+            storageObjectPath: upload.objectPath, fileSizeBytes: file.size,
+          }),
+        });
+        setActiveBackgroundId(started.importId);
+        setPhase("queued"); setProgress(0); setMessage("Upload complete. The server is processing this list in the background; you can close this tab safely.");
+        return;
+      }
       setPhase("reading"); setMessage("Reading CSV and checking the columns…");
       const parsed = await readImportTable(file);
       if (!parsed.headers.length || !parsed.rows.length) throw new Error("The CSV needs a header row and at least one data row.");
@@ -253,9 +325,9 @@ function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onC
     <div className="import-card">
       <div className="form-field"><label htmlFor="import-client">Client</label><select id="import-client" value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option><option value={unassignedClientId}>Unassigned (list only)</option>{clients.filter((client) => client.id !== unassignedClientId).map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><small>Choose “Unassigned” to import the list without entering a client name.</small></div>
       {!clientId && <div className="form-field"><label htmlFor="new-client-name">New client name</label><input id="new-client-name" value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}
-      <label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void pickFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to review</small></> : <><strong>Choose a CSV or Excel file</strong><small>CSV or .xlsx from Excel / Google Sheets</small></>}</label>
+      <label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void pickFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to review</small></> : <><strong>Choose a prospect CSV</strong><small>CSV streams safely for lists up to 500,000+ rows</small></>}</label>
       <div className="form-field"><label htmlFor="list-name">List name</label><input id="list-name" value={listName} onChange={(event) => setListName(event.target.value)} placeholder="Auto-filled from the CSV filename" /></div>
-      {fileAudit && <><div className="file-audit"><div><span className="audit-check"><AppIcon name="check" size={14}/></span><p><strong>{formatNumber(fileAudit.headers.length)} fields detected</strong><small>{formatNumber(fileAudit.rows)} rows · {formatNumber(fileAudit.populatedCells)} populated cells</small></p></div><div className="audit-fields">{fileAudit.headers.slice(0, 8).map((header) => <span key={header}>{header}</span>)}{fileAudit.headers.length > 8 && <span>+{fileAudit.headers.length - 8} more</span>}</div><p>{fileAudit.invalidRows ? `${fileAudit.invalidRows} rows have no email, LinkedIn, or name plus company and will be preserved without a People DB link.` : "Every row has enough identity data (email, LinkedIn, or name plus company) to match the People DB."}</p></div><ImportMappingPanel audit={fileAudit} fieldMap={fieldMap} onChange={(header, value) => setFieldMap((current) => ({ ...current, [header]: value }))}/><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Missing mandatory columns: ${missingFields.join(", ")}.` : "All required person columns are mapped."}</p>{missingFields.length ? <div className="cleanup-choice import-override"><input id="import-allow-missing" type="checkbox" checked={allowMissing} onChange={(event) => setAllowMissing(event.target.checked)} /><label htmlFor="import-allow-missing"><strong>Import anyway without all mandatory fields</strong><small>Rows import with whatever identity they have; those missing name/company and email/LinkedIn are preserved without a People DB link.</small></label></div> : null}</>}
+      {fileAudit && <><div className="file-audit"><div><span className="audit-check"><AppIcon name="check" size={14}/></span><p><strong>{formatNumber(fileAudit.headers.length)} fields detected</strong><small>{fileAudit.sampled ? `${formatNumber(fileAudit.rows)} sample rows checked · full CSV will be processed by the server` : `${formatNumber(fileAudit.rows)} rows · ${formatNumber(fileAudit.populatedCells)} populated cells`}</small></p></div><div className="audit-fields">{fileAudit.headers.slice(0, 8).map((header) => <span key={header}>{header}</span>)}{fileAudit.headers.length > 8 && <span>+{fileAudit.headers.length - 8} more</span>}</div><p>{fileAudit.invalidRows ? `${fileAudit.invalidRows} sampled rows have no email, LinkedIn, or name plus company and will be preserved without a People DB link.` : "The checked rows have enough identity data to match the People DB."}</p></div><ImportMappingPanel audit={fileAudit} fieldMap={fieldMap} onChange={(header, value) => setFieldMap((current) => ({ ...current, [header]: value }))}/><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Missing mandatory columns: ${missingFields.join(", ")}.` : "All required person columns are mapped."}</p>{missingFields.length ? <div className="cleanup-choice import-override"><input id="import-allow-missing" type="checkbox" checked={allowMissing} onChange={(event) => setAllowMissing(event.target.checked)} /><label htmlFor="import-allow-missing"><strong>Import anyway without all mandatory fields</strong><small>Rows import with whatever identity they have; those missing name/company and email/LinkedIn are preserved without a People DB link.</small></label></div> : null}</>}
       {phase !== "idle" && <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div>}
       {message && phase === "idle" && <p className="form-error" role="alert">{message}</p>}
       <button className="primary import-button" disabled={!canSubmit} onClick={startImport}>{phase === "idle" ? "Start import & sync" : "Processing…"}</button><p className="privacy-note">Original rows and fields remain stored in your private database.</p>
