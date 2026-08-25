@@ -2,7 +2,7 @@ import { normalizeDomain, normalizeText, parseEmployeeCount } from "../../../../
 import { authorizeApi } from "../../../../lib/auth";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
-type CompanyImportRow = { name?: unknown; website?: unknown; employeeCount?: unknown; industry?: unknown; city?: unknown; state?: unknown; country?: unknown; keywords?: unknown; shortDescription?: unknown; foundedYear?: unknown; technologies?: unknown; totalFunding?: unknown; raw?: unknown; sourceRowNumber?: unknown };
+type CompanyImportRow = { name?: unknown; website?: unknown; employeeCount?: unknown; industry?: unknown; location?: unknown; city?: unknown; state?: unknown; country?: unknown; keywords?: unknown; shortDescription?: unknown; foundedYear?: unknown; technologies?: unknown; totalFunding?: unknown; raw?: unknown; sourceRowNumber?: unknown };
 
 function listValue(value: unknown) {
   return [...new Set(String(value ?? "").split(/[,;|]/).map((item) => item.trim()).filter(Boolean))].slice(0, 100);
@@ -30,6 +30,7 @@ export async function POST(request: Request) {
       employeeCountMin: employeeCount.min,
       employeeCountMax: employeeCount.max,
       industry: String(row.industry ?? "").trim().slice(0, 300),
+      location: String(row.location ?? "").trim().slice(0, 500),
       city: String(row.city ?? "").trim().slice(0, 200),
       state: String(row.state ?? "").trim().slice(0, 200),
       country: String(row.country ?? "").trim().slice(0, 200),

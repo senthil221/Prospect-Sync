@@ -20,7 +20,7 @@ app, TLS, backups, and a one-command deploy.
           │                 │                     │
     ┌─────┴─────┐    ┌──────┴───────┐      ┌──────┴──────┐
     │  Next.js  │    │ /auth/v1 → GoTrue   │   Studio    │  basic auth
-    │  (app)    │    │   public            │  + meta     │  + private IPs
+    │  (app)    │    │   public            │  + meta     │  CIDR + basic auth
     └─────┬─────┘    │ /rest/v1 → PostgREST└──────┬──────┘
           │          │   private IPs only        │
           │          └──────┬───────┘            │
@@ -147,6 +147,12 @@ nano .env          # domains, ACME_EMAIL, ALLOWED_USER_EMAILS
 the database password, and a Studio login. **The Studio password is printed
 once.** Save it immediately.
 
+Studio is denied before its password prompt unless the caller is in
+`STUDIO_ALLOWED_CIDRS`. The default permits Tailscale (`100.64.0.0/10`) and
+loopback only. Prefer private DNS that resolves `studio.<domain>` to the VPS's
+Tailscale address. If that is not available, add only your fixed public IP as a
+`/32`; never set `0.0.0.0/0`.
+
 `check-images.sh` matters: the image tags in `.env.example` were current when it
 was written, and container tags get superseded. If any fail, copy the current
 pins from
@@ -218,6 +224,8 @@ echo <github-pat-with-read:packages> | docker login ghcr.io -u senthil221 --pass
 
 Then push to `main`. CI runs lint, build, tests, and the migration guard; the
 image builds; the deploy applies pending migrations and swaps the container.
+Readiness checks Auth, PostgREST, and PostgreSQL, and a failed rollout
+automatically restores the previously running application image.
 
 ### 8. Turn on backups
 
@@ -245,7 +253,7 @@ no egress fees and costs cents a month at this size.
 | Back up now | `./scripts/backup.sh` |
 | **Restore drill** | `./scripts/restore.sh --verify-only` |
 | Real restore | `./scripts/restore.sh --into-production <dir>` |
-| Health / capacity | `./scripts/maintenance.sh` |
+| Health / capacity | `./scripts/status.sh` and `./scripts/maintenance.sh` |
 | Logs | `docker compose logs -f app` |
 | SQL shell | `docker compose exec db psql -U postgres` |
 

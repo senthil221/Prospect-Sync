@@ -261,6 +261,8 @@ services:
     logging: *default-logging
     depends_on:
       db: { condition: service_healthy }
+      auth: { condition: service_healthy }
+      rest: { condition: service_started }
     environment:
       NODE_ENV: production
       PORT: "3000"
@@ -274,7 +276,9 @@ services:
       # Node heap ceiling so a runaway CSV import cannot OOM the whole box.
       NODE_OPTIONS: "--max-old-space-size=1024"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      # Readiness covers Next.js, GoTrue, PostgREST, and PostgreSQL. A static
+      # login page can be healthy while every authenticated action is broken.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -308,6 +312,7 @@ services:
       ACME_EMAIL: ${ACME_EMAIL}
       STUDIO_BASIC_AUTH_USER: ${STUDIO_BASIC_AUTH_USER}
       STUDIO_BASIC_AUTH_HASH: ${STUDIO_BASIC_AUTH_HASH}
+      STUDIO_ALLOWED_CIDRS: "${STUDIO_ALLOWED_CIDRS:-100.64.0.0/10 127.0.0.1/32 ::1}"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

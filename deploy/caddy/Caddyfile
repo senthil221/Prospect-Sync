@@ -142,17 +142,22 @@
 #
 # Best practice for an internal tool: install Tailscale on the VPS and point
 # studio.<domain> at the tailnet IP so it is not resolvable from the internet
-# at all. Until then, the basic_auth below is what stands between a scanner and
-# your entire prospect database.
+# at all. STUDIO_ALLOWED_CIDRS defaults to Tailscale plus loopback, so a public
+# DNS record alone cannot expose the login prompt.
 # ───────────────────────────────────────────────────────────────────────────
 {$STUDIO_DOMAIN} {
 	encode zstd gzip
 
-	basic_auth {
-		{$STUDIO_BASIC_AUTH_USER} {$STUDIO_BASIC_AUTH_HASH}
-	}
+	@studio_external not client_ip {$STUDIO_ALLOWED_CIDRS:100.64.0.0/10 127.0.0.1/32 ::1}
+	route {
+		respond @studio_external 403
 
-	reverse_proxy studio:3000
+		basic_auth {
+			{$STUDIO_BASIC_AUTH_USER} {$STUDIO_BASIC_AUTH_HASH}
+		}
+
+		reverse_proxy studio:3000
+	}
 
 	log {
 		output file /data/logs/studio.log {

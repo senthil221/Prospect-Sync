@@ -16,9 +16,19 @@ load_env .env
 
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/prospect}"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-DEST="${BACKUP_DIR}/${STAMP}"
 RETENTION="${BACKUP_RETENTION_DAYS:-7}"
 
+[[ "$BACKUP_DIR" == /* ]] || { echo "BACKUP_DIR must be an absolute path." >&2; exit 1; }
+[[ "$RETENTION" =~ ^[0-9]+$ ]] || { echo "BACKUP_RETENTION_DAYS must be a non-negative integer." >&2; exit 1; }
+mkdir -p "$BACKUP_DIR"
+BACKUP_DIR="$(realpath -- "$BACKUP_DIR")"
+case "$BACKUP_DIR" in
+  /|/var|/var/backups|/home|/root)
+    echo "Refusing to use broad backup directory: ${BACKUP_DIR}" >&2
+    exit 1
+    ;;
+esac
+DEST="${BACKUP_DIR}/${STAMP}"
 mkdir -p "$DEST"
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
@@ -69,6 +79,8 @@ else
 fi
 
 log "Pruning local backups older than ${RETENTION} days"
-find "$BACKUP_DIR" -maxdepth 1 -mindepth 1 -type d -mtime "+${RETENTION}" -exec rm -rf {} +
+find "$BACKUP_DIR" -maxdepth 1 -mindepth 1 -type d \
+  -name '20[0-9][0-9][01][0-9][0-3][0-9]T[0-2][0-9][0-5][0-9][0-5][0-9]Z' \
+  -mtime "+${RETENTION}" -exec rm -rf -- {} +
 
 df -h /var | tail -1 | awk '{print "Disk after backup: " $3 " used, " $4 " available (" $5 ")"}'

@@ -106,7 +106,7 @@ jobs:
             git fetch --quiet origin main
             git reset --quiet --hard origin/main
             cd deploy
-            ./scripts/update.sh "${IMAGE}"
+            ./scripts/update.sh "${IMAGE}" "${GITHUB_SHA}"
           EOF
 
       - name: Smoke test
@@ -119,11 +119,11 @@ jobs:
           # time, see Dockerfile and next.config.ts) so a stale rollout fails
           # loudly here instead of shipping green while serving old code.
           for i in $(seq 1 10); do
-            headers=$(curl -s -D - -o /dev/null "${{ secrets.APP_PUBLIC_URL }}/login" || true)
+            headers=$(curl -s -D - -o /dev/null "${{ secrets.APP_PUBLIC_URL }}/api/health" || true)
             code=$(printf '%s' "$headers" | head -1 | grep -o '[0-9]\{3\}' || echo 000)
             version=$(printf '%s' "$headers" | grep -i '^x-app-version:' | tr -d '\r' | cut -d' ' -f2)
             if [ "$code" = "200" ] && [ "$version" = "$EXPECTED_VERSION" ]; then
-              echo "Login page is serving version ${version}."
+              echo "Application and backend are serving version ${version}."
               exit 0
             fi
             echo "attempt $i: HTTP ${code:-000}, X-App-Version=${version:-<none>} (want ${EXPECTED_VERSION})"

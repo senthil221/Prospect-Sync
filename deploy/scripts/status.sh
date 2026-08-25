@@ -61,9 +61,9 @@ probe() {
     warn "$label returned $code, expected $want"
   fi
 }
-probe "app"        "https://${APP_DOMAIN}/login"          "200"
+probe "app + data" "https://${APP_DOMAIN}/api/health"     "200"
 probe "api (auth)" "https://${API_DOMAIN}/auth/v1/health" "200"
-probe "studio"     "https://${STUDIO_DOMAIN}/"            "401"
+probe "studio gate" "https://${STUDIO_DOMAIN}/"           "401,403"
 probe "api (data)" "https://${API_DOMAIN}/rest/v1/"       "403"
 printf '  %s403 on the data API is correct — it means the internet cannot reach it.%s\n' "$DIM" "$R"
 

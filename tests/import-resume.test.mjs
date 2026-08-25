@@ -4,6 +4,7 @@ import test from "node:test";
 import { importHeaderSignature, importHeadersMatch } from "../lib/import-resume.ts";
 
 const migrationUrl = new URL("../supabase/migrations/20260816013930_resumable_import_cursors.sql", import.meta.url);
+const locationFixUrl = new URL("../supabase/migrations/20260825103139_fix_company_location_import_drift.sql", import.meta.url);
 
 test("matches only the original ordered import header signature", () => {
   const signature = importHeaderSignature(["Name", "Work Email", "Company"]);
@@ -32,6 +33,21 @@ test("chunk routes pass row offsets into both resumable RPCs", async () => {
   ]);
   assert.match(prospectRoute, /p_row_offset: normalizedRowOffset/);
   assert.match(companyRoute, /p_row_offset: rowOffset/);
+});
+
+test("company location reaches the active resumable RPC through a forward migration", async () => {
+  const [migration, companyRoute] = await Promise.all([
+    readFile(locationFixUrl, "utf8"),
+    readFile(new URL("../app/api/company-imports/chunk/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(companyRoute, /location\?: unknown/);
+  assert.match(companyRoute, /location: String\(row\.location/);
+  assert.match(migration, /drop function if exists public\.import_company_batch_v2\(text, jsonb\)/);
+  assert.match(migration, /import_company_batch_v2\(\s*p_import_id text,\s*p_rows jsonb,\s*p_row_offset integer\s*\)/);
+  assert.match(migration, /row_data->>'location'/);
+  assert.match(migration, /revoke execute on function public\.import_company_batch_v2\(text, jsonb, integer\) from public, anon, authenticated/);
+  assert.match(migration, /grant execute on function public\.import_company_batch_v2\(text, jsonb, integer\) to service_role/);
 });
 
 test("the imports panel discovers, validates, and cancels interrupted imports", async () => {

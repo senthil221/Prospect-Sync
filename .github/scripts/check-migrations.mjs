@@ -97,15 +97,26 @@ if (baseArgumentIndex !== -1) {
   const baseRevision = process.argv[baseArgumentIndex + 1];
   if (!baseRevision) throw new Error("--base requires a Git revision");
 
-  const changedPaths = execFileSync(
+  const changedEntries = execFileSync(
     "git",
-    ["diff", "--name-only", "--diff-filter=AM", baseRevision, "HEAD", "--", "supabase/migrations"],
+    ["diff", "--name-status", "--find-renames", baseRevision, "HEAD", "--", "supabase/migrations"],
     { encoding: "utf8" },
   );
-  securityMigrationNames = changedPaths
-    .split(/\r?\n/)
-    .filter((name) => name.endsWith(".sql"))
-    .map((name) => path.basename(name));
+  securityMigrationNames = [];
+
+  for (const entry of changedEntries.split(/\r?\n/).filter(Boolean)) {
+    const [status, ...changedPaths] = entry.split("\t");
+    if (status === "A") {
+      const migrationPath = changedPaths[0];
+      if (migrationPath?.endsWith(".sql")) securityMigrationNames.push(path.basename(migrationPath));
+      continue;
+    }
+
+    const migrationPath = changedPaths.at(-1) ?? changedPaths[0] ?? "unknown migration";
+    failures.push(
+      `${migrationPath}: applied migration files are immutable (${status}); add a new timestamped forward migration instead`,
+    );
+  }
 }
 
 for (const migrationName of securityMigrationNames) {
