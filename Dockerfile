@@ -54,10 +54,19 @@ RUN grep -rq "$NEXT_PUBLIC_SUPABASE_URL" .next/static \
 FROM node:22.13-alpine AS runner
 WORKDIR /app
 
+# The git SHA this image was built from. next.config.ts reads it at request
+# time to set X-App-Version, which is how the deploy pipeline's smoke test
+# tells "the new container is answering" from "a container is answering" — an
+# old container returns 200 on /login just as readily as a new one does.
+# ARGs don't cross build stages on their own, so this is redeclared here even
+# though the builder stage never needed it.
+ARG APP_VERSION=unknown
+
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    HOSTNAME=0.0.0.0
+    HOSTNAME=0.0.0.0 \
+    APP_VERSION=${APP_VERSION}
 
 RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
 

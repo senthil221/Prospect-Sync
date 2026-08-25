@@ -72,6 +72,7 @@ jobs:
           build-args: |
             NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
             NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+            APP_VERSION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
@@ -109,11 +110,25 @@ jobs:
           EOF
 
       - name: Smoke test
+        env:
+          EXPECTED_VERSION: ${{ github.sha }}
         run: |
+          # A 200 on its own proves *a* container answered, not that it is the
+          # one this run just shipped — an old container returns 200 just as
+          # readily. Check X-App-Version (set from the git SHA at image build
+          # time, see Dockerfile and next.config.ts) so a stale rollout fails
+          # loudly here instead of shipping green while serving old code.
           for i in $(seq 1 10); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ secrets.APP_PUBLIC_URL }}/login" || echo 000)
-            if [ "$code" = "200" ]; then echo "Login page is serving."; exit 0; fi
-            echo "attempt $i: HTTP $code"; sleep 10
+            headers=$(curl -s -D - -o /dev/null "${{ secrets.APP_PUBLIC_URL }}/login" || true)
+            code=$(printf '%s' "$headers" | head -1 | grep -o '[0-9]\{3\}' || echo 000)
+            version=$(printf '%s' "$headers" | grep -i '^x-app-version:' | tr -d '\r' | cut -d' ' -f2)
+            if [ "$code" = "200" ] && [ "$version" = "$EXPECTED_VERSION" ]; then
+              echo "Login page is serving version ${version}."
+              exit 0
+            fi
+            echo "attempt $i: HTTP ${code:-000}, X-App-Version=${version:-<none>} (want ${EXPECTED_VERSION})"
+            sleep 10
           done
-          echo "Login page never returned 200." >&2
+          echo "Never saw HTTP 200 with X-App-Version=${EXPECTED_VERSION}." >&2
+          echo "The new image was pushed but the running container is not serving it." >&2
           exit 1

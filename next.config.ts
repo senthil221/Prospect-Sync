@@ -49,6 +49,12 @@ const nextConfig: NextConfig = {
             key: "Permissions-Policy",
             value: "camera=(), microphone=(), geolocation=()",
           },
+          // Set from the git SHA at image build time (see Dockerfile). This is
+          // what lets the deploy pipeline's smoke test prove the container that
+          // answered is the one it just shipped, rather than an old one still
+          // running and happening to also return 200. Not sensitive: a commit
+          // SHA discloses nothing that isn't already public in the repo.
+          { key: "X-App-Version", value: process.env.APP_VERSION || "dev" },
         ],
       },
     ];
