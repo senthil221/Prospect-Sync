@@ -309,8 +309,11 @@ with resumable TUS before the background worker processes them. Files land
 on the VPS disk, so they compete with the database for those 100 GB. If uploads
 become significant, point `STORAGE_BACKEND=s3` at R2 instead.
 
-The `import-worker` streams one CSV at a time, checkpoints every committed
-batch, and reclaims jobs whose lease expired after a restart. Useful checks:
+The `import-worker` streams one CSV at a time into the private
+`prospect_import.staged_rows` table with PostgreSQL `COPY`, then commits local
+1,000-row batches through the canonical importer. Each batch deletes its staged
+rows and advances the durable cursor in the same transaction. Expired leases
+are reclaimed after a restart. Useful checks:
 
 ```bash
 docker compose ps storage import-worker

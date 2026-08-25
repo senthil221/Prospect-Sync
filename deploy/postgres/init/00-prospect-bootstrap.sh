@@ -45,6 +45,18 @@ psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
 	end
 	\$\$;
 
+	-- The bulk import worker connects as authenticator, then assumes this
+	-- narrowly-scoped NOLOGIN role. Recreate role membership after a logical
+	-- disaster recovery where database objects survive but cluster roles do not.
+	do \$\$
+	begin
+	  if not exists (select 1 from pg_roles where rolname = 'prospect_importer') then
+	    create role prospect_importer nologin noinherit;
+	  end if;
+	end
+	\$\$;
+	grant prospect_importer to authenticator;
+
 	-- JWT settings PostgREST and legacy helpers read from the database ------
 	alter database "${DB}" set "app.settings.jwt_secret" to '${JWT_SECRET}';
 	alter database "${DB}" set "app.settings.jwt_exp" to '${JWT_EXP:-3600}';

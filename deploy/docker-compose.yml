@@ -320,10 +320,15 @@ services:
       SUPABASE_REST_URL: http://rest:3000
       SUPABASE_STORAGE_URL: http://storage:5000
       IMPORT_APP_URL: http://app-router:3000
-      IMPORT_BATCH_SIZE: "250"
-      NODE_OPTIONS: "--max-old-space-size=384"
-    mem_limit: 512m
-    cpus: "0.75"
+      IMPORT_BATCH_SIZE: "1000"
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: authenticator
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      NODE_OPTIONS: "--max-old-space-size=512"
+    mem_limit: 768m
+    cpus: "1.0"
     stop_grace_period: 30s
     networks: [internal]
 

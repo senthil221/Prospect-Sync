@@ -269,6 +269,9 @@ set_app_image "$NEW_IMAGE"
 echo "==> Ensuring the database and Supabase services are up"
 docker compose up -d db auth rest storage meta studio
 
+echo "==> Refreshing database roles and guard rails"
+docker compose exec -T db bash -s < postgres/init/00-prospect-bootstrap.sh
+
 echo "==> Applying pending backward-compatible migrations"
 ./scripts/migrate.sh
 

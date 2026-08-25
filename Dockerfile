@@ -13,6 +13,14 @@ COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --no-audit --no-fund
 
+# The worker has two small runtime-only dependencies. Keeping its lockfile
+# separate avoids copying the complete Next.js dependency tree into the image.
+FROM node:22.13-alpine AS worker-deps
+WORKDIR /app/worker
+COPY worker/package.json worker/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev --no-audit --no-fund
+
 # ── build ──────────────────────────────────────────────────────────────────
 FROM node:22.13-alpine AS builder
 WORKDIR /app
@@ -75,6 +83,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/worker ./worker
+COPY --from=worker-deps --chown=nextjs:nodejs /app/worker/node_modules ./worker/node_modules
 
 USER nextjs
 EXPOSE 3000
