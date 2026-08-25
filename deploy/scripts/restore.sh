@@ -113,6 +113,19 @@ read -rp "Type the word RESTORE to continue: " confirm
 
 SERVICES_STOPPED=0
 RECOVERY_ACTIVE=0
+RUNNING_APP_CONTAINERS=()
+for container in prospect-app prospect-app-blue prospect-app-green; do
+  if [[ "$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || true)" == "true" ]]; then
+    RUNNING_APP_CONTAINERS+=("$container")
+  fi
+done
+
+restart_application_containers() {
+  if (( ${#RUNNING_APP_CONTAINERS[@]} > 0 )); then
+    docker start "${RUNNING_APP_CONTAINERS[@]}" >/dev/null
+  fi
+}
+
 restore_failed() {
   status=$?
   trap - ERR
@@ -125,13 +138,17 @@ restore_failed() {
   fi
   if [[ "$SERVICES_STOPPED" == "1" ]]; then
     docker compose up -d
+    restart_application_containers
   fi
   exit "$status"
 }
 trap restore_failed ERR
 
 echo "Stopping everything that writes to the database"
-docker compose stop app rest auth studio meta storage realtime functions 2>/dev/null || true
+if (( ${#RUNNING_APP_CONTAINERS[@]} > 0 )); then
+  docker stop "${RUNNING_APP_CONTAINERS[@]}" >/dev/null
+fi
+docker compose stop rest auth studio meta storage realtime functions 2>/dev/null || true
 SERVICES_STOPPED=1
 
 echo "Restoring globals"
@@ -154,6 +171,7 @@ docker compose exec -T db bash -s < postgres/init/00-prospect-bootstrap.sh
 
 echo "Restarting services"
 docker compose up -d
+restart_application_containers
 SERVICES_STOPPED=0
 RECOVERY_ACTIVE=0
 trap - ERR

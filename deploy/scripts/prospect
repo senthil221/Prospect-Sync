@@ -35,17 +35,30 @@ ${B}prospect${R} — Prospect Sync control
   ${B}prospect config${R}              Show settings (secrets masked)
   ${B}prospect version${R}             What is deployed
 
-  ${DIM}services: app  db  auth  rest  caddy  studio  meta${R}
+  ${DIM}services: app (active slot)  db  auth  rest  caddy  studio  meta${R}
 EOF
 }
 
 need() { [[ -n "${1:-}" ]] || { echo "Missing argument. See: prospect help" >&2; exit 1; }; }
 
+active_app_service() {
+  local slot
+  slot="$(cat .active-app-slot 2>/dev/null || true)"
+  case "$slot" in
+    blue|green) echo "app-${slot}" ;;
+    *) echo "app" ;;
+  esac
+}
+
+resolve_service() {
+  if [[ "${1:-}" == "app" ]]; then active_app_service; else echo "${1:-}"; fi
+}
+
 case "${1:-status}" in
   status|st)   ./scripts/status.sh ;;
   health)      ./scripts/maintenance.sh ;;
-  logs)        docker compose logs -f --tail "${3:-80}" ${2:-} ;;
-  restart)     docker compose restart ${2:-}; echo; docker compose ps --format 'table {{.Service}}\t{{.Status}}' ;;
+  logs)        docker compose logs -f --tail "${3:-80}" $(resolve_service "${2:-}") ;;
+  restart)     docker compose restart $(resolve_service "${2:-}"); echo; docker compose ps --format 'table {{.Service}}\t{{.Status}}' ;;
   update|deploy) ./scripts/update.sh "${2:-}" ;;
   rollback)    ./scripts/update.sh --rollback ;;
   migrate)     ./scripts/migrate.sh "${2:-}" ;;
@@ -75,8 +88,8 @@ case "${1:-status}" in
       awk -v v="${ALLOWED_USER_EMAILS},$2" -F= \
         '$1=="ALLOWED_USER_EMAILS"{print "ALLOWED_USER_EMAILS="v; next}{print}' .env > .env.tmp
       mv .env.tmp .env && chmod 600 .env
-      echo "Added $2. Restarting the app..."
-      docker compose up -d app
+      echo "Added $2. Deploying the configuration without downtime..."
+      ./scripts/update.sh "$APP_IMAGE"
       echo "Done. They still need an account: prospect user $2"
     fi
     ;;
@@ -100,6 +113,7 @@ case "${1:-status}" in
     source ./scripts/_env.sh; load_env .env
     echo "deployed:  ${APP_IMAGE}"
     echo "commit:    $(git -C .. log --oneline -1 2>/dev/null || echo unknown)"
+    echo "slot:      $(cat .active-app-slot 2>/dev/null || echo legacy)"
     echo "rollback:  $(cat .last-image 2>/dev/null || echo 'none yet')"
     ;;
 

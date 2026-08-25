@@ -33,13 +33,50 @@ test("restore, rollback, Studio, and backup guards fail closed", async () => {
   assert.match(restore, /psql_as -d template1/);
   assert.match(restore, /restore_failed/);
   assert.match(restore, /42710/);
-  assert.match(update, /Automatically rolling back/);
+  assert.match(update, /Deployment failed; keeping the previous application online/);
+  assert.match(update, /Returning traffic to \$\{ACTIVE_SLOT\}/);
   assert.match(update, /set_app_image "\$PREVIOUS_IMAGE"/);
   assert.match(update, /trap 'rollback_on_error \$\?' ERR/);
   assert.ok(caddy.indexOf("respond @studio_external 403") < caddy.indexOf("basic_auth"));
   assert.match(caddy, /STUDIO_ALLOWED_CIDRS/);
   assert.match(backup, /Refusing to use broad backup directory/);
   assert.match(backup, /-name '20\[0-9\]/);
+});
+
+test("deployments retry transport failures and switch blue/green traffic only after readiness", async () => {
+  const [workflow, update, compose, caddy, router, migrate] = await Promise.all([
+    readFile(new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/scripts/update.sh", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/docker-compose.yml", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/caddy/Caddyfile", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/caddy/AppRouter.Caddyfile", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/scripts/migrate.sh", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(workflow, /for attempt in 1 2 3 4/);
+  assert.match(workflow, /ConnectTimeout=15/);
+  assert.match(workflow, /ServerAliveInterval=30/);
+  assert.match(workflow, /"\$status" -ne 255/);
+  assert.match(update, /flock -w 600/);
+  assert.match(compose, /app-blue:/);
+  assert.match(compose, /app-green:/);
+  assert.match(compose, /app-router:/);
+  assert.doesNotMatch(compose, /container_name: prospect-app\s*$/m);
+  assert.match(caddy, /reverse_proxy app-router:3000/);
+  assert.match(router, /reverse_proxy app-blue:3000 app-green:3000/);
+  assert.match(router, /health_uri \/api\/health/);
+  assert.match(router, /lb_try_duration 5s/);
+  assert.match(migrate, /set local lock_timeout = '5s'/);
+
+  const start = update.indexOf('docker compose up -d --no-deps --pull always "$CANDIDATE_SERVICE"');
+  const ready = update.indexOf('verify_candidate_version "$CANDIDATE_CONTAINER"');
+  const cutover = update.indexOf('switch_traffic "$CANDIDATE_SLOT"');
+  const publicCheck = update.indexOf('verify_public_route "$EXPECTED_VERSION" 12');
+  const stopOld = update.indexOf('docker stop -t 300 "$(slot_container "$ACTIVE_SLOT")"');
+  assert.ok(start >= 0 && start < ready);
+  assert.ok(ready < cutover);
+  assert.ok(cutover < publicCheck);
+  assert.ok(publicCheck < stopOld);
 });
 
 test("migration guard rejects changes to an existing migration", async () => {

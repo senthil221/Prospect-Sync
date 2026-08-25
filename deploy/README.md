@@ -19,11 +19,13 @@ app, TLS, backups, and a one-command deploy.
    app.<domain>       api.<domain>         studio.<domain>
           │                 │                     │
     ┌─────┴─────┐    ┌──────┴───────┐      ┌──────┴──────┐
-    │  Next.js  │    │ /auth/v1 → GoTrue   │   Studio    │  basic auth
-    │  (app)    │    │   public            │  + meta     │  CIDR + basic auth
+    │ app-router│    │ /auth/v1 → GoTrue   │   Studio    │  basic auth
+    │ blue/green│    │   public            │  + meta     │  CIDR + basic auth
     └─────┬─────┘    │ /rest/v1 → PostgREST└──────┬──────┘
-          │          │   private IPs only        │
-          │          └──────┬───────┘            │
+    ┌─────┴─────┐    │   private IPs only        │
+    │  Next.js  │    └──────┬───────┘            │
+    │ active slot│          │                    │
+    └─────┬─────┘           │                    │
           └─────────────────┼────────────────────┘
                      ┌──────┴──────┐
                      │ PostgreSQL  │  ← the only thing that matters
@@ -87,7 +89,7 @@ Hostinger KVM 2 is 2 vCPU / 8 GB RAM / 100 GB NVMe. Steady-state allocation:
 | Next.js app | ~0.5 GB | capped at 1.5 GB |
 | Studio | ~0.3 GB | idle unless open |
 | GoTrue + PostgREST + meta | ~0.25 GB | |
-| Caddy | ~0.03 GB | |
+| Caddy + app router | ~0.06 GB | graceful blue/green cutovers |
 | **Free for page cache** | **~4 GB** | this is what keeps queries fast |
 
 Plus a 4 GB swapfile so a large import spike degrades instead of triggering the
@@ -165,6 +167,10 @@ docker compose up -d
 docker compose ps
 ```
 
+This starts the database, Supabase services, Studio, and Caddy. The application
+uses profiled blue/green slots and starts with the first GitHub deployment; this
+avoids running two app containers during ordinary operation.
+
 Give Caddy a minute to get certificates, then confirm:
 
 ```bash
@@ -223,9 +229,12 @@ echo <github-pat-with-read:packages> | docker login ghcr.io -u senthil221 --pass
 ```
 
 Then push to `main`. CI runs lint, build, tests, and the migration guard; the
-image builds; the deploy applies pending migrations and swaps the container.
-Readiness checks Auth, PostgREST, and PostgreSQL, and a failed rollout
-automatically restores the previously running application image.
+image builds; the deploy applies pending migrations and starts the inactive
+blue/green slot. Readiness checks Next.js, Auth, PostgREST, and PostgreSQL before
+Caddy atomically sends new traffic to that slot. The previous slot stays online
+until the public version check passes, so a failed rollout keeps serving the
+known-good application. SSH transport is retried without starting concurrent
+deployments.
 
 ### 8. Turn on backups
 
@@ -254,7 +263,7 @@ no egress fees and costs cents a month at this size.
 | **Restore drill** | `./scripts/restore.sh --verify-only` |
 | Real restore | `./scripts/restore.sh --into-production <dir>` |
 | Health / capacity | `./scripts/status.sh` and `./scripts/maintenance.sh` |
-| Logs | `docker compose logs -f app` |
+| Logs | `prospect logs app` |
 | SQL shell | `docker compose exec db psql -U postgres` |
 
 ### The monthly ten minutes
@@ -322,8 +331,9 @@ are blocked. `dig +short app.clearroadco.link` and `sudo ufw status`.
 `docker compose logs caddy` names the actual ACME error.
 
 **Auth works, but every API call 401s.** The email is not in
-`ALLOWED_USER_EMAILS`, or the app container did not pick up a change to it.
-`docker compose up -d app`.
+`ALLOWED_USER_EMAILS`, or the active app slot did not pick up a change to it.
+Run `./scripts/update.sh "$APP_IMAGE"` to roll the configuration through the
+inactive slot without interrupting traffic.
 
 **Login page loads but sign-in hangs.** The browser cannot reach
 `api.<domain>/auth/v1/*`. Check the browser console for a CSP violation — the
@@ -337,7 +347,8 @@ does not pick the alias up, requests hairpin out to your own public IP and back
 — still correct, just an extra round trip. Confirm with:
 
 ```bash
-docker compose exec app node -e "require('dns').lookup('api.clearroadco.link',console.log)"
+docker exec "$(docker ps --filter 'name=prospect-app-' --format '{{.Names}}' | head -1)" \
+  node -e "require('dns').lookup('api.clearroadco.link',console.log)"
 ```
 
 A `172.x` address is the alias working; your public IP means it is hairpinning.

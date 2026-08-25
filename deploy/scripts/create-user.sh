@@ -55,6 +55,6 @@ if ! grep -qi "$EMAIL" <<<"${ALLOWED_USER_EMAILS}"; then
 
      ALLOWED_USER_EMAILS=${ALLOWED_USER_EMAILS},${EMAIL}
 
-   Then: docker compose up -d app
+   Then: ./scripts/update.sh "$APP_IMAGE"
 EOF
 fi

@@ -82,7 +82,7 @@ jobs:
     needs: build
     if: ${{ !inputs.skip_deploy }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     environment: production
 
     steps:
@@ -101,13 +101,52 @@ jobs:
           HOST: ${{ secrets.VPS_HOST }}
           USER: ${{ secrets.VPS_USER }}
         run: |
-          ssh -o BatchMode=yes "${USER}@${HOST}" bash -euo pipefail <<EOF
-            cd /opt/prospect
-            git fetch --quiet origin main
-            git reset --quiet --hard origin/main
-            cd deploy
-            ./scripts/update.sh "${IMAGE}" "${GITHUB_SHA}"
-          EOF
+          deploy_remote() {
+            ssh \
+              -o BatchMode=yes \
+              -o ConnectTimeout=15 \
+              -o ConnectionAttempts=2 \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=4 \
+              "${USER}@${HOST}" bash -s -- "${IMAGE}" "${GITHUB_SHA}" <<'REMOTE'
+          set -euo pipefail
+          image="$1"
+          expected_version="$2"
+          cd /opt/prospect
+          git fetch --quiet origin main
+          git reset --quiet --hard origin/main
+          cd deploy
+          ./scripts/update.sh "$image" "$expected_version"
+          REMOTE
+          }
+
+          # GitHub-hosted runners and the VPS are separated by the public
+          # internet. A short routing interruption must not fail an otherwise
+          # safe release. The server-side deployment lock makes a retry safe if
+          # the earlier SSH client disconnected while its command kept running.
+          status=1
+          for attempt in 1 2 3 4; do
+            echo "SSH deployment attempt ${attempt}/4"
+            if deploy_remote; then
+              status=0
+              break
+            else
+              status=$?
+            fi
+            # 255 is SSH transport failure. Any other status came from the
+            # deployment itself and should fail once with its original logs,
+            # not repeat migrations or health checks four times.
+            if [ "$status" -ne 255 ]; then
+              echo "Remote deployment failed with ${status}; not retrying a deterministic error."
+              break
+            fi
+            if [ "$attempt" -lt 4 ]; then
+              delay=$((attempt * 15))
+              echo "SSH attempt failed with ${status}; retrying in ${delay}s."
+              sleep "$delay"
+            fi
+          done
+          exit "$status"
 
       - name: Smoke test
         env:

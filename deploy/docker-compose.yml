@@ -3,7 +3,10 @@ name: prospect
 # Lean self-hosted Supabase + Prospect Sync, sized for a 2 vCPU / 8 GB VPS.
 #
 # Default `docker compose up -d` starts only what Prospect Sync uses today:
-#   db, auth, rest, meta, studio, app, caddy
+#   db, auth, rest, meta, studio, app-router, caddy
+# The application is deployed as one of two profiled services (app-blue or
+# app-green) by scripts/update.sh. Keeping the inactive slot out of the default
+# profile prevents a plain `docker compose up -d` from consuming extra RAM.
 #
 # Optional services are behind Compose profiles. Turn them on by editing
 # COMPOSE_PROFILES in .env (e.g. COMPOSE_PROFILES=storage,realtime,functions).
@@ -20,6 +23,38 @@ x-logging: &default-logging
 
 x-restart: &default-restart
   restart: unless-stopped
+
+x-app: &app
+  image: ${APP_IMAGE}
+  <<: [*default-restart]
+  logging: *default-logging
+  depends_on:
+    db: { condition: service_healthy }
+    auth: { condition: service_healthy }
+    rest: { condition: service_started }
+  environment:
+    NODE_ENV: production
+    PORT: "3000"
+    HOSTNAME: "0.0.0.0"
+    NEXT_TELEMETRY_DISABLED: "1"
+    # Must match the value baked in at build time (see .github/workflows/deploy.yml).
+    NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
+    SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+    ALLOWED_USER_EMAILS: ${ALLOWED_USER_EMAILS}
+    # Node heap ceiling so a runaway CSV import cannot OOM the whole box.
+    NODE_OPTIONS: "--max-old-space-size=1024"
+  healthcheck:
+    # Readiness covers Next.js, GoTrue, PostgREST, and PostgreSQL. A static
+    # login page can be healthy while every authenticated action is broken.
+    test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    interval: 10s
+    timeout: 10s
+    retries: 6
+    start_period: 40s
+  mem_limit: 1500m
+  stop_grace_period: 5m
+  networks: [internal]
 
 services:
   # ─────────────────────────────────────────────────────────────────────────
@@ -254,37 +289,34 @@ services:
   # ─────────────────────────────────────────────────────────────────────────
   # Prospect Sync (Next.js). Image is built by GitHub Actions and pulled here.
   # ─────────────────────────────────────────────────────────────────────────
-  app:
-    image: ${APP_IMAGE}
-    container_name: prospect-app
+  # Blue/green slots. update.sh explicitly starts the inactive service, waits
+  # for its backend-aware healthcheck, atomically reloads Caddy, and only then
+  # stops the old slot. A normal compose startup leaves both slots alone.
+  app-blue:
+    <<: *app
+    profiles: ["app-blue"]
+    container_name: prospect-app-blue
+
+  app-green:
+    <<: *app
+    profiles: ["app-green"]
+    container_name: prospect-app-green
+
+  # Stable internal proxy between the public Caddy listener and the two app
+  # slots. Its configuration reload is graceful, so ports 80/443 and existing
+  # public connections are never bounced during an application release.
+  app-router:
+    image: caddy:${CADDY_IMAGE_TAG}
+    container_name: prospect-app-router
     <<: [*default-restart]
     logging: *default-logging
-    depends_on:
-      db: { condition: service_healthy }
-      auth: { condition: service_healthy }
-      rest: { condition: service_started }
-    environment:
-      NODE_ENV: production
-      PORT: "3000"
-      HOSTNAME: "0.0.0.0"
-      NEXT_TELEMETRY_DISABLED: "1"
-      # Must match the value baked in at build time (see .github/workflows/deploy.yml).
-      NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
-      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
-      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
-      ALLOWED_USER_EMAILS: ${ALLOWED_USER_EMAILS}
-      # Node heap ceiling so a runaway CSV import cannot OOM the whole box.
-      NODE_OPTIONS: "--max-old-space-size=1024"
-    healthcheck:
-      # Readiness covers Next.js, GoTrue, PostgREST, and PostgreSQL. A static
-      # login page can be healthy while every authenticated action is broken.
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    mem_limit: 1500m
-    networks: [internal]
+    volumes:
+      - ./caddy/AppRouter.Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      internal:
+        aliases:
+          # Compatibility for the first deployment from the former app service.
+          - app
 
   # ─────────────────────────────────────────────────────────────────────────
   # Caddy — TLS, HTTP routing, and the public/private boundary.
@@ -297,7 +329,7 @@ services:
     <<: [*default-restart]
     logging: *default-logging
     depends_on:
-      - app
+      - app-router
       - auth
       - rest
       - studio

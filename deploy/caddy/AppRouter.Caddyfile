@@ -1,0 +1,32 @@
+{
+	auto_https off
+}
+
+# Reboot-safe fallback: only the active blue/green container normally exists,
+# so health checks select it. During a release, update.sh gracefully reloads an
+# equivalent config containing only the verified candidate before stopping the
+# previous slot.
+:3000 {
+	reverse_proxy app-blue:3000 app-green:3000 {
+		lb_policy first
+		lb_try_duration 5s
+		lb_try_interval 250ms
+
+		health_uri /api/health
+		health_interval 10s
+		health_timeout 5s
+		health_status 200
+		health_fails 1
+		health_passes 1
+
+		fail_duration 30s
+		max_fails 1
+		unhealthy_status 5xx
+
+		header_up X-Forwarded-Proto https
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+}

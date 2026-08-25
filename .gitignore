@@ -45,3 +45,9 @@ yarn-error.log*
 # ...but the self-hosting config TEMPLATE must be tracked. Without this the
 # `.env*` rule above silently drops it and a fresh clone has nothing to copy.
 !deploy/.env.example
+
+# VPS deployment state (created by deploy/scripts/update.sh)
+/deploy/.active-app-slot
+/deploy/.last-image
+/deploy/.deploy.lock
+/deploy/.env.tmp

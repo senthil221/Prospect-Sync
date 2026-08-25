@@ -69,6 +69,11 @@ for file in "${pending[@]}"; do
 
   {
     echo "begin;"
+    # Never make a release freeze the live application while waiting for an
+    # incompatible table lock. Fail the deployment and keep the old slot
+    # serving; the migration can then be rewritten as an expand/contract step.
+    echo "set local lock_timeout = '5s';"
+    echo "set local statement_timeout = '5min';"
     cat "$file"
     echo ";"
     printf "insert into supabase_migrations.schema_migrations (version, name) values ('%s', '%s') on conflict (version) do nothing;\n" \

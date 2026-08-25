@@ -38,7 +38,9 @@
 		max_size 100MB
 	}
 
-	reverse_proxy app:3000 {
+	# app-router is a stable internal hop. It lets the edge proxy and TLS
+	# listener remain untouched while blue/green application slots change.
+	reverse_proxy app-router:3000 {
 		header_up X-Forwarded-Proto https
 		# Long imports and exports: don't cut them off at the proxy.
 		transport http {
