@@ -153,7 +153,15 @@ Studio is denied before its password prompt unless the caller is in
 `STUDIO_ALLOWED_CIDRS`. The default permits Tailscale (`100.64.0.0/10`) and
 loopback only. Prefer private DNS that resolves `studio.<domain>` to the VPS's
 Tailscale address. If that is not available, add only your fixed public IP as a
-`/32`; never set `0.0.0.0/0`.
+`/32`.
+
+If nobody who needs Studio has a fixed IP or Tailscale, set
+`STUDIO_ALLOWED_CIDRS="0.0.0.0/0 ::/0"` instead — this drops the IP lock
+entirely and leaves basic auth as the only gate. Give each person their own
+line in the Caddyfile's `basic_auth` block (`STUDIO_BASIC_AUTH_USER_2` /
+`_HASH_2` in `.env`, username = their email) rather than sharing one password,
+and run `./scripts/setup-studio-fail2ban.sh` once so repeated failed logins
+get banned at the firewall instead of retried forever.
 
 `check-images.sh` matters: the image tags in `.env.example` were current when it
 was written, and container tags get superseded. If any fail, copy the current

@@ -140,12 +140,21 @@
 }
 
 # ───────────────────────────────────────────────────────────────────────────
-# Supabase Studio — full database admin. Two locks: source-IP and basic auth.
+# Supabase Studio — full database admin.
 #
-# Best practice for an internal tool: install Tailscale on the VPS and point
-# studio.<domain> at the tailnet IP so it is not resolvable from the internet
-# at all. STUDIO_ALLOWED_CIDRS defaults to Tailscale plus loopback, so a public
-# DNS record alone cannot expose the login prompt.
+# Default posture is two locks: source-IP (STUDIO_ALLOWED_CIDRS, Tailscale +
+# loopback) and basic auth. Best practice for an internal tool: install
+# Tailscale on the VPS and point studio.<domain> at the tailnet IP so it is
+# not resolvable from the internet at all.
+#
+# If you need Studio reachable from arbitrary IPs (no Tailscale/VPN), set
+# STUDIO_ALLOWED_CIDRS="0.0.0.0/0 ::/0" in .env. That drops the IP lock and
+# leaves basic auth as the only gate — pair it with per-user credentials
+# (below) and run scripts/setup-studio-fail2ban.sh so repeated failed logins
+# get banned at the firewall instead of just retried forever.
+#
+# basic_auth takes one "user hash" pair per line — add a line per person who
+# needs a login. Remove the _2 line entirely if only one person needs access.
 # ───────────────────────────────────────────────────────────────────────────
 {$STUDIO_DOMAIN} {
 	encode zstd gzip
@@ -156,6 +165,7 @@
 
 		basic_auth {
 			{$STUDIO_BASIC_AUTH_USER} {$STUDIO_BASIC_AUTH_HASH}
+			{$STUDIO_BASIC_AUTH_USER_2} {$STUDIO_BASIC_AUTH_HASH_2}
 		}
 
 		reverse_proxy studio:3000
