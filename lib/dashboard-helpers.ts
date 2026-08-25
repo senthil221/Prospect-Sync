@@ -111,6 +111,11 @@ export function prospectFieldValue(prospect: Prospect, field: string) {
   }
   if (field === "__seniority") return String(prospect.seniority || "");
   if (field === "__department") return String(prospect.department || "");
+  // Classifier outputs. Blank means the keyword lists could not resolve that half of
+  // the title; it shows up in the gaps report rather than being guessed at.
+  if (field === "__title_seniority_tier") return String(prospect.title_seniority || "");
+  if (field === "__title_department") return String(prospect.title_department || "");
+  if (field === "__title_sub_department") return String(prospect.title_sub_department || "");
   if (field === "__sub_department") {
     const data = parseAllData(prospect.all_data);
     const key = Object.keys(data).find((candidate) => { const normalized = candidate.toLowerCase().replace(/[^a-z0-9]/g, ""); return normalized === "subdepartments" || normalized === "subdepartment" || normalized === "subdepartmentname"; });

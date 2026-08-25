@@ -14,6 +14,29 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient();
   const missing = (result: { error?: { code?: string } | null }) => result.error?.code === "PGRST202" || result.error?.code === "42883";
+
+  // The three job-title classifier fields have their own values function. They live
+  // on prospect_index only -- prospect_filter_values_* reads the prospect_summaries
+  // view, whose fixed column list predates them.
+  if (["__title_department", "__title_sub_department", "__title_seniority_tier"].includes(field)) {
+    const classified = await supabase.rpc("title_class_filter_values_v1", {
+      p_field: field,
+      p_search: search,
+      p_client_id: clientId,
+      p_limit: limit,
+    });
+    if (classified.error) {
+      const migrationMissing = missing(classified);
+      return Response.json(
+        { error: migrationMissing ? "Apply the latest database migration to enable job title classifier filters." : classified.error.message },
+        { status: migrationMissing ? 503 : 500 },
+      );
+    }
+    return Response.json({
+      values: (classified.data ?? []).map((item: { value: unknown; match_count: unknown }) => ({ value: String(item.value), count: Number(item.match_count ?? 0) })),
+    });
+  }
+
   // v3 reads the flat prospect_index; v2 (identical semantics) is the fallback before migration.
   let result = await supabase.rpc("prospect_filter_values_v3", {
     p_field: field,

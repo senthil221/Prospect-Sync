@@ -1,0 +1,217 @@
+keyword,tier,notes
+# tier is one of: owner c_suite vp director manager senior_ic entry none
+# "none" consumes its tokens and contributes no rank. It exists so that a phrase
+# which merely CONTAINS a seniority word can stop that word from firing --
+# "lead generation" must not make someone a senior IC. Longest phrase wins, so a
+# "none" row always beats the shorter row it is meant to suppress.
+lead generation,none,Stops the lead row firing on Lead Generation Executive
+lead gen,none,Stops the lead row firing
+demand generation,none,
+head hunter,none,Stops the head row firing
+head hunting,none,
+head office,none,Location word, not a role
+executive assistant to the ceo,entry,Demotion override; must beat ceo
+executive assistant to the md,entry,Demotion override; must beat md
+executive assistant to the chairman,entry,Demotion override
+assistant to the managing director,entry,Demotion override
+assistant to the ceo,entry,Demotion override
+assistant vice president,vp,India/banking AVP written out
+associate vice president,vp,India/banking AVP written out
+senior vice president,vp,
+executive vice president,vp,
+corporate vice president,vp,
+group vice president,vp,
+regional vice president,vp,
+first vice president,vp,Banking title
+deputy vice president,vp,
+vice president,vp,
+assistant general manager,director,AGM
+associate general manager,director,AGM
+deputy general manager,director,DGM
+chief general manager,director,CGM
+senior general manager,director,
+group general manager,director,
+general manager,director,GM
+company secretary,c_suite,Also a Legal department keyword; the two scans are independent
+chief executive officer,c_suite,
+chief operating officer,c_suite,
+chief financial officer,c_suite,
+chief technology officer,c_suite,
+chief technical officer,c_suite,
+chief information officer,c_suite,
+chief information security officer,c_suite,
+chief marketing officer,c_suite,
+chief revenue officer,c_suite,
+chief commercial officer,c_suite,
+chief human resources officer,c_suite,
+chief people officer,c_suite,
+chief product officer,c_suite,
+chief data officer,c_suite,
+chief digital officer,c_suite,
+chief analytics officer,c_suite,
+chief legal officer,c_suite,
+chief compliance officer,c_suite,
+chief risk officer,c_suite,
+chief strategy officer,c_suite,
+chief security officer,c_suite,
+chief business officer,c_suite,
+chief growth officer,c_suite,
+chief customer officer,c_suite,
+chief sustainability officer,c_suite,
+chief investment officer,c_suite,
+chief medical officer,c_suite,
+chief scientific officer,c_suite,
+chief procurement officer,c_suite,
+chief supply chain officer,c_suite,
+chief quality officer,c_suite,
+chief innovation officer,c_suite,
+chief administrative officer,c_suite,
+chief accounting officer,c_suite,
+chief of staff,c_suite,
+chairman and managing director,c_suite,CMD written out
+joint managing director,c_suite,
+deputy managing director,c_suite,
+managing director,c_suite,
+non executive director,c_suite,Board seat
+independent director,c_suite,Board seat
+whole time director,c_suite,India statutory role
+executive director,c_suite,ED
+board member,c_suite,
+board of directors,c_suite,
+vice chairman,c_suite,
+president and ceo,c_suite,
+group president,c_suite,
+country head,director,
+country manager,director,Must beat the bare manager row
+country director,director,
+director general,director,GCC / public sector
+regional director,director,
+managing partner,owner,
+senior partner,owner,
+founding partner,owner,
+general partner,owner,
+equity partner,owner,
+name partner,owner,
+channel partner manager,manager,Partner here is a channel word, not an owner
+partner account manager,manager,
+partner marketing manager,manager,
+partner manager,manager,
+partnership manager,manager,
+co founder,owner,Normalizer turns co-founder into co founder
+cofounder,owner,
+founder s office,owner,Normalizer turns founder's office into founder s office
+sole proprietor,owner,
+self employed,owner,
+business owner,owner,
+proprietor,owner,
+promoter,owner,
+founder,owner,
+owner,owner,
+partner,owner,
+chairman,c_suite,
+chairperson,c_suite,
+chairwoman,c_suite,
+president,c_suite,
+cmd,c_suite,
+ceo,c_suite,
+coo,c_suite,
+cfo,c_suite,
+cto,c_suite,
+cio,c_suite,
+ciso,c_suite,
+cmo,c_suite,
+cro,c_suite,
+chro,c_suite,
+cpo,c_suite,
+cdo,c_suite,
+cso,c_suite,
+cco,c_suite,
+cxo,c_suite,
+md,c_suite,Managing Director; skipped when the company looks like a healthcare provider
+svp,vp,
+evp,vp,
+avp,vp,
+dvp,vp,
+vp,vp,
+head of department,director,
+department head,director,
+division head,director,
+global head,director,
+group head,director,
+regional head,director,
+national head,director,
+head of,director,
+head,director,Token-boundary match only; never matches headhunter
+directeur,director,French
+direktor,director,German / Nordic
+director,director,
+assistant director,manager,Demotion below director
+deputy director,manager,Demotion below director
+associate director,manager,Demotion below director
+general secretary,director,
+senior manager,manager,
+group manager,manager,
+national manager,manager,
+regional manager,manager,
+zonal manager,manager,
+area manager,manager,
+branch manager,manager,
+plant manager,manager,
+program manager,manager,
+programme manager,manager,
+project manager,manager,
+product manager,manager,
+account manager,manager,
+district manager,manager,
+territory manager,manager,
+gerente,manager,Spanish
+responsable,manager,French
+manager,manager,
+assistant manager,entry,Demotion override; must beat manager
+deputy manager,entry,Demotion override
+associate manager,entry,Demotion override
+management trainee,entry,
+graduate trainee,entry,
+principal architect,senior_ic,
+principal engineer,senior_ic,
+principal consultant,senior_ic,
+principal scientist,senior_ic,
+distinguished engineer,senior_ic,
+senior staff engineer,senior_ic,
+staff engineer,senior_ic,
+technical lead,senior_ic,
+tech lead,senior_ic,
+team lead,senior_ic,
+team leader,senior_ic,
+squad lead,senior_ic,
+senior engineer,senior_ic,
+senior developer,senior_ic,
+senior architect,senior_ic,
+senior consultant,senior_ic,
+fellow,senior_ic,
+lead,senior_ic,
+principal,senior_ic,
+architect,senior_ic,
+consultant,senior_ic,
+specialist,senior_ic,
+senior associate,entry,
+senior executive,entry,India: executive is a junior marker
+senior officer,entry,
+senior analyst,entry,
+executive assistant,entry,Also an Admin department keyword
+personal assistant,entry,Also an Admin department keyword
+executive,entry,India convention: junior individual contributor
+officer,entry,India convention: junior individual contributor
+associate,entry,
+analyst,entry,
+coordinator,entry,
+administrator,entry,
+assistant,entry,
+representative,entry,
+agent,entry,
+apprentice,entry,
+trainee,entry,
+intern,entry,
+internship,entry,
+fresher,entry,
+junior,entry,

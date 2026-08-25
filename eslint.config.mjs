@@ -14,6 +14,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Local scratch checkouts. They hold whole copies of this repo at other
+    // revisions, so linting them buries the real findings under tens of
+    // thousands of duplicates. Matches the tsconfig "exclude" list.
+    "work/**",
+    "outputs/**",
+    ".codex-worktrees/**",
   ]),
   eslint.configs.recommended,
   ...tseslint.configs.recommended,

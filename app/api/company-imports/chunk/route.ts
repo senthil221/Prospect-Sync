@@ -43,9 +43,16 @@ export async function POST(request: Request) {
       sourceRowNumber: Math.max(2, Math.round(Number(row.sourceRowNumber ?? rowOffset + index + 2))),
     };
   });
-  const { data, error } = await createAdminClient().rpc("import_company_batch_v2", { p_import_id: importId, p_rows: rows, p_row_offset: rowOffset });
+  const supabase = createAdminClient();
+  const args = { p_import_id: importId, p_rows: rows, p_row_offset: rowOffset };
+  const isMissing = (candidate: { code?: string } | null) => candidate?.code === "PGRST202" || candidate?.code === "42883";
+  // v3 applies the merge mode stored on the import row. v2 is the pre-merge-mode
+  // name and, once the migration is applied, simply forwards to v3 -- so this
+  // fallback only matters while a deployed build is ahead of the database.
+  let { data, error } = await supabase.rpc("import_company_batch_v3", args);
+  if (isMissing(error)) ({ data, error } = await supabase.rpc("import_company_batch_v2", args));
   if (error) {
-    const missing = error.code === "PGRST202" || error.code === "42883";
+    const missing = isMissing(error);
     return Response.json({ error: missing ? "Apply the latest database migration to enable company imports." : error.message }, { status: missing ? 503 : 500 });
   }
   const summary = Array.isArray(data) ? data[0] : data;

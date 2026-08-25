@@ -71,19 +71,25 @@ test("geography is one filter, not three, in both panels", async () => {
 
   // ...and the three parts are not offered as separate filters anywhere. They
   // remain real columns for exports and enrichment; they are just not three
-  // things to filter on.
-  assert.match(people, /const optionalFilters: FilterDefinition\[\] = \[\];/);
-  assert.match(companies, /const companyDetailFilters: CompanyFilterDefinition\[\] = \[\];/);
+  // things to filter on. Asserted by absence rather than by the filter lists
+  // being literally empty, so an unrelated filter (Tags) can live there without
+  // weakening the guarantee this test exists for.
+  for (const part of ["__city", "__state", "__country", "__company_city", "__company_state", "__company_country"]) {
+    assert.ok(!people.includes(`id: "${part}"`), `${part} must not be a People filter`);
+    assert.ok(!companies.includes(`id: "${part}"`), `${part} must not be a Company filter`);
+  }
 
   // A company file whose geography is a single Location column must import, so
-  // the three parts are no longer individually mandatory.
+  // the three parts are not individually mandatory. Nor is any detail column:
+  // identity alone is required, and geography is named as one line in the
+  // advisory list of what a partial import leaves untouched.
   assert.match(schema, /companyGeographyFields/);
-  const requiredBlock = schema.slice(
-    schema.indexOf("requiredCompanyImportFields = ["),
-    schema.indexOf("] as const", schema.indexOf("requiredCompanyImportFields = [")),
+  const detailBlock = schema.slice(
+    schema.indexOf("companyDetailFields = ["),
+    schema.indexOf("] as const", schema.indexOf("companyDetailFields = [")),
   );
   for (const part of ["Company City", "Company State", "Company Country"]) {
-    assert.ok(!requiredBlock.includes(part), `${part} must not be individually required`);
+    assert.ok(!detailBlock.includes(part), `${part} must not be listed individually`);
   }
   assert.match(schema, /"Company Location \(or Company City \/ State \/ Country\)"/);
 });

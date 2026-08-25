@@ -63,6 +63,56 @@ Use the **Email provider type** filter with `SEG` to isolate MX-visible secure e
 
 MX records only reveal services that receive mail for the domain. API-only or post-delivery security products do not change MX records and therefore cannot be identified reliably by this scan; those domains retain their visible mailbox provider instead of being guessed.
 
-## Safe deletion
+## Master data isolation
 
-Imports, lists, and clients can be removed from the dashboard after confirmation. Cleanup is transactional: client-list links are removed first, and an optional orphan cleanup deletes a master prospect only when no remaining client list uses it. Companies are removed only when no master prospect references them.
+The People database and the Company database are storage. Clients and lists are views onto that storage, held together by `list_memberships` and `list_rows`.
+
+**Deleting anything on the client side can never delete a master record.** Removing a client, a list, an import, or a single person from a list removes only the links; the prospect and the company stay exactly as they are, available to every other client. This is enforced in the database, not just in the UI: `delete_client_with_cleanup`, `delete_list_with_cleanup`, and `delete_import_with_cleanup` have no code path that reaches `prospects` or `companies`, and the `cleanup_orphaned_master_records` function that used to delete "orphaned" master rows has been dropped outright. Their `p_delete_orphans` argument is still accepted, for older deployed builds that pass it, but is inert.
+
+The reverse direction is unchanged and intended: deleting a person from the People database also removes their list links, and deleting a company unlinks its people (they survive, without a company).
+
+### Pushing people from master into a list
+
+Select people in the People database — a page, a selection across pages, or everything matching the current filters — and choose **Add to client list**. They are linked into the chosen list (new or existing); anyone already on it is left alone rather than duplicated, and nothing about the master record changes.
+
+Each push is recorded as an import row, so it appears in the Imports panel with its provenance and can be undone in one click exactly like a CSV upload.
+
+## Company duplicate handling
+
+A company row in an upload matches a stored company by normalized website first, then by normalized name when at least one of the two has no website. Every company upload chooses what happens on a match:
+
+| Mode | Behaviour |
+| --- | --- |
+| **Fill in what's missing** (default) | Only blanks are filled. Nothing already stored is changed. |
+| **Let this file win** | Stored values are replaced wherever this file supplies one. Fields the file does not have are left alone, so a narrow CSV cannot blank out data you already collected. |
+| **Skip matches entirely** | Matched companies are untouched and counted as skipped. Only new companies are written. |
+
+The mode is stored on the import, so a resumed upload continues under the mode it started with.
+
+## Job title classifier
+
+Every prospect's raw job title is classified into a department (one of 18), an optional sub-department, and a seniority tier (`owner` · `c_suite` · `vp` · `director` · `manager` · `senior_ic` · `entry`). It is deterministic — two keyword scans over a normalized copy of the title, no AI and no network call — and it runs automatically on every write.
+
+The raw title is never modified. Results land in separate columns (`title_seniority`, `title_department`, `title_sub_department`, `title_is_former`) beside the `Seniority`/`Departments` columns that came with the upload, so the imported values are preserved and the classifier can be re-run at any time without destroying data. Filter on them under **From job title** in the filter panel, add them as table columns, or include them in a CSV export.
+
+### Improving the keyword lists
+
+The lists are data, in `data/seniority_map.csv` and `data/department_map.csv`. Editing them needs no deploy.
+
+1. See which titles are not resolving, worst first:
+   ```bash
+   curl -s "$APP_URL/api/prospects/classify?missing=any&limit=200"
+   ```
+2. Add keywords to the CSVs. Longest phrase wins, so `assistant manager` overrides `manager`. A `none` tier consumes tokens without contributing a rank, which is how `lead generation` stops `lead` from firing.
+3. Push the lists to the database (upserts what is present, deletes what you removed):
+   ```bash
+   node scripts/sync-title-keywords.mjs
+   ```
+4. Re-classify the prospects the change affects. Repeat while `remaining` is `true`:
+   ```bash
+   curl -s -X POST "$APP_URL/api/prospects/classify"
+   ```
+
+Any keyword change timestamps the lists, and step 4 only revisits prospects classified before that timestamp — it is not a full-table rebuild.
+
+Known limitations, accepted by design: `md` is read as Managing Director except at a company that looks like a healthcare provider; bare function words (`Sales`) carry a department but no seniority; multi-department titles take the earliest-mentioned department; and non-Latin scripts are out of scope and land in the gaps report.

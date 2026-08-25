@@ -9,6 +9,8 @@ export type TabItem<T extends string> = {
   count?: number | string;
   /** Optional leading icon — pass an <AppIcon/>, not a unicode glyph. */
   icon?: ReactNode;
+  /** Optional hover explanation, for a label or count that needs one word more. */
+  hint?: string;
 };
 
 type TabsProps<T extends string> = {
@@ -98,6 +100,7 @@ export default function Tabs<T extends string>({ items, value, onChange, variant
             aria-selected={selected}
             aria-controls={`tabpanel-${item.id}`}
             tabIndex={selected ? 0 : -1}
+            title={item.hint}
             className={selected ? "active" : ""}
             ref={(node) => {
               if (node) tabRefs.current.set(item.id, node);

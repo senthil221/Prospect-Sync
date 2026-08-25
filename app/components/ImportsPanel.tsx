@@ -2,10 +2,12 @@
 
 import { ChangeEvent, useEffect, useState } from "react";
 import { mapProspect } from "../../db/normalize";
+import { companyMergeModeLabels, companyMergeModes, defaultCompanyMergeMode, type CompanyMergeMode } from "../../lib/company-merge-mode";
 import { commonDataSources } from "../../lib/data-source";
 import { api } from "../../lib/dashboard-api";
 import { deriveListName, formatNumber, readCsvPreview, readImportTable } from "../../lib/dashboard-helpers";
-import { companyImportFields, missingCompanyImportFields, missingRequiredFields, requiredPersonImportFields, resolvedImportFields, skipImportField, suggestedCompanyImportField, suggestedPersonImportField } from "../../lib/import-schema";
+import { companyImportFields, missingCompanyImportFields, missingRequiredFields, requiredPersonImportFields, resolvedImportFields, skipImportField, suggestedCompanyImportField, suggestedPersonImportField, unmappedCompanyDetailFields } from "../../lib/import-schema";
+import { parsePastedCompanyTable } from "../../lib/paste-table";
 import { importHeadersMatch } from "../../lib/import-resume";
 import { unassignedClientId } from "../../lib/import-owner";
 import { canonicalImportFields } from "../../lib/prospect-field-definitions";
@@ -78,31 +80,83 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
   </section>;
 }
 
+// A company row that matches one already in the database can be handled three ways.
+// This is the single most consequential choice in a company upload -- "let this file
+// win" rewrites stored values -- so it is a visible set of radios with the
+// consequence spelled out, not a dropdown default nobody reads.
+function MergeModeChooser({ mode, disabled, onChange }: { mode: CompanyMergeMode; disabled: boolean; onChange: (mode: CompanyMergeMode) => void }) {
+  return <fieldset className="merge-mode-chooser">
+    <legend>When a company is already in the database</legend>
+    <p className="merge-mode-hint">Matched by website first, then by company name when either side has no website.</p>
+    {companyMergeModes.map((option) => <label key={option} htmlFor={`company-merge-mode-${option}`} className={mode === option ? "active" : ""}>
+      <input id={`company-merge-mode-${option}`} type="radio" name="company-merge-mode" value={option} checked={mode === option} disabled={disabled} onChange={() => onChange(option)}/>
+      <strong>{companyMergeModeLabels[option].label}</strong>
+      <small>{companyMergeModeLabels[option].description}</small>
+    </label>)}
+  </fieldset>;
+}
+
 function RequiredFieldList({ title, fields }: { title: string; fields: readonly string[] }) {
   return <div className="required-field-list"><strong>{title}</strong><div>{fields.map((field) => <span key={field}><AppIcon name="check" size={14}/> {field}</span>)}</div></div>;
 }
 
 function CompanyImportView({ dataSource, onComplete, resumeImport, onCancelResume, onResumed }: { dataSource: string; onComplete: () => Promise<void>; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
+  // A paste has no File behind it, so the import needs a name of its own for the
+  // audit trail. Everything downstream -- mapping, merge mode, chunked upload,
+  // resume -- works off `parsed` and does not care which of the two produced it.
+  const [inputMode, setInputMode] = useState<"file" | "paste">("file");
+  const [pastedText, setPastedText] = useState("");
+  const [pasteNotice, setPasteNotice] = useState("");
   const [parsed, setParsed] = useState<{ headers: string[]; rows: string[][] } | null>(null);
   const [fieldMap, setFieldMap] = useState<Record<string, string>>({});
   const [phase, setPhase] = useState<"idle" | "uploading" | "done">("idle");
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
   const [summary, setSummary] = useState<{ processed_rows: number; added_count: number; updated_count: number; skipped_count: number } | null>(null);
+  // What to do when an uploaded row matches a company already in the Company DB.
+  // A resumed import keeps whatever mode it started under -- see the note in the route.
+  const [mergeMode, setMergeMode] = useState<CompanyMergeMode>(defaultCompanyMergeMode);
   const mappedFields = parsed ? resolvedImportFields(parsed.headers, fieldMap, suggestedCompanyImportField) : [];
   const missingFields = missingCompanyImportFields(mappedFields);
-  const canSubmit = Boolean(file && parsed?.rows.length && dataSource && !missingFields.length && phase === "idle");
+  const unmappedDetails = parsed ? unmappedCompanyDetailFields(mappedFields) : [];
+  const sourceName = inputMode === "paste" ? `Pasted companies ${new Date().toISOString().slice(0, 10)}` : file?.name ?? "";
+  const hasSource = inputMode === "paste" ? Boolean(pastedText.trim()) : Boolean(file);
+  const canSubmit = Boolean(hasSource && parsed?.rows.length && dataSource && !missingFields.length && phase === "idle");
+
+  function applyParsedTable(table: { headers: string[]; rows: string[][] }) {
+    setFieldMap(Object.fromEntries(table.headers.map((header) => [header, suggestedCompanyImportField(header)])));
+    setParsed(table);
+  }
 
   async function pickCompanyFile(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0] ?? null;
     setFile(next); setParsed(null); setFieldMap({}); setMessage(""); setSummary(null); setProgress(0);
     if (!next) return;
     try {
-      const nextParsed = await readImportTable(next);
-      setFieldMap(Object.fromEntries(nextParsed.headers.map((header) => [header, suggestedCompanyImportField(header)])));
-      setParsed(nextParsed);
+      applyParsedTable(await readImportTable(next));
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Unable to read this company CSV."); }
+  }
+
+  function readPastedCompanies(text: string) {
+    setPastedText(text); setMessage(""); setSummary(null); setProgress(0);
+    if (!text.trim()) { setParsed(null); setFieldMap({}); setPasteNotice(""); return; }
+    try {
+      const table = parsePastedCompanyTable(text);
+      applyParsedTable(table);
+      setPasteNotice(table.inferredHeaders
+        ? `No header row found — ${formatNumber(table.rows.length)} rows read and the columns named from their contents. Correct any of them below.`
+        : `Header row detected — ${formatNumber(table.rows.length)} company rows read.`);
+    } catch (caught) {
+      setParsed(null); setFieldMap({}); setPasteNotice("");
+      setMessage(caught instanceof Error ? caught.message : "Unable to read this paste.");
+    }
+  }
+
+  function switchInputMode(next: "file" | "paste") {
+    setInputMode(next);
+    setParsed(null); setFieldMap({}); setMessage(""); setSummary(null); setProgress(0); setPasteNotice("");
+    if (next === "paste") setFile(null); else setPastedText("");
   }
 
   async function uploadCompanyRows(importId: string, table: { headers: string[]; rows: string[][] }, savedFieldMap: Record<string, string>, rowOffset: number) {
@@ -134,39 +188,72 @@ function CompanyImportView({ dataSource, onComplete, resumeImport, onCancelResum
       setProgress(Math.round(((index + rows.length) / table.rows.length) * 100));
     }
     const completed = await api<{ summary: { processed_rows: number; added_count: number; updated_count: number; skipped_count: number } }>("/api/company-imports/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId }) });
-    setSummary(completed.summary); setPhase("done"); setMessage("Company import complete. Names and websites are now available in the Company DB.");
+    setSummary(completed.summary); setPhase("done");
+    setMessage(`Company import complete. Companies already in the database were handled with “${companyMergeModeLabels[mergeMode].label}”.`);
   }
 
   async function startCompanyImport() {
-    if (!file || !parsed || !canSubmit) return;
+    if (!parsed || !canSubmit) return;
     try {
-      const started = await api<{ importId: string }>("/api/company-imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, totalRows: parsed.rows.length, dataSource, headers: parsed.headers, fieldMap }) });
+      const started = await api<{ importId: string }>("/api/company-imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: sourceName, totalRows: parsed.rows.length, dataSource, headers: parsed.headers, fieldMap, mergeMode }) });
       await uploadCompanyRows(started.importId, parsed, fieldMap, 0);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Company import failed."); setPhase("idle"); }
   }
 
-  async function resumeCompanyFile(event: ChangeEvent<HTMLInputElement>) {
-    const selected = event.target.files?.[0];
-    if (!selected || !resumeImport) return;
+  // A paste is resumed by pasting the same block again, exactly as a file import is
+  // resumed by re-selecting the same file: the header signature and the row count
+  // have to match either way before a single further row is sent.
+  async function resumeCompanyTable(label: string, read: () => Promise<{ headers: string[]; rows: string[][] }>) {
+    if (!resumeImport) return;
     try {
-      setPhase("uploading"); setMessage(`Validating ${selected.name} before resuming…`);
-      const [detail, table] = await Promise.all([
-        api<ImportResumeDetail>(`/api/imports/${encodeURIComponent(resumeImport.id)}`),
-        readImportTable(selected),
-      ]);
-      if (!detail.headerSignature || !importHeadersMatch(table.headers, detail.headerSignature)) throw new Error("The selected file headers do not match the interrupted import. Re-select the original file or start a new import instead.");
-      if (detail.totalRows !== table.rows.length) throw new Error(`The selected file has ${formatNumber(table.rows.length)} rows; the interrupted import expected ${formatNumber(detail.totalRows)}. Re-select the same file or start a new import instead.`);
-      setFile(selected); setParsed(table); setFieldMap(detail.fieldMap);
+      setPhase("uploading"); setMessage(`Validating ${label} before resuming…`);
+      const [detail, table] = await Promise.all([api<ImportResumeDetail>(`/api/imports/${encodeURIComponent(resumeImport.id)}`), read()]);
+      if (!detail.headerSignature || !importHeadersMatch(table.headers, detail.headerSignature)) throw new Error("The headers do not match the interrupted import. Supply the original rows, or start a new import instead.");
+      if (detail.totalRows !== table.rows.length) throw new Error(`This has ${formatNumber(table.rows.length)} rows; the interrupted import expected ${formatNumber(detail.totalRows)}. Supply the original rows, or start a new import instead.`);
+      setParsed(table); setFieldMap(detail.fieldMap);
+      if (detail.mergeMode) setMergeMode(detail.mergeMode);
       await uploadCompanyRows(detail.id, table, detail.fieldMap, detail.committedRowOffset);
       onResumed(detail.id);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Unable to resume the company import."); setPhase("idle"); }
   }
 
+  async function resumeCompanyFile(event: ChangeEvent<HTMLInputElement>) {
+    const selected = event.target.files?.[0];
+    if (!selected) return;
+    setFile(selected);
+    await resumeCompanyTable(selected.name, () => readImportTable(selected));
+  }
+
   if (phase === "done" && summary) return <div className="import-success"><span className="success-mark"><AppIcon name="check" size={14}/></span><p className="eyebrow">COMPANY IMPORT COMPLETE</p><h2>Your Company DB is updated.</h2><p>{message}</p><div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(summary.added_count)}</strong><span>Companies added</span></div><div><strong>{formatNumber(summary.updated_count)}</strong><span>Companies matched</span></div><div><strong>{formatNumber(summary.skipped_count)}</strong><span>Rows skipped</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
 
-  if (resumeImport) return <div className="resume-import-card panel"><p className="eyebrow">RESUME COMPANY IMPORT</p><h3>{resumeImport.fileName}</h3><p>Interrupted — resume from row {formatNumber(resumeImport.resumeFromRow)} of {formatNumber(resumeImport.totalRows)}.</p><label className="dropzone"><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={phase !== "idle"} onChange={(event) => void resumeCompanyFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span><strong>Re-select the same file</strong><small>Its headers and row count will be verified before upload resumes.</small></label>{phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="secondary" disabled={phase !== "idle"} onClick={onCancelResume}>Start a new import instead</button></div>;
+  if (resumeImport) return <div className="resume-import-card panel"><p className="eyebrow">RESUME COMPANY IMPORT</p><h3>{resumeImport.fileName}</h3><p>Interrupted — resume from row {formatNumber(resumeImport.resumeFromRow)} of {formatNumber(resumeImport.totalRows)}.</p><label className="dropzone"><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={phase !== "idle"} onChange={(event) => void resumeCompanyFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span><strong>Re-select the same file</strong><small>Its headers and row count will be verified before upload resumes.</small></label><div className="resume-paste"><label><span>…or paste the same rows again</span><textarea aria-label="Paste the same company rows to resume" rows={4} disabled={phase !== "idle"} value={pastedText} onChange={(event) => setPastedText(event.target.value)} placeholder="Paste the original block to resume a pasted import"/></label><button className="secondary" disabled={phase !== "idle" || !pastedText.trim()} onClick={() => void resumeCompanyTable("the pasted rows", async () => parsePastedCompanyTable(pastedText))}>Resume from paste</button></div>{phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="secondary" disabled={phase !== "idle"} onClick={onCancelResume}>Start a new import instead</button></div>;
 
-  return <div className="import-layout company-import-layout"><div className="import-copy"><p className="eyebrow">COMPANY CSV IMPORT</p><h2>Import a complete company dataset.</h2><p>Map a company name or a website (either works), plus the company detail columns. Companies are matched by normalized website first and company name second.</p><RequiredFieldList title="Company columns" fields={companyImportFields}/></div><div className="import-card"><label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void pickCompanyFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span>{file ? <><strong>{file.name}</strong><small>{formatNumber(parsed?.rows.length)} company rows ready</small></> : <><strong>Choose a company CSV or Excel file</strong><small>A company name or website is required</small></>}</label>{parsed ? <><div className="mapping-list company-required-mapping">{parsed.headers.map((header) => <label key={header}><span title={header}>{header}</span><b><AppIcon name="arrow" size={14}/></b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Not mapped"} onChange={(event) => setFieldMap((current) => ({ ...current, [header]: event.target.value }))}><option>Not mapped</option><option>{skipImportField}</option>{companyImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Map required columns: ${missingFields.join(", ")}.` : "All required company columns are mapped."}</p></> : null}{phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="primary import-button" disabled={!canSubmit} onClick={() => void startCompanyImport()}>{phase === "uploading" ? "Processing…" : "Import companies"}</button></div></div>;
+  return <div className="import-layout company-import-layout">
+    <div className="import-copy">
+      <p className="eyebrow">COMPANY IMPORT</p>
+      <h2>Import companies from a file or a paste.</h2>
+      <p>A company name or a website is all that is required — either one identifies a company. Companies are matched by normalized website first and company name second, so a list of domains lands on the companies you already have rather than duplicating them.</p>
+      <RequiredFieldList title="Company columns" fields={companyImportFields}/>
+    </div>
+    <div className="import-card">
+      <div className="import-kind-switch import-input-switch" role="tablist" aria-label="How to supply the companies">
+        <button role="tab" aria-selected={inputMode === "file"} className={inputMode === "file" ? "active" : ""} disabled={phase !== "idle"} onClick={() => switchInputMode("file")}>Upload a file</button>
+        <button role="tab" aria-selected={inputMode === "paste"} className={inputMode === "paste" ? "active" : ""} disabled={phase !== "idle"} onClick={() => switchInputMode("paste")}>Paste rows</button>
+      </div>
+      {inputMode === "file"
+        ? <label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void pickCompanyFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span>{file ? <><strong>{file.name}</strong><small>{formatNumber(parsed?.rows.length)} company rows ready</small></> : <><strong>Choose a company CSV or Excel file</strong><small>A company name or website is required</small></>}</label>
+        : <div className="paste-zone"><label><span>Paste companies</span><textarea aria-label="Paste company rows" rows={9} disabled={phase !== "idle"} value={pastedText} onChange={(event) => readPastedCompanies(event.target.value)} placeholder={"Acme Corp\tacme.com\nGlobex\tglobex.com\n\nOne company per line. Names only, websites only, or both — tabs, commas or semicolons between columns. A header row is used if there is one."}/></label>{pasteNotice ? <p className="source-selected-note" role="status">{pasteNotice}</p> : null}</div>}
+      {parsed ? <>
+        <div className="mapping-list company-required-mapping">{parsed.headers.map((header) => <label key={header}><span title={header}>{header}</span><b><AppIcon name="arrow" size={14}/></b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Not mapped"} onChange={(event) => setFieldMap((current) => ({ ...current, [header]: event.target.value }))}><option>Not mapped</option><option>{skipImportField}</option>{companyImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div>
+        <p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Map a ${missingFields.join(", ")} column — one of the two identifies the company.` : `${formatNumber(parsed.rows.length)} rows ready to import.`}</p>
+        {!missingFields.length && unmappedDetails.length ? <p className="import-partial-note">Detail columns this import does not carry: {unmappedDetails.join(", ")}. They are left exactly as stored — no merge mode can blank out a value this import has nothing to say about.</p> : null}
+        <MergeModeChooser mode={mergeMode} disabled={phase !== "idle"} onChange={setMergeMode}/>
+      </> : null}
+      {phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}
+      {message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}
+      <button className="primary import-button" disabled={!canSubmit} onClick={() => void startCompanyImport()}>{phase === "uploading" ? "Processing…" : "Import companies"}</button>
+    </div>
+  </div>;
 }
 
 function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onCancelResume, onResumed }: { clients: ClientRecord[]; onComplete: () => Promise<void>; dataSource: string; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void }) {

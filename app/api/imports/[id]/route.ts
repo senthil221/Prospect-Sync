@@ -28,7 +28,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     kind = "companies";
     const companyImport = await supabase
       .from("company_imports")
-      .select("id,file_name,data_source,status,committed_row_offset,total_rows,field_headers,field_map,header_signature")
+      .select("id,file_name,data_source,status,committed_row_offset,total_rows,field_headers,field_map,header_signature,merge_mode")
       .eq("id", id)
       .maybeSingle();
     if (companyImport.error) return Response.json({ error: companyImport.error.message }, { status: 500 });
@@ -55,6 +55,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     headers: Array.isArray(row.field_headers) ? row.field_headers.map(String) : [],
     fieldMap: row.field_map && typeof row.field_map === "object" ? row.field_map : {},
     headerSignature: String(row.header_signature ?? ""),
+    // Resuming must continue with the mode the import started under; changing it
+    // halfway would apply two different rules to one file.
+    mergeMode: kind === "companies" ? String((row as { merge_mode?: unknown }).merge_mode ?? "enrich") : null,
   }, { headers: { "Cache-Control": "no-store" } });
 }
 

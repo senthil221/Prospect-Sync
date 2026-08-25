@@ -1114,3 +1114,49 @@ tr.row-blocked td:not(.select-column):not(.icp-column) { text-decoration: line-t
 .enrichment-sample span { display: inline-flex; align-items: baseline; gap: var(--space-2); padding: var(--space-1) var(--space-2); border: 1px solid var(--ph-border-strong); border-radius: var(--radius-full); background: var(--surface); color: var(--text-secondary); font-size: var(--text-2xs); }
 .enrichment-sample strong { color: var(--text-primary); font-size: var(--text-2xs); }
 .enrichment-sample .enrichment-more { border-style: dashed; }
+
+/* How a company upload resolves a row that matches a stored company. */
+.merge-mode-chooser { margin: var(--space-3) 0 var(--space-1); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); border: 1px solid var(--ph-border); border-radius: var(--radius-md); background: var(--ph-surface-soft); }
+.merge-mode-chooser legend { padding: 0 var(--space-1); color: var(--ph-brand-dark); font-size: var(--text-xs); font-weight: var(--weight-bold); }
+.merge-mode-hint { margin: 0 0 var(--space-1); color: var(--text-secondary); font-size: var(--text-2xs); line-height: 1.5; }
+.merge-mode-chooser label { padding: var(--space-2); display: grid; grid-template-columns: auto 1fr; align-items: start; column-gap: var(--space-2); row-gap: var(--space-1); border: 1px solid var(--ph-border); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; }
+.merge-mode-chooser label > input { grid-row: 1 / span 2; }
+.merge-mode-chooser label > strong, .merge-mode-chooser label > small { grid-column: 2; }
+.merge-mode-chooser label.active { border-color: var(--accent); background: var(--ph-brand-soft); }
+.merge-mode-chooser strong { font-size: var(--text-xs); }
+.merge-mode-chooser small { color: var(--text-secondary); font-size: var(--text-2xs); line-height: 1.5; }
+
+/* Companies arrive as a file or as a pasted block; the two share the mapping,
+   merge-mode and progress UI below, so only the input itself is switched. */
+.import-input-switch { margin-bottom: var(--space-3); }
+.paste-zone label > span { display: block; margin-bottom: var(--space-1); color: var(--text-secondary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.paste-zone textarea, .resume-paste textarea {
+  width: 100%; padding: var(--space-2); border: 1px solid var(--ph-border-strong); border-radius: var(--radius-md);
+  background: var(--surface); color: var(--text-primary); font-family: var(--ph-mono, ui-monospace, "SF Mono", Consolas, monospace);
+  font-size: var(--text-2xs); line-height: 1.6; resize: vertical;
+}
+.paste-zone textarea:focus, .resume-paste textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .08); outline: 0; }
+.paste-zone textarea::placeholder, .resume-paste textarea::placeholder { color: var(--text-disabled); }
+.paste-zone .source-selected-note { margin: var(--space-2) 0 0; font-size: var(--text-2xs); }
+.resume-paste { margin-top: var(--space-3); }
+.resume-paste > button { margin-top: var(--space-2); }
+/* A narrow import is legitimate, not an error: name the columns it leaves alone. */
+.import-partial-note { margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--ph-warning); border-radius: var(--radius-sm); background: var(--ph-warning-soft); color: var(--text-secondary); font-size: var(--text-2xs); line-height: 1.55; }
+
+/* Job title classifier: the undefined log and its re-run control. */
+.title-classifier { padding: var(--space-4); }
+.classifier-head { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); }
+.classifier-head strong { font-size: var(--text-sm); }
+.classifier-head p { max-width: 68ch; margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-2xs); line-height: 1.6; }
+.classifier-head code, .title-classifier tbody code { padding: 1px var(--space-1); border-radius: var(--radius-sm); background: var(--ph-surface-soft); color: var(--text-secondary); font-family: var(--ph-mono, ui-monospace, monospace); font-size: var(--text-2xs); }
+.classifier-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.classifier-actions select { height: 34px; padding: 0 var(--space-2); border: 1px solid var(--ph-border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text-primary); font-size: var(--text-2xs); }
+.classifier-summary { margin-top: var(--space-3); display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); }
+.classifier-summary > div { padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-1); border: 1px solid var(--ph-border-strong); border-radius: var(--radius-md); background: var(--surface); }
+.classifier-summary strong { font-size: var(--text-md); font-variant-numeric: tabular-nums; }
+.classifier-summary span { color: var(--text-secondary); font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: .06em; }
+.title-classifier > .master-table-wrap { margin-top: var(--space-3); }
+.classifier-missing { padding: var(--space-1) var(--space-2); border-radius: var(--radius-full); background: var(--ph-warning-soft); color: var(--ph-warning); font-size: var(--text-2xs); font-weight: var(--weight-semibold); white-space: nowrap; }
+.classifier-missing.both { background: var(--danger-soft); color: var(--danger); }
+.classifier-empty { margin: var(--space-4) 0 0; padding: var(--space-6); border: 1px dashed var(--ph-border-strong); border-radius: var(--radius-md); color: var(--text-secondary); font-size: var(--text-xs); text-align: center; }
+@media (max-width: 720px) { .classifier-actions { width: 100%; } }

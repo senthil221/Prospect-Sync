@@ -28,10 +28,26 @@ const mainFilters: FilterDefinition[] = [
   { id: "__esp_type", label: "ESP", description: "Matches the ESP or the email provider type (e.g. SEG)." },
 ];
 
+// Derived from the job title by the deterministic classifier, not from the uploaded
+// Seniority/Departments columns -- so they are consistent across data sources even
+// when the file's own columns are blank or use a different vocabulary.
+const classifierFilters: FilterDefinition[] = [
+  { id: "__title_department", label: "Department (from title)", description: "One of 18 departments worked out from the job title itself." },
+  { id: "__title_sub_department", label: "Sub-department (from title)", description: "The finer slice, where the title is specific enough to tell. Titles that only identify the department have no sub-department, so pair this with the department filter rather than using it alone." },
+  { id: "__title_seniority_tier", label: "Seniority tier (from title)", description: "owner · c_suite · vp · director · manager · senior_ic · entry" },
+];
+
 // City / state / country are deliberately NOT filters. "Location" matches all
 // three at once, which is the whole point of having it. The columns still exist
 // and are still exported — they just are not three things to filter on.
-const optionalFilters: FilterDefinition[] = [];
+//
+// Tags are the one thing that belongs here: applied inside the workspace rather
+// than imported, so they sit with the kept custom fields rather than the mandatory
+// person fields. The value picker lists the tags that actually exist, which is the
+// whole point of having tagged a selection.
+const optionalFilters: FilterDefinition[] = [
+  { id: "__tags", label: "Tags", description: "Tags added from the bulk actions bar after selecting rows." },
+];
 
 const employeeRanges = [
   ["1:10", "1–10"], ["11:20", "11–20"], ["21:50", "21–50"], ["51:100", "51–100"],
@@ -39,6 +55,10 @@ const employeeRanges = [
   ["1001:2000", "1,001–2,000"], ["2001:5000", "2,001–5,000"],
   ["5001:10000", "5,001–10,000"], ["10001:", "10,001+"],
 ] as const;
+
+// Separators a pasted list can arrive with: commas, semicolons, pipes, newlines, and
+// tabs (a column copied out of a spreadsheet).
+const splitPattern = /[,;\n\t|]/;
 
 export function filterId(field: string, operator: ProspectFilterOperator) {
   return `${field}:${operator}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`;
@@ -49,7 +69,7 @@ function activeCount(filters: ProspectFilter[]) {
 }
 
 export function filterLabel(field: string, customFields: ProspectFieldDefinition[] = []) {
-  return [...mainFilters, ...optionalFilters, ...customFields].find((definition) => definition.id === field)?.label ?? field;
+  return [...mainFilters, ...classifierFilters, ...optionalFilters, ...customFields].find((definition) => definition.id === field)?.label ?? field;
 }
 
 export default function ApolloFilterPanel({ filters, customFields, clientId, onChange }: {
@@ -64,6 +84,7 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, onC
   useDismiss(panelRef, () => setExpanded(""), Boolean(expanded));
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const visibleMain = mainFilters.filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
+  const visibleClassifier = classifierFilters.filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
   const visibleOptional = [...optionalFilters, ...customFields].filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
 
   function replaceField(field: string, replacements: ProspectFilter[]) {
@@ -101,8 +122,9 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, onC
     <label className="filter-panel-search"><span><AppIcon name="search" size={14}/></span><input aria-label="Search filters" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search all filters…"/></label>
     <div className="apollo-filter-scroll">
       {visibleMain.length ? <div className="apollo-filter-group"><small>Main filters</small>{visibleMain.map(renderDefinition)}</div> : null}
+      {visibleClassifier.length ? <div className="apollo-filter-group"><small>From job title</small>{visibleClassifier.map(renderDefinition)}</div> : null}
       {visibleOptional.length ? <div className="apollo-filter-group optional"><small>More filters</small>{visibleOptional.map(renderDefinition)}</div> : null}
-      {!visibleMain.length && !visibleOptional.length ? <p className="filter-search-empty">No filters match “{search}”.</p> : null}
+      {!visibleMain.length && !visibleClassifier.length && !visibleOptional.length ? <p className="filter-search-empty">No filters match “{search}”.</p> : null}
     </div>
     {/* Applied state stays visible without scrolling the list back to the top. */}
     <div className="filter-panel-footer" role="status">
@@ -246,7 +268,9 @@ export function TokenValuePicker({ field, values, clientId, placeholder, valuesE
 
   function onPaste(event: ClipboardEvent<HTMLInputElement>) {
     const pasted = event.clipboardData.getData("text");
-    if (/[,;\n|]/.test(pasted)) { event.preventDefault(); addMany(pasted); }
+    // Tabs matter: a column copied out of Excel or Google Sheets arrives tab- and
+    // newline-separated, which used to paste in as one giant single value.
+    if (splitPattern.test(pasted)) { event.preventDefault(); addMany(pasted); }
   }
 
   const selected = new Set(values.map((value) => value.toLocaleLowerCase()));

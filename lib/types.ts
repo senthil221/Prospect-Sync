@@ -1,3 +1,4 @@
+import type { CompanyMergeMode } from "./company-merge-mode.ts";
 export type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" | "quality" | "imports";
 
 export type ProspectFilterOperator = "contains" | "equals" | "not_contains" | "not_equals" | "empty" | "not_empty" | "boolean" | "number_ranges";
@@ -15,7 +16,7 @@ export type DeleteRequest = { kind: DeleteKind; id: string; name: string; contex
 export type FileAudit = { headers: string[]; rows: number; populatedCells: number; invalidRows: number; sampled?: boolean };
 export type InterruptedImport = { id: string; kind: "prospects" | "companies"; fileName: string; dataSource: string; status: string; committedRowOffset: number; totalRows: number; resumeFromRow: number; createdAt: string };
 export type BackgroundImport = { id: string; fileName: string; status: string; committedRowOffset: number; totalRows: number | null; lastError: string; createdAt: string };
-export type ImportResumeDetail = { id: string; kind: "prospects" | "companies"; listId: string | null; fileName: string; dataSource: string; status: string; ingestionMode?: string; committedRowOffset: number; totalRows: number | null; processedRows?: number; uniqueAdded?: number; duplicatesLinked?: number; processedBytes?: number; fileSizeBytes?: number | null; lastError?: string; headers: string[]; fieldMap: Record<string, string>; headerSignature: string };
+export type ImportResumeDetail = { id: string; kind: "prospects" | "companies"; listId: string | null; fileName: string; dataSource: string; status: string; ingestionMode?: string; committedRowOffset: number; totalRows: number | null; processedRows?: number; uniqueAdded?: number; duplicatesLinked?: number; processedBytes?: number; fileSizeBytes?: number | null; lastError?: string; headers: string[]; fieldMap: Record<string, string>; headerSignature: string; mergeMode: CompanyMergeMode | null };
 export type SavedView = { id: string; name: string; definition: { filters: ProspectFilter[]; columns: string[]; sort: string; direction: "asc" | "desc" } };
 export type CoverageRow = { row: number; name: string; domain: string; status: "known" | "new"; matchedBy: string; matchedCompany: string; prospectCount: number; clientCount: number };
 export type QualitySummary = { total: number; missingEmail: number; missingTitle: number; missingLinkedin: number; missingCompany: number; missingDomain: number; staleRecords: number; potentialDuplicateGroups: number };

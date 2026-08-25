@@ -13,6 +13,7 @@ import { useDismiss } from "../use-dismiss";
 import { AppIcon, EmptyState } from "./DashboardUi";
 import ProspectTableRow from "./ProspectTableRow";
 import Tabs from "./Tabs";
+import TitleClassifierPanel from "./TitleClassifierPanel";
 
 const DENSITIES = ["compact", "default", "comfortable"] as const;
 type Density = (typeof DENSITIES)[number];
@@ -23,7 +24,8 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const [columnMenu, setColumnMenu] = useState(false);
   const columnMenuRef = useRef<HTMLDivElement>(null);
   useDismiss(columnMenuRef, () => setColumnMenu(false), columnMenu);
-  const [tab, setTab] = useState<"records" | "coverage">("records");
+  const [tab, setTab] = useState<"records" | "coverage" | "titles">("records");
+  const [classifierGaps, setClassifierGaps] = useState<number | null>(null);
   // Row density is a viewing preference, not data — it persists per browser.
   const [density, setDensity] = useState<Density>("default");
   const [tableScrollWidth, setTableScrollWidth] = useState(0);
@@ -126,6 +128,13 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const firstRecord = total ? (page - 1) * 50 + 1 : 0;
   const lastRecord = Math.min(page * 50, total);
   const displayedTotal = `${totalEstimated ? "≈" : ""}${formatNumber(total)}`;
+  // The unfiltered People DB total comes from PostgreSQL's maintained row estimate
+  // rather than a full count, so it can drift by a fraction of a percent until the
+  // next autovacuum. Anything narrower than the whole database is counted exactly
+  // and loses the "≈" -- say which of the two you are looking at.
+  const totalHint = totalEstimated
+    ? "Approximate: the whole-database total is PostgreSQL's maintained row estimate, so no full table count runs on every page load. Search or filter and the count becomes exact."
+    : "Exact count of the records matching this search and these filters.";
 
   useEffect(() => {
     if (!active) return;
@@ -403,17 +412,27 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
       value={tab}
       onChange={setTab}
       items={[
-        { id: "records" as const, label: "All prospects", count: displayedTotal, icon: <AppIcon name="database" size={15}/> },
+        { id: "records" as const, label: "All prospects", count: displayedTotal, hint: totalHint, icon: <AppIcon name="database" size={15}/> },
         { id: "coverage" as const, label: "Field coverage", count: formatNumber(fields.length), icon: <AppIcon name="columns" size={15}/> },
+        // Classifier maintenance is database-wide, so it is not offered inside a
+        // client workspace where the numbers would be a misleading subset.
+        ...(canDeleteMaster ? [{
+          id: "titles" as const,
+          label: "Job titles",
+          count: classifierGaps === null ? undefined : formatNumber(classifierGaps),
+          hint: "Maintain the job title classifier: see the titles it could not resolve and re-run it after editing the keyword lists.",
+          icon: <AppIcon name="target" size={15}/>,
+        }] : []),
       ]}
     />
-    {tab === "coverage" ? <article className="panel field-coverage">
+    {tab === "titles" ? <TitleClassifierPanel onGapCount={setClassifierGaps}/>
+      : tab === "coverage" ? <article className="panel field-coverage">
       <div className="coverage-summary"><span className="coverage-symbol"><AppIcon name="check" size={14}/></span><div><strong>{formatNumber(fields.length)} uploaded fields available</strong><p>Every field from your CSV is saved and ready to filter or display.</p></div></div>
       <div className="coverage-groups"><section><h3>Standard columns</h3><div>{standardProspectFields.map((field, index) => <span className={`field-chip tone-${index % 4}`} key={field.id}>{field.label}</span>)}</div></section><section><h3>Uploaded CSV fields</h3><div>{fields.map((field, index) => <span className={`field-chip tone-${index % 4}`} key={field}>{field}</span>)}</div></section></div>
     </article> : <div className={`people-layout ${filtersOpen ? "" : "filters-collapsed"}`}>
       <article className="panel results-panel">
         <div className="results-toolbar">
-          <div className="results-count"><strong>{displayedTotal} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `All ${displayedTotal} selected` : `Select all ${displayedTotal} across pages`}</button> : null}</div>
+          <div className="results-count"><strong title={totalHint}>{displayedTotal} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `All ${displayedTotal} selected` : `Select all ${displayedTotal} across pages`}</button> : null}</div>
           <div className="workspace-actions">
             <label><span className="sr-only">Saved ICP view</span><select defaultValue="" onChange={(event) => applyView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label>
             <button className="outline-button" onClick={() => void saveCurrentView()}><AppIcon name="star" size={14}/> Save view</button>

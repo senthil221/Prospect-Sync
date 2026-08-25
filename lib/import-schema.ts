@@ -10,17 +10,18 @@ export const requiredPersonImportFields = [
 ] as const;
 
 // A company row is identifiable by either its name or its website; at least one
-// of these must be mapped, but not both. The remaining fields are still required
-// so imported companies carry the full canonical profile.
+// of these must be mapped, but not both.
 export const companyIdentityFields = ["Company Name", "Website"] as const;
 
-// Geography is one requirement, not three. A file that carries a single
-// "Location" column satisfies it just as well as one with city, state and
-// country — which is how most exports actually ship it. Whichever arrives, the
-// import stores both the composed location and any parts it was given.
+// Geography is one thing, not three. A file that carries a single "Location"
+// column describes a company just as well as one with city, state and country —
+// which is how most exports actually ship it. Whichever arrives, the import stores
+// both the composed location and any parts it was given.
 export const companyGeographyFields = ["Company Location", "Company City", "Company State", "Company Country"] as const;
 
-export const requiredCompanyImportFields = [
+// The rest of the canonical company profile. Wanted on a complete dataset upload,
+// but not required -- see missingCompanyImportFields.
+export const companyDetailFields = [
   "#employees",
   "Industry",
   "Keywords",
@@ -31,7 +32,7 @@ export const requiredCompanyImportFields = [
 ] as const;
 
 // Every mappable company target, for the import column picker (identity first).
-export const companyImportFields = [...companyIdentityFields, ...companyGeographyFields, ...requiredCompanyImportFields] as const;
+export const companyImportFields = [...companyIdentityFields, ...companyGeographyFields, ...companyDetailFields] as const;
 
 const personAliases: Record<string, string> = {
   name: "Name", fullname: "Name", firstname: "First Name", lastname: "Last Name",
@@ -93,17 +94,24 @@ export function missingRequiredFields(required: readonly string[], mapped: strin
   return required.filter((field) => !present.has(field));
 }
 
-// Company imports need every detail field, at least one identity column
-// (Company Name or Website) — a website-only or name-only list is valid — and
-// some geography, which a single Company Location column satisfies just as well
-// as separate city / state / country.
+// A company import needs one identity column (Company Name or Website) and nothing
+// else. The detail columns used to be mandatory, which made the most common real
+// input -- a pasted column of names, or of domains -- impossible to import at all.
+// Every merge mode is blank-safe (see 20260825020000_company_merge_modes.sql), so a
+// narrow import can only add identities and fill blanks; it can never blank out a
+// detail already stored against a company.
 export function missingCompanyImportFields(mapped: string[]) {
-  const missing = missingRequiredFields(requiredCompanyImportFields, mapped);
+  return companyIdentityFields.some((field) => mapped.includes(field)) ? [] : [companyIdentityFields.join(" or ")];
+}
+
+// What a complete profile would have carried and this import does not. Advisory
+// only, so that uploading a partial dataset is a visible choice rather than a
+// silent one. Geography stays one line, not three: a single Company Location
+// column answers it just as well as separate city / state / country.
+export function unmappedCompanyDetailFields(mapped: string[]) {
+  const missing = missingRequiredFields(companyDetailFields, mapped);
   if (!companyGeographyFields.some((field) => mapped.includes(field))) {
     missing.unshift("Company Location (or Company City / State / Country)");
-  }
-  if (!companyIdentityFields.some((field) => mapped.includes(field))) {
-    missing.unshift(companyIdentityFields.join(" or "));
   }
   return missing;
 }

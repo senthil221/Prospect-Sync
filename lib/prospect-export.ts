@@ -57,6 +57,11 @@ export const standardExportColumns: Array<{ id: string; header: string; value: (
   { id: "__keywords", header: "Keywords", value: (row) => arrayText(row.keywords) },
   { id: "__seniority", header: "Seniority", value: (row) => row.seniority },
   { id: "__department", header: "Department", value: (row) => row.department },
+  // Derived from the job title by the classifier, alongside (never replacing) the
+  // Seniority/Department columns the file was imported with.
+  { id: "__title_seniority_tier", header: "Seniority Tier (from title)", value: (row) => row.title_seniority },
+  { id: "__title_department", header: "Department (from title)", value: (row) => row.title_department },
+  { id: "__title_sub_department", header: "Sub-department (from title)", value: (row) => row.title_sub_department },
   { id: "__city", header: "City", value: (row) => row.city },
   { id: "__state", header: "State", value: (row) => row.state },
   { id: "__country", header: "Country", value: (row) => row.country },
