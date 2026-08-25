@@ -23,14 +23,20 @@ const companyFilters: CompanyFilterDefinition[] = [
   { id: "__website", label: "Website", kind: "token", autocomplete: true, description: "Matches the company domain. Use the Bulk domains tab to paste a list." },
   { id: "__industry", label: "Industry", kind: "token", autocomplete: true },
   { id: "__employee_count", label: "# Employees", kind: "employee" },
-  { id: "__company_city", label: "Company city", kind: "token", autocomplete: true },
-  { id: "__company_state", label: "Company state", kind: "token", autocomplete: true },
-  { id: "__company_country", label: "Company country", kind: "token", autocomplete: true },
+  { id: "__company_location", label: "Company location", kind: "token", autocomplete: true, description: "One field for city, state and country — e.g. “London”, “California”, “India”." },
   { id: "__keywords", label: "Keywords", kind: "text", autocomplete: true, description: "Simple include/exclude, or Boolean with AND/OR/NOT." },
   { id: "__short_description", label: "Short description", kind: "text", description: "Search the company description. Boolean supported." },
   { id: "__founded_year", label: "Founded year", kind: "year" },
   { id: "__technologies", label: "Technologies", kind: "token", autocomplete: true },
   { id: "__total_funding", label: "Total funding", kind: "token", autocomplete: true },
+];
+
+// Reachable through "MORE FILTERS" for the rare case a single Location is too
+// coarse. Company location covers all three for everyday filtering.
+const companyDetailFilters: CompanyFilterDefinition[] = [
+  { id: "__company_city", label: "Company city", kind: "token", autocomplete: true },
+  { id: "__company_state", label: "Company state", kind: "token", autocomplete: true },
+  { id: "__company_country", label: "Company country", kind: "token", autocomplete: true },
 ];
 
 const employeeRanges = [
@@ -93,6 +99,7 @@ export default function CompanyFilterPanel({ filters, onChange }: {
   useDismiss(panelRef, () => setExpanded(""), Boolean(expanded));
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const visible = companyFilters.filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
+  const visibleDetail = companyDetailFilters.filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
   const total = activeCount(filters);
 
   function replaceField(field: string, replacements: ProspectFilter[]) {
@@ -166,7 +173,9 @@ export default function CompanyFilterPanel({ filters, onChange }: {
     {importError ? <p className="form-error" role="alert">{importError}</p> : null}
     <label className="filter-panel-search"><span>⌕</span><input aria-label="Search company filters" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search all filters…"/></label>
     <div className="apollo-filter-scroll">
-      {visible.length ? <div className="apollo-filter-group"><small>COMPANY FILTERS</small>{visible.map(renderDefinition)}</div> : <p className="filter-search-empty">No filters match “{search}”.</p>}
+      {visible.length ? <div className="apollo-filter-group"><small>COMPANY FILTERS</small>{visible.map(renderDefinition)}</div> : null}
+      {visibleDetail.length ? <div className="apollo-filter-group optional"><small>MORE FILTERS</small>{visibleDetail.map(renderDefinition)}</div> : null}
+      {!visible.length && !visibleDetail.length ? <p className="filter-search-empty">No filters match “{search}”.</p> : null}
     </div>
   </aside>;
 }
