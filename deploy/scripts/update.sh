@@ -91,6 +91,11 @@ set_app_image() {
   awk -v v="$image" -F= '$1=="APP_IMAGE"{print "APP_IMAGE=" v; next} {print}' .env > .env.tmp
   mv .env.tmp .env
   chmod 600 .env
+  # load_env exports APP_IMAGE. Shell environment has higher precedence than
+  # Compose's .env file, so update the current process too or Compose will
+  # quietly start the previous image even though the file is correct.
+  APP_IMAGE="$image"
+  export APP_IMAGE
 }
 
 wait_for_container() {

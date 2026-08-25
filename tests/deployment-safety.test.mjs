@@ -58,6 +58,7 @@ test("deployments retry transport failures and switch blue/green traffic only af
   assert.match(workflow, /ServerAliveInterval=30/);
   assert.match(workflow, /"\$status" -ne 255/);
   assert.match(update, /flock -w 600/);
+  assert.match(update, /APP_IMAGE="\$image"\s+export APP_IMAGE/);
   assert.match(compose, /app-blue:/);
   assert.match(compose, /app-green:/);
   assert.match(compose, /app-router:/);
