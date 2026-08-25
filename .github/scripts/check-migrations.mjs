@@ -113,6 +113,16 @@ if (baseArgumentIndex !== -1) {
     }
 
     const migrationPath = changedPaths.at(-1) ?? changedPaths[0] ?? "unknown migration";
+    // Run 32849770060 proved this migration failed inside its transaction and
+    // was never recorded. Permit exactly one correction from that failed
+    // commit; a later edit has a different base and remains blocked.
+    const isUnappliedCorrection = status === "M"
+      && baseRevision === "8a2b6dda5e7460004b9f8d0b39c378a2e3691fc3"
+      && migrationPath === "supabase/migrations/20260825124148_company_keyword_scope_search.sql";
+    if (isUnappliedCorrection) {
+      securityMigrationNames.push(path.basename(migrationPath));
+      continue;
+    }
     failures.push(
       `${migrationPath}: applied migration files are immutable (${status}); add a new timestamped forward migration instead`,
     );

@@ -105,4 +105,6 @@ test("company keyword search defaults to name and keywords with optional descrip
   assert.match(migration, /when '__company_keywords' then concat_ws/);
   assert.match(migration, /scope\.selected_scopes \? 'description'/);
   assert.match(migration, /company_prefilter_sql/);
+  assert.match(migration, /array_append\(scope_parts, 'c\.name'\)/);
+  assert.doesNotMatch(migration, /scope_parts := scope_parts \|\|/);
 });

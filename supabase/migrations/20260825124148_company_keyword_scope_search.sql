@@ -134,9 +134,9 @@ begin
         else '["name","keywords"]'::jsonb
       end;
       scope_parts := array[]::text[];
-      if selected_scopes ? 'name' then scope_parts := scope_parts || 'c.name'; end if;
-      if selected_scopes ? 'keywords' then scope_parts := scope_parts || 'array_to_string(c.keywords, '' | '')'; end if;
-      if selected_scopes ? 'description' then scope_parts := scope_parts || 'c.short_description'; end if;
+      if selected_scopes ? 'name' then scope_parts := array_append(scope_parts, 'c.name'); end if;
+      if selected_scopes ? 'keywords' then scope_parts := array_append(scope_parts, 'array_to_string(c.keywords, '' | '')'); end if;
+      if selected_scopes ? 'description' then scope_parts := array_append(scope_parts, 'c.short_description'); end if;
       if cardinality(scope_parts) = 0 then continue; end if;
       column_expr := 'concat_ws('' | '', ' || array_to_string(scope_parts, ', ') || ')';
     else
