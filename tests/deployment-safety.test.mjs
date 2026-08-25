@@ -37,7 +37,7 @@ test("restore, rollback, Studio, and backup guards fail closed", async () => {
   assert.match(update, /Returning traffic to \$\{ACTIVE_SLOT\}/);
   assert.match(update, /set_app_image "\$PREVIOUS_IMAGE"/);
   assert.match(update, /trap 'rollback_on_error \$\?' ERR/);
-  assert.ok(caddy.indexOf("respond @studio_external 403") < caddy.indexOf("basic_auth"));
+  assert.match(caddy, /route\s*\{[\s\S]*?respond @studio_external 403[\s\S]*?basic_auth\s*\{/);
   assert.match(caddy, /STUDIO_ALLOWED_CIDRS/);
   assert.match(backup, /Refusing to use broad backup directory/);
   assert.match(backup, /-name '20\[0-9\]/);
