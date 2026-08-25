@@ -42,7 +42,9 @@ export function prospectApiPath({ search = "", page = 1, sort = "created_at", di
 }
 
 export function encodeFilters(filters: ProspectFilter[]) {
-  return JSON.stringify(filters.map(({ field, operator, values }) => ({ field, operator, values })));
+  return JSON.stringify(filters.map(({ field, operator, values, scopes }) => ({
+    field, operator, values, ...(scopes?.length ? { scopes } : {}),
+  })));
 }
 
 export function companyApiPath({ search = "", page = 1, clientId = "", filters = [], peopleScope = null }: { search?: string; page?: number; clientId?: string; filters?: ProspectFilter[]; peopleScope?: PeopleScope | null }) {

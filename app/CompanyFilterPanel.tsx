@@ -4,12 +4,13 @@ import { ChangeEvent, useRef, useState } from "react";
 import { describeBulkMerge, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
 import { isXlsxFile, readXlsxRows } from "../lib/spreadsheet";
 import { filterId, IncludeExcludeFilter, TextBooleanFilter, type ProspectFilter } from "./ApolloFilterPanel";
+import type { CompanyKeywordScope } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
 import { AppIcon } from "./components/DashboardUi";
 
 const COMPANY_VALUES_ENDPOINT = "/api/companies/filter-values";
 
-type CompanyFieldKind = "text" | "token" | "employee" | "year";
+type CompanyFieldKind = "company_keywords" | "text" | "token" | "employee" | "year";
 type CompanyFilterDefinition = {
   id: string;
   label: string;
@@ -20,13 +21,12 @@ type CompanyFilterDefinition = {
 
 // Every one of these maps to a real companies column populated on import.
 const companyFilters: CompanyFilterDefinition[] = [
-  { id: "__company", label: "Company name", kind: "text", autocomplete: true, description: "Simple include/exclude, or Boolean with AND/OR/NOT." },
+  { id: "__company_keywords", label: "Company keywords", kind: "company_keywords", description: "Search company names and keywords together. Add description when you want broader coverage." },
+  { id: "__company", label: "Company name only", kind: "text", autocomplete: true, description: "Use for known accounts or imported company-name lists. Simple include/exclude and Boolean search are supported." },
   { id: "__website", label: "Website", kind: "token", autocomplete: true, description: "Matches the company domain. Use the Bulk domains tab to paste a list." },
   { id: "__industry", label: "Industry", kind: "token", autocomplete: true },
   { id: "__employee_count", label: "# Employees", kind: "employee" },
   { id: "__company_location", label: "Company location", kind: "token", autocomplete: true, description: "One field for city, state and country — e.g. “London”, “California”, “India”." },
-  { id: "__keywords", label: "Keywords", kind: "text", autocomplete: true, description: "Simple include/exclude, or Boolean with AND/OR/NOT." },
-  { id: "__short_description", label: "Short description", kind: "text", description: "Search the company description. Boolean supported." },
   { id: "__founded_year", label: "Founded year", kind: "year" },
   { id: "__technologies", label: "Technologies", kind: "token", autocomplete: true },
   { id: "__total_funding", label: "Total funding", kind: "token", autocomplete: true },
@@ -151,7 +151,9 @@ export default function CompanyFilterPanel({ filters, onChange }: {
       </button>
       {isExpanded ? <div className="apollo-filter-content">
         {definition.description ? <p className="apollo-filter-description">{definition.description}</p> : null}
-        {definition.kind === "employee"
+        {definition.kind === "company_keywords"
+          ? <CompanyKeywordFilter key={fieldFilters.map((filter) => filter.scopes?.join("|") ?? "default").join(";") || "default"} filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
+          : definition.kind === "employee"
           ? <RangeFilter field={definition.id} filters={fieldFilters} presets={employeeRanges} unknownLabel="# of employees is unknown" onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "year"
             ? <RangeFilter field={definition.id} filters={fieldFilters} presets={foundedYearRanges} unknownLabel="Founded year is unknown" minPlaceholder="e.g. 2005" maxPlaceholder="e.g. 2015" onChange={(next) => replaceField(definition.id, next)} />
@@ -183,6 +185,41 @@ export default function CompanyFilterPanel({ filters, onChange }: {
         : <span>No filters applied</span>}
     </div>
   </aside>;
+}
+
+const companyKeywordScopeOptions: Array<{ id: CompanyKeywordScope; label: string; note?: string }> = [
+  { id: "name", label: "Name" },
+  { id: "keywords", label: "Keywords" },
+  { id: "description", label: "Company description", note: "Broader coverage" },
+];
+
+function CompanyKeywordFilter({ filters, onChange }: { filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void }) {
+  const initialScopes = filters.find((filter) => filter.scopes?.length)?.scopes ?? ["name", "keywords"];
+  const [scopes, setScopes] = useState<CompanyKeywordScope[]>(initialScopes);
+
+  function updateScopes(scope: CompanyKeywordScope) {
+    const selected = scopes.includes(scope);
+    if (selected && scopes.length === 1) return;
+    const next = selected ? scopes.filter((item) => item !== scope) : [...scopes, scope];
+    setScopes(next);
+    if (filters.length) onChange(filters.map((filter) => ({ ...filter, scopes: next })));
+  }
+
+  return <div className="company-keyword-filter">
+    <fieldset className="company-keyword-scopes">
+      <legend>Search in</legend>
+      {companyKeywordScopeOptions.map((option) => <label key={option.id}>
+        <input type="checkbox" checked={scopes.includes(option.id)} disabled={scopes.includes(option.id) && scopes.length === 1} onChange={() => updateScopes(option.id)} />
+        <span>{option.label}{option.note ? <small>{option.note}</small> : null}</span>
+      </label>)}
+    </fieldset>
+    <p className="company-keyword-scope-note">Selected fields are searched together. Description increases recall and may return more companies.</p>
+    <TextBooleanFilter
+      definition={{ id: "__company_keywords", label: "Company keywords" }}
+      filters={filters}
+      onChange={(next) => onChange(next.map((filter) => ({ ...filter, scopes })))}
+    />
+  </div>;
 }
 
 // Merge a list of (already-normalized) domains into the __website include filter,

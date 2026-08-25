@@ -1,7 +1,8 @@
 export type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" | "quality" | "imports";
 
 export type ProspectFilterOperator = "contains" | "equals" | "not_contains" | "not_equals" | "empty" | "not_empty" | "boolean" | "number_ranges";
-export type ProspectFilter = { id: string; field: string; operator: ProspectFilterOperator; values: string[] };
+export type CompanyKeywordScope = "name" | "keywords" | "description";
+export type ProspectFilter = { id: string; field: string; operator: ProspectFilterOperator; values: string[]; scopes?: CompanyKeywordScope[] };
 
 export type ClientRecord = { id: string; name: string; list_count: number; prospect_count: number; cooldown_days?: number; icp_verified_count?: number; blocked_count?: number };
 export type ListRecord = { id: string; name: string; data_source: string; source_file_name: string; uploaded_rows: number; unique_added: number; duplicates_linked: number; prospect_count: number; created_at: string; field_count: number; field_headers: string[] };

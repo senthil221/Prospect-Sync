@@ -4,7 +4,7 @@ export type ProspectFilterOperator =
   | "contains" | "equals" | "not_contains" | "not_equals"
   | "empty" | "not_empty" | "boolean" | "number_ranges";
 
-export type ProspectFilter = { field: string; operator: ProspectFilterOperator; values: string[] };
+export type ProspectFilter = { field: string; operator: ProspectFilterOperator; values: string[]; scopes?: string[] };
 
 const allowedOperators = new Set<string>([
   "contains", "equals", "not_contains", "not_equals", "empty", "not_empty", "boolean", "number_ranges",
@@ -17,6 +17,8 @@ const allowedOperators = new Set<string>([
 // than an OR chain once a filter is large, so the query plan holds up.
 const maxFilterValues = 1000;
 const maxFilters = 40;
+const companyKeywordScopes = new Set(["name", "keywords", "description"]);
+const defaultCompanyKeywordScopes = ["name", "keywords"];
 
 // Sanitize an untrusted filters JSON string into a bounded, well-formed filter list.
 // Throws only when a Boolean expression fails to compile.
@@ -36,6 +38,11 @@ export function parseFilters(value: string | null): ProspectFilter[] {
     if (operator === "boolean") values = [compileBooleanSearch(values[0])];
     if (operator === "number_ranges") values = values.filter((range) => range === "unknown" || /^[0-9]+:[0-9]*$/.test(range));
     if (operator === "number_ranges" && !values.length) return [];
-    return [{ field, operator: operator as ProspectFilterOperator, values }];
+    const requestedScopes = Array.isArray(candidate.scopes) ? candidate.scopes : [];
+    const scopes = field === "__company_keywords"
+      ? [...new Set(requestedScopes.map((scope) => String(scope)).filter((scope) => companyKeywordScopes.has(scope)))].slice(0, 3)
+      : [];
+    return [{ field, operator: operator as ProspectFilterOperator, values,
+      ...(field === "__company_keywords" ? { scopes: scopes.length ? scopes : defaultCompanyKeywordScopes } : {}) }];
   });
 }

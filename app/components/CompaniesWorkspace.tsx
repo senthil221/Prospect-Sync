@@ -68,7 +68,7 @@ export function CompanyTable({ companies, total, covered, prospectTotal, page, p
   const [selectionQueryKey, setSelectionQueryKey] = useState("");
   const [deleteRequest, setDeleteRequest] = useState<{ mode: "ids" | "all_matching"; count: number; ids?: string[] } | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const selectionKey = JSON.stringify({ search: search.trim(), filters: filters.map(({ field, operator, values }) => ({ field, operator, values })), peopleScope });
+  const selectionKey = JSON.stringify({ search: search.trim(), filters: filters.map(({ field, operator, values, scopes }) => ({ field, operator, values, ...(scopes?.length ? { scopes } : {}) })), peopleScope });
   const selectionMatchesQuery = selectionQueryKey === selectionKey;
   const selectedCount = !selectionMatchesQuery ? 0 : selectionMode === "all_matching" ? Math.max(0, total - excludedIds.size) : selectedIds.size;
 
@@ -112,7 +112,7 @@ export function CompanyTable({ companies, total, covered, prospectTotal, page, p
     try {
       const body = deleteRequest.mode === "ids"
         ? { ids: deleteRequest.ids }
-        : { allMatching: true, search: search.trim(), filters: filters.map(({ field, operator, values }) => ({ field, operator, values })), excludedIds: [...excludedIds] };
+        : { allMatching: true, search: search.trim(), filters: filters.map(({ field, operator, values, scopes }) => ({ field, operator, values, ...(scopes?.length ? { scopes } : {}) })), excludedIds: [...excludedIds] };
       const result = await api<{ deleted: number }>("/api/companies", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       setCompanyNotice(`Deleted ${formatNumber(result.deleted)} compan${result.deleted === 1 ? "y" : "ies"} from the Company database.`);
       setDeleteRequest(null); clearSelection(); onRefresh?.();

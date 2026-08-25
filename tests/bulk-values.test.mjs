@@ -65,3 +65,20 @@ test("filter parsing stays bounded against a hostile payload", () => {
   const many = Array.from({ length: 100 }, () => ({ field: "__title", operator: "contains", values: ["x"] }));
   assert.equal(parseFilters(JSON.stringify(many)).length, 40);
 });
+
+test("company keyword scopes are defaulted, whitelisted, and preserved", () => {
+  const [defaults] = parseFilters(JSON.stringify([
+    { field: "__company_keywords", operator: "contains", values: ["cold email"] },
+  ]));
+  assert.deepEqual(defaults.scopes, ["name", "keywords"]);
+
+  const [scoped] = parseFilters(JSON.stringify([
+    { field: "__company_keywords", operator: "contains", values: ["deliverability"], scopes: ["description", "keywords", "private_column", "description"] },
+  ]));
+  assert.deepEqual(scoped.scopes, ["description", "keywords"]);
+
+  const [ordinary] = parseFilters(JSON.stringify([
+    { field: "__website", operator: "contains", values: ["example.com"], scopes: ["description"] },
+  ]));
+  assert.equal(ordinary.scopes, undefined);
+});

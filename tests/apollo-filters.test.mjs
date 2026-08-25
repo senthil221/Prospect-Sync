@@ -87,3 +87,22 @@ test("geography is one filter, not three, in both panels", async () => {
   }
   assert.match(schema, /"Company Location \(or Company City \/ State \/ Country\)"/);
 });
+
+test("company keyword search defaults to name and keywords with optional description", async () => {
+  const [panel, transport, migration] = await Promise.all([
+    readFile(new URL("../app/CompanyFilterPanel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/dashboard-api.ts", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260825124148_company_keyword_scope_search.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(panel, /id: "__company_keywords", label: "Company keywords"/);
+  assert.match(panel, /\["name", "keywords"\]/);
+  assert.match(panel, /Company description/);
+  assert.match(panel, /Broader coverage/);
+  assert.match(panel, /Description increases recall/);
+  assert.match(panel, /Company name only/);
+  assert.match(transport, /scopes\?\.length/);
+  assert.match(migration, /when '__company_keywords' then concat_ws/);
+  assert.match(migration, /scope\.selected_scopes \? 'description'/);
+  assert.match(migration, /company_prefilter_sql/);
+});
