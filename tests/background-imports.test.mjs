@@ -62,6 +62,13 @@ test("deployment runs storage and one bounded import worker", async () => {
   assert.match(bootstrap, /export PGPASSWORD="\$\{POSTGRES_PASSWORD:\?POSTGRES_PASSWORD is required\}"/);
   assert.match(bootstrap, /create role prospect_importer nologin noinherit/i);
   assert.match(bootstrap, /grant prospect_importer to authenticator/i);
+  // migrate.sh connects as postgres and CREATE OR REPLACE FUNCTION needs
+  // ownership, so anything created through Studio (which connects as
+  // supabase_admin) has to be handed back before migrations run — while leaving
+  // extension members like pg_trgm alone.
+  assert.match(bootstrap, /alter %s owner to postgres/i);
+  assert.match(bootstrap, /deptype = 'e'/);
+  assert.match(bootstrap, /still owned by supabase_admin/i);
   assert.match(compose, /PGUSER: authenticator/);
   assert.match(worker, /copyFrom\("copy prospect_import\.staged_rows/);
   assert.match(worker, /process_staged_batch_v1/);

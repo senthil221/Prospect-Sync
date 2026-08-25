@@ -80,6 +80,45 @@ psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
 
 	-- Studio and psql sessions get more rope, but not unlimited.
 	alter role postgres set idle_in_transaction_session_timeout = '300s';
+
+	-- Application objects belong to postgres ---------------------------------
+	-- scripts/migrate.sh connects as postgres, and CREATE OR REPLACE FUNCTION
+	-- requires ownership. Anything created through Studio or a psql session
+	-- opened as supabase_admin is therefore owned by the wrong role, and the
+	-- next migration that touches it fails the release with
+	-- "must be owner of function ...". That is not hypothetical: it is what
+	-- blocked the 20260826040000 release.
+	--
+	-- So hand ownership of the application's own public objects back to
+	-- postgres on every deploy. Extension members are excluded — pg_trgm and
+	-- unaccent are installed by supabase_admin and must stay that way — which
+	-- is what the pg_depend deptype 'e' test filters out.
+	do \$\$
+	declare
+	  obj record;
+	begin
+	  for obj in
+	    select 'function ' || p.oid::regprocedure::text as spec
+	    from pg_proc p
+	    join pg_namespace n on n.oid = p.pronamespace
+	    where n.nspname = 'public'
+	      and pg_get_userbyid(p.proowner) = 'supabase_admin'
+	      and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')
+	    union all
+	    select case c.relkind when 'v' then 'view ' when 'S' then 'sequence ' else 'table ' end
+	      || quote_ident(n.nspname) || '.' || quote_ident(c.relname)
+	    from pg_class c
+	    join pg_namespace n on n.oid = c.relnamespace
+	    where n.nspname = 'public'
+	      and c.relkind in ('r', 'p', 'v', 'S')
+	      and pg_get_userbyid(c.relowner) = 'supabase_admin'
+	      and not exists (select 1 from pg_depend d where d.objid = c.oid and d.deptype = 'e')
+	  loop
+	    execute format('alter %s owner to postgres', obj.spec);
+	    raise notice 'prospect: reassigned % to postgres', obj.spec;
+	  end loop;
+	end
+	\$\$;
 EOSQL
 
 # Assert the work actually landed. The failure mode this replaces was a script
@@ -93,4 +132,26 @@ if [[ -n "$missing" ]]; then
   exit 1
 fi
 
-echo "prospect: role logins, JWT settings, extensions and timeouts applied"
+# Same check for ownership. A release that reaches migrate.sh with application
+# objects still owned by supabase_admin fails halfway through, which is worse
+# than failing here with the list of what is wrong.
+misowned="$(psql -tAq --username supabase_admin --dbname "$DB" -c \
+  "select string_agg(name, ', ') from (
+     select p.oid::regprocedure::text as name
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and pg_get_userbyid(p.proowner) = 'supabase_admin'
+       and not exists (select 1 from pg_depend d where d.objid = p.oid and d.deptype = 'e')
+     union all
+     select n.nspname || '.' || c.relname
+     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'public' and c.relkind in ('r','p','v','S')
+       and pg_get_userbyid(c.relowner) = 'supabase_admin'
+       and not exists (select 1 from pg_depend d where d.objid = c.oid and d.deptype = 'e')
+   ) t")"
+
+if [[ -n "$misowned" ]]; then
+  echo "prospect: FAILED — still owned by supabase_admin, migrations will not be able to replace: ${misowned}" >&2
+  exit 1
+fi
+
+echo "prospect: role logins, JWT settings, extensions, timeouts and object ownership applied"
