@@ -5,6 +5,15 @@
 	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
 	servers {
 		trusted_proxies static private_ranges
+		# HTTP/3 (QUIC, over UDP/443) off. Caddy advertises it via Alt-Svc by
+		# default, and browsers that pick it up race it against plain TCP on
+		# the next request. When a network drops or mishandles UDP -- seen
+		# here as login POSTs failing with no response (misreported by Chrome
+		# as a CORS error) after an OPTIONS preflight succeeded over TCP --
+		# that shows up as an intermittent, hard-to-repro failure while curl
+		# and plain HTTPS keep working fine. h1/h2 over TCP has been solid
+		# through every test today; h3 has not.
+		protocols h1 h2
 	}
 }
 
