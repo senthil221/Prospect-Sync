@@ -272,6 +272,14 @@ services:
       - meta
       - rest
     environment:
+      # Docker sets HOSTNAME to the container ID by default, and Studio's
+      # entrypoint binds Next.js to it (next start -H "$HOSTNAME"). That means
+      # the server only listens on the container's bridge IP -- not loopback
+      # -- so the image's own healthcheck (fetch to localhost:3000) always
+      # fails with ECONNREFUSED even though every real request through the
+      # bridge network works fine. Same fix as the app service's HOSTNAME
+      # below: force it to bind everywhere.
+      HOSTNAME: "0.0.0.0"
       STUDIO_PG_META_URL: http://meta:8080
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DEFAULT_ORGANIZATION_NAME: ${STUDIO_ORG_NAME}
