@@ -276,7 +276,13 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       DEFAULT_ORGANIZATION_NAME: ${STUDIO_ORG_NAME}
       DEFAULT_PROJECT_NAME: ${STUDIO_PROJECT_NAME}
-      SUPABASE_URL: http://rest:3000
+      # Not rest:3000 directly: Studio's own backend uses this one base URL to
+      # reach both PostgREST (/rest/v1) and GoTrue (/auth/v1 -- Authentication
+      # > Users needs this), and only Caddy serves both paths. The request
+      # stays on the Docker bridge: api.clearroadco.link is a network alias
+      # for the caddy container (see the caddy service below), so this never
+      # leaves the host despite looking like a public URL.
+      SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
       SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
       SUPABASE_ANON_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
