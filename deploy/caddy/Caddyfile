@@ -91,7 +91,13 @@
 		Access-Control-Allow-Origin "https://{$APP_DOMAIN}"
 		Access-Control-Allow-Credentials "true"
 		Access-Control-Allow-Methods "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"
-		Access-Control-Allow-Headers "authorization, apikey, content-type, x-client-info, x-signature, x-upsert, upload-length, upload-metadata, upload-offset, tus-resumable, accept-profile, content-profile, prefer, range"
+		# x-supabase-api-version: supabase-js sends this on every request as of
+		# a recent version bump; it was missing here so the preflight rejected
+		# it outright and the browser never sent the real request -- the
+		# actual cause of today's "Failed to fetch" / CORS-error login
+		# failures (not HTTP/3, which was a red herring worth ruling out but
+		# didn't fix this).
+		Access-Control-Allow-Headers "authorization, apikey, content-type, x-client-info, x-signature, x-upsert, upload-length, upload-metadata, upload-offset, tus-resumable, accept-profile, content-profile, prefer, range, x-supabase-api-version"
 		Access-Control-Expose-Headers "content-range, location, upload-length, upload-offset, tus-resumable, x-supabase-api-version"
 		Access-Control-Max-Age "86400"
 		Vary "Origin"
