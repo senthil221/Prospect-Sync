@@ -24,6 +24,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dryRun = process.argv.includes("--dry-run");
+const maxKeywordTokens = 8;
 
 function loadEnv() {
   const env = { ...process.env };
@@ -106,7 +107,7 @@ function readMap(fileName, build) {
     const keyword = normalizeKeyword(raw.keyword ?? "");
     if (!keyword) { problems.push(`${fileName}:${line} keyword is empty after normalization ("${raw.keyword}")`); continue; }
     if (keyword !== (raw.keyword ?? "").trim()) problems.push(`${fileName}:${line} keyword normalized "${raw.keyword}" -> "${keyword}"`);
-    if (keyword.split(" ").length > 4) { problems.push(`${fileName}:${line} "${keyword}" is longer than the 4-token scan window and can never match`); continue; }
+    if (keyword.split(" ").length > maxKeywordTokens) { problems.push(`${fileName}:${line} "${keyword}" is longer than the ${maxKeywordTokens}-token scan window and can never match`); continue; }
     if (seen.has(keyword)) { problems.push(`${fileName}:${line} duplicate keyword "${keyword}" (first seen at row ${seen.get(keyword)})`); continue; }
     const built = build(keyword, raw, line, problems);
     if (!built) continue;

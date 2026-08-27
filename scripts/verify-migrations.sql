@@ -205,6 +205,16 @@ with checks(sort_key, area, check_name, ok, detail) as (
     (select seniority = '' from public.classify_job_title_v1('MD', 'Apollo Hospitals Ltd')),
     (select coalesce(nullif(seniority,''),'-') from public.classify_job_title_v1('MD', 'Apollo Hospitals Ltd'))
 
+  union all
+  select 106, 'behaviour', 'Executive Assistant to MD -> entry / Admin (phrase demotion override)',
+    (select seniority = 'entry' and department = 'Admin' from public.classify_job_title_v1('Executive Assistant to MD')),
+    (select coalesce(nullif(seniority,''),'-') || ' / ' || coalesce(nullif(department,''),'-') from public.classify_job_title_v1('Executive Assistant to MD'))
+
+  union all
+  select 107, 'behaviour', 'Executive Assistant to the MD -> entry / Admin (five-token scan)',
+    (select seniority = 'entry' and department = 'Admin' from public.classify_job_title_v1('Executive Assistant to the MD')),
+    (select coalesce(nullif(seniority,''),'-') || ' / ' || coalesce(nullif(department,''),'-') from public.classify_job_title_v1('Executive Assistant to the MD'))
+
   -- 8. Backfill progress -----------------------------------------------------
   union all
   select 120, 'backfill', 'every prospect has been classified at least once',

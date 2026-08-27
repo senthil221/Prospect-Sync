@@ -4,6 +4,14 @@ import type { Prospect } from "../../lib/types";
 
 type ColumnDefinition = { id: string; label: string };
 
+function formatClientDate(value: unknown) {
+  const date = String(value ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "—";
+  const [year, month, day] = date.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    .format(new Date(year, month - 1, day));
+}
+
 function ListMembershipCell({ prospect, includeClient, onShowAll }: { prospect: Prospect; includeClient: boolean; onShowAll: () => void }) {
   const memberships = prospectMembershipItems(prospect, includeClient);
   if (!memberships.length) return <span className="missing-value">No linked list</span>;
@@ -25,7 +33,7 @@ function ProspectTableRow({ prospect, visibleDefinitions, selected, includeClien
       const value = prospectFieldValue(prospect, field.id);
       return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "-"}</span> : field.id === "__esp" ? <span className={`esp-cell ${prospect.email_provider_type === "SEG" ? "seg" : ""}`} title={Array.isArray(prospect.mx_records) && prospect.mx_records.length ? prospect.mx_records.join("\n") : "Run Detect ESPs to check this domain"}><strong>{value || "Not checked"}</strong><small>{prospect.email_provider_type || "Unknown"}</small></span> : field.id === "__lists" ? <ListMembershipCell prospect={prospect} includeClient={includeClient} onShowAll={() => onSelect(prospect)}/> : <span title={value}>{value || "-"}</span>}</td>;
     })}
-    {clientId ? <td className="icp-column" onClick={(event) => event.stopPropagation()}>{blocked ? <span className="blocked-badge" title={String(prospect.blocked_reason ?? "Blocked for this client")}>Blocked</span> : <button type="button" className={`icp-toggle ${verified ? "verified" : ""}`} aria-pressed={verified} title={verified ? "ICP verified for this client" : "Not verified"} onClick={() => onToggleVerified?.(prospect, !verified)}>{verified ? "Verified" : "Mark ICP"}</button>}</td> : null}<td className="row-detail-column" onClick={(event) => event.stopPropagation()}>{onRemoveFromClient ? <button className="row-danger client-remove-prospect" onClick={() => void onRemoveFromClient(prospect)}>Remove</button> : canDeleteMaster ? <button className="row-danger" title={`Delete ${prospect.full_name || "this prospect"} from the People database`} onClick={() => onDelete(prospect.id)}>Delete</button> : "›"}</td>
+    {clientId ? <><td className="date-added-column" title="First date this prospect was added to this client">{formatClientDate(prospect.client_date_added)}</td><td className="icp-column" onClick={(event) => event.stopPropagation()}>{blocked ? <span className="blocked-badge" title={String(prospect.blocked_reason ?? "Blocked for this client")}>Blocked</span> : <button type="button" className={`icp-toggle ${verified ? "verified" : ""}`} aria-pressed={verified} title={verified ? "ICP verified for this client" : "Not verified"} onClick={() => onToggleVerified?.(prospect, !verified)}>{verified ? "Verified" : "Mark ICP"}</button>}</td></> : null}<td className="row-detail-column" onClick={(event) => event.stopPropagation()}>{onRemoveFromClient ? <button className="row-danger client-remove-prospect" onClick={() => void onRemoveFromClient(prospect)}>Remove</button> : canDeleteMaster ? <button className="row-danger" title={`Delete ${prospect.full_name || "this prospect"} from the People database`} onClick={() => onDelete(prospect.id)}>Delete</button> : "›"}</td>
   </tr>;
 }
 

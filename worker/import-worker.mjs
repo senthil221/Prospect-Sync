@@ -3,6 +3,7 @@ import { once } from "node:events";
 import { finished } from "node:stream/promises";
 import pg from "pg";
 import { from as copyFrom } from "pg-copy-streams";
+import { createServer } from "node:http";
 import { mapProspect, normalizeText } from "./prospect-map.mjs";
 
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -15,6 +16,8 @@ const leaseSeconds = 300;
 const batchSize = Math.max(100, Math.min(5000, Number(process.env.IMPORT_BATCH_SIZE ?? 1000)));
 const skipImportField = "Skip column";
 let stopping = false;
+let lastProgressAt = Date.now();
+let activeImportId = "";
 
 if (!serviceKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is required by the import worker.");
 process.on("SIGTERM", () => { stopping = true; });
@@ -22,6 +25,15 @@ process.on("SIGINT", () => { stopping = true; });
 
 const authHeaders = { apikey: serviceKey, authorization: `Bearer ${serviceKey}` };
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const markProgress = (importId = activeImportId) => { lastProgressAt = Date.now(); activeImportId = importId; };
+
+const healthServer = createServer((request, response) => {
+  if (request.url !== "/health") { response.writeHead(404).end(); return; }
+  const ageMs = Date.now() - lastProgressAt;
+  const healthy = !stopping && ageMs < 180_000;
+  response.writeHead(healthy ? 200 : 503, { "content-type": "application/json", "cache-control": "no-store" });
+  response.end(JSON.stringify({ status: healthy ? "ok" : "stale", activeImportId: activeImportId || null, ageMs }));
+});
 
 async function rpc(name, body) {
   const response = await fetch(`${restUrl}/rpc/${name}`, {
@@ -54,6 +66,7 @@ async function removeObject(path) {
 }
 
 async function heartbeat(job, totalRows, committedRows) {
+  markProgress(job.id);
   const processedBytes = totalRows > 0
     ? Math.min(Number(job.fileSizeBytes ?? 0), Math.round(Number(job.fileSizeBytes ?? 0) * committedRows / totalRows))
     : 0;
@@ -114,6 +127,7 @@ async function stageCsv(client, job, committedOffset) {
     for await (const row of { [Symbol.asyncIterator]: () => iterator }) {
       const rowOffset = totalRows;
       totalRows += 1;
+      if (totalRows % 10_000 === 0) markProgress(job.id);
       if (rowOffset < committedOffset) continue;
       const payload = mappedPayload(headers, row, job.fieldMap ?? {}, rowOffset);
       const line = `${copyText(job.id)}\t${rowOffset}\t${copyText(JSON.stringify(payload))}\n`;
@@ -142,6 +156,7 @@ async function stageState(client, importId) {
 }
 
 async function processJob(job) {
+  markProgress(job.id);
   const client = new pg.Client({ application_name: "prospect-import-worker", connectionTimeoutMillis: 10000 });
   await client.connect();
   try {
@@ -198,6 +213,7 @@ async function failOrRetry(job, error) {
 async function main() {
   console.log(`Prospect import worker ${workerId} started; batch size ${batchSize}.`);
   while (!stopping) {
+    markProgress("");
     let job = null;
     try {
       job = await rpc("claim_next_prospect_import_v1", { p_worker_id: workerId, p_lease_seconds: leaseSeconds });
@@ -214,4 +230,9 @@ async function main() {
   console.log("Prospect import worker stopped.");
 }
 
+await new Promise((resolve, reject) => {
+  healthServer.once("error", reject);
+  healthServer.listen(9090, "0.0.0.0", resolve);
+});
 await main();
+await new Promise((resolve) => healthServer.close(resolve));

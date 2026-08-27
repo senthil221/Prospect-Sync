@@ -199,6 +199,28 @@ verify_public_route() {
   return 1
 }
 
+verify_public_upload_route() {
+  local attempts="${1:-8}" attempt code
+  for attempt in $(seq 1 "$attempts"); do
+    # Deliberately omit auth and upload metadata. A live TUS route rejects the
+    # request with a client/auth error; the regression this protects against is
+    # the edge proxy's 404 before Storage ever sees it.
+    code="$(curl -sS -o /dev/null -w '%{http_code}' -m 15 -X POST \
+      -H 'Tus-Resumable: 1.0.0' -H 'Upload-Length: 0' \
+      "${SUPABASE_PUBLIC_URL}/storage/v1/upload/resumable" || echo 000)"
+    case "$code" in
+      404|000|"") ;;
+      2??|4??)
+        echo "    public resumable-upload route reached Storage (HTTP ${code})"
+        return 0
+        ;;
+    esac
+    echo "    attempt ${attempt}/${attempts}: upload route returned HTTP ${code:-000}"
+    sleep 5
+  done
+  return 1
+}
+
 ACTIVE_SLOT="$(detect_active_slot)"
 case "$ACTIVE_SLOT" in
   blue) CANDIDATE_SLOT=green ;;
@@ -256,6 +278,8 @@ rollback_on_error() {
   fi
   if [[ -n "$PREVIOUS_IMAGE" && "$safe_to_stop_candidate" == "1" ]]; then
     set_app_image "$PREVIOUS_IMAGE"
+    docker compose up -d --no-deps import-worker >/dev/null 2>&1 \
+      || echo "WARNING: the previous import worker image could not be restored automatically." >&2
   fi
   exit "$status"
 }
@@ -274,6 +298,15 @@ docker compose exec -T db bash -s < postgres/init/00-prospect-bootstrap.sh
 
 echo "==> Applying pending backward-compatible migrations"
 ./scripts/migrate.sh
+
+echo "==> Starting and verifying the durable import worker on ${NEW_IMAGE}"
+docker compose up -d --no-deps app-router
+docker compose up -d --no-deps --pull always import-worker
+if ! wait_for_container prospect-import-worker 18; then
+  echo "Import worker did not become healthy. Last 80 log lines:" >&2
+  docker compose logs --tail 80 import-worker >&2 || true
+  rollback_on_error 1
+fi
 
 echo "==> Starting ${CANDIDATE_SERVICE} without touching ${ACTIVE_SLOT}"
 CANDIDATE_STARTED=1
@@ -300,8 +333,11 @@ if ! verify_public_route "$EXPECTED_VERSION" 12; then
   rollback_on_error 1
 fi
 
-echo "==> Starting the durable import worker on ${NEW_IMAGE}"
-docker compose up -d --no-deps --pull always import-worker
+echo "==> Verifying the public resumable-upload route"
+if ! verify_public_upload_route 8; then
+  echo "The application is healthy, but the public Storage TUS route is unavailable." >&2
+  rollback_on_error 1
+fi
 
 # Caddy reloads are graceful: requests already assigned to the previous config
 # retain it, while new requests use the candidate. Docker then gives any old

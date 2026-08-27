@@ -229,6 +229,8 @@ Actions):
 | `VPS_USER` | `deploy` |
 | `VPS_SSH_KEY` | private key whose public half you passed to bootstrap |
 | `VPS_SSH_HOST_KEY` | output of `ssh-keyscan <vps-ip>` — **run this yourself, from a trusted network, and paste the result** |
+| `E2E_USER_EMAIL` | approved dedicated smoke-test user (optional, enables the authenticated import test) |
+| `E2E_USER_PASSWORD` | password for that dedicated smoke-test user (optional) |
 
 The VPS needs to pull from GHCR once:
 
@@ -238,9 +240,13 @@ echo <github-pat-with-read:packages> | docker login ghcr.io -u senthil221 --pass
 
 Then push to `main`. CI runs lint, build, tests, and the migration guard; the
 image builds; the deploy applies pending migrations and starts the inactive
-blue/green slot. Readiness checks Next.js, Auth, PostgREST, and PostgreSQL before
+blue/green slot. Readiness checks Next.js, Auth, PostgREST, PostgreSQL, Storage,
+and the durable import worker before
 Caddy atomically sends new traffic to that slot. The previous slot stays online
-until the public version check passes, so a failed rollout keeps serving the
+until the public version and resumable-upload route checks pass. When the two
+optional E2E secrets are present, the deployment also signs in, imports one
+uniquely named CSV, verifies its client-scoped date, and removes its test data.
+This means a failed rollout keeps serving the
 known-good application. SSH transport is retried without starting concurrent
 deployments.
 

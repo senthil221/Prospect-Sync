@@ -15,6 +15,11 @@ import { prospectUploadFingerprint, uploadProspectCsv } from "../../lib/resumabl
 import type { BackgroundImport, ClientRecord, FileAudit, ImportResumeDetail, InterruptedImport } from "../../lib/types";
 import { AppIcon } from "./DashboardUi";
 
+function localIsoDate() {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+}
+
 function ImportMappingPanel({ audit, fieldMap, onChange }: { audit: FileAudit; fieldMap: Record<string, string>; onChange: (header: string, value: string) => void }) {
   return <div className="import-mapping"><div className="mapping-head"><div><strong>Field mapping</strong><small>Review how CSV columns map to master fields</small></div><span>{audit.invalidRows ? `${audit.invalidRows} rows need identity data` : "All rows identifiable"}</span></div><div className="mapping-list">{audit.headers.map((header) => <label key={header}><span title={header}>{header}</span><b><AppIcon name="arrow" size={14}/></b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Auto detect"} onChange={(event) => onChange(header, event.target.value)}>{canonicalImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p>Original headers and values are preserved when mapped or auto-detected. Set a column to “{skipImportField}” to drop it entirely — it won’t be stored or added to the field catalog.</p></div>;
 }
@@ -32,7 +37,7 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
   const activeDataSource = resumeImport?.dataSource ?? dataSource;
   useEffect(() => {
     let active = true;
-    const load = () => void api<{ imports: InterruptedImport[]; backgroundImports?: BackgroundImport[] }>("/api/imports")
+    const load = () => void api<{ imports: InterruptedImport[]; backgroundImports?: BackgroundImport[] }>("/api/imports", { cache: "no-store" })
       .then((result) => { if (active) { setInterruptedImports(result.imports); setBackgroundImports(result.backgroundImports ?? []); } })
       .catch(() => { if (active) { setInterruptedImports([]); setBackgroundImports([]); } });
     load();
@@ -269,16 +274,17 @@ function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onC
   const [fieldMap, setFieldMap] = useState<Record<string, string>>({});
   const [allowMissing, setAllowMissing] = useState(false);
   const [activeBackgroundId, setActiveBackgroundId] = useState("");
+  const [dateAdded, setDateAdded] = useState(localIsoDate);
   const mappedFields = fileAudit ? resolvedImportFields(fileAudit.headers, fieldMap, suggestedPersonImportField) : [];
   const missingFields = missingRequiredFields(requiredPersonImportFields, mappedFields);
-  const canSubmit = file && fileAudit && dataSource && listName.trim() && (clientId || newClient.trim()) && (!missingFields.length || allowMissing) && phase === "idle";
+  const canSubmit = file && fileAudit && dataSource && dateAdded && listName.trim() && (clientId || newClient.trim()) && (!missingFields.length || allowMissing) && phase === "idle";
 
   useEffect(() => {
     if (!activeBackgroundId) return;
     let active = true;
     const poll = async () => {
       try {
-        const detail = await api<ImportResumeDetail>(`/api/imports/${encodeURIComponent(activeBackgroundId)}`);
+        const detail = await api<ImportResumeDetail>(`/api/imports/${encodeURIComponent(activeBackgroundId)}`, { cache: "no-store" });
         if (!active) return;
         if (detail.status === "failed") {
           setActiveBackgroundId(""); setPhase("idle"); setMessage(detail.lastError || "Background import failed after automatic retries.");
@@ -357,7 +363,7 @@ function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onC
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
             clientId: withoutClient ? undefined : clientId || undefined,
             clientName: newClient || undefined, withoutClient, listName, dataSource,
-            fileName: file.name, headers: keptHeaders, sourceHeaders, fieldMap,
+            fileName: file.name, headers: keptHeaders, sourceHeaders, fieldMap, dateAdded,
             allowMissingFields: allowMissing, background: true,
             storageObjectPath: upload.objectPath, fileSizeBytes: file.size,
           }),
@@ -375,7 +381,7 @@ function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onC
       const keptHeaders = keptColumns.map(({ header }) => header);
       const resolvedFieldMap = Object.fromEntries(Object.entries(fieldMap).filter(([header, value]) => value && value !== "Auto detect" && value !== skipImportField && keptHeaders.includes(header)));
       const withoutClient = clientId === unassignedClientId;
-      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, sourceHeaders: parsed.headers, fieldMap, allowMissingFields: allowMissing }) });
+      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateAdded, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, sourceHeaders: parsed.headers, fieldMap, allowMissingFields: allowMissing }) });
       await uploadProspectRows(parsed, started, keptColumns, keptHeaders, resolvedFieldMap, 0);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Import failed."); setPhase("idle"); }
   }
@@ -412,6 +418,7 @@ function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onC
     <div className="import-card">
       <div className="form-field"><label htmlFor="import-client">Client</label><select id="import-client" value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option><option value={unassignedClientId}>Unassigned (list only)</option>{clients.filter((client) => client.id !== unassignedClientId).map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><small>Choose “Unassigned” to import the list without entering a client name.</small></div>
       {!clientId && <div className="form-field"><label htmlFor="new-client-name">New client name</label><input id="new-client-name" value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}
+      <div className="form-field"><label htmlFor="prospect-date-added">Date added</label><input id="prospect-date-added" type="date" required value={dateAdded} max={localIsoDate()} onChange={(event) => setDateAdded(event.target.value)}/><small>Applied to these prospects for this client only. Existing client records keep their earliest date.</small></div>
       <label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void pickFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to review</small></> : <><strong>Choose a prospect CSV</strong><small>CSV streams safely for lists up to 500,000+ rows</small></>}</label>
       <div className="form-field"><label htmlFor="list-name">List name</label><input id="list-name" value={listName} onChange={(event) => setListName(event.target.value)} placeholder="Auto-filled from the CSV filename" /></div>
       {fileAudit && <><div className="file-audit"><div><span className="audit-check"><AppIcon name="check" size={14}/></span><p><strong>{formatNumber(fileAudit.headers.length)} fields detected</strong><small>{fileAudit.sampled ? `${formatNumber(fileAudit.rows)} sample rows checked · full CSV will be processed by the server` : `${formatNumber(fileAudit.rows)} rows · ${formatNumber(fileAudit.populatedCells)} populated cells`}</small></p></div><div className="audit-fields">{fileAudit.headers.slice(0, 8).map((header) => <span key={header}>{header}</span>)}{fileAudit.headers.length > 8 && <span>+{fileAudit.headers.length - 8} more</span>}</div><p>{fileAudit.invalidRows ? `${fileAudit.invalidRows} sampled rows have no email, LinkedIn, or name plus company and will be preserved without a People DB link.` : "The checked rows have enough identity data to match the People DB."}</p></div><ImportMappingPanel audit={fileAudit} fieldMap={fieldMap} onChange={(header, value) => setFieldMap((current) => ({ ...current, [header]: value }))}/><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Missing mandatory columns: ${missingFields.join(", ")}.` : "All required person columns are mapped."}</p>{missingFields.length ? <div className="cleanup-choice import-override"><input id="import-allow-missing" type="checkbox" checked={allowMissing} onChange={(event) => setAllowMissing(event.target.checked)} /><label htmlFor="import-allow-missing"><strong>Import anyway without all mandatory fields</strong><small>Rows import with whatever identity they have; those missing name/company and email/LinkedIn are preserved without a People DB link.</small></label></div> : null}</>}

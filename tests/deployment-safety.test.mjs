@@ -19,6 +19,24 @@ test("readiness checks Auth, PostgREST, and PostgreSQL before a deploy passes", 
   assert.match(workflow, /APP_PUBLIC_URL }}\/api\/health/);
 });
 
+test("public resumable uploads translate the Supabase URL to Storage's internal TUS route", async () => {
+  const [caddy, compose] = await Promise.all([
+    readFile(new URL("../deploy/caddy/Caddyfile", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/docker-compose.yml", import.meta.url), "utf8"),
+  ]);
+
+  const publicTus = caddy.match(/handle \/storage\/v1\/upload\/resumable\* \{[\s\S]*?\n\t\}/)?.[0];
+  assert.ok(publicTus, "the signed TUS endpoint must have a dedicated public route");
+  assert.match(publicTus, /uri strip_prefix \/storage\/v1/);
+  assert.match(publicTus, /header_up X-Forwarded-Prefix \/storage\/v1/);
+  assert.match(compose, /TUS_URL_PATH: \/upload\/resumable/);
+  assert.doesNotMatch(compose, /TUS_URL_PATH: \/storage\/v1\/upload\/resumable/);
+
+  const publicRoute = caddy.indexOf("handle /storage/v1/upload/resumable*");
+  const internalRoute = caddy.indexOf("handle_path /storage/v1/*");
+  assert.ok(publicRoute >= 0 && publicRoute < internalRoute, "the signed route must win before the internal Storage guard");
+});
+
 test("restore, rollback, Studio, and backup guards fail closed", async () => {
   const [restore, update, caddy, backup] = await Promise.all([
     readFile(new URL("../deploy/scripts/restore.sh", import.meta.url), "utf8"),

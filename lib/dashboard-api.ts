@@ -10,7 +10,9 @@ export function clearApiCache() {
 
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const method = String(options?.method ?? "GET").toUpperCase();
-  const cacheable = method === "GET" && !options?.signal;
+  // Polling callers opt out with `cache: "no-store"`. Without this guard the
+  // in-memory cache can keep returning the first import status for five minutes.
+  const cacheable = method === "GET" && !options?.signal && options?.cache !== "no-store";
   if (cacheable) {
     const cached = apiResponseCache.get(path);
     if (cached && cached.expiresAt > Date.now()) return cached.data as T;
@@ -41,10 +43,14 @@ export function prospectApiPath({ search = "", page = 1, sort = "created_at", di
   return `/api/prospects?${params.toString()}`;
 }
 
-export function encodeFilters(filters: ProspectFilter[]) {
-  return JSON.stringify(filters.map(({ field, operator, values, scopes }) => ({
+export function filterPayload(filters: ProspectFilter[]) {
+  return filters.map(({ field, operator, values, scopes }) => ({
     field, operator, values, ...(scopes?.length ? { scopes } : {}),
-  })));
+  }));
+}
+
+export function encodeFilters(filters: ProspectFilter[]) {
+  return JSON.stringify(filterPayload(filters));
 }
 
 export function companyApiPath({ search = "", page = 1, clientId = "", filters = [], peopleScope = null }: { search?: string; page?: number; clientId?: string; filters?: ProspectFilter[]; peopleScope?: PeopleScope | null }) {

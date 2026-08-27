@@ -384,3 +384,127 @@ innovation,R&D,,
 new product development,R&D,,
 npd,R&D,,
 clinical research,R&D,,
+# --- Additional high-confidence coverage from the supplied v3 map --------
+# Existing curated rows keep their mappings when the supplied maps disagree. Broad
+# context words such as service, office, process and project remain excluded.
+bde,Sales,BD & Partnerships,
+sales engineering,Sales,Presales & Solutions,
+solutions,Sales,Presales & Solutions,
+territory,Sales,Field & Enterprise,
+gtm,Sales,,
+go to market,Sales,,
+account manager,Sales,,
+channel,Sales,BD & Partnerships,
+channels,Sales,BD & Partnerships,
+export,Sales,,
+cro,Sales,,Chief Revenue Officer acronym
+marketting,Marketing,,Common misspelling
+advertising,Marketing,Demand Gen & Performance,
+comms,Marketing,Brand & Comms,
+community,Marketing,Brand & Comms,
+corporate affairs,Marketing,Brand & Comms,
+demand gen,Marketing,Demand Gen & Performance,
+engineer,Engineering,,
+engr,Engineering,,
+software,Engineering,,
+development,Engineering,,
+fullstack,Engineering,,
+technology,Engineering,,
+tech,Engineering,,
+cloud,Engineering,DevOps & Cloud,
+cto,Engineering,,
+database administrator,IT,Infrastructure,
+network administrator,IT,Infrastructure,
+network,IT,Infrastructure,
+security,IT,Security,
+ciso,IT,Security,
+cio,IT,,
+designer,Design,,
+ui,Design,,
+graphic,Design,,
+visual,Design,,
+user research,Design,,
+ml,Data & Analytics,,
+ai,Data & Analytics,,
+insights,Data & Analytics,,
+big data,Data & Analytics,,
+cdo,Data & Analytics,,
+training,HR,L&D,
+compensation,HR,Comp & Benefits,
+benefits,HR,Comp & Benefits,
+chro,HR,,
+rh,HR,,French HR acronym
+rrhh,HR,,Spanish HR acronym
+recursos humanos,HR,,Spanish HR
+risorse umane,HR,,Italian HR
+accountant,Finance,Accounting,
+auditor,Finance,Audit,
+billing,Finance,Accounting,
+comptroller,Finance,Accounting,
+credit,Finance,Credit & Collections,
+equity research,Finance,,
+cfo,Finance,,
+finanzas,Finance,,Spanish finance
+comptabilite,Finance,Accounting,French accounting after accent folding
+contabilidad,Finance,Accounting,Spanish accounting
+regulatory,Legal,,
+secretarial,Legal,,
+ipr,Legal,,
+public policy,Legal,,
+government relations,Legal,,
+government affairs,Legal,,
+clo,Legal,,
+ops,Operations,,
+operational,Operations,,
+delivery,Operations,,
+field operations,Operations,,
+coo,Operations,,
+scm,Supply Chain,,
+purchase,Supply Chain,Procurement & Sourcing,
+vendor,Supply Chain,Procurement & Sourcing,
+materials,Supply Chain,Procurement & Sourcing,
+stores,Supply Chain,Logistics & Warehouse,
+dispatch,Supply Chain,Logistics & Warehouse,
+fulfillment,Supply Chain,Logistics & Warehouse,
+planning,Supply Chain,Planning,
+achats,Supply Chain,Procurement & Sourcing,French purchasing
+compras,Supply Chain,Procurement & Sourcing,Spanish purchasing
+inkoop,Supply Chain,Procurement & Sourcing,Dutch purchasing
+acquisti,Supply Chain,Procurement & Sourcing,Italian purchasing
+assembly,Manufacturing,,
+tooling,Manufacturing,,
+packaging,Manufacturing,,
+works,Manufacturing,,
+ehs,Quality,,
+hse,Quality,,
+safety,Quality,,
+csm,Support,Customer Success,
+client relations,Support,Customer Success,
+onboarding,Support,Customer Success,
+customer care,Support,Customer Support,
+cx,Support,,
+admin,Admin,,
+administration,Admin,,
+administrative,Admin,,
+office management,Admin,,
+reception,Admin,,
+facility,Admin,,
+travel,Admin,,
+cao,Admin,,Chief Administrative Officer acronym
+strategic,Strategy,,
+sustainability,Strategy,,
+esg,Strategy,,
+csr,Strategy,,
+founders office,Strategy,,
+founder s office,Strategy,,
+ceo office,Strategy,,
+office of the ceo,Strategy,,
+ventes,Sales,,French sales
+vendite,Sales,,Italian sales
+verkoop,Sales,,Dutch sales
+vendas,Sales,,Portuguese sales
+informatique,IT,,French IT
+operaciones,Operations,,Spanish operations
+calidad,Quality,,Spanish quality
+juridique,Legal,,French legal
+juridico,Legal,,Spanish legal

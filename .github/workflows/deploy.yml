@@ -82,7 +82,9 @@ jobs:
     needs: build
     if: ${{ !inputs.skip_deploy }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
+    env:
+      E2E_ENABLED: ${{ secrets.E2E_USER_EMAIL != '' && secrets.E2E_USER_PASSWORD != '' }}
     environment: production
 
     steps:
@@ -171,3 +173,29 @@ jobs:
           echo "Never saw HTTP 200 with X-App-Version=${EXPECTED_VERSION}." >&2
           echo "The new image was pushed but the running container is not serving it." >&2
           exit 1
+
+      - name: Check out repository for authenticated import test
+        if: ${{ env.E2E_ENABLED == 'true' }}
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js for authenticated import test
+        if: ${{ env.E2E_ENABLED == 'true' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+          cache: npm
+
+      - name: Install authenticated import test browser
+        if: ${{ env.E2E_ENABLED == 'true' }}
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Authenticated CSV import test
+        if: ${{ env.E2E_ENABLED == 'true' }}
+        env:
+          E2E_BASE_URL: ${{ secrets.APP_PUBLIC_URL }}
+          E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+          E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+          E2E_ALLOW_MUTATION: "1"
+        run: npm run test:e2e

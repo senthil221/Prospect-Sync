@@ -7,13 +7,26 @@ import { importHeaderSignature } from "../../../../lib/import-resume";
 import { prospectImportBucket, validProspectImportObjectPath } from "../../../../lib/import-storage.ts";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
+function validDateAdded(value: unknown) {
+  const date = String(value ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < "1900-01-01") return "";
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return "";
+  // Browsers submit the user's local calendar day. UTC can still be on the
+  // previous day for UTC+ timezones, so allow the next UTC date; the UI itself
+  // caps selection at its local today.
+  return date <= new Date(Date.now() + 24 * 60 * 60_000).toISOString().slice(0, 10) ? date : "";
+}
+
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const payload = await request.json() as { clientId?: string; clientName?: string; withoutClient?: boolean; listName?: string; fileName?: string; totalRows?: number; headers?: string[]; sourceHeaders?: string[]; fieldMap?: Record<string, string>; dataSource?: string; allowMissingFields?: boolean; background?: boolean; storageObjectPath?: string; fileSizeBytes?: number };
+  const payload = await request.json() as { clientId?: string; clientName?: string; withoutClient?: boolean; listName?: string; dateAdded?: string; fileName?: string; totalRows?: number; headers?: string[]; sourceHeaders?: string[]; fieldMap?: Record<string, string>; dataSource?: string; allowMissingFields?: boolean; background?: boolean; storageObjectPath?: string; fileSizeBytes?: number };
   const supabase = createAdminClient();
   const dataSource = normalizeDataSource(payload.dataSource);
   if (!dataSource) return Response.json({ error: "Choose a data source before importing." }, { status: 400 });
+  const dateAdded = validDateAdded(payload.dateAdded);
+  if (!dateAdded) return Response.json({ error: "Choose a valid Date added between 1900-01-01 and today." }, { status: 400 });
   const importHeaders = Array.isArray(payload.headers) ? payload.headers.map(String) : [];
   const missingFields = missingRequiredFields(requiredPersonImportFields, resolvedImportFields(importHeaders, payload.fieldMap, suggestedPersonImportField));
   // Missing mandatory columns normally block the import; the UI can override with an
@@ -60,6 +73,7 @@ export async function POST(request: Request) {
   const importResult = await supabase.from("imports").insert({
     id: importId, client_id: clientId, list_id: listId, data_source: dataSource,
     file_name: payload.fileName ?? "", total_rows: totalRows, field_headers: headers,
+    prospect_date_added: dateAdded,
     field_map: payload.fieldMap ?? {}, header_signature: importHeaderSignature(sourceHeaders),
     status: payload.background === true ? "queued" : "processing",
     ingestion_mode: payload.background === true ? "background" : "browser",

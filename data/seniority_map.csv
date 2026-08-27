@@ -13,6 +13,9 @@ head office,none,Location word, not a role
 executive assistant to the ceo,entry,Demotion override; must beat ceo
 executive assistant to the md,entry,Demotion override; must beat md
 executive assistant to the chairman,entry,Demotion override
+executive assistant to ceo,entry,Demotion override without optional article
+executive assistant to md,entry,Demotion override without optional article
+executive assistant to chairman,entry,Demotion override without optional article
 assistant to the managing director,entry,Demotion override
 assistant to the ceo,entry,Demotion override
 assistant vice president,vp,India/banking AVP written out
@@ -99,7 +102,7 @@ partner manager,manager,
 partnership manager,manager,
 co founder,owner,Normalizer turns co-founder into co founder
 cofounder,owner,
-founder s office,owner,Normalizer turns founder's office into founder s office
+founder s office,none,Office context must not classify as owner
 sole proprietor,owner,
 self employed,owner,
 business owner,owner,
@@ -215,3 +218,112 @@ intern,entry,
 internship,entry,
 fresher,entry,
 junior,entry,
+# --- Additional high-confidence coverage from the supplied v3 map --------
+# Ambiguous bare words such as chief, board, chair, business partner and steward
+# stay out: they increase coverage but reduce precision. Existing conflict decisions
+# above continue to win (for example associate director remains a demotion override).
+founding,owner,
+co owner,owner,
+entrepreneur,owner,
+enterpreneur,owner,Common misspelling
+entreprenuer,owner,Common misspelling
+businessman,owner,
+businesswoman,owner,
+industrialist,owner,
+franchisee,owner,
+shareholder,owner,
+managing member,owner,
+co ceo,c_suite,
+dmd,c_suite,Deputy Managing Director acronym
+jmd,c_suite,Joint Managing Director acronym
+joint md,c_suite,
+jt md,c_suite,
+wtd,c_suite,Whole-time Director acronym
+chief executive,c_suite,
+cao,c_suite,Chief Administrative or Accounting Officer
+cbo,c_suite,Chief Business Officer
+clo,c_suite,Chief Legal Officer
+cgo,c_suite,Chief Growth Officer
+secretary general,c_suite,
+managing trustee,owner,
+geschaftsfuhrer,c_suite,German managing director
+vorstand,c_suite,German executive board
+pdg,c_suite,French CEO acronym
+dg,c_suite,French director general acronym
+dga,c_suite,French deputy director general acronym
+gerente general,c_suite,Spanish or Portuguese general manager
+presidente,c_suite,Spanish or Portuguese president
+amministratore delegato,c_suite,Italian managing director
+vd,c_suite,Dutch managing director acronym
+prezes,c_suite,Polish president
+vice presedent,vp,Common misspelling
+sr vp,vp,
+senior director,director,
+directer,director,Common misspelling
+dir,director,Common abbreviation
+hod,director,Head of department acronym
+gm,director,General Manager acronym
+dgm,director,Deputy General Manager acronym
+agm,director,Assistant General Manager acronym
+cgm,director,Chief General Manager acronym
+gen mgr,director,
+genral manager,director,Common misspelling
+additional general manager,director,
+business head,director,
+plant head,director,
+state head,director,
+state manager,director,
+cluster head,director,
+vertical head,director,
+zonal head,director,
+superintendent,director,
+hospital administrator,director,
+prokurist,director,German authorized officer
+leiter,director,German leader or head
+directrice,director,French feminine director
+direttore,director,Italian director
+diretor,director,Portuguese director
+hoofd,director,Dutch head
+dyrektor,director,Polish director
+manger,manager,Common misspelling
+mgr,manager,Common abbreviation
+mngr,manager,Common abbreviation
+sr manager,manager,
+incharge,manager,
+in charge,manager,
+responsabile,manager,Italian manager
+chef de,manager,French manager phrase
+jefe,manager,Spanish manager
+kierownik,manager,Polish manager
+product owner,senior_ic,
+process owner,senior_ic,
+scrum master,senior_ic,
+distinguished,senior_ic,
+asst manager,entry,
+asstt manager,entry,Common misspelling
+dy manager,entry,
+sales executive,entry,
+account executive,entry,
+sr analyst,entry,
+jr,entry,
+supervisor,entry,
+founders office,none,Office context must not classify as owner
+ceo office,none,Office context must not classify as C-Suite
+office of the ceo,none,Office context must not classify as C-Suite
+oprichter,owner,Dutch founder
+eigenaar,owner,Dutch owner
+inhaber,owner,German owner
+grunder,owner,German founder after accent folding
+fondateur,owner,French founder
+fondatrice,owner,French feminine founder
+gerant,owner,French managing owner
+fundador,owner,Spanish founder
+fundadora,owner,Spanish feminine founder
+dueno,owner,Spanish owner after accent folding
+propietario,owner,Spanish proprietor
+socio,owner,Spanish partner
+fondatore,owner,Italian founder
+titolare,owner,Italian owner
+proprietario,owner,Portuguese proprietor
+wlasciciel,owner,Polish owner after accent folding
+zalozyciel,owner,Polish founder after accent folding

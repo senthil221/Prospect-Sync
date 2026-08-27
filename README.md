@@ -103,7 +103,7 @@ The lists are data, in `data/seniority_map.csv` and `data/department_map.csv`. E
    ```bash
    curl -s "$APP_URL/api/prospects/classify?missing=any&limit=200"
    ```
-2. Add keywords to the CSVs. Longest phrase wins, so `assistant manager` overrides `manager`. A `none` tier consumes tokens without contributing a rank, which is how `lead generation` stops `lead` from firing.
+2. Add keywords to the CSVs. Longest phrase wins (up to eight tokens), so `assistant manager` overrides `manager` and `executive assistant to the md` overrides `md`. A `none` tier consumes tokens without contributing a rank, which is how `lead generation` stops `lead` from firing. Prefer precise phrases over ambiguous bare words: the Undefined log is safer than a confident false positive.
 3. Push the lists to the database (upserts what is present, deletes what you removed):
    ```bash
    node scripts/sync-title-keywords.mjs

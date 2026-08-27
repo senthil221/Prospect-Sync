@@ -8,6 +8,7 @@ type ImportDetailRow = {
   processed_rows?: number; unique_added?: number; duplicates_linked?: number;
   processed_bytes?: number; file_size_bytes?: number | null; last_error?: string | null;
   field_headers: unknown; field_map: unknown; header_signature: string;
+  prospect_date_added?: string | null;
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
@@ -17,7 +18,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const supabase = createAdminClient();
   const prospectImport = await supabase
     .from("imports")
-    .select("id,list_id,file_name,data_source,status,ingestion_mode,committed_row_offset,total_rows,processed_rows,unique_added,duplicates_linked,processed_bytes,file_size_bytes,last_error,field_headers,field_map,header_signature")
+    .select("id,list_id,file_name,data_source,status,ingestion_mode,committed_row_offset,total_rows,processed_rows,unique_added,duplicates_linked,processed_bytes,file_size_bytes,last_error,field_headers,field_map,header_signature,prospect_date_added")
     .eq("id", id)
     .maybeSingle();
   if (prospectImport.error) return Response.json({ error: prospectImport.error.message }, { status: 500 });
@@ -55,6 +56,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     headers: Array.isArray(row.field_headers) ? row.field_headers.map(String) : [],
     fieldMap: row.field_map && typeof row.field_map === "object" ? row.field_map : {},
     headerSignature: String(row.header_signature ?? ""),
+    dateAdded: row.prospect_date_added ?? null,
     // Resuming must continue with the mode the import started under; changing it
     // halfway would apply two different rules to one file.
     mergeMode: kind === "companies" ? String((row as { merge_mode?: unknown }).merge_mode ?? "enrich") : null,

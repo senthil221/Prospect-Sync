@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { api, isAbortError, prospectApiPath } from "../../lib/dashboard-api";
+import { api, encodeFilters, isAbortError, prospectApiPath } from "../../lib/dashboard-api";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import type { ClientRecord, Prospect, ProspectFilter } from "../../lib/types";
 import ProspectTable from "./ProspectTable";
@@ -18,7 +18,7 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
   const totalCache = useRef(new Map<string, { total: number; estimated: boolean }>());
   const deferredSearch = useDeferredValue(search);
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);
-  const encodedFilters = useMemo(() => JSON.stringify(filters.map(({ field, operator, values }) => ({ field, operator, values }))), [filters]);
+  const encodedFilters = useMemo(() => encodeFilters(filters), [filters]);
   const countKey = useMemo(() => JSON.stringify([debouncedSearch.trim(), encodedFilters, companyScope, refresh, statsProspects]), [companyScope, debouncedSearch, encodedFilters, refresh, statsProspects]);
 
   useEffect(() => {

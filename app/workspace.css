@@ -1091,12 +1091,13 @@ main { min-width: 0; grid-column: 2; }
 
 /* Per-client state: ICP verification and blocklist suppression. */
 .icp-column { width: 116px; white-space: nowrap; }
+.date-added-column { width: 128px; white-space: nowrap; }
 .icp-toggle { padding: var(--space-1) var(--space-2); border: 1px solid var(--ph-border-strong); border-radius: var(--radius-full); background: var(--surface); color: var(--text-secondary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); cursor: pointer; }
 .icp-toggle:hover { border-color: var(--ph-brand); color: var(--ph-brand); }
 .icp-toggle.verified { border-color: var(--ph-success); background: var(--success-line); color: var(--ph-success); }
 .blocked-badge { padding: var(--space-1) var(--space-2); border-radius: var(--radius-full); background: var(--danger-soft); color: var(--danger); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
 tr.row-blocked { opacity: .62; }
-tr.row-blocked td:not(.select-column):not(.icp-column) { text-decoration: line-through; text-decoration-color: rgba(var(--shadow-rgb), .35); }
+tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) { text-decoration: line-through; text-decoration-color: rgba(var(--shadow-rgb), .35); }
 .icp-count { color: var(--ph-success); }
 .bulk-verify, .bulk-push { border-color: var(--ph-brand) !important; background: var(--ph-brand) !important; color: var(--text-inverse) !important; }
 

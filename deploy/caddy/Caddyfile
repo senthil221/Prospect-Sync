@@ -120,7 +120,12 @@
 
 	# Signed TUS uploads are the only public Storage operation.
 	handle /storage/v1/upload/resumable* {
+		# Storage exposes TUS at /upload/resumable internally. Preserve the
+		# external Supabase prefix in generated Location headers without sending
+		# that prefix to the Storage router.
+		uri strip_prefix /storage/v1
 		reverse_proxy storage:5000 {
+			header_up X-Forwarded-Prefix /storage/v1
 			transport http {
 				read_timeout 300s
 				write_timeout 300s

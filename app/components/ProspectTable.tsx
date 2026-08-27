@@ -5,7 +5,7 @@ import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import ApolloFilterPanel, { filterLabel } from "../ApolloFilterPanel";
 import { fileSystemAccessSupported, runProspectExport, type ExportFormat } from "../../lib/export-runner";
 import { buildCustomFieldDefinitions } from "../../lib/prospect-fields";
-import { api } from "../../lib/dashboard-api";
+import { api, filterPayload } from "../../lib/dashboard-api";
 import { filterChipValue, formatNumber } from "../../lib/dashboard-helpers";
 import { defaultProspectColumns, defaultProspectExportFields, standardProspectExportFields, standardProspectFields } from "../../lib/prospect-field-definitions";
 import type { ClientRecord, Prospect, ProspectFilter, SavedView } from "../../lib/types";
@@ -121,7 +121,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const configuredDefinitions = useMemo(() => visibleColumns.map((id) => allColumns.find((column) => column.id === id)).filter((column): column is { id: string; label: string } => Boolean(column)), [allColumns, visibleColumns]);
   const visibleDefinitions = useMemo(() => configuredDefinitions.length ? configuredDefinitions : standardProspectFields.slice(0, 4), [configuredDefinitions]);
   const effectiveFilters = filters.filter((filter) => filter.values.length || filter.operator === "empty" || filter.operator === "not_empty");
-  const selectionKey = JSON.stringify({ clientId, search: search.trim(), filters: effectiveFilters.map(({ field, operator, values }) => ({ field, operator, values })) });
+  const selectionKey = JSON.stringify({ clientId, search: search.trim(), filters: filterPayload(effectiveFilters) });
   const selectionMatchesQuery = selectionQueryKey === selectionKey;
   const selectedCount = !selectionMatchesQuery ? 0 : selectionMode === "all_matching" ? Math.max(0, total - excludedIds.size) : selectedIds.size;
   const totalPages = Math.max(1, Math.ceil(total / 50));
@@ -248,7 +248,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     try {
       const result = await runProspectExport({
         search: search.trim(),
-        filters: effectiveFilters.map(({ field, operator, values }) => ({ field, operator, values })),
+        filters: filterPayload(effectiveFilters),
         clientId: clientId || null,
         companyScope,
         fields: exportFields,
@@ -294,7 +294,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   // than 40,000 ids — the same contract export already uses.
   function selectionPayload() {
     return selectionMode === "all_matching"
-      ? { search, filters: effectiveFilters.map(({ field, operator, values }) => ({ field, operator, values })), excludedIds: [...excludedIds] }
+      ? { search, filters: filterPayload(effectiveFilters), excludedIds: [...excludedIds] }
       : { prospectIds: [...selectedIds] };
   }
 
@@ -345,7 +345,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     try {
       const body = deleteRequest.mode === "ids"
         ? { ids: deleteRequest.ids }
-        : { allMatching: true, search: search.trim(), filters: effectiveFilters.map(({ field, operator, values }) => ({ field, operator, values })), excludedIds: [...excludedIds] };
+        : { allMatching: true, search: search.trim(), filters: filterPayload(effectiveFilters), excludedIds: [...excludedIds] };
       const result = await api<{ deleted: number }>("/api/prospects", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       setNotice(`Deleted ${formatNumber(result.deleted)} prospect${result.deleted === 1 ? "" : "s"} from the People database.`);
       setDeleteRequest(null); clearSelection(); onRefresh();
@@ -404,9 +404,9 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   return <section className="people-workspace">
     <div className="people-heading">
       <div><p className="eyebrow">PROSPECTS</p><h2>Find people</h2><p>Search and filter every prospect saved in your people database.</p></div>
-      <div className="entity-pivot-actions"><button className="secondary" onClick={() => onSeeCompanies({ search: search.trim(), filters: effectiveFilters.map(({ field, operator, values }) => ({ field, operator, values })) })}>See Companies <AppIcon name="arrow" size={14}/></button><button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import prospects</button></div>
+      <div className="entity-pivot-actions"><button className="secondary" title="Safely scope up to 250,000 matching people" onClick={() => onSeeCompanies({ search: search.trim(), filters: filterPayload(effectiveFilters), limit: 250000 })}>See Companies <AppIcon name="arrow" size={14}/></button><button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import prospects</button></div>
     </div>
-    {companyScope ? <div className="cross-scope-banner" role="status"><span>Showing people inside the companies from your previous Company DB search.</span><button onClick={onClearCompanyScope}>Clear company scope</button></div> : null}
+    {companyScope ? <div className="cross-scope-banner" role="status"><span>Showing people inside the companies from your previous Company DB search (safety limit: {formatNumber(companyScope.limit)} matching companies).</span><button onClick={onClearCompanyScope}>Clear company scope</button></div> : null}
     <Tabs
       label="Prospect views"
       value={tab}
@@ -458,7 +458,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
           const prefix = filter.operator === "not_contains" || filter.operator === "not_equals" ? "Exclude " : filter.operator === "boolean" ? "Boolean " : "";
           return filter.values.map((value) => <button key={`${filter.id}-${value}`} onClick={() => updateFilter(filter.id, { values: filter.values.filter((item) => item !== value) })}>{prefix}{label}: {filterChipValue(filter.field, value)} <span><AppIcon name="close" size={14}/></span></button>);
         })}<button className="clear-filter-chip" onClick={() => onFiltersChange([])}>Clear all</button></div> : null}
-        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" data-density={density} ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select all prospects on this page" title="Select all prospects on this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => isProspectSelected(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}{clientId ? <th className="icp-column">ICP verified</th> : null}<th className="row-detail-column">{onRemoveFromClient || canDeleteMaster ? "Actions" : ""}</th></tr></thead><tbody>{prospects.map((person) => <ProspectTableRow key={person.id} prospect={person} visibleDefinitions={visibleDefinitions} selected={isProspectSelected(person.id)} includeClient={!clientId} canDeleteMaster={canDeleteMaster} clientId={clientId} onSelect={onSelect} onToggleSelected={toggleSelected} onRemoveFromClient={onRemoveFromClient} onToggleVerified={toggleVerified} onDelete={deleteProspect}/>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {displayedTotal} matching records</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}><AppIcon name="back" size={14}/> Previous</button><span>Page {page} of {totalEstimated ? "≈" : ""}{totalPages}</span><button disabled={totalEstimated ? prospects.length < 50 : page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button></div></div></> : <EmptyState title="No matching prospects" text={effectiveFilters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and your unique prospects will appear here."} action={effectiveFilters.length ? "Clear filters" : "Import CSV"} onAction={effectiveFilters.length ? () => onFiltersChange([]) : onImport} />}
+        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" data-density={density} ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select all prospects on this page" title="Select all prospects on this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => isProspectSelected(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id}>{field.label}</th>)}{clientId ? <><th className="date-added-column">Date added</th><th className="icp-column">ICP verified</th></> : null}<th className="row-detail-column">{onRemoveFromClient || canDeleteMaster ? "Actions" : ""}</th></tr></thead><tbody>{prospects.map((person) => <ProspectTableRow key={person.id} prospect={person} visibleDefinitions={visibleDefinitions} selected={isProspectSelected(person.id)} includeClient={!clientId} canDeleteMaster={canDeleteMaster} clientId={clientId} onSelect={onSelect} onToggleSelected={toggleSelected} onRemoveFromClient={onRemoveFromClient} onToggleVerified={toggleVerified} onDelete={deleteProspect}/>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {displayedTotal} matching records</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}><AppIcon name="back" size={14}/> Previous</button><span>Page {page} of {totalEstimated ? "≈" : ""}{totalPages}</span><button disabled={totalEstimated ? prospects.length < 50 : page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button></div></div></> : <EmptyState title="No matching prospects" text={effectiveFilters.length ? "Adjust or clear the filters to see more records." : "Import a CSV and your unique prospects will appear here."} action={effectiveFilters.length ? "Clear filters" : "Import CSV"} onAction={effectiveFilters.length ? () => onFiltersChange([]) : onImport} />}
       </article>
       {filtersOpen ? <ApolloFilterPanel filters={filters} customFields={customFields} clientId={clientId} onChange={onFiltersChange}/> : null}
     </div>}

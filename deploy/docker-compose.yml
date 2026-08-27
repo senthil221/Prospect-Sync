@@ -32,6 +32,7 @@ x-app: &app
     db: { condition: service_healthy }
     auth: { condition: service_healthy }
     rest: { condition: service_started }
+    storage: { condition: service_started }
   environment:
     NODE_ENV: production
     PORT: "3000"
@@ -41,12 +42,14 @@ x-app: &app
     NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_PUBLIC_URL}
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
     SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+    SUPABASE_STORAGE_URL: http://storage:5000
+    IMPORT_WORKER_HEALTH_URL: http://import-worker:9090/health
     ALLOWED_USER_EMAILS: ${ALLOWED_USER_EMAILS}
     # Node heap ceiling so a runaway CSV import cannot OOM the whole box.
     NODE_OPTIONS: "--max-old-space-size=1024"
   healthcheck:
-    # Readiness covers Next.js, GoTrue, PostgREST, and PostgreSQL. A static
-    # login page can be healthy while every authenticated action is broken.
+    # Readiness covers Next.js, GoTrue, PostgREST/PostgreSQL, Storage, and the
+    # import worker. A static login page can be healthy while imports are broken.
     test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
     interval: 10s
     timeout: 10s
@@ -341,6 +344,12 @@ services:
       PGUSER: authenticator
       PGPASSWORD: ${POSTGRES_PASSWORD}
       NODE_OPTIONS: "--max-old-space-size=512"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9090/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     mem_limit: 768m
     cpus: "1.0"
     stop_grace_period: 30s
@@ -426,7 +435,7 @@ services:
       UPLOAD_FILE_SIZE_LIMIT: "1073741824"
       UPLOAD_FILE_SIZE_LIMIT_STANDARD: "52428800"
       UPLOAD_SIGNED_URL_EXPIRATION_TIME: "300"
-      TUS_URL_PATH: /storage/v1/upload/resumable
+      TUS_URL_PATH: /upload/resumable
       TUS_URL_EXPIRY_MS: "86400000"
       TUS_MAX_CONCURRENT_UPLOADS: "4"
       TUS_PART_SIZE: "6"
