@@ -1,4 +1,4 @@
-import { authorizeApi } from "../../../../lib/auth";
+import { getAuthorizedUser } from "../../../../lib/auth";
 import { normalizeText } from "../../../../db/normalize";
 import { normalizeDataSource } from "../../../../lib/data-source";
 import { missingRequiredFields, requiredPersonImportFields, resolvedImportFields, suggestedPersonImportField } from "../../../../lib/import-schema";
@@ -19,8 +19,13 @@ function validDateAdded(value: unknown) {
 }
 
 export async function POST(request: Request) {
-  const unauthorized = await authorizeApi();
-  if (unauthorized) return unauthorized;
+  let user;
+  try {
+    user = await getAuthorizedUser();
+  } catch {
+    return Response.json({ error: "Supabase is not configured." }, { status: 503 });
+  }
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const payload = await request.json() as { clientId?: string; clientName?: string; withoutClient?: boolean; listName?: string; dateAdded?: string; fileName?: string; totalRows?: number; headers?: string[]; sourceHeaders?: string[]; fieldMap?: Record<string, string>; dataSource?: string; allowMissingFields?: boolean; background?: boolean; storageObjectPath?: string; fileSizeBytes?: number };
   const supabase = createAdminClient();
   const dataSource = normalizeDataSource(payload.dataSource);
@@ -59,8 +64,10 @@ export async function POST(request: Request) {
   const sourceHeaders = (Array.isArray(payload.sourceHeaders) ? payload.sourceHeaders : importHeaders).map(String).slice(0, 500);
   const totalRows = Number.isSafeInteger(payload.totalRows) && Number(payload.totalRows) >= 0 ? Number(payload.totalRows) : null;
   if (payload.background === true) {
-    if (!validProspectImportObjectPath(payload.storageObjectPath)) return Response.json({ error: "Invalid background import object." }, { status: 400 });
-    const [folder, objectName] = payload.storageObjectPath.split("/");
+    if (!validProspectImportObjectPath(payload.storageObjectPath, user.id)) return Response.json({ error: "Invalid background import object." }, { status: 400 });
+    const separator = payload.storageObjectPath.lastIndexOf("/");
+    const folder = payload.storageObjectPath.slice(0, separator);
+    const objectName = payload.storageObjectPath.slice(separator + 1);
     const stored = await supabase.storage.from(prospectImportBucket).list(folder, { search: objectName, limit: 2 });
     if (stored.error) return Response.json({ error: stored.error.message }, { status: 500 });
     if (!stored.data.some((item) => item.name === objectName)) return Response.json({ error: "The uploaded CSV could not be found. Upload it again." }, { status: 409 });

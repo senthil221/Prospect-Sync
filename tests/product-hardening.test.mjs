@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { api, clearApiCache, filterPayload } from "../lib/dashboard-api.ts";
+import { prospectImportObjectPath, validProspectImportObjectPath } from "../lib/import-storage.ts";
 import { parseCompanyScope, parsePeopleScope } from "../lib/workspace-scopes.ts";
 
 test("polling requests bypass the client response cache", async () => {
@@ -30,6 +31,27 @@ test("company keyword scopes survive every workspace serialization boundary", ()
   assert.deepEqual(parsePeopleScope(JSON.stringify({ search: "", filters: payload, limit: 999999 }))?.filters[0].scopes, ["description"]);
   assert.deepEqual(parseCompanyScope(JSON.stringify({ search: "", filters: payload, limit: 999999 }))?.filters[0].scopes, ["description"]);
   assert.equal(parseCompanyScope(JSON.stringify({ filters: payload, limit: 999999 }))?.limit, 250000);
+});
+
+test("prospect signed uploads are scoped to the authenticated owner", async () => {
+  const userId = "123e4567-e89b-42d3-a456-426614174000";
+  const otherUserId = "123e4567-e89b-42d3-a456-426614174001";
+  const fingerprint = "a".repeat(64);
+  const path = prospectImportObjectPath(userId, fingerprint);
+  assert.equal(path, `pending/${userId}/${fingerprint}.csv`);
+  assert.equal(validProspectImportObjectPath(path, userId), true);
+  assert.equal(validProspectImportObjectPath(path, otherUserId), false);
+  assert.equal(validProspectImportObjectPath(`pending/${fingerprint}.csv`, userId), false);
+
+  const [tokenRoute, startRoute, resumable] = await Promise.all([
+    readFile(new URL("../app/api/imports/upload-token/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/imports/start/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/resumable-upload.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(tokenRoute, /prospectImportObjectPath\(user\.id, normalizedFingerprint\)/);
+  assert.match(startRoute, /validProspectImportObjectPath\(payload\.storageObjectPath, user\.id\)/);
+  assert.match(resumable, /storage\/v1\/upload\/resumable\/sign/);
+  assert.match(resumable, /fingerprint: \(\) => Promise\.resolve\(`prospect-import:\$\{objectPath\}`\)/);
 });
 
 test("client date, bounded pivots, Storage, and worker readiness are wired end to end", async () => {

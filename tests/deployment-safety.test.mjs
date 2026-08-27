@@ -19,10 +19,12 @@ test("readiness checks Auth, PostgREST, and PostgreSQL before a deploy passes", 
   assert.match(workflow, /APP_PUBLIC_URL }}\/api\/health/);
 });
 
-test("public resumable uploads translate the Supabase URL to Storage's internal TUS route", async () => {
-  const [caddy, compose] = await Promise.all([
+test("public resumable uploads translate the signed Supabase URL to Storage's internal TUS route", async () => {
+  const [caddy, compose, resumable, update] = await Promise.all([
     readFile(new URL("../deploy/caddy/Caddyfile", import.meta.url), "utf8"),
     readFile(new URL("../deploy/docker-compose.yml", import.meta.url), "utf8"),
+    readFile(new URL("../lib/resumable-upload.ts", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/scripts/update.sh", import.meta.url), "utf8"),
   ]);
 
   const publicTus = caddy.match(/handle \/storage\/v1\/upload\/resumable\* \{[\s\S]*?\n\t\}/)?.[0];
@@ -31,6 +33,8 @@ test("public resumable uploads translate the Supabase URL to Storage's internal 
   assert.match(publicTus, /header_up X-Forwarded-Prefix \/storage\/v1/);
   assert.match(compose, /TUS_URL_PATH: \/upload\/resumable/);
   assert.doesNotMatch(compose, /TUS_URL_PATH: \/storage\/v1\/upload\/resumable/);
+  assert.match(resumable, /storage\/v1\/upload\/resumable\/sign/);
+  assert.match(update, /storage\/v1\/upload\/resumable\/sign/);
 
   const publicRoute = caddy.indexOf("handle /storage/v1/upload/resumable*");
   const internalRoute = caddy.indexOf("handle_path /storage/v1/*");

@@ -23,11 +23,18 @@ export async function uploadProspectCsv(file: File, objectPath: string, signatur
   return new Promise<void>((resolve, reject) => {
     try {
       const upload = new Upload(file, {
-        endpoint: `${url.replace(/\/$/, "")}/storage/v1/upload/resumable`,
+        // Signed TUS tokens are consumed only by Storage's `/sign` route.
+        // Sending x-signature to the ordinary route ignores it and falls into
+        // storage.objects RLS, which rejects creation with HTTP 403.
+        endpoint: `${url.replace(/\/$/, "")}/storage/v1/upload/resumable/sign`,
         retryDelays: [0, 1000, 3000, 5000, 10000, 20000],
         chunkSize: 6 * 1024 * 1024,
         uploadDataDuringCreation: true,
         removeFingerprintOnSuccess: true,
+        // The default tus fingerprint omits metadata. Include the server-issued
+        // user-scoped object path so another account or an old failed route can
+        // never resume the wrong upload URL from browser storage.
+        fingerprint: () => Promise.resolve(`prospect-import:${objectPath}`),
         headers: { authorization: `Bearer ${session.access_token}`, "x-signature": signature },
         metadata: {
           bucketName: "prospect-imports",

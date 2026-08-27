@@ -207,7 +207,7 @@ verify_public_upload_route() {
     # the edge proxy's 404 before Storage ever sees it.
     code="$(curl -sS -o /dev/null -w '%{http_code}' -m 15 -X POST \
       -H 'Tus-Resumable: 1.0.0' -H 'Upload-Length: 0' \
-      "${SUPABASE_PUBLIC_URL}/storage/v1/upload/resumable" || echo 000)"
+      "${SUPABASE_PUBLIC_URL}/storage/v1/upload/resumable/sign" || echo 000)"
     case "$code" in
       404|000|"") ;;
       2??|4??)
