@@ -4,7 +4,7 @@ import { createAdminClient } from "../../../../../../lib/supabase/admin";
 const missingFunctionCodes = new Set(["PGRST202", "42883", "42P01"]);
 
 // Removing one prospect is the same operation as removing a filtered segment,
-// so it goes through the same function — one code path, one set of semantics:
+// so it goes through the same function - one code path, one set of semantics:
 // the client link goes, the master People DB record never does.
 export async function DELETE(_request: Request, context: { params: Promise<{ id: string; prospectId: string }> }) {
   const unauthorized = await authorizeApi();

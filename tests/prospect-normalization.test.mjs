@@ -30,7 +30,7 @@ test("normalizes duplicate imported headers without discarding their values", ()
 test("a single Location column is preserved verbatim, not re-derived from parts", () => {
   const headers = ["Full Name", "Work Email", "Location", "City", "State", "Country"];
   const prospect = mapProspect(headers, ["Ada Byron", "ada@example.com", "Greater London, United Kingdom", "London", "England", "United Kingdom"]);
-  // The file's own phrasing wins — re-joining the parts would produce
+  // The file's own phrasing wins - re-joining the parts would produce
   // "London, England, United Kingdom" and lose what the source actually said.
   assert.equal(prospect.location, "Greater London, United Kingdom");
   assert.equal(prospect.city, "London");

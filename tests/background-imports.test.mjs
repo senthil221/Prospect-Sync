@@ -64,7 +64,7 @@ test("deployment runs storage and one bounded import worker", async () => {
   assert.match(bootstrap, /grant prospect_importer to authenticator/i);
   // migrate.sh connects as postgres and CREATE OR REPLACE FUNCTION needs
   // ownership, so anything created through Studio (which connects as
-  // supabase_admin) has to be handed back before migrations run — while leaving
+  // supabase_admin) has to be handed back before migrations run - while leaving
   // extension members like pg_trgm alone.
   assert.match(bootstrap, /alter %s owner to postgres/i);
   assert.match(bootstrap, /deptype = 'e'/);

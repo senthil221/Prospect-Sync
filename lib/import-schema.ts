@@ -1,12 +1,10 @@
 export const requiredPersonImportFields = [
-  "Name",
+  "First Name",
+  "Last Name",
   "Company Name",
   "Email",
   "Personal LinkedIn URL",
   "Job Title",
-  "Seniority",
-  "Departments",
-  "Sub Departments",
 ] as const;
 
 // A company row is identifiable by either its name or its website; at least one
@@ -14,7 +12,7 @@ export const requiredPersonImportFields = [
 export const companyIdentityFields = ["Company Name", "Website"] as const;
 
 // Geography is one thing, not three. A file that carries a single "Location"
-// column describes a company just as well as one with city, state and country —
+// column describes a company just as well as one with city, state and country -
 // which is how most exports actually ship it. Whichever arrives, the import stores
 // both the composed location and any parts it was given.
 export const companyGeographyFields = ["Company Location", "Company City", "Company State", "Company Country"] as const;

@@ -70,21 +70,21 @@
 # ───────────────────────────────────────────────────────────────────────────
 # Supabase API
 #
-# PUBLIC:   /auth/v1/*  — the browser needs this to sign in and refresh tokens.
-# INTERNAL: everything else — Prospect Sync's server routes reach these over the
+# PUBLIC:   /auth/v1/*  - the browser needs this to sign in and refresh tokens.
+# INTERNAL: everything else - Prospect Sync's server routes reach these over the
 #           Docker bridge. The `internal_only` snippet 403s the public internet.
 #
 # Loosening this is a deliberate act: if you later expose /rest/v1 for an MCP
 # server or a partner integration, add that source IP to the snippet above and
 # write real RLS policies first. Right now every table has RLS on with zero
 # policies and zero grants to anon/authenticated, so the Data API returns
-# nothing without the service-role key — but don't rely on that alone.
+# nothing without the service-role key - but don't rely on that alone.
 # ───────────────────────────────────────────────────────────────────────────
 {$API_DOMAIN} {
 	encode zstd gzip
 
 	# One authoritative set of CORS headers. `defer` makes these replace, rather
-	# than duplicate, anything the upstream emits — duplicated
+	# than duplicate, anything the upstream emits - duplicated
 	# Access-Control-Allow-Origin headers are rejected by every browser.
 	header {
 		defer
@@ -170,7 +170,7 @@
 }
 
 # ───────────────────────────────────────────────────────────────────────────
-# Supabase Studio — full database admin.
+# Supabase Studio - full database admin.
 #
 # Default posture is two locks: source-IP (STUDIO_ALLOWED_CIDRS, Tailscale +
 # loopback) and basic auth. Best practice for an internal tool: install
@@ -179,11 +179,11 @@
 #
 # If you need Studio reachable from arbitrary IPs (no Tailscale/VPN), set
 # STUDIO_ALLOWED_CIDRS="0.0.0.0/0 ::/0" in .env. That drops the IP lock and
-# leaves basic auth as the only gate — pair it with per-user credentials
+# leaves basic auth as the only gate - pair it with per-user credentials
 # (below) and run scripts/setup-studio-fail2ban.sh so repeated failed logins
 # get banned at the firewall instead of just retried forever.
 #
-# basic_auth takes one "user hash" pair per line — add a line per person who
+# basic_auth takes one "user hash" pair per line - add a line per person who
 # needs a login. Remove the _2 line entirely if only one person needs access.
 # ───────────────────────────────────────────────────────────────────────────
 {$STUDIO_DOMAIN} {

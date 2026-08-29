@@ -17,7 +17,7 @@ if [[ -t 1 ]]; then B=$'\e[1m'; DIM=$'\e[2m'; R=$'\e[0m'; else B=""; DIM=""; R="
 
 usage() {
   cat <<EOF
-${B}prospect${R} — Prospect Sync control
+${B}prospect${R} - Prospect Sync control
 
   ${B}prospect status${R}              Is everything OK? Start here.
   ${B}prospect logs${R} [service]      Follow the logs (Ctrl+C to stop)

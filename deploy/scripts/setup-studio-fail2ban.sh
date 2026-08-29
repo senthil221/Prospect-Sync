@@ -2,7 +2,7 @@
 # Ban repeated failed Studio logins at the firewall.
 #
 # fail2ban (installed by bootstrap-vps.sh) only watches sshd out of the box.
-# That's fine while Studio is locked to Tailscale/loopback — but once
+# That's fine while Studio is locked to Tailscale/loopback - but once
 # STUDIO_ALLOWED_CIDRS is widened (e.g. "0.0.0.0/0 ::/0" for access from
 # arbitrary IPs), basic auth becomes the only gate on the full database admin
 # UI, with no rate limit on guesses. Run this once after that change.
@@ -18,7 +18,7 @@ LOGPATH="${LOGDIR}/studio.log"
 
 # The volume is root-owned (Caddy runs as root in its container), so check as
 # root rather than as the deploy user, which can't even stat it.
-sudo test -d "$LOGDIR" || { echo "No $LOGDIR yet — start the stack (docker compose up -d) first." >&2; exit 1; }
+sudo test -d "$LOGDIR" || { echo "No $LOGDIR yet - start the stack (docker compose up -d) first." >&2; exit 1; }
 
 sudo tee /etc/fail2ban/filter.d/caddy-studio.conf >/dev/null <<'EOF'
 # Matches Caddy's JSON access log for the Studio site: a failed basic-auth

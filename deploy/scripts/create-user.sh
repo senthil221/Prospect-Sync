@@ -5,7 +5,7 @@
 #   ./scripts/create-user.sh owner@example.com
 #   ./scripts/create-user.sh owner@example.com 'a-password-you-chose'
 #
-# Access is gated twice — GoTrue must have the user, AND the address must be in
+# Access is gated twice - GoTrue must have the user, AND the address must be in
 # ALLOWED_USER_EMAILS. This script reminds you about the second half, because
 # forgetting it produces a login that succeeds and then bounces to a 401.
 set -euo pipefail
@@ -39,7 +39,7 @@ if grep -q '"id"' <<<"$response"; then
   if [[ "$GENERATED" == "yes" ]]; then
     echo
     echo "  password: ${PASSWORD}"
-    echo "  (shown once — save it, then have them change it after first login)"
+    echo "  (shown once - save it, then have them change it after first login)"
   fi
 else
   echo "Unexpected response:" >&2

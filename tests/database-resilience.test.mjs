@@ -34,7 +34,7 @@ test("the workspace RPC applies the indexed pre-filter before the scalar matcher
     body.indexOf("prospect_prefilter_sql") < body.indexOf("prospect_index_matches_v1"),
     "the pre-filter must be built before the scalar matcher is appended",
   );
-  // Narrow sort set, then hydrate by id — never to_jsonb over every matched row.
+  // Narrow sort set, then hydrate by id - never to_jsonb over every matched row.
   assert.match(body, /matched as materialized/);
   assert.match(body, /hydrated as \(\s*select pi\.\*/);
   // An empty company scope must not join the scope CTE at all, or company-less

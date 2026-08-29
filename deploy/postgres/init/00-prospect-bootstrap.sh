@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs once, on first initialisation of an empty data directory.
 #
-# Idempotent — safe to re-run against a live database, which is what
+# Idempotent - safe to re-run against a live database, which is what
 # scripts/restore.sh does after a recovery:
 #   docker compose exec -T db bash -s < postgres/init/00-prospect-bootstrap.sh
 set -euo pipefail
@@ -14,7 +14,7 @@ export PGPASSWORD="${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
 
 # Connect as supabase_admin, NOT postgres.
 #
-# In supabase/postgres the `postgres` role is deliberately not a superuser —
+# In supabase/postgres the `postgres` role is deliberately not a superuser -
 # supabase_admin is. `ALTER ROLE <other> SET ...` requires superuser, so running
 # this as postgres fails partway through, and with ON_ERROR_STOP the rest of the
 # file silently never executes: no pg_trgm, no timeouts, and a stack that only
@@ -90,8 +90,8 @@ psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
 	-- blocked the 20260826040000 release.
 	--
 	-- So hand ownership of the application's own public objects back to
-	-- postgres on every deploy. Extension members are excluded — pg_trgm and
-	-- unaccent are installed by supabase_admin and must stay that way — which
+	-- postgres on every deploy. Extension members are excluded - pg_trgm and
+	-- unaccent are installed by supabase_admin and must stay that way - which
 	-- is what the pg_depend deptype 'e' test filters out.
 	do \$\$
 	declare
@@ -128,7 +128,7 @@ missing="$(psql -tAq --username supabase_admin --dbname "$DB" -c \
    where e not in (select extname from pg_extension)")"
 
 if [[ -n "$missing" ]]; then
-  echo "prospect: FAILED — extensions still missing: ${missing}" >&2
+  echo "prospect: FAILED - extensions still missing: ${missing}" >&2
   exit 1
 fi
 
@@ -150,7 +150,7 @@ misowned="$(psql -tAq --username supabase_admin --dbname "$DB" -c \
    ) t")"
 
 if [[ -n "$misowned" ]]; then
-  echo "prospect: FAILED — still owned by supabase_admin, migrations will not be able to replace: ${misowned}" >&2
+  echo "prospect: FAILED - still owned by supabase_admin, migrations will not be able to replace: ${misowned}" >&2
   exit 1
 fi
 

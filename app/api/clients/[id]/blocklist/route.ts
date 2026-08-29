@@ -33,7 +33,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 }
 
 // Accepts one pasted blob and sorts it by shape, so domains and emails can be
-// pasted together — which is how they actually arrive from a client.
+// pasted together - which is how they actually arrive from a client.
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;

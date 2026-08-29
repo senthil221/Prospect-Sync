@@ -42,7 +42,7 @@ export function normalizeBulkValue(value: string, kind: BulkFieldKind) {
   return trimmed;
 }
 
-// A pasted email must look like one, and a pasted domain must have a dot —
+// A pasted email must look like one, and a pasted domain must have a dot -
 // otherwise a stray header row ("Website") silently becomes a filter value that
 // matches nothing and quietly shrinks the result set.
 export function isValidBulkValue(value: string, kind: BulkFieldKind) {
@@ -96,6 +96,6 @@ export function describeBulkMerge(result: BulkMergeResult, noun = "value") {
 }
 
 // Pasting hundreds of domains means "these exact companies", not "any company
-// whose domain contains this string" — and an equality test is indexable where a
+// whose domain contains this string" - and an equality test is indexable where a
 // chain of ILIKE '%…%' is not. Above this size the picker switches operators.
 export const exactMatchThreshold = 25;

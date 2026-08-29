@@ -5,6 +5,29 @@ import { parseFilters, type ProspectFilter } from "../../../lib/prospect-filters
 import { parsePeopleScope, type PeopleScope } from "../../../lib/workspace-scopes";
 
 const exportBatchSize = 1000;
+const missingCompanyValidationCodes = new Set(["PGRST205", "42P01"]);
+
+async function withClientIcpValidation(
+  supabase: ReturnType<typeof createAdminClient>,
+  rows: Array<Record<string, unknown>>,
+  clientId: string,
+) {
+  if (!clientId || !rows.length) return rows;
+  const ids = rows.map((company) => String(company.id ?? "")).filter(Boolean);
+  const result = await supabase
+    .from("client_company_icp_validations")
+    .select("company_id")
+    .eq("client_id", clientId)
+    .in("company_id", ids);
+  if (result.error) {
+    if (result.error.code && missingCompanyValidationCodes.has(result.error.code)) {
+      return rows.map((company) => ({ ...company, icp_validated: false }));
+    }
+    throw new Error(result.error.message);
+  }
+  const validatedIds = new Set((result.data ?? []).map((item) => item.company_id));
+  return rows.map((company) => ({ ...company, icp_validated: validatedIds.has(String(company.id ?? "")) }));
+}
 
 function websiteUrl(domain: string) {
   return /^https?:\/\//i.test(domain) ? domain : `https://${domain}`;
@@ -146,8 +169,11 @@ export async function GET(request: Request) {
       return Response.json({ error: migrationMissing ? "Apply the latest database migration to enable company filters." : error.message }, { status: migrationMissing ? 503 : 500 });
     }
     const summary = Array.isArray(data) ? data[0] : data;
+    let companies;
+    try { companies = await withClientIcpValidation(supabase, summary?.result_rows ?? [], clientId); }
+    catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to load company validation." }, { status: 500 }); }
     return Response.json({
-      companies: summary?.result_rows ?? [],
+      companies,
       total: Number(summary?.total_count ?? 0),
       covered: Number(summary?.covered_count ?? 0),
       prospectTotal: Number(summary?.prospect_total ?? 0),
@@ -165,8 +191,11 @@ export async function GET(request: Request) {
     });
     if (error) return Response.json({ error: error.code === "PGRST202" || error.code === "42883" ? "Apply the latest database migration to enable client workspaces." : error.message }, { status: error.code === "PGRST202" || error.code === "42883" ? 503 : 500 });
     const summary = Array.isArray(data) ? data[0] : data;
+    let companies;
+    try { companies = await withClientIcpValidation(supabase, summary?.result_rows ?? [], clientId); }
+    catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to load company validation." }, { status: 500 }); }
     return Response.json({
-      companies: summary?.result_rows ?? [],
+      companies,
       total: Number(summary?.total_count ?? 0),
       covered: Number(summary?.covered_count ?? 0),
       prospectTotal: Number(summary?.prospect_count ?? 0),

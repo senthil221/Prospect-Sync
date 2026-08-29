@@ -20,7 +20,7 @@ test("a bulk selection accepts explicit ids or the live filter payload", () => {
 });
 
 // Without this guard a request carrying neither ids nor filters would mean
-// "every prospect in the database" — which for push or ICP marking is a
+// "every prospect in the database" - which for push or ICP marking is a
 // catastrophe rather than a no-op.
 test("a selection with neither ids nor filters is rejected, not treated as everything", () => {
   assert.equal(isEmptySelection(parseBulkSelection({})), true);

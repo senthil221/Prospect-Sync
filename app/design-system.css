@@ -178,7 +178,7 @@
   --success-rgb: 15, 122, 82;
   --shadow-rgb:  11, 13, 18;
 
-  /* Translucent surfaces sitting over scrolling content — the sticky topbar,
+  /* Translucent surfaces sitting over scrolling content - the sticky topbar,
      progress strips, glass chips. These must be tokens: a literal white here
      is a white bar floating on a dark page. */
   --surface-veil:       rgba(255, 255, 255, .78);

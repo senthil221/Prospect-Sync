@@ -73,7 +73,7 @@ The reverse direction is unchanged and intended: deleting a person from the Peop
 
 ### Pushing people from master into a list
 
-Select people in the People database — a page, a selection across pages, or everything matching the current filters — and choose **Add to client list**. They are linked into the chosen list (new or existing); anyone already on it is left alone rather than duplicated, and nothing about the master record changes.
+Select people in the People database - a page, a selection across pages, or everything matching the current filters - and choose **Add to client list**. They are linked into the chosen list (new or existing); anyone already on it is left alone rather than duplicated, and nothing about the master record changes.
 
 Each push is recorded as an import row, so it appears in the Imports panel with its provenance and can be undone in one click exactly like a CSV upload.
 
@@ -91,7 +91,7 @@ The mode is stored on the import, so a resumed upload continues under the mode i
 
 ## Job title classifier
 
-Every prospect's raw job title is classified into a department (one of 18), an optional sub-department, and a seniority tier (`owner` · `c_suite` · `vp` · `director` · `manager` · `senior_ic` · `entry`). It is deterministic — two keyword scans over a normalized copy of the title, no AI and no network call — and it runs automatically on every write.
+Every prospect's raw job title is classified into a department (one of 18), an optional sub-department, and a seniority tier (`owner` · `c_suite` · `vp` · `director` · `manager` · `senior_ic` · `entry`). It is deterministic - two keyword scans over a normalized copy of the title, no AI and no network call - and it runs automatically on every write.
 
 The raw title is never modified. Results land in separate columns (`title_seniority`, `title_department`, `title_sub_department`, `title_is_former`) beside the `Seniority`/`Departments` columns that came with the upload, so the imported values are preserved and the classifier can be re-run at any time without destroying data. Filter on them under **From job title** in the filter panel, add them as table columns, or include them in a CSV export.
 
@@ -113,6 +113,6 @@ The lists are data, in `data/seniority_map.csv` and `data/department_map.csv`. E
    curl -s -X POST "$APP_URL/api/prospects/classify"
    ```
 
-Any keyword change timestamps the lists, and step 4 only revisits prospects classified before that timestamp — it is not a full-table rebuild.
+Any keyword change timestamps the lists, and step 4 only revisits prospects classified before that timestamp - it is not a full-table rebuild.
 
 Known limitations, accepted by design: `md` is read as Managing Director except at a company that looks like a healthcare provider; bare function words (`Sales`) carry a department but no seniority; multi-department titles take the earliest-mentioned department; and non-Latin scripts are out of scope and land in the gaps report.

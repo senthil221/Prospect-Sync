@@ -54,22 +54,29 @@ test("prospect signed uploads are scoped to the authenticated owner", async () =
   assert.match(resumable, /fingerprint: \(\) => Promise\.resolve\(`prospect-import:\$\{objectPath\}`\)/);
 });
 
-test("client date, bounded pivots, Storage, and worker readiness are wired end to end", async () => {
-  const [migration, startRoute, healthRoute, worker, compose, update, row] = await Promise.all([
+test("Date Contacted, bounded pivots, Storage, and worker readiness are wired end to end", async () => {
+  const [migration, pivotMigration, startRoute, clientRoute, healthRoute, worker, compose, update, row, table] = await Promise.all([
+    readFile(new URL("../supabase/migrations/20260829004125_client_date_contacted.sql", import.meta.url), "utf8"),
     readFile(new URL("../supabase/migrations/20260828010000_client_dates_pivot_limits.sql", import.meta.url), "utf8"),
     readFile(new URL("../app/api/imports/start/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/clients/[id]/prospects/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/health/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/import-worker.mjs", import.meta.url), "utf8"),
     readFile(new URL("../deploy/docker-compose.yml", import.meta.url), "utf8"),
     readFile(new URL("../deploy/scripts/update.sh", import.meta.url), "utf8"),
     readFile(new URL("../app/components/ProspectTableRow.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ProspectTable.tsx", import.meta.url), "utf8"),
   ]);
-  assert.match(startRoute, /prospect_date_added: dateAdded/);
-  assert.match(migration, /add column if not exists date_added date not null default current_date/);
-  assert.match(migration, /least\(public\.client_prospects\.date_added, excluded\.date_added\)/);
-  assert.match(migration, /client_date_added/);
-  assert.match(migration, /limit %s[\s\S]*250000/);
-  assert.match(row, /formatClientDate\(prospect\.client_date_added\)/);
+  assert.match(startRoute, /prospect_date_added: dateContacted/);
+  assert.match(startRoute, /if \(value === null\) return null/);
+  assert.match(migration, /alter column date_added drop not null/);
+  assert.match(migration, /client_date_contacted/);
+  assert.match(migration, /set_client_date_contacted_v1/);
+  assert.match(clientRoute, /action === "set_date_contacted"/);
+  assert.match(table, /Set Date Contacted/);
+  assert.match(table, /No contact date \(clear existing date\)/);
+  assert.match(pivotMigration, /limit %s[\s\S]*250000/);
+  assert.match(row, /formatClientDate\(prospect\.client_date_contacted\)/);
   assert.match(healthRoute, /checkStorage[\s\S]*checkImportWorker/);
   assert.match(worker, /createServer[\s\S]*\/health[\s\S]*lastProgressAt/);
   assert.match(compose, /IMPORT_WORKER_HEALTH_URL: http:\/\/import-worker:9090\/health/);

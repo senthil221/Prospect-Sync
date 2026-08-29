@@ -8,7 +8,7 @@
 # tries to run `Sync` as a command and the script dies with a message that says
 # nothing about .env. Docker Compose accepts that line, so the file looks fine.
 #
-# This loader reads the file as data instead — no evaluation, no surprises from
+# This loader reads the file as data instead - no evaluation, no surprises from
 # spaces, #, $ or quotes in a password.
 
 load_env() {

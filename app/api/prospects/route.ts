@@ -23,7 +23,7 @@ function isMissingFunction(error: { code?: string } | null | undefined) {
 
 // One current function, no version ladder. Deploys run migrations before the app
 // starts (deploy/scripts/update.sh), so a missing function means the database is
-// behind — which the caller surfaces as a 503 telling the operator to migrate,
+// behind - which the caller surfaces as a 503 telling the operator to migrate,
 // rather than silently degrading to an older filter contract.
 async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClient>, query: WorkspaceQuery) {
   const workspace = await supabase.rpc("search_prospect_workspace_v12", {

@@ -66,7 +66,7 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.image }}
             ${{ steps.meta.outputs.latest }}
-          # These are compiled into the client bundle. They are public values —
+          # These are compiled into the client bundle. They are public values -
           # the anon key grants nothing, because every table has RLS enabled
           # with no policies and no grants to anon.
           build-args: |
@@ -155,7 +155,7 @@ jobs:
           EXPECTED_VERSION: ${{ github.sha }}
         run: |
           # A 200 on its own proves *a* container answered, not that it is the
-          # one this run just shipped — an old container returns 200 just as
+          # one this run just shipped - an old container returns 200 just as
           # readily. Check X-App-Version (set from the git SHA at image build
           # time, see Dockerfile and next.config.ts) so a stale rollout fails
           # loudly here instead of shipping green while serving old code.

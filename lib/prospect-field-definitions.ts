@@ -1,6 +1,6 @@
 import { requiredPersonImportFields, skipImportField } from "./import-schema.ts";
 
-export const canonicalImportFields = ["Auto detect", skipImportField, ...requiredPersonImportFields, "First Name", "Last Name", "Personal Email", "Mobile Number", "Keywords", "City", "State", "Country", "Person Location", "Company Website", "Company Employee Count", "Company Location", "Company City", "Company State", "Company Country"];
+export const canonicalImportFields = ["Auto detect", skipImportField, ...requiredPersonImportFields, "Name", "Personal Email", "Mobile Number", "Keywords", "Seniority", "Departments", "Sub Departments", "City", "State", "Country", "Person Location", "Company Website", "Company Employee Count", "Company Location", "Company City", "Company State", "Company Country"];
 
 export const standardProspectFields = [
   { id: "__name", label: "Name" },

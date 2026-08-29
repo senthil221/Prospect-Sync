@@ -24,7 +24,7 @@ const mainFilters: FilterDefinition[] = [
   { id: "__linkedin", label: "Personal LinkedIn URL" },
   { id: "__title_seniority", label: "Job Title & Seniority", description: "Matches either the job title or the seniority." },
   { id: "__department", label: "Departments" },
-  { id: "__person_location", label: "Location", description: "One field for city, state and country — e.g. “London”, “California”, “United Kingdom”." },
+  { id: "__person_location", label: "Location", description: "One field for city, state and country - e.g. “London”, “California”, “United Kingdom”." },
   { id: "__esp_type", label: "ESP", description: "Matches the ESP or the email provider type (e.g. SEG)." },
 ];
 
@@ -39,7 +39,7 @@ const classifierFilters: FilterDefinition[] = [
 
 // City / state / country are deliberately NOT filters. "Location" matches all
 // three at once, which is the whole point of having it. The columns still exist
-// and are still exported — they just are not three things to filter on.
+// and are still exported - they just are not three things to filter on.
 //
 // Tags are the one thing that belongs here: applied inside the workspace rather
 // than imported, so they sit with the kept custom fields rather than the mandatory

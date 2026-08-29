@@ -66,10 +66,12 @@ test("the imports panel discovers, validates, and cancels interrupted imports", 
   assert.match(detailRoute, /totalRows/);
   assert.match(prospectStart, /total_rows: totalRows/);
   assert.match(companyStart, /total_rows: totalRows/);
-  assert.match(dashboard, /Interrupted — resume from row/);
+  assert.match(dashboard, /Interrupted - resume from row/);
   assert.match(dashboard, /importHeadersMatch/);
   assert.match(dashboard, /Start a new import instead/);
   assert.match(importsPanel, /Cancel import/);
+  assert.match(importsPanel, /visibleInterruptedImports = interruptedImports\.filter\(\(item\) => item\.id !== activeImportId\)/);
+  assert.match(importsPanel, /onActiveImportChange\(started\.importId\)/);
   assert.match(importsPanel, /cancel: true, kind: cancelImport\.kind/);
   assert.match(detailRoute, /payload\?\.cancel === true/);
   assert.match(detailRoute, /existing\.data\.status !== "processing"/);

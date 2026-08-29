@@ -178,7 +178,7 @@ trap - ERR
 
 cat <<EOF
 
-Restore complete. The previous database is kept as "${POSTGRES_DB}_old" —
+Restore complete. The previous database is kept as "${POSTGRES_DB}_old" -
 verify the application, then reclaim the disk space with:
 
   docker compose exec db psql -U postgres -d postgres -c 'drop database ${POSTGRES_DB}_old;'

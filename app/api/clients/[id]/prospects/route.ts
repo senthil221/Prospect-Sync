@@ -12,6 +12,15 @@ function failure(error: { code?: string; message: string }, feature: string) {
   );
 }
 
+function validDateContacted(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  const date = String(value ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < "1900-01-01") return undefined;
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return undefined;
+  return date <= new Date(Date.now() + 24 * 60 * 60_000).toISOString().slice(0, 10) ? date : undefined;
+}
+
 // Push master records into this client, mark them ICP verified, or remove them.
 // Every action accepts either explicit ids or the current search/filters, so a
 // whole segment is one request.
@@ -56,6 +65,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       p_actor: actor,
     });
     if (error) return failure(error, "ICP verification");
+    return Response.json({ result: data });
+  }
+
+  if (action === "set_date_contacted") {
+    const dateContacted = validDateContacted(payload.dateContacted);
+    if (dateContacted === undefined) {
+      return Response.json({ error: "Choose a valid Date Contacted between 1900-01-01 and today, or select no contact date." }, { status: 400 });
+    }
+    const { data, error } = await supabase.rpc("set_client_date_contacted_v1", {
+      p_client_id: id,
+      p_date_contacted: dateContacted,
+      ...selectionArgs(selection),
+      p_actor: actor,
+    });
+    if (error) return failure(error, "Date Contacted updates");
     return Response.json({ result: data });
   }
 

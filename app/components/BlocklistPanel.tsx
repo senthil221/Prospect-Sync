@@ -105,7 +105,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
     {error ? <div className="inline-error" role="alert">{error}</div> : null}
 
     <article className="panel blocklist-add">
-      <div className="panel-head"><div><h3>Add to the blocklist</h3><p>Paste domains and email addresses together — they are sorted by shape. URLs are trimmed to the domain, so a pasted link matches the stored company.</p></div></div>
+      <div className="panel-head"><div><h3>Add to the blocklist</h3><p>Paste domains and email addresses together - they are sorted by shape. URLs are trimmed to the domain, so a pasted link matches the stored company.</p></div></div>
       <textarea
         value={text}
         onChange={(event) => { setText(event.target.value); if (notice) setNotice(""); }}
@@ -114,7 +114,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
         placeholder={"acme.com\nhttps://www.competitor.co.uk/about\nno-contact@bigco.com\n\nOne per line, or comma-separated."}
       />
       <div className="blocklist-add-actions">
-        <input aria-label="Reason (optional)" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reason (optional) — e.g. existing customer"/>
+        <input aria-label="Reason (optional)" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reason (optional) - e.g. existing customer"/>
         <button className="primary" disabled={busy || !pending} onClick={() => void addEntries()}>
           {busy ? "Blocking…" : `Block ${pending ? formatNumber(pending) : ""}`}
         </button>
@@ -133,7 +133,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
           <td className="select-column"><input type="checkbox" aria-label={`Select ${entry.value}`} checked={selected.has(entry.id)} onChange={() => toggle(entry.id)}/></td>
           <td><strong>{entry.value}</strong></td>
           <td><span className={`data-source-badge ${entry.kind}`}>{entry.kind === "domain" ? "Domain" : "Email"}</span></td>
-          <td>{entry.reason || <span className="missing-value">—</span>}</td>
+          <td>{entry.reason || <span className="missing-value">-</span>}</td>
           <td>{new Date(entry.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
         </tr>)}</tbody>
       </table></div> : <EmptyCompact text={search ? `No blocked entries match “${search}”.` : "Nothing is blocked for this client yet."} />}

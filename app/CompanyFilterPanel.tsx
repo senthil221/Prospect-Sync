@@ -26,7 +26,7 @@ const companyFilters: CompanyFilterDefinition[] = [
   { id: "__website", label: "Website", kind: "token", autocomplete: true, description: "Matches the company domain. Use the Bulk domains tab to paste a list." },
   { id: "__industry", label: "Industry", kind: "token", autocomplete: true },
   { id: "__employee_count", label: "# Employees", kind: "employee" },
-  { id: "__company_location", label: "Company location", kind: "token", autocomplete: true, description: "One field for city, state and country — e.g. “London”, “California”, “India”." },
+  { id: "__company_location", label: "Company location", kind: "token", autocomplete: true, description: "One field for city, state and country - e.g. “London”, “California”, “India”." },
   { id: "__founded_year", label: "Founded year", kind: "year" },
   { id: "__technologies", label: "Technologies", kind: "token", autocomplete: true },
   { id: "__total_funding", label: "Total funding", kind: "token", autocomplete: true },
@@ -35,7 +35,7 @@ const companyFilters: CompanyFilterDefinition[] = [
 // Company city / state / country are deliberately NOT filters. "Company
 // location" matches all three at once, which is the whole point of having it.
 // The columns still exist and are still exported and read by the
-// fill-from-company enrichment — they just are not three things to filter on.
+// fill-from-company enrichment - they just are not three things to filter on.
 const companyDetailFilters: CompanyFilterDefinition[] = [];
 
 const employeeRanges = [

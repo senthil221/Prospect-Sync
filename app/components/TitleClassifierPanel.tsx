@@ -93,7 +93,7 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
         setProgress(`Re-classified ${formatNumber(total)} prospects…`);
         if (!data.remaining) break;
       }
-      setProgress(total ? `Done — ${formatNumber(total)} prospects re-classified.` : "Done — every prospect was already classified against the current keyword lists.");
+      setProgress(total ? `Done - ${formatNumber(total)} prospects re-classified.` : "Done - every prospect was already classified against the current keyword lists.");
       reload();
     } catch (caught) {
       setProgress("");
@@ -108,7 +108,7 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
       await navigator.clipboard.writeText(gaps.map((gap) => gap.sampleTitle).join("\n"));
       setCopied(`Copied ${formatNumber(gaps.length)} titles.`);
     } catch {
-      setCopied("Copying is blocked in this browser — select the column instead.");
+      setCopied("Copying is blocked in this browser - select the column instead.");
     }
   }
 
@@ -118,7 +118,7 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
     <div className="classifier-head">
       <div>
         <strong>Undefined job titles</strong>
-        <p>Titles the keyword lists could not fully resolve, biggest first. Add the missing words to <code>data/seniority_map.csv</code> or <code>data/department_map.csv</code>, then re-run. Plenty of real titles name only one side — a “Director” or “Founder” has a seniority and no department — so <strong>Missing both</strong> is the list actually worth working through.</p>
+        <p>Titles the keyword lists could not fully resolve, biggest first. Add the missing words to <code>data/seniority_map.csv</code> or <code>data/department_map.csv</code>, then re-run. Plenty of real titles name only one side - a “Director” or “Founder” has a seniority and no department - so <strong>Missing both</strong> is the list actually worth working through.</p>
       </div>
       <div className="classifier-actions">
         <label><span className="sr-only">Which side is missing</span><select value={missing} disabled={running} onChange={(event) => { setLoading(true); setMissing(event.target.value as MissingOption); }}>{missingOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -131,7 +131,7 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
     <div className="classifier-summary">
       <div><strong>{formatNumber(gaps.length)}</strong><span>Distinct titles unresolved</span></div>
       <div><strong>{formatNumber(covered)}</strong><span>People they cover</span></div>
-      <div><strong>{gaps.length ? formatNumber(gaps[0].occurrences) : "—"}</strong><span>People the top fix covers</span></div>
+      <div><strong>{gaps.length ? formatNumber(gaps[0].occurrences) : "-"}</strong><span>People the top fix covers</span></div>
     </div>
 
     {progress ? <p className="source-selected-note" role="status">{progress}</p> : null}
@@ -140,6 +140,6 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
 
     {loading ? <p className="classifier-empty">Loading the undefined log…</p>
       : gaps.length ? <div className="master-table-wrap"><table className="master-data-table"><thead><tr><th>Job title</th><th>Normalized</th><th>People</th><th>Missing</th></tr></thead><tbody>{gaps.map((gap) => <tr key={gap.normalizedTitle}><td><span title={gap.sampleTitle}>{gap.sampleTitle}</span></td><td><code>{gap.normalizedTitle}</code></td><td>{formatNumber(gap.occurrences)}</td><td><span className={`classifier-missing ${gap.missingSeniority && gap.missingDepartment ? "both" : ""}`}>{gapLabel(gap)}</span></td></tr>)}</tbody></table></div>
-        : <p className="classifier-empty">Nothing unresolved for this filter — every job title resolved to both a seniority tier and a department.</p>}
+        : <p className="classifier-empty">Nothing unresolved for this filter - every job title resolved to both a seniority tier and a department.</p>}
   </article>;
 }

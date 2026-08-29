@@ -6,7 +6,7 @@ const missingFunctionCodes = new Set(["PGRST202", "42883"]);
 
 // Deleting a client, list, or import has to re-index every prospect that lost a
 // membership. Doing that from the app meant selecting all the affected ids over
-// HTTP and handing the same ids straight back — untenable for a client with
+// HTTP and handing the same ids straight back - untenable for a client with
 // 100k prospects, and the reindex that followed was one call certain to exceed
 // its 15s timeout. The *_and_reindex_v1 functions do both inside the database,
 // in bounded batches, queueing anything they could not finish.

@@ -46,7 +46,7 @@ export async function POST() {
     const done = Number(row?.processed ?? 0);
     remaining = Number(row?.remaining ?? 0);
     processed += done;
-    // No progress means the queue is empty, or every row in it is failing —
+    // No progress means the queue is empty, or every row in it is failing -
     // either way, stop rather than spinning.
     if (!done || !remaining || Date.now() > deadline) break;
   }

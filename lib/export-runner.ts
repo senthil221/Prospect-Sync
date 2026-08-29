@@ -101,7 +101,7 @@ function partName(base: string, index: number) {
   return `${base}-part-${String(index).padStart(2, "0")}.csv`;
 }
 
-// mode "selected": rows already in memory — no server round-trips.
+// mode "selected": rows already in memory - no server round-trips.
 function selectedContent(options: ExportOptions) {
   const columns = buildExportColumns(options.customFieldNames, options.fields);
   const header = csvHeaderLine(columns);

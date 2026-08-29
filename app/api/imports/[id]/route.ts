@@ -56,7 +56,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     headers: Array.isArray(row.field_headers) ? row.field_headers.map(String) : [],
     fieldMap: row.field_map && typeof row.field_map === "object" ? row.field_map : {},
     headerSignature: String(row.header_signature ?? ""),
-    dateAdded: row.prospect_date_added ?? null,
+    dateContacted: row.prospect_date_added ?? null,
     // Resuming must continue with the mode the import started under; changing it
     // halfway would apply two different rules to one file.
     mergeMode: kind === "companies" ? String((row as { merge_mode?: unknown }).merge_mode ?? "enrich") : null,

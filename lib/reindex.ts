@@ -7,7 +7,7 @@ type Admin = ReturnType<typeof createAdminClient>;
 const benignCodes = new Set(["PGRST202", "42883", "42P01"]);
 
 // reindex_prospects runs under a 15s statement timeout. Sending it every id a
-// large client owns is a guaranteed timeout, so callers never do — ids are split
+// large client owns is a guaranteed timeout, so callers never do - ids are split
 // into batches this size, and any batch that still fails is queued for retry
 // rather than silently dropped.
 const batchSize = 2000;
@@ -47,7 +47,7 @@ export async function reindexProspects(supabase: Admin, ids: Array<string | null
   return { reindexed, queued, degraded };
 }
 
-// Index everything attached to a client, list, import, or company — resolved
+// Index everything attached to a client, list, import, or company - resolved
 // inside the database so the ids never travel over HTTP just to come back.
 export async function reindexScope(supabase: Admin, scope: {
   clientId?: string | null;
@@ -107,6 +107,6 @@ export async function reindexAll(supabase: Admin) {
 // can say so instead of showing stale rows and looking broken.
 export function indexNotice(outcome: ReindexOutcome) {
   if (outcome.queued) return `${outcome.queued.toLocaleString("en-IN")} records are queued for re-indexing and will refresh shortly.`;
-  if (outcome.degraded) return "Search index maintenance is unavailable — apply the latest database migration.";
+  if (outcome.degraded) return "Search index maintenance is unavailable - apply the latest database migration.";
   return "";
 }

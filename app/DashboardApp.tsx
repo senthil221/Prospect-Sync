@@ -149,7 +149,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
       <section className="content" aria-busy={loading || workspaceLoading}>
         {loading ? <LoadingState/> : null}
         {!loading && workspaceLoading ? <div className="workspace-progress" role="status"><span/>Updating {title.toLowerCase()}…</div> : null}
-        {!loading && section === "overview" && <OverviewWorkspace stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name} · ${item.list_name}` })}/>}
+        {!loading && section === "overview" && <OverviewWorkspace stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name ?? "Unassigned"} · ${item.list_name ?? "Unassigned"}` })}/>}
         {!loading && section === "prospects" && <ProspectsWorkspace controller={prospectsController} filters={prospectFilters} sort={prospectSort} direction={prospectDirection} clients={clients} companyScope={companyPeopleScope} onClearCompanyScope={() => setCompanyPeopleScope(null)} onSeeCompanies={seeCompanies} onFiltersChange={setProspectFilters} onSortChange={(nextSort, nextDirection) => { setProspectSort(nextSort); setProspectDirection(nextDirection); }} onSelect={setSelectedProspect} onImport={() => navigate("imports")}/>}
         {!loading && section === "companies" && <CompaniesWorkspace controller={companiesController} filters={companyFilters} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onSeePeople={seePeople} onFilters={setCompanyFilters} onImport={() => navigate("imports")}/>}
         {!loading && section === "clients" && <ClientsPanel clients={clients} selectedClient={selectedClient} selectedList={selectedList} lists={lists} onOpenClient={(client) => void openClient(client)} onCloseClient={() => setSelectedClient(null)} onOpenList={setSelectedList} onCloseList={() => setSelectedList(null)} onSelectProspect={setSelectedProspect} onImport={() => navigate("imports")} onDeleteClient={(client) => setDeleteRequest({ kind: "client", id: client.id, name: client.name, context: `${client.list_count} lists · ${client.prospect_count} linked prospects` })} onDeleteList={(list) => setDeleteRequest({ kind: "list", id: list.id, name: list.name, context: `${list.source_file_name} · ${list.prospect_count} linked prospects` })} onRefreshClients={() => { void refreshDashboard(); }}/>}
@@ -192,6 +192,6 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   withTotal: prospectPage === 1 && !prospectTotalCache.current.has;
   totalEstimated ? "≈"; const deferredSearch = useDeferredValue(search);
   useDebouncedValue(deferredSearch, 300); new AbortController(); signal: controller.signal;
-  controller.abort(); !isAbortError(caught); Interrupted — resume from row;
+  controller.abort(); !isAbortError(caught); Interrupted - resume from row;
   importHeadersMatch; Start a new import instead.
 */

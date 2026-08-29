@@ -61,7 +61,7 @@ x-app: &app
 
 services:
   # ─────────────────────────────────────────────────────────────────────────
-  # PostgreSQL — the actual product. Everything else is replaceable.
+  # PostgreSQL - the actual product. Everything else is replaceable.
   # ─────────────────────────────────────────────────────────────────────────
   db:
     image: supabase/postgres:${POSTGRES_IMAGE_TAG}
@@ -73,7 +73,7 @@ services:
     # Without it PostgreSQL falls back to the file initdb generated inside
     # PGDATA, which sets listen_addresses='localhost' and an empty
     # shared_preload_libraries. The container then starts, reports healthy, and
-    # accepts psql over its own loopback — while every other service in the
+    # accepts psql over its own loopback - while every other service in the
     # stack gets "connection refused", and pgsodium/supabase_vault/pg_cron/
     # pg_net are silently absent.
     #
@@ -159,7 +159,7 @@ services:
     networks: [internal]
 
   # ─────────────────────────────────────────────────────────────────────────
-  # GoTrue — email/password auth. This is the ONLY Supabase service that the
+  # GoTrue - email/password auth. This is the ONLY Supabase service that the
   # browser talks to directly (see deploy/README.md § "Why the API is safe").
   # ─────────────────────────────────────────────────────────────────────────
   auth:
@@ -220,7 +220,7 @@ services:
     networks: [internal]
 
   # ─────────────────────────────────────────────────────────────────────────
-  # PostgREST — the Data API. Prospect Sync reaches this ONLY from its server
+  # PostgREST - the Data API. Prospect Sync reaches this ONLY from its server
   # routes using the service-role key; Caddy blocks it from the public internet.
   # ─────────────────────────────────────────────────────────────────────────
   rest:
@@ -247,7 +247,7 @@ services:
     networks: [internal]
 
   # ─────────────────────────────────────────────────────────────────────────
-  # postgres-meta + Studio — admin UI. NEVER exposed publicly; Caddy serves it
+  # postgres-meta + Studio - admin UI. NEVER exposed publicly; Caddy serves it
   # on a separate hostname behind basic auth, and ideally only over Tailscale.
   # ─────────────────────────────────────────────────────────────────────────
   meta:
@@ -298,7 +298,7 @@ services:
       SUPABASE_ANON_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
       AUTH_JWT_SECRET: ${JWT_SECRET}
-      # Logflare/analytics is not deployed — keep the Logs pages hidden.
+      # Logflare/analytics is not deployed - keep the Logs pages hidden.
       NEXT_PUBLIC_ENABLE_LOGS: "false"
       NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
     networks: [internal]
@@ -372,7 +372,7 @@ services:
           - app
 
   # ─────────────────────────────────────────────────────────────────────────
-  # Caddy — TLS, HTTP routing, and the public/private boundary.
+  # Caddy - TLS, HTTP routing, and the public/private boundary.
   # This replaces Supabase's Kong gateway: one less service, one less config
   # file, and the routing rules live next to the TLS config.
   # ─────────────────────────────────────────────────────────────────────────
@@ -412,7 +412,7 @@ services:
           - ${API_DOMAIN}
 
   # ═════════════════════════════════════════════════════════════════════════
-  # OPTIONAL — enable via COMPOSE_PROFILES in .env
+  # OPTIONAL - enable via COMPOSE_PROFILES in .env
   # ═════════════════════════════════════════════════════════════════════════
 
   storage:

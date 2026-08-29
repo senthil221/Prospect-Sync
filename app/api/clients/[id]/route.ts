@@ -20,7 +20,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   const supabase = createAdminClient();
   // Delete and re-index in one server-side call: a large client owns far too
   // many prospects to ship their ids over HTTP just to hand straight back.
-  // Client-side deletes never touch the People/Company databases — only the
+  // Client-side deletes never touch the People/Company databases - only the
   // client, its lists, imports, and membership links are removed.
   const { data, error } = await deleteAndReindex(supabase, "delete_client_and_reindex_v1", "delete_client_with_cleanup", { p_client_id: id });
   if (error) return Response.json({ error: error.message }, { status: error.code === "P0002" ? 404 : 500 });

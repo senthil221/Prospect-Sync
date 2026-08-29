@@ -1,6 +1,6 @@
 // Shared spreadsheet helpers so the CSV importers can also accept .xlsx.
 // The xlsx parser (read-excel-file) is imported lazily so it only loads when a
-// user actually picks an Excel file — CSV imports pull in nothing extra.
+// user actually picks an Excel file - CSV imports pull in nothing extra.
 
 export function isXlsxFile(file: File): boolean {
   return /\.xlsx$/i.test(file.name)

@@ -22,7 +22,7 @@ export async function generateMetadata(): Promise<Metadata> {
 // script, not next/script: `beforeInteractive` is preloaded but its execution
 // does not block paint, which is exactly the flash this exists to prevent.
 // The CSP already allows inline scripts (script-src 'self' 'unsafe-inline').
-// Default is "light" — dark mode is opt-in, so an OS setting never flips the
+// Default is "light" - dark mode is opt-in, so an OS setting never flips the
 // workspace on its own. See app/components/ThemeToggle.tsx.
 const themeBootScript = `(function(){try{var c=localStorage.getItem("prospecthub-theme");if(c!=="dark"&&c!=="light"&&c!=="system"){c="light"}if(c==="system"){document.documentElement.removeAttribute("data-theme")}else{document.documentElement.setAttribute("data-theme",c)}}catch(e){document.documentElement.setAttribute("data-theme","light")}})();`;
 

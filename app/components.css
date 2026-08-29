@@ -1,5 +1,5 @@
 /* =============================================================================
-   Component layer — hand-built primitives.
+   Component layer - hand-built primitives.
 
    Loaded after workspace.css so it wins on the surfaces it owns. Everything
    here references design-system.css tokens only; no literal colours, sizes,
@@ -45,7 +45,7 @@
 .ds-tab-icon { display: grid; place-items: center; color: var(--text-tertiary); transition: color var(--duration-fast) var(--ease); }
 .ds-tabs button.active .ds-tab-icon { color: var(--accent); }
 
-/* The count is a quiet companion to the label — it must never out-weigh it. */
+/* The count is a quiet companion to the label - it must never out-weigh it. */
 .ds-tab-count {
   min-width: 20px;
   padding: 2px var(--space-1);
@@ -73,7 +73,7 @@
   transition: transform var(--duration-fast) var(--ease-out), width var(--duration-fast) var(--ease-out);
 }
 
-/* Variant: line — the workspace default. */
+/* Variant: line - the workspace default. */
 .ds-tabs-line {
   border-bottom: 1px solid var(--border-subtle);
   gap: var(--space-4);
@@ -86,7 +86,7 @@
   background: var(--accent);
 }
 
-/* Variant: segmented — enclosed switcher. */
+/* Variant: segmented - enclosed switcher. */
 .ds-tabs-segmented {
   width: fit-content;
   max-width: 100%;
@@ -380,7 +380,7 @@
 
 /* -----------------------------------------------------------------------------
    Theme control
-   Three mutually exclusive choices. Dark is opt-in — the default is Light, and
+   Three mutually exclusive choices. Dark is opt-in - the default is Light, and
    System is there for people who want it to follow the OS.
    -------------------------------------------------------------------------- */
 .theme-toggle {
@@ -415,7 +415,7 @@
 /* .theme-toggle now owns the auto margin that anchors this pair to the bottom. */
 .sidebar .profile { margin-top: var(--space-3); }
 
-/* The actions column was sized for a single chevron glyph — 42px wide at 20px
+/* The actions column was sized for a single chevron glyph - 42px wide at 20px
    type. It now carries the word "Actions" and a delete control, so it needs
    header type like every other column and room to actually hold the label. */
 .master-data-table th.row-detail-column,
@@ -431,4 +431,124 @@
 .company-table td.row-detail-column {
   font-size: var(--text-xs) !important;
   text-transform: none;
+}
+
+/* -----------------------------------------------------------------------------
+   Dropdown system
+   One quiet, precise treatment for every native select and menu surface.
+   Native semantics stay intact for keyboard and screen-reader reliability.
+   This stays last so older screen-specific rules cannot strip the chevron.
+   -------------------------------------------------------------------------- */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 36px;
+  padding: 0 36px 0 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 14 14' fill='none'%3E%3Cpath d='M3.5 5.25 7 8.75l3.5-3.5' stroke='%2376767f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 14px;
+  box-shadow: var(--elevation-1), inset 0 1px 0 rgba(255, 255, 255, .45);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+select:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background-color: var(--surface-hover);
+  box-shadow: var(--elevation-2), inset 0 1px 0 rgba(255, 255, 255, .45);
+}
+
+select:focus,
+select:focus-visible {
+  border-color: var(--accent);
+  outline: 0;
+  box-shadow: 0 0 0 3px var(--accent-ring), var(--elevation-1);
+}
+
+select:disabled {
+  border-color: var(--border-subtle);
+  background-color: var(--surface-sunken);
+  color: var(--text-disabled);
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: .72;
+}
+
+select option,
+select optgroup {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+select option { padding: 8px 12px; }
+select optgroup { color: var(--text-secondary); font-weight: var(--weight-semibold); }
+select:has(option[value=""]:checked) { color: var(--text-tertiary); }
+
+.mapping-list select,
+.filter-rule-actions select,
+.classifier-actions select,
+.import-source-fields select,
+.company-import-mapping select {
+  min-height: 36px;
+  padding-right: 34px;
+  background-position: right 10px center;
+}
+
+.export-format small select {
+  width: auto;
+  min-height: 28px;
+  height: 28px;
+  padding: 0 26px 0 8px;
+  border-radius: var(--radius-md);
+  background-position: right 7px center;
+  background-size: 12px;
+  box-shadow: none;
+}
+
+:where(.column-menu, .token-options, .multi-value-menu) {
+  padding: 6px;
+  border-color: var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--elevation-4);
+}
+
+:where(.token-options > button, .multi-value-menu button, .column-menu label) {
+  min-height: 36px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+}
+
+:where(.token-options > button, .multi-value-menu button):hover,
+:where(.token-options > button, .multi-value-menu button):focus-visible,
+.column-menu label:hover {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+:where(.token-options > button, .multi-value-menu button):focus-visible {
+  outline-offset: -2px;
+}
+
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] select option,
+:root[data-theme="dark"] select optgroup {
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) select,
+  :root:not([data-theme="light"]) select option,
+  :root:not([data-theme="light"]) select optgroup {
+    color-scheme: dark;
+  }
 }

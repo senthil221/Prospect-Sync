@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { requiredPersonImportFields } from "../lib/import-schema.ts";
 
 const migrationUrl = new URL("../supabase/migrations/20260812221326_remap_required_fields_and_fast_company_people.sql", import.meta.url);
 const narrowMigrationUrl = new URL("../supabase/migrations/20260812222615_narrow_company_people_pivot_rows.sql", import.meta.url);
@@ -47,7 +48,7 @@ test("people and company imports require the approved schemas", async () => {
     readFile(new URL("../app/api/company-imports/start/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/company-imports/chunk/route.ts", import.meta.url), "utf8"),
   ]);
-  for (const field of ["Name", "Company Name", "Email", "Personal LinkedIn URL", "Job Title", "Seniority", "Departments", "Sub Departments"]) assert.match(schema, new RegExp(`"${field}"`));
+  assert.deepEqual(requiredPersonImportFields, ["First Name", "Last Name", "Company Name", "Email", "Personal LinkedIn URL", "Job Title"]);
   for (const field of ["#employees", "Industry", "Website", "Company City", "Company State", "Company Country", "Keywords", "Short Description", "Founded Year", "Technologies", "Total Funding"]) assert.match(schema, new RegExp(`"${field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
   assert.match(peopleStart, /missingRequiredFields/);
   assert.match(companyStart, /missingCompanyImportFields/);

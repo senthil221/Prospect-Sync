@@ -1,12 +1,13 @@
 import { memo } from "react";
 import { initials, prospectFieldValue, prospectMembershipItems } from "../../lib/dashboard-helpers";
+import { clientIdleAge } from "../../lib/client-idle-age";
 import type { Prospect } from "../../lib/types";
 
 type ColumnDefinition = { id: string; label: string };
 
 function formatClientDate(value: unknown) {
   const date = String(value ?? "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "—";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "-";
   const [year, month, day] = date.split("-").map(Number);
   return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" })
     .format(new Date(year, month - 1, day));
@@ -27,13 +28,14 @@ function ProspectTableRow({ prospect, visibleDefinitions, selected, includeClien
   // client only, so they are read from the arrays the index carries per row.
   const verified = Boolean(clientId && prospect.icp_verified_client_ids?.includes(clientId));
   const blocked = Boolean(clientId && prospect.blocked_client_ids?.includes(clientId));
+  const idleAge = clientId ? clientIdleAge(prospect.client_date_contacted) : null;
   return <tr className={`${selected ? "selected" : ""} ${blocked ? "row-blocked" : ""}`.trim()} onClick={() => onSelect(prospect)}>
     <td className="select-column" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${prospect.full_name || "prospect"}`} type="checkbox" checked={selected} onChange={() => onToggleSelected(prospect.id)}/></td>
     {visibleDefinitions.map((field) => {
       const value = prospectFieldValue(prospect, field.id);
       return <td key={field.id}>{field.id === "__name" ? <div className="compact-person"><span>{initials(value)}</span><strong>{value || "Unnamed prospect"}</strong></div> : field.id === "__email" ? <span className="email-cell">{value || "-"}</span> : field.id === "__esp" ? <span className={`esp-cell ${prospect.email_provider_type === "SEG" ? "seg" : ""}`} title={Array.isArray(prospect.mx_records) && prospect.mx_records.length ? prospect.mx_records.join("\n") : "Run Detect ESPs to check this domain"}><strong>{value || "Not checked"}</strong><small>{prospect.email_provider_type || "Unknown"}</small></span> : field.id === "__lists" ? <ListMembershipCell prospect={prospect} includeClient={includeClient} onShowAll={() => onSelect(prospect)}/> : <span title={value}>{value || "-"}</span>}</td>;
     })}
-    {clientId ? <><td className="date-added-column" title="First date this prospect was added to this client">{formatClientDate(prospect.client_date_added)}</td><td className="icp-column" onClick={(event) => event.stopPropagation()}>{blocked ? <span className="blocked-badge" title={String(prospect.blocked_reason ?? "Blocked for this client")}>Blocked</span> : <button type="button" className={`icp-toggle ${verified ? "verified" : ""}`} aria-pressed={verified} title={verified ? "ICP verified for this client" : "Not verified"} onClick={() => onToggleVerified?.(prospect, !verified)}>{verified ? "Verified" : "Mark ICP"}</button>}</td></> : null}<td className="row-detail-column" onClick={(event) => event.stopPropagation()}>{onRemoveFromClient ? <button className="row-danger client-remove-prospect" onClick={() => void onRemoveFromClient(prospect)}>Remove</button> : canDeleteMaster ? <button className="row-danger" title={`Delete ${prospect.full_name || "this prospect"} from the People database`} onClick={() => onDelete(prospect.id)}>Delete</button> : "›"}</td>
+    {clientId ? <><td className="date-added-column" title={prospect.client_date_contacted ? `Contacted for this client on ${formatClientDate(prospect.client_date_contacted)}` : "No contact date for this client"}><span className={`client-idle-age ${idleAge?.tone ?? "unknown"}`}><strong>{formatClientDate(prospect.client_date_contacted)}</strong><small>{idleAge?.label ?? "No contact date"}</small></span></td><td className="icp-column" onClick={(event) => event.stopPropagation()}>{blocked ? <span className="blocked-badge" title={String(prospect.blocked_reason ?? "Blocked for this client")}>Blocked</span> : <button type="button" className={`icp-toggle ${verified ? "verified" : ""}`} aria-pressed={verified} title={verified ? "ICP verified for this client" : "Not verified"} onClick={() => onToggleVerified?.(prospect, !verified)}>{verified ? "Verified" : "Mark ICP"}</button>}</td></> : null}<td className="row-detail-column" onClick={(event) => event.stopPropagation()}>{onRemoveFromClient ? <button className="row-danger client-remove-prospect" onClick={() => void onRemoveFromClient(prospect)}>Remove</button> : canDeleteMaster ? <button className="row-danger" title={`Delete ${prospect.full_name || "this prospect"} from the People database`} onClick={() => onDelete(prospect.id)}>Delete</button> : "›"}</td>
   </tr>;
 }
 

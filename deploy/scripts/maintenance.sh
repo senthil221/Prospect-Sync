@@ -39,7 +39,7 @@ echo "=== Draining the re-index backlog ==="
 # progress, so the search index converges without anyone opening the app.
 for _ in $(seq 1 40); do
   drained="$(psql_run -tAq -c "select processed || ' ' || remaining from public.drain_reindex_backlog(2000);" 2>/dev/null || echo "")"
-  [[ -n "$drained" ]] || { echo "  drain function not present — skipping (apply migrations)"; break; }
+  [[ -n "$drained" ]] || { echo "  drain function not present - skipping (apply migrations)"; break; }
   processed="${drained%% *}"
   remaining="${drained##* }"
   echo "  re-indexed ${processed}, ${remaining} remaining"
@@ -51,7 +51,7 @@ echo
 echo "=== Search index drift ==="
 # A denormalized index you cannot verify is one you cannot trust.
 psql_run -c "select jsonb_pretty(public.prospect_index_drift());" 2>/dev/null \
-  || echo "  drift check not present — apply migrations"
+  || echo "  drift check not present - apply migrations"
 
 echo
 echo "=== Reindexing prospect_index ==="
@@ -63,7 +63,7 @@ psql_run -c "reindex table concurrently public.prospect_index;" \
 
 echo
 echo "=== Refreshing planner statistics ==="
-# Scoped to public — see the note in migrate.sh about the shared-catalog warnings.
+# Scoped to public - see the note in migrate.sh about the shared-catalog warnings.
 psql_run -q <<'SQL'
 do $$
 declare

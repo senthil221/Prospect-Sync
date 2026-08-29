@@ -5,7 +5,7 @@
 #   ./scripts/gen-secrets.sh
 #
 # Rotating a secret later means clearing that line in .env and re-running this.
-# Read the rotation notes in deploy/README.md first — rotating JWT_SECRET
+# Read the rotation notes in deploy/README.md first - rotating JWT_SECRET
 # invalidates ANON_KEY and SERVICE_ROLE_KEY together, and both must be
 # redeployed to the app at the same time.
 set -euo pipefail
@@ -82,7 +82,7 @@ if [[ -z "$(current STUDIO_BASIC_AUTH_HASH)" ]]; then
   echo "  generated  STUDIO_BASIC_AUTH_HASH"
   echo
   echo "  ┌──────────────────────────────────────────────────────────────┐"
-  echo "  │ Studio login — save this in your password manager NOW.       │"
+  echo "  │ Studio login - save this in your password manager NOW.       │"
   echo "  │ It is hashed in .env and cannot be recovered.                 │"
   echo "  ├──────────────────────────────────────────────────────────────┤"
   printf  "  │ user: %-54s │\n" "$(current STUDIO_BASIC_AUTH_USER)"

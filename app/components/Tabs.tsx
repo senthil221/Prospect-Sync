@@ -7,7 +7,7 @@ export type TabItem<T extends string> = {
   label: string;
   /** Optional trailing count. Rendered as a badge, muted until the tab is active. */
   count?: number | string;
-  /** Optional leading icon — pass an <AppIcon/>, not a unicode glyph. */
+  /** Optional leading icon - pass an <AppIcon/>, not a unicode glyph. */
   icon?: ReactNode;
   /** Optional hover explanation, for a label or count that needs one word more. */
   hint?: string;
@@ -19,7 +19,7 @@ type TabsProps<T extends string> = {
   onChange: (next: T) => void;
   /** "line" is the workspace default; "segmented" is for enclosed switchers. */
   variant?: "line" | "segmented";
-  /** Accessible name for the tablist — required, it is what a screen reader announces. */
+  /** Accessible name for the tablist - required, it is what a screen reader announces. */
   label: string;
 };
 

@@ -4,14 +4,14 @@
 #   ./scripts/migrate.sh            # apply everything pending
 #   ./scripts/migrate.sh --dry-run  # list what would run
 #
-# State is tracked in supabase_migrations.schema_migrations — the same table the
+# State is tracked in supabase_migrations.schema_migrations - the same table the
 # Supabase CLI uses. That is deliberate: history dumped from your hosted project
 # carries over, already-applied migrations are correctly skipped, and you can
 # still fall back to `supabase db push` at any point.
 #
 # Every migration in this repo is transaction-safe (no CREATE INDEX
 # CONCURRENTLY), so each file runs inside BEGIN/COMMIT. A failure rolls that
-# file back completely and stops — the database is never left half-migrated.
+# file back completely and stops - the database is never left half-migrated.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -51,7 +51,7 @@ for file in "$MIGRATIONS_DIR"/*.sql; do
 done
 
 if (( ${#pending[@]} == 0 )); then
-  echo "Up to date — nothing to apply."
+  echo "Up to date - nothing to apply."
   exit 0
 fi
 

@@ -11,7 +11,8 @@ test("an authenticated user can upload and complete a prospect CSV import", asyn
   const clientName = `Codex E2E ${suffix}`;
   const listName = `Authenticated import ${suffix}`;
   const prospectEmail = `codex-import-${suffix}@example.invalid`;
-  const dateAdded = "2026-08-20";
+  const dateContacted = "2026-08-20";
+  const updatedDateContacted = "2026-08-21";
   let clientId = "";
 
   try {
@@ -24,10 +25,10 @@ test("an authenticated user can upload and complete a prospect CSV import", asyn
     await page.getByRole("button", { name: "Import CSV" }).click();
     await page.getByLabel("Data source").selectOption("Apollo");
     await page.getByLabel("New client name").fill(clientName);
-    await page.getByLabel("Date added").fill(dateAdded);
+    await page.getByLabel("Date Contacted").fill(dateContacted);
     const csv = [
-      "Name,Company Name,Email,Personal LinkedIn URL,Job Title,Seniority,Departments,Sub Departments",
-      `Codex Import Sentinel,Prospect Sync E2E,${prospectEmail},https://www.linkedin.com/in/codex-import-sentinel,Director of Testing,Director,Engineering,Quality Assurance`,
+      "First Name,Last Name,Company Name,Email,Personal LinkedIn URL,Job Title",
+      `Codex Import,Sentinel,Prospect Sync E2E,${prospectEmail},https://www.linkedin.com/in/codex-import-sentinel,Director of Testing`,
     ].join("\n");
     await page.locator('input[type="file"][accept=".csv,text/csv"]').setInputFiles({
       name: `authenticated-import-${suffix}.csv`, mimeType: "text/csv", buffer: Buffer.from(csv),
@@ -44,9 +45,17 @@ test("an authenticated user can upload and complete a prospect CSV import", asyn
 
     const prospectsResponse = await page.request.get(`/api/prospects?clientId=${encodeURIComponent(clientId)}&search=${encodeURIComponent(prospectEmail)}&page=1&withTotal=1`);
     expect(prospectsResponse.ok()).toBeTruthy();
-    const prospectsBody = await prospectsResponse.json() as { prospects: Array<{ id: string; client_date_added?: string }> };
+    const prospectsBody = await prospectsResponse.json() as { prospects: Array<{ id: string; client_date_contacted?: string | null }> };
     expect(prospectsBody.prospects).toHaveLength(1);
-    expect(prospectsBody.prospects[0].client_date_added).toBe(dateAdded);
+    expect(prospectsBody.prospects[0].client_date_contacted).toBe(dateContacted);
+
+    const updateResponse = await page.request.post(`/api/clients/${encodeURIComponent(clientId)}/prospects`, {
+      data: { action: "set_date_contacted", prospectIds: [prospectsBody.prospects[0].id], dateContacted: updatedDateContacted },
+    });
+    expect(updateResponse.ok()).toBeTruthy();
+    const updatedResponse = await page.request.get(`/api/prospects?clientId=${encodeURIComponent(clientId)}&search=${encodeURIComponent(prospectEmail)}&page=1&withTotal=1`);
+    const updatedBody = await updatedResponse.json() as { prospects: Array<{ client_date_contacted?: string | null }> };
+    expect(updatedBody.prospects[0].client_date_contacted).toBe(updatedDateContacted);
   } finally {
     let canDeleteMaster = false;
     if (!clientId) {

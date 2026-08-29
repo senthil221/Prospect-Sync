@@ -46,7 +46,7 @@ test("new filters are applied globally before pagination and are available to ex
   assert.ok(viewDefinition.indexOf("co.name as company_name") < viewDefinition.indexOf("p.keywords"), "new view columns must be appended after the existing view contract");
   assert.match(migration, /filtered as materialized/);
   assert.ok(migration.indexOf("filtered as materialized") < migration.indexOf("limit greatest", migration.indexOf("filtered as materialized")));
-  // The route calls exactly one workspace function — no version ladder to fall
+  // The route calls exactly one workspace function - no version ladder to fall
   // through, so a filter contract can never be silently downgraded.
   assert.match(route, /search_prospect_workspace_v12/);
   assert.equal(route.match(/search_prospect_workspace_v\d+/g).length, 1);

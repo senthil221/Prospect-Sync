@@ -75,7 +75,7 @@ if [[ -n "${RESTIC_REPOSITORY:-}" ]]; then
     --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --prune
   log "Offsite copy complete"
 else
-  log "WARNING: RESTIC_REPOSITORY is unset — this backup exists only on this VPS."
+  log "WARNING: RESTIC_REPOSITORY is unset - this backup exists only on this VPS."
 fi
 
 log "Pruning local backups older than ${RETENTION} days"

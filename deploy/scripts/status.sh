@@ -38,12 +38,12 @@ while IFS='|' read -r svc state; do
       # Studio's own healthcheck probes the analytics service we deliberately
       # do not run. Its unhealthy flag is expected and means nothing.
       if [[ "$svc" == "studio" ]]; then
-        row "$svc" "${OK}● Up${R} ${DIM}(reports unhealthy — expected)${R}"
+        row "$svc" "${OK}● Up${R} ${DIM}(reports unhealthy - expected)${R}"
       else
         row "$svc" "${WARN}● ${state}${R}"; warn "$svc reports unhealthy"
       fi ;;
     Up*)              row "$svc" "${OK}● ${state}${R}" ;;
-    *Restarting*)     row "$svc" "${BAD}● ${state}${R}"; warn "$svc is restart-looping — check: prospect logs $svc" ;;
+    *Restarting*)     row "$svc" "${BAD}● ${state}${R}"; warn "$svc is restart-looping - check: prospect logs $svc" ;;
     *)                row "$svc" "${BAD}● ${state:-not running}${R}"; warn "$svc is not running" ;;
   esac
 done < <(docker compose ps --format '{{.Service}}|{{.Status}}' 2>/dev/null | sort)
@@ -65,7 +65,7 @@ probe "app + data" "https://${APP_DOMAIN}/api/health"     "200"
 probe "api (auth)" "https://${API_DOMAIN}/auth/v1/health" "200"
 probe "studio gate" "https://${STUDIO_DOMAIN}/"           "401,403"
 probe "api (data)" "https://${API_DOMAIN}/rest/v1/"       "403"
-printf '  %s403 on the data API is correct — it means the internet cannot reach it.%s\n' "$DIM" "$R"
+printf '  %s403 on the data API is correct - it means the internet cannot reach it.%s\n' "$DIM" "$R"
 
 # ── Certificates ───────────────────────────────────────────────────────────
 head "CERTIFICATE"
@@ -87,7 +87,7 @@ row "image" "${APP_IMAGE##*/}"
 if [[ -f .last-image ]]; then
   row "rollback to" "${DIM}$(sed 's|.*/||' .last-image)${R}"
 else
-  row "rollback to" "${DIM}nothing yet — armed after your next deploy${R}"
+  row "rollback to" "${DIM}nothing yet - armed after your next deploy${R}"
 fi
 row "repo commit" "$(git -C .. log --oneline -1 2>/dev/null || echo unknown)"
 
@@ -117,7 +117,7 @@ if [[ -n "$last" ]]; then
   age_h=$(( ( $(date +%s) - $(stat -c %Y "$last") ) / 3600 ))
   if (( age_h > 30 )); then
     row "most recent" "${WARN}${age_h}h ago${R} ${DIM}$(basename "$last")${R}"
-    warn "last backup was ${age_h}h ago — the nightly timer may not be running"
+    warn "last backup was ${age_h}h ago - the nightly timer may not be running"
   else
     row "most recent" "${OK}${age_h}h ago${R} ${DIM}($(du -sh "$last" 2>/dev/null | cut -f1))${R}"
   fi
@@ -131,7 +131,7 @@ if [[ -n "${RESTIC_REPOSITORY:-}" ]]; then
   row "off-server" "${OK}${RESTIC_REPOSITORY}${R}"
 else
   row "off-server" "${BAD}not configured${R}"
-  warn "backups exist only on this server — a hardware failure loses the database and its backups together"
+  warn "backups exist only on this server - a hardware failure loses the database and its backups together"
 fi
 row "next run" "$(systemctl list-timers prospect-backup.timer --no-pager 2>/dev/null | awk 'NR==2{print $1" "$2" "$3}' || echo unknown)"
 
@@ -142,13 +142,13 @@ row "load" "$(uptime | sed 's/.*load average: //')  ${DIM}(2 cores)${R}"
 
 disk_pct=$(df --output=pcent / | tail -1 | tr -dc '0-9')
 disk_txt=$(df -h / | awk 'NR==2{print $3" of "$2" ("$5"), "$4" free"}')
-if   (( disk_pct > 85 )); then row "disk" "${BAD}${disk_txt}${R}"; warn "disk is ${disk_pct}% full — PostgreSQL needs free space to reclaim its own"
+if   (( disk_pct > 85 )); then row "disk" "${BAD}${disk_txt}${R}"; warn "disk is ${disk_pct}% full - PostgreSQL needs free space to reclaim its own"
 elif (( disk_pct > 75 )); then row "disk" "${WARN}${disk_txt}${R}"; warn "disk is ${disk_pct}% full"
 else                           row "disk" "${OK}${disk_txt}${R}"
 fi
 
 if [[ -f /var/run/reboot-required ]]; then
-  row "reboot" "${WARN}pending${R} ${DIM}(kernel update — reboot when convenient)${R}"
+  row "reboot" "${WARN}pending${R} ${DIM}(kernel update - reboot when convenient)${R}"
 fi
 
 # ── Verdict ────────────────────────────────────────────────────────────────

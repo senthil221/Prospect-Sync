@@ -306,6 +306,7 @@ main { min-width: 0; grid-column: 2; }
 .company-panel-head { background: var(--surface); }
 .directory-badge { padding: var(--space-2) var(--space-2); border: 1px solid var(--accent-line); border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent-text); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
 .company-table { width: 100%; min-width: 900px; border-collapse: collapse; }
+.company-table th.select-column, .company-table td.select-column { width: 48px; min-width: 48px; padding-left: 0; padding-right: 0; text-align: center; }
 .company-table th, table th { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border-default); background: var(--accent-soft); color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: .45px; text-align: left; text-transform: uppercase; }
 .company-table td, table td { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border-default); color: var(--text-secondary); font-size: var(--text-xs); }
 .company-table tbody tr:hover, table tbody tr:hover { background: var(--accent-soft); }
@@ -474,6 +475,9 @@ main { min-width: 0; grid-column: 2; }
 .form-field label { display: block; margin-bottom: var(--space-2); color: var(--text-secondary); font-size: var(--text-xs); font-weight: var(--weight-bold); }
 .form-field input, .form-field select { width: 100%; height: 42px; padding: 0 var(--space-3); border: 1px solid var(--ph-border-strong); border-radius: var(--radius-lg); background: var(--accent-soft); outline: 0; color: var(--text-primary); font-size: var(--text-sm); }
 .form-field input:focus, .form-field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.inline-checkbox, .form-field .inline-checkbox { margin-top: var(--space-2); display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); font-size: var(--text-xs); font-weight: var(--weight-semibold); }
+.inline-checkbox input, .form-field .inline-checkbox input { width: 16px; height: 16px; margin: 0; padding: 0; flex: 0 0 auto; accent-color: var(--accent); }
+.form-field input:disabled { opacity: .55; cursor: not-allowed; }
 .form-field label[for="list-name"]::after { content: "Auto-filled · editable"; margin-left: var(--space-2); color: var(--ph-brand); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
 .import-button { width: 100%; height: 42px; margin-top: var(--space-4); }
 .privacy-note { margin: var(--space-3) 0 0; color: var(--text-tertiary); font-size: var(--text-2xs); text-align: center; }
@@ -552,6 +556,7 @@ main { min-width: 0; grid-column: 2; }
 .drawer-empty { padding: var(--space-10) var(--space-4); color: var(--ph-muted); font-size: var(--text-xs); text-align: center; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 70; padding: var(--space-5); display: grid; place-items: center; background: var(--overlay); backdrop-filter: blur(3px); }
 .confirm-modal { width: min(480px, 100%); padding: var(--space-8); border: 1px solid var(--danger-line); border-radius: var(--radius-xl); background: var(--surface); box-shadow: 0 24px 70px rgba(var(--shadow-rgb), .2); }
+.confirm-modal .form-field { margin-top: var(--space-4); }
 .warning-mark { width: 44px; height: 44px; margin-bottom: var(--space-4); display: grid; place-items: center; border-radius: var(--radius-xl); background: var(--ph-danger-soft); color: var(--ph-danger); font-size: var(--text-lg); font-weight: var(--weight-bold); }
 .confirm-modal h2 { margin: 0 0 var(--space-2); font-size: var(--text-xl); }
 .confirm-modal > p:not(.eyebrow):not(.shared-safety) { margin: 0; color: var(--ph-muted); font-size: var(--text-xs); line-height: 1.6; }
@@ -900,7 +905,7 @@ main { min-width: 0; grid-column: 2; }
    Premium refinement layer
    Layout rhythm, depth, and motion polish. Token- and
    cascade-driven so it layers over the base with no markup
-   changes. Fully reversible — delete this block to revert.
+   changes. Fully reversible - delete this block to revert.
    ============================================================ */
 
 /* Atmosphere: a barely-there tint gives the flat canvas depth
@@ -912,7 +917,7 @@ main { min-width: 0; grid-column: 2; }
     var(--ph-bg);
 }
 
-/* Sidebar — hairline separation and calmer, springier nav */
+/* Sidebar - hairline separation and calmer, springier nav */
 .sidebar { box-shadow: 1px 0 0 rgba(var(--shadow-rgb), .02); }
 .sidebar nav button { transition: background-color var(--ph-dur) var(--ph-ease), color var(--ph-dur) var(--ph-ease), box-shadow var(--ph-dur) var(--ph-ease); }
 .sidebar nav button > span { transition: color var(--ph-dur) var(--ph-ease), transform var(--ph-dur) var(--ph-ease-out); }
@@ -920,10 +925,10 @@ main { min-width: 0; grid-column: 2; }
 .sidebar nav button.active { box-shadow: inset 3px 0 var(--ph-brand), 0 1px 2px rgba(var(--accent-rgb), .06); }
 .brand-mark { box-shadow: 0 6px 16px rgba(var(--accent-rgb), .26), inset 0 1px 0 rgba(255, 255, 255, .22); }
 
-/* Topbar — deeper glass and a crisp hairline under the blur */
+/* Topbar - deeper glass and a crisp hairline under the blur */
 .topbar { background: var(--surface-veil); backdrop-filter: saturate(180%) blur(18px); -webkit-backdrop-filter: saturate(180%) blur(18px); box-shadow: 0 1px 0 rgba(var(--shadow-rgb), .04); }
 
-/* Surfaces — layered shadow ramp + smoother, calmer lift */
+/* Surfaces - layered shadow ramp + smoother, calmer lift */
 .panel, .metric-card, .client-card, .client-hero, .import-card { transition: transform .22s var(--ph-ease-out), box-shadow .22s var(--ph-ease-out), border-color var(--ph-dur) var(--ph-ease); }
 .metric-card { box-shadow: var(--ph-shadow); }
 .metric-card:hover { transform: translateY(-2px); box-shadow: var(--ph-shadow-md); }
@@ -931,13 +936,13 @@ main { min-width: 0; grid-column: 2; }
 .client-card:hover { transform: translateY(-3px); box-shadow: var(--ph-shadow-lifted); }
 .welcome { box-shadow: var(--ph-shadow-md); }
 
-/* Buttons — tactile press + refined shadow behavior */
+/* Buttons - tactile press + refined shadow behavior */
 .primary { box-shadow: 0 1px 2px rgba(var(--accent-rgb), .18), 0 4px 12px -4px rgba(var(--accent-rgb), .4); }
 .primary:hover { box-shadow: 0 2px 4px rgba(var(--accent-rgb), .2), 0 10px 22px -6px rgba(var(--accent-rgb), .5); }
 .primary:active, .secondary:active, .outline-button:active, .company-pagination button:active:not(:disabled), .table-footer button:active:not(:disabled) { transform: translateY(1px); }
 .primary:active { box-shadow: 0 1px 2px rgba(var(--accent-rgb), .22); }
 
-/* Tables — smoother row transitions, softer sticky header, and
+/* Tables - smoother row transitions, softer sticky header, and
    an accent rail on hover for scan-ability */
 .master-data-table tbody tr { transition: background-color .13s var(--ph-ease), box-shadow .13s var(--ph-ease); }
 .master-data-table tbody tr:hover { box-shadow: inset 3px 0 var(--ph-brand); }
@@ -945,15 +950,15 @@ main { min-width: 0; grid-column: 2; }
 .master-data-table th { box-shadow: 0 1px 0 var(--surface-active); border-bottom-color: transparent; }
 .company-table th, table th { box-shadow: 0 1px 0 var(--surface-active); }
 
-/* Panels — hairline crispness against the tinted canvas */
+/* Panels - hairline crispness against the tinted canvas */
 .panel { box-shadow: var(--ph-shadow); }
 .panel:hover { box-shadow: var(--ph-shadow-md); }
 
-/* Filter panel + pills — gentle interaction feedback */
+/* Filter panel + pills - gentle interaction feedback */
 .active-filter-strip button, .quick-filters button, .value-chip, .membership-chips span { transition: background-color var(--ph-dur) var(--ph-ease), border-color var(--ph-dur) var(--ph-ease), color var(--ph-dur) var(--ph-ease), transform var(--ph-dur) var(--ph-ease); }
 .quick-filters button:hover { transform: translateY(-1px); }
 
-/* Drawer + modals — richer, softer elevation for focus moments */
+/* Drawer + modals - richer, softer elevation for focus moments */
 .drawer { box-shadow: -24px 0 60px -20px rgba(var(--shadow-rgb), .28); }
 .drawer, .confirm-modal, .export-modal { animation: ph-surface-in .32s var(--ph-ease-out) both; }
 .drawer-backdrop, .modal-backdrop { animation: ph-fade-in .2s var(--ph-ease) both; }
@@ -962,7 +967,7 @@ main { min-width: 0; grid-column: 2; }
 .drawer { animation-name: ph-drawer-in; }
 @keyframes ph-drawer-in { from { opacity: 0; transform: translateX(24px); } }
 
-/* Content entrance — one orchestrated, subtle reveal on each view
+/* Content entrance - one orchestrated, subtle reveal on each view
    so navigation feels responsive and composed, not janky. */
 .content > * { animation: ph-rise .42s var(--ph-ease-out) both; }
 .content > *:nth-child(2) { animation-delay: .05s; }
@@ -970,18 +975,18 @@ main { min-width: 0; grid-column: 2; }
 .content > *:nth-child(4) { animation-delay: .14s; }
 @keyframes ph-rise { from { opacity: 0; transform: translateY(8px); } }
 
-/* Dropdowns / popovers — quick, springy entrance from their anchor so
+/* Dropdowns / popovers - quick, springy entrance from their anchor so
    open/close reads as a deliberate motion, not a flash. */
 .column-menu, .token-options, .multi-value-menu { transform-origin: top right; animation: ph-pop .16s var(--ph-ease-out) both; }
 .token-options, .multi-value-menu { transform-origin: top left; }
 @keyframes ph-pop { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
 .column-menu, .token-options, .multi-value-menu, .apollo-filter-content, .filter-rule-content { box-shadow: var(--ph-shadow-lifted); }
 .apollo-filter-content, .filter-rule-content { box-shadow: none; }
-/* Expanding a filter section — reveal its body without layout jank. */
+/* Expanding a filter section - reveal its body without layout jank. */
 .apollo-filter-content { animation: ph-reveal .2s var(--ph-ease-out) both; }
 @keyframes ph-reveal { from { opacity: 0; transform: translateY(-3px); } }
 
-/* Empty & loading states — warmer, more intentional. */
+/* Empty & loading states - warmer, more intentional. */
 .empty > span, .coverage-placeholder > span { box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .08), 0 8px 20px -8px rgba(var(--accent-rgb), .35); }
 .empty { animation: ph-rise .42s var(--ph-ease-out) both; }
 .loading-bar, .loading-grid span { background-color: var(--accent-soft); }
@@ -997,6 +1002,7 @@ main { min-width: 0; grid-column: 2; }
 .bulk-domain-paste textarea { width: 100%; min-height: 150px; max-height: 320px; padding: var(--space-2) var(--space-2); border: 1px solid var(--ph-border-strong); border-radius: var(--radius-md); background: var(--surface); font-size: var(--text-2xs); font-family: ui-monospace, "SF Mono", Consolas, monospace; line-height: 1.55; overflow-y: auto; resize: vertical; }
 .bulk-domain-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .bulk-domain-actions button { padding: var(--space-2) var(--space-3); border: 1px solid var(--accent-line); border-radius: var(--radius-full); background: var(--ph-brand); color: var(--text-inverse); cursor: pointer; font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.bulk-domain-actions button.ghost { background: var(--surface); color: var(--text-secondary); }
 .bulk-domain-actions button:disabled { opacity: .5; cursor: not-allowed; }
 .bulk-domain-note { color: var(--ph-success); font-size: var(--text-2xs); }
 .company-bulk-panel { padding: var(--space-4) var(--space-4); margin-bottom: var(--space-1); display: flex; flex-direction: column; gap: var(--space-3); }
@@ -1048,7 +1054,7 @@ main { min-width: 0; grid-column: 2; }
 .source-required-note, .source-selected-note { grid-column: 1; }
 .entity-pivot-actions, .company-filter-head-actions { width: 100%; flex-wrap: wrap; } }
 
-/* Respect users who prefer less motion — kill transforms/entrances,
+/* Respect users who prefer less motion - kill transforms/entrances,
    keep instant, legible state changes. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
@@ -1091,7 +1097,22 @@ main { min-width: 0; grid-column: 2; }
 
 /* Per-client state: ICP verification and blocklist suppression. */
 .icp-column { width: 116px; white-space: nowrap; }
-.date-added-column { width: 128px; white-space: nowrap; }
+.date-added-column { width: 150px; min-width: 150px; white-space: nowrap; }
+.client-idle-age { display: inline-flex; flex-direction: column; gap: 2px; padding: var(--space-1) var(--space-2); border: 1px solid var(--border-default); border-radius: var(--radius-md); background: var(--surface-sunken); }
+.client-idle-age strong { display: flex; align-items: center; gap: 6px; color: var(--text-primary); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
+.client-idle-age strong::before { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--text-disabled); content: ""; }
+.client-idle-age small { color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-medium); }
+.client-idle-age.fresh strong::before { background: var(--success); }
+.client-idle-age.waiting strong::before { background: var(--accent); }
+.client-idle-age.idle { border-color: var(--warning-line); background: var(--warning-soft); }
+.client-idle-age.idle strong::before { background: var(--warning); }
+.client-idle-age.stale { border-color: var(--danger-line); background: var(--danger-soft); }
+.client-idle-age.stale strong::before { background: var(--danger); }
+.company-icp-column { width: 126px; min-width: 126px; white-space: nowrap; }
+.company-icp-status { display: inline-flex; align-items: center; gap: 6px; padding: var(--space-1) var(--space-2); border: 1px solid var(--border-default); border-radius: var(--radius-full); background: var(--surface-sunken); color: var(--text-secondary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.company-icp-status::before { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--text-disabled); content: ""; }
+.company-icp-status.validated { border-color: var(--success-line); background: var(--success-soft); color: var(--success); }
+.company-icp-status.validated::before { background: var(--success); }
 .icp-toggle { padding: var(--space-1) var(--space-2); border: 1px solid var(--ph-border-strong); border-radius: var(--radius-full); background: var(--surface); color: var(--text-secondary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); cursor: pointer; }
 .icp-toggle:hover { border-color: var(--ph-brand); color: var(--ph-brand); }
 .icp-toggle.verified { border-color: var(--ph-success); background: var(--success-line); color: var(--ph-success); }

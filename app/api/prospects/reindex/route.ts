@@ -4,7 +4,7 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-// Manual full rebuild of the flat prospect_index — a safety net. Normal operation
+// Manual full rebuild of the flat prospect_index - a safety net. Normal operation
 // keeps the index fresh incrementally through reindex hooks on every write path.
 export async function POST() {
   const unauthorized = await authorizeApi();

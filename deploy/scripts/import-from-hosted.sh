@@ -9,7 +9,7 @@
 #
 # What moves:  the `public` schema (all tables, functions, indexes, data) and
 #              your applied-migration history.
-# What does not: `auth` — GoTrue's own tables belong to whatever GoTrue version
+# What does not: `auth` - GoTrue's own tables belong to whatever GoTrue version
 #              wrote them, and forcing one version's schema onto another is a
 #              reliable way to end up unable to log in. Your user list is two
 #              people; recreate them with scripts/create-user.sh afterwards.

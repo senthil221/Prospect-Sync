@@ -41,7 +41,7 @@ One or more tags do not exist. Find the current pins here:
   https://hub.docker.com/r/supabase/postgres/tags
 
 Copy the tag Supabase currently ships and update .env. Keep the whole stack on
-one upstream release wave — mixing a new gotrue with an old postgres image is
+one upstream release wave - mixing a new gotrue with an old postgres image is
 how you get auth schema drift.
 EOF
   exit 1

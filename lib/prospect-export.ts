@@ -133,7 +133,7 @@ export function csvRowsBody(rows: ProspectRow[], columns: ExportColumn[]) {
   return rows.map((row) => columns.map((column) => csvCell(column.value(row))).join(",")).join("\r\n");
 }
 
-// Full single-shot document (BOM + header + rows) — used by the legacy export path.
+// Full single-shot document (BOM + header + rows) - used by the legacy export path.
 export function prospectsCsv(rows: ProspectRow[], fields: string[], requestedFields?: string[]) {
   const columns = buildExportColumns(fields, requestedFields);
   return csvDocument(columns.map((column) => column.header), rows.map((row) => columns.map((column) => column.value(row))));

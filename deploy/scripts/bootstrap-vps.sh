@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-time provisioning for a fresh Hostinger KVM 2 (Ubuntu 24.04 LTS).
-# Idempotent — re-running it is safe and is the fastest way to re-assert the
+# Idempotent - re-running it is safe and is the fastest way to re-assert the
 # hardening after any manual poking.
 #
 # Run as root on the VPS:
@@ -42,7 +42,7 @@ log "SSH hardening"
 # The 00- prefix is load-bearing. sshd takes the FIRST occurrence of each
 # keyword, and drop-ins load in lexical order, so Ubuntu cloud images silently
 # win with /etc/ssh/sshd_config.d/50-cloud-init.conf containing
-# "PasswordAuthentication yes". A 99- file is read but never applied — the box
+# "PasswordAuthentication yes". A 99- file is read but never applied - the box
 # looks hardened and still accepts passwords.
 rm -f /etc/ssh/sshd_config.d/99-prospect.conf
 cat > /etc/ssh/sshd_config.d/00-prospect.conf <<'EOF'
@@ -63,7 +63,7 @@ cat > /etc/cloud/cloud.cfg.d/99-disable-password-auth.cfg <<'EOF'
 ssh_pwauth: false
 EOF
 
-# Verify before restarting — a bad config here locks you out permanently.
+# Verify before restarting - a bad config here locks you out permanently.
 sshd -t
 systemctl restart ssh
 
@@ -130,7 +130,7 @@ fi
 
 log "Kernel tuning"
 cat > /etc/sysctl.d/99-prospect.conf <<'EOF'
-# Swap only under real pressure — never to reclaim PostgreSQL's page cache.
+# Swap only under real pressure - never to reclaim PostgreSQL's page cache.
 vm.swappiness = 10
 vm.dirty_background_ratio = 5
 vm.dirty_ratio = 15
