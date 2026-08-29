@@ -45,7 +45,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       : [];
     return Response.json({ companyIds, matched: companyIds.length, submitted: parsed.submitted, truncated: parsed.truncated });
   }
-  if (action !== "set_icp_validated" && action !== "clear_icp_validated") {
+  if (action !== "push" && action !== "set_icp_verified" && action !== "clear_icp_verified") {
     return Response.json({ error: "Unsupported client company action." }, { status: 400 });
   }
 
@@ -54,7 +54,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     : [];
   const allMatching = payload.allMatching === true;
   if (!explicitIds.length && !allMatching) {
-    return Response.json({ error: "Select companies before updating ICP validation." }, { status: 400 });
+    return Response.json({ error: `Select companies before ${action === "push" ? "pushing them" : "updating ICP verification"}.` }, { status: 400 });
   }
 
   let filters;
@@ -71,21 +71,24 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     : [];
   const user = await getAuthorizedUser();
   const supabase = createAdminClient();
-  const { data, error } = await supabase.rpc("set_company_icp_validated_v1", {
+  const rpcName = action === "push" ? "push_companies_to_client_v1" : "set_company_icp_verified_v2";
+  const rpcArgs = {
     p_client_id: clientId,
-    p_validated: action === "set_icp_validated",
     p_company_ids: explicitIds.length ? explicitIds : null,
     p_search: allMatching ? String(payload.search ?? "").trim().slice(0, 300) : "",
     p_filters: allMatching ? filters : [],
     p_people_scope: allMatching ? peopleScope : null,
     p_excluded_ids: allMatching && excludedIds.length ? excludedIds : null,
     p_actor: user?.email ?? "",
-  });
+  };
+  const { data, error } = action === "push"
+    ? await supabase.rpc(rpcName, rpcArgs)
+    : await supabase.rpc(rpcName, { ...rpcArgs, p_verified: action === "set_icp_verified" });
 
   if (error) {
     const missing = Boolean(error.code && missingFunctionCodes.has(error.code));
     return Response.json(
-      { error: missing ? "Apply the latest database migration to enable company ICP validation." : error.message },
+      { error: missing ? `Apply the latest database migration to enable company ${action === "push" ? "push" : "ICP verification"}.` : error.message },
       { status: missing ? 503 : error.code === "P0002" ? 404 : 500 },
     );
   }

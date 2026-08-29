@@ -32,7 +32,10 @@ test("chunk routes pass row offsets into both resumable RPCs", async () => {
     readFile(new URL("../app/api/company-imports/chunk/route.ts", import.meta.url), "utf8"),
   ]);
   assert.match(prospectRoute, /p_row_offset: normalizedRowOffset/);
-  assert.match(companyRoute, /p_row_offset: rowOffset/);
+  assert.match(companyRoute, /p_row_offset: offset/);
+  assert.match(companyRoute, /candidate\?\.code === "57014"/);
+  assert.match(companyRoute, /importBatch\(batch\.slice\(0, midpoint\), offset\)/);
+  assert.match(companyRoute, /importBatch\(batch\.slice\(midpoint\), offset \+ midpoint\)/);
 });
 
 test("company location reaches the active resumable RPC through a forward migration", async () => {

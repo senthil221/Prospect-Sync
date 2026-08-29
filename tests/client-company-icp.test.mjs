@@ -23,14 +23,17 @@ test("prospect idle age is derived from the client-specific Date Contacted", () 
   assert.equal(clientIdleAge("", now), null);
 });
 
-test("company ICP validation is isolated by client and supports selected segments", async () => {
-  const [migration, route, companyRoute, companyTable, companyRow, prospectRow] = await Promise.all([
+test("company ICP verification is isolated by client and supports selected segments", async () => {
+  const [migration, membershipMigration, route, companyRoute, companyTable, companyRow, prospectTable, prospectRow, dashboard] = await Promise.all([
     readFile(new URL("../supabase/migrations/20260828204110_client_company_icp_validation.sql", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260829012335_accelerate_company_import_batches.sql", import.meta.url), "utf8"),
     readFile(new URL("../app/api/clients/[id]/companies/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/companies/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/components/CompaniesWorkspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/CompanyTableRow.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ProspectTable.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/ProspectTableRow.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/DashboardApp.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(migration, /primary key \(client_id, company_id\)/);
@@ -49,16 +52,20 @@ test("company ICP validation is isolated by client and supports selected segment
   assert.match(migration, /reindex_scope_v1\(p_prospect_ids => v_prospect_ids\)/);
   assert.match(migration, /'eligibleProspects', cardinality\(v_prospect_ids\)/);
   assert.match(route, /authorizeApi/);
-  assert.match(route, /set_icp_validated/);
-  assert.match(route, /clear_icp_validated/);
+  assert.match(route, /set_icp_verified/);
+  assert.match(route, /clear_icp_verified/);
+  assert.match(route, /push_companies_to_client_v1/);
+  assert.match(route, /set_company_icp_verified_v2/);
   assert.match(route, /resolve_selection/);
   assert.match(route, /parseCompanyBulkSelection/);
   assert.match(route, /rawValues\.length > 2_000_000/);
   assert.match(route, /p_client_id: clientId/);
   assert.match(companyRoute, /client_company_icp_validations/);
   assert.match(companyRoute, /icp_validated/);
-  assert.match(companyTable, /Mark ICP validated/);
-  assert.match(companyTable, /Remove ICP validation/);
+  assert.match(companyTable, /Mark ICP verified/);
+  assert.match(companyTable, /Remove ICP verification/);
+  assert.match(companyTable, /Push to Client/);
+  assert.match(companyTable, /Client to receive selected companies/);
   assert.match(companyTable, /showSelection = canDelete \|\| Boolean\(clientId\)/);
   assert.match(companyTable, /Select all companies on this page/);
   assert.match(companyTable, /Paste company websites or names/);
@@ -68,6 +75,18 @@ test("company ICP validation is isolated by client and supports selected segment
   assert.match(companyTable, /allMatching: true/);
   assert.match(companyRow, /company\.icp_validated/);
   assert.match(companyRow, /showSelection \? <td className="select-column"/);
+  assert.match(companyRow, /"Verified" : "Not verified"/);
+  assert.match(membershipMigration, /create table if not exists public\.client_companies/);
+  assert.match(membershipMigration, /primary key \(client_id, company_id\)/);
+  assert.match(membershipMigration, /push_companies_to_client_v1/);
+  assert.match(membershipMigration, /client_company_workspace_v2/);
+  assert.match(membershipMigration, /resolve_company_action_selection_v1/);
+  assert.match(membershipMigration, /revoke all on public\.client_companies from anon, authenticated/);
+  assert.match(companyRoute, /client_company_workspace_v2/);
+  assert.match(dashboard, /clients=\{clients\}/);
+  assert.doesNotMatch(prospectTable, /> Mark ICP verified</);
+  assert.doesNotMatch(prospectTable, /> Clear verified</);
+  assert.doesNotMatch(prospectRow, /onToggleVerified/);
   assert.match(prospectRow, /clientIdleAge\(prospect\.client_date_contacted\)/);
   assert.match(prospectRow, /No contact date/);
 });

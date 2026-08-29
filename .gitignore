@@ -56,3 +56,4 @@ yarn-error.log*
 /deploy/.last-image
 /deploy/.deploy.lock
 /deploy/.env.tmp
+supabase/.temp/

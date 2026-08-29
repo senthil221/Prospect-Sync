@@ -151,6 +151,23 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient();
 
+  if (clientId) {
+    const { data, error } = await supabase.rpc("client_company_workspace_v2", {
+      p_client_id: clientId,
+      p_search: search,
+      p_filters: filters,
+      p_people_scope: peopleScope,
+      p_limit: pageSize,
+      p_offset: from,
+    });
+    if (error) return Response.json({ error: error.code === "PGRST202" || error.code === "42883" ? "Apply the latest database migration to enable client company memberships." : error.message }, { status: error.code === "PGRST202" || error.code === "42883" ? 503 : 500 });
+    const summary = Array.isArray(data) ? data[0] : data;
+    let companies;
+    try { companies = await withClientIcpValidation(supabase, summary?.result_rows ?? [], clientId); }
+    catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to load company verification." }, { status: 500 }); }
+    return Response.json({ companies, total: Number(summary?.total_count ?? 0), covered: Number(summary?.covered_count ?? 0), prospectTotal: Number(summary?.prospect_count ?? 0), page, pageSize });
+  }
+
   // Company-column filters (and the People-DB pivot scope) run through
   // filter_companies_v4, which also handles client scoping via p_client_id -- so a
   // filtered client-company view goes here too, while the unfiltered client view
@@ -177,28 +194,6 @@ export async function GET(request: Request) {
       total: Number(summary?.total_count ?? 0),
       covered: Number(summary?.covered_count ?? 0),
       prospectTotal: Number(summary?.prospect_total ?? 0),
-      page,
-      pageSize,
-    });
-  }
-
-  if (clientId) {
-    const { data, error } = await supabase.rpc("client_company_workspace", {
-      p_client_id: clientId,
-      p_search: search,
-      p_limit: pageSize,
-      p_offset: from,
-    });
-    if (error) return Response.json({ error: error.code === "PGRST202" || error.code === "42883" ? "Apply the latest database migration to enable client workspaces." : error.message }, { status: error.code === "PGRST202" || error.code === "42883" ? 503 : 500 });
-    const summary = Array.isArray(data) ? data[0] : data;
-    let companies;
-    try { companies = await withClientIcpValidation(supabase, summary?.result_rows ?? [], clientId); }
-    catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to load company validation." }, { status: 500 }); }
-    return Response.json({
-      companies,
-      total: Number(summary?.total_count ?? 0),
-      covered: Number(summary?.covered_count ?? 0),
-      prospectTotal: Number(summary?.prospect_count ?? 0),
       page,
       pageSize,
     });

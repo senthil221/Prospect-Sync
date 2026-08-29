@@ -5,7 +5,7 @@ import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import CompanyFilterPanel, { BulkDomainPaste, addDomainsToWebsiteFilter } from "../CompanyFilterPanel";
 import { api, companyApiPath, encodeFilters, isAbortError } from "../../lib/dashboard-api";
 import { colorTone, formatNumber, initials } from "../../lib/dashboard-helpers";
-import type { Company, Prospect, ProspectFilter } from "../../lib/types";
+import type { ClientRecord, Company, Prospect, ProspectFilter } from "../../lib/types";
 import { AppIcon, EmptyState } from "./DashboardUi";
 import CompanyTableRow from "./CompanyTableRow";
 import { useDebouncedValue } from "./useDebouncedValue";
@@ -38,12 +38,12 @@ export function useCompaniesWorkspaceController({ active, search, filters, peopl
   return { companies, page, setPage, summary, deferredSearch, refreshWorkspace };
 }
 
-export default function CompaniesWorkspace({ controller, filters, peopleScope, onClearPeopleScope, onSeePeople, onFilters, onImport }: { controller: ReturnType<typeof useCompaniesWorkspaceController>; filters: ProspectFilter[]; peopleScope: PeopleScope | null; onClearPeopleScope: () => void; onSeePeople: (scope: CompanyScope) => void; onFilters: (filters: ProspectFilter[]) => void; onImport: () => void }) {
+export default function CompaniesWorkspace({ controller, clients, filters, peopleScope, onClearPeopleScope, onSeePeople, onFilters, onImport }: { controller: ReturnType<typeof useCompaniesWorkspaceController>; clients: ClientRecord[]; filters: ProspectFilter[]; peopleScope: PeopleScope | null; onClearPeopleScope: () => void; onSeePeople: (scope: CompanyScope) => void; onFilters: (filters: ProspectFilter[]) => void; onImport: () => void }) {
   const handleFilters = useCallback((next: ProspectFilter[]) => { onFilters(next); controller.setPage(1); }, [controller, onFilters]);
-  return <CompanyTable companies={controller.companies} total={controller.summary.total} covered={controller.summary.covered} prospectTotal={controller.summary.prospectTotal} page={controller.page} pageSize={controller.summary.pageSize} search={controller.deferredSearch} filters={filters} peopleScope={peopleScope} onClearPeopleScope={onClearPeopleScope} onSeePeople={onSeePeople} onFilters={handleFilters} onPageChange={controller.setPage} onImport={onImport} onRefresh={controller.refreshWorkspace}/>;
+  return <CompanyTable companies={controller.companies} clients={clients} total={controller.summary.total} covered={controller.summary.covered} prospectTotal={controller.summary.prospectTotal} page={controller.page} pageSize={controller.summary.pageSize} search={controller.deferredSearch} filters={filters} peopleScope={peopleScope} onClearPeopleScope={onClearPeopleScope} onSeePeople={onSeePeople} onFilters={handleFilters} onPageChange={controller.setPage} onImport={onImport} onRefresh={controller.refreshWorkspace}/>;
 }
 
-export function CompanyTable({ companies, total, covered, prospectTotal, page, pageSize, clientId = "", search = "", filters = [], peopleScope = null, onClearPeopleScope, onSeePeople, onFilters, onPageChange, onImport, onRefresh }: { companies: Company[]; total: number; covered: number; prospectTotal: number; page: number; pageSize: number; clientId?: string; search?: string; filters?: ProspectFilter[]; peopleScope?: PeopleScope | null; onClearPeopleScope?: () => void; onSeePeople: (scope: CompanyScope) => void; onFilters?: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onImport: () => void; onRefresh?: () => void }) {
+export function CompanyTable({ companies, clients = [], total, covered, prospectTotal, page, pageSize, clientId = "", search = "", filters = [], peopleScope = null, onClearPeopleScope, onSeePeople, onFilters, onPageChange, onImport, onRefresh }: { companies: Company[]; clients?: ClientRecord[]; total: number; covered: number; prospectTotal: number; page: number; pageSize: number; clientId?: string; search?: string; filters?: ProspectFilter[]; peopleScope?: PeopleScope | null; onClearPeopleScope?: () => void; onSeePeople: (scope: CompanyScope) => void; onFilters?: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onImport: () => void; onRefresh?: () => void }) {
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [prospectsByCompany, setProspectsByCompany] = useState<Record<string, Prospect[]>>({});
   const [prospectTotalsByCompany, setProspectTotalsByCompany] = useState<Record<string, number>>({});
@@ -74,6 +74,8 @@ export function CompanyTable({ companies, total, covered, prospectTotal, page, p
   const [deleteRequest, setDeleteRequest] = useState<{ mode: "ids" | "all_matching"; count: number; ids?: string[] } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [updatingIcp, setUpdatingIcp] = useState(false);
+  const [pushClientId, setPushClientId] = useState("");
+  const [pushing, setPushing] = useState(false);
   const selectionKey = JSON.stringify({ search: search.trim(), filters: filters.map(({ field, operator, values, scopes }) => ({ field, operator, values, ...(scopes?.length ? { scopes } : {}) })), peopleScope });
   const selectionMatchesQuery = selectionQueryKey === selectionKey;
   const selectedCount = !selectionMatchesQuery ? 0 : selectionMode === "all_matching" ? Math.max(0, total - excludedIds.size) : selectedIds.size;
@@ -136,18 +138,37 @@ export function CompanyTable({ companies, total, covered, prospectTotal, page, p
       const response = await api<{ result: { updated?: number; selected?: number; eligibleProspects?: number; prospectsUpdated?: number } }>(`/api/clients/${encodeURIComponent(clientId)}/companies`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: validated ? "set_icp_validated" : "clear_icp_validated", ...selection }),
+        body: JSON.stringify({ action: validated ? "set_icp_verified" : "clear_icp_verified", ...selection }),
       });
       const updated = Number(response.result.updated ?? 0);
       const eligibleProspects = Number(response.result.eligibleProspects ?? 0);
       const prospectNotice = validated
         ? `${formatNumber(eligibleProspects)} linked prospect${eligibleProspects === 1 ? " is" : "s are"} now eligible.`
         : `${formatNumber(eligibleProspects)} linked prospect${eligibleProspects === 1 ? " was" : "s were"} recalculated; manually verified prospects remain eligible.`;
-      setCompanyNotice(`${formatNumber(updated)} compan${updated === 1 ? "y" : "ies"} ${validated ? "marked ICP validated" : "removed from ICP validation"}. ${prospectNotice}`);
+      setCompanyNotice(`${formatNumber(updated)} compan${updated === 1 ? "y" : "ies"} ${validated ? "marked ICP verified" : "had ICP verification removed"}. ${prospectNotice}`);
       clearSelection();
       onRefresh?.();
-    } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to update company ICP validation."); }
+    } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to update company ICP verification."); }
     finally { setUpdatingIcp(false); }
+  }
+
+  async function pushCompaniesToClient() {
+    if (clientId || !pushClientId || !selectedCount) return;
+    setPushing(true); setCompanyError(""); setCompanyNotice("");
+    try {
+      const selection = selectionMode === "all_matching"
+        ? { allMatching: true, search: search.trim(), filters: filters.map(({ field, operator, values, scopes }) => ({ field, operator, values, ...(scopes?.length ? { scopes } : {}) })), peopleScope, excludedIds: [...excludedIds] }
+        : { companyIds: [...selectedIds] };
+      const response = await api<{ result: { selected?: number; added?: number; alreadyPresent?: number } }>(`/api/clients/${encodeURIComponent(pushClientId)}/companies`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "push", ...selection }),
+      });
+      const target = clients.find((client) => client.id === pushClientId)?.name ?? "the client";
+      const added = Number(response.result.added ?? 0);
+      const alreadyPresent = Number(response.result.alreadyPresent ?? 0);
+      setCompanyNotice(`${formatNumber(added)} compan${added === 1 ? "y" : "ies"} pushed to ${target}.${alreadyPresent ? ` ${formatNumber(alreadyPresent)} already present.` : ""}`);
+      clearSelection();
+    } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to push companies to the client."); }
+    finally { setPushing(false); }
   }
 
   async function selectCompaniesFromPaste() {
@@ -235,7 +256,22 @@ export function CompanyTable({ companies, total, covered, prospectTotal, page, p
     {clientId && bulkSelectOpen ? <div className="panel company-bulk-panel"><div className="company-bulk-panel-head"><div><strong>Select companies by website or name</strong><small>Paste one value per line. Exact normalized matches are selected across every page for this client only.</small></div><button className="company-bulk-close" aria-label="Close bulk company selection" onClick={() => setBulkSelectOpen(false)}><AppIcon name="close" size={14}/></button></div><div className="bulk-domain-paste"><label htmlFor="bulk-company-selection">Paste company websites or names</label><textarea id="bulk-company-selection" value={bulkSelectValues} placeholder={'acme.com\nGlobex Corporation\nhttps://initech.com'} onChange={(event) => setBulkSelectValues(event.target.value)}/><div className="bulk-domain-actions"><button type="button" disabled={bulkSelecting || !bulkSelectValues.trim()} onClick={() => void selectCompaniesFromPaste()}>{bulkSelecting ? "Matching…" : "Select matching companies"}</button>{bulkSelectValues ? <button type="button" className="ghost" disabled={bulkSelecting} onClick={() => setBulkSelectValues("")}>Clear pasted values</button> : null}<span className="bulk-domain-note">Up to 20,000 pasted values and 50,000 matches</span></div></div></div> : null}
     {onFilters && bulkOpen ? <div className="panel company-bulk-panel"><div className="company-bulk-panel-head"><div><strong>Filter by a list of domains</strong><small>Paste domains - each is normalized and matched against company websites. They stack with your other filters.</small></div><button className="company-bulk-close" aria-label="Close bulk domains" onClick={() => setBulkOpen(false)}><AppIcon name="close" size={14}/></button></div><BulkDomainPaste onAdd={(domains) => { onFilters(addDomainsToWebsiteFilter(filters, domains)); onPageChange(1); }} />{domainFilterCount ? <button type="button" className="company-bulk-clear" onClick={() => { onFilters(filters.filter((filter) => !(filter.field === "__website" && (filter.operator === "contains" || filter.operator === "equals")))); onPageChange(1); }}>Clear {domainFilterCount} domain{domainFilterCount === 1 ? "" : "s"}</button> : null}</div> : null}
     <div className={`people-layout ${onFilters && filtersOpen ? "" : "filters-collapsed"}`}>
-    <article className="panel company-table-panel"><div className="panel-head company-panel-head"><div><h3>Company database</h3><p>Showing {formatNumber(resultStart)}–{formatNumber(resultEnd)} of {formatNumber(total)} companies. Click any row to open its details.</p></div><span className="directory-badge">{formatNumber(total)} total</span></div>{selectedCount ? <div className="bulk-bar company-bulk-bar"><strong>{formatNumber(selectedCount)} selected {selectionMode === "all_matching" ? "across all pages" : "across pages"}</strong>{selectionMode === "explicit" && selectedCount < total ? <button onClick={selectAllMatching}>Select all {formatNumber(total)}</button> : null}{canDelete ? <button className="row-danger bulk-delete" disabled={deleting} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? formatNumber(selectedCount) : "selected"}</button> : <><button className="bulk-verify" disabled={updatingIcp} onClick={() => void setCompanyIcpValidation(true)}><AppIcon name="check" size={14}/> Mark ICP validated</button><button disabled={updatingIcp} onClick={() => void setCompanyIcpValidation(false)}><AppIcon name="close" size={14}/> Remove ICP validation</button></>}<button disabled={updatingIcp || deleting} onClick={clearSelection}>Clear</button></div> : null}{companies.length ? <><div className="table-wrap"><table className="company-table"><thead><tr>{showSelection ? <th className="select-column"><input aria-label="Select all companies on this page" title="Select all companies on this page" type="checkbox" checked={companies.length > 0 && companies.every((company) => isSelected(company.id))} onChange={togglePageSelection}/></th> : null}<th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th>{clientId ? <th className="company-icp-column">ICP validated</th> : null}{canDelete ? <th className="row-detail-column">Actions</th> : null}</tr></thead><tbody>{companies.map((company) => <CompanyTableRow key={company.id} company={company} selected={isSelected(company.id)} showSelection={showSelection} canDelete={canDelete} clientScoped={Boolean(clientId)} onOpen={openCompany} onToggleSelected={toggleSelected} onDelete={deleteCompany}/>)}</tbody></table></div><div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}><AppIcon name="back" size={14}/> Previous</button><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button></div></div></> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}</article>
+    <article className="panel company-table-panel"><div className="panel-head company-panel-head"><div><h3>Company database</h3><p>Showing {formatNumber(resultStart)}–{formatNumber(resultEnd)} of {formatNumber(total)} companies. Click any row to open its details.</p></div><span className="directory-badge">{formatNumber(total)} total</span></div>
+      {selectedCount ? <div className="bulk-bar company-bulk-bar">
+        <strong>{formatNumber(selectedCount)} selected {selectionMode === "all_matching" ? "across all pages" : "across pages"}</strong>
+        {selectionMode === "explicit" && selectedCount < total ? <button onClick={selectAllMatching}>Select all {formatNumber(total)}</button> : null}
+        {canDelete ? <>
+          <select aria-label="Client to receive selected companies" value={pushClientId} disabled={pushing} onChange={(event) => setPushClientId(event.target.value)}><option value="">Choose client…</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>
+          <button className="bulk-verify" disabled={pushing || !pushClientId} onClick={() => void pushCompaniesToClient()}><AppIcon name="arrow" size={14}/> {pushing ? "Pushing…" : "Push to Client"}</button>
+          <button className="row-danger bulk-delete" disabled={deleting || pushing} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? formatNumber(selectedCount) : "selected"}</button>
+        </> : <>
+          <button className="bulk-verify" disabled={updatingIcp} onClick={() => void setCompanyIcpValidation(true)}><AppIcon name="check" size={14}/> Mark ICP verified</button>
+          <button disabled={updatingIcp} onClick={() => void setCompanyIcpValidation(false)}><AppIcon name="close" size={14}/> Remove ICP verification</button>
+        </>}
+        <button disabled={updatingIcp || deleting || pushing} onClick={clearSelection}>Clear</button>
+      </div> : null}
+      {companies.length ? <><div className="table-wrap"><table className="company-table"><thead><tr>{showSelection ? <th className="select-column"><input aria-label="Select all companies on this page" title="Select all companies on this page" type="checkbox" checked={companies.length > 0 && companies.every((company) => isSelected(company.id))} onChange={togglePageSelection}/></th> : null}<th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th>{clientId ? <th className="company-icp-column">ICP verified</th> : null}{canDelete ? <th className="row-detail-column">Actions</th> : null}</tr></thead><tbody>{companies.map((company) => <CompanyTableRow key={company.id} company={company} selected={isSelected(company.id)} showSelection={showSelection} canDelete={canDelete} clientScoped={Boolean(clientId)} onOpen={openCompany} onToggleSelected={toggleSelected} onDelete={deleteCompany}/>)}</tbody></table></div><div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}><AppIcon name="back" size={14}/> Previous</button><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button></div></div></> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}
+    </article>
     {onFilters && filtersOpen ? <CompanyFilterPanel filters={filters} onChange={onFilters} /> : null}
     </div>
     {selectedCompany ? <CompanyDrawer company={selectedCompany} prospects={prospectsByCompany[selectedCompany.id] ?? []} total={prospectTotalsByCompany[selectedCompany.id] ?? selectedCompany.prospect_count} loading={loadingCompany === selectedCompany.id} error={companyError} onLoadMore={() => void loadMoreProspects(selectedCompany)} onClose={() => { setSelectedCompany(null); setCompanyError(""); }} /> : null}

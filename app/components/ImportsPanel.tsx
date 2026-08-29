@@ -169,7 +169,10 @@ function CompanyImportView({ dataSource, onComplete, resumeImport, onCancelResum
   async function uploadCompanyRows(importId: string, table: { headers: string[]; rows: string[][] }, savedFieldMap: Record<string, string>, rowOffset: number) {
     const columnFor = (field: string) => table.headers.findIndex((header) => savedFieldMap[header] === field);
     const valueFor = (row: string[], field: string) => { const column = columnFor(field); return column >= 0 ? String(row[column] ?? "").trim() : ""; };
-    const chunkSize = 100;
+      // Company upserts do more duplicate and provenance work than prospect rows.
+      // Smaller commits stay responsive on large self-hosted databases; the API
+      // additionally bisects any chunk that still reaches the SQL timeout.
+      const chunkSize = 25;
     setPhase("uploading");
     setProgress(Math.round((rowOffset / table.rows.length) * 100));
     setMessage(rowOffset ? `Resuming company import from row ${formatNumber(rowOffset + 1)}…` : "Importing companies into the master Company DB…");

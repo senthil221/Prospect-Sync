@@ -3,6 +3,7 @@ import { authorizeApi } from "../../../../lib/auth";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
 type CompanyImportRow = { name?: unknown; website?: unknown; employeeCount?: unknown; industry?: unknown; location?: unknown; city?: unknown; state?: unknown; country?: unknown; keywords?: unknown; shortDescription?: unknown; foundedYear?: unknown; technologies?: unknown; totalFunding?: unknown; raw?: unknown; sourceRowNumber?: unknown };
+type ImportSummary = { processed: number; added: number; updated: number; skipped: number };
 
 function listValue(value: unknown) {
   return [...new Set(String(value ?? "").split(/[,;|]/).map((item) => item.trim()).filter(Boolean))].slice(0, 100);
@@ -44,23 +45,49 @@ export async function POST(request: Request) {
     };
   });
   const supabase = createAdminClient();
-  const args = { p_import_id: importId, p_rows: rows, p_row_offset: rowOffset };
   const isMissing = (candidate: { code?: string } | null) => candidate?.code === "PGRST202" || candidate?.code === "42883";
-  // v3 applies the merge mode stored on the import row. v2 is the pre-merge-mode
-  // name and, once the migration is applied, simply forwards to v3 -- so this
-  // fallback only matters while a deployed build is ahead of the database.
-  let { data, error } = await supabase.rpc("import_company_batch_v3", args);
-  if (isMissing(error)) ({ data, error } = await supabase.rpc("import_company_batch_v2", args));
-  if (error) {
+  const isTimeout = (candidate: { code?: string; message?: string } | null) => candidate?.code === "57014" || /statement timeout/i.test(candidate?.message ?? "");
+
+  async function importBatch(batch: typeof rows, offset: number): Promise<ImportSummary> {
+    const args = { p_import_id: importId, p_rows: batch, p_row_offset: offset };
+    let { data, error } = await supabase.rpc("import_company_batch_v3", args);
+    if (isMissing(error)) ({ data, error } = await supabase.rpc("import_company_batch_v2", args));
+    if (error && isTimeout(error) && batch.length > 1) {
+      const midpoint = Math.ceil(batch.length / 2);
+      const left = await importBatch(batch.slice(0, midpoint), offset);
+      const right = await importBatch(batch.slice(midpoint), offset + midpoint);
+      return {
+        processed: left.processed + right.processed,
+        added: left.added + right.added,
+        updated: left.updated + right.updated,
+        skipped: left.skipped + right.skipped,
+      };
+    }
+    if (error) {
+      throw Object.assign(new Error(error.message), { code: error.code });
+    }
+    const summary = Array.isArray(data) ? data[0] : data;
+    return {
+      processed: Number(summary?.processed ?? batch.length),
+      added: Number(summary?.added ?? 0),
+      updated: Number(summary?.updated ?? 0),
+      skipped: Number(summary?.skipped ?? 0),
+    };
+  }
+
+  let summary: ImportSummary;
+  try {
+    summary = await importBatch(rows, rowOffset);
+  } catch (caught) {
+    const error = caught as Error & { code?: string };
     const missing = isMissing(error);
     return Response.json({ error: missing ? "Apply the latest database migration to enable company imports." : error.message }, { status: missing ? 503 : 500 });
   }
-  const summary = Array.isArray(data) ? data[0] : data;
   return Response.json({
-    processed: Number(summary?.processed ?? rows.length),
-    added: Number(summary?.added ?? 0),
-    updated: Number(summary?.updated ?? 0),
-    skipped: Number(summary?.skipped ?? 0),
+    processed: summary.processed,
+    added: summary.added,
+    updated: summary.updated,
+    skipped: summary.skipped,
     committedRowOffset: rowOffset + rows.length,
   });
 }
