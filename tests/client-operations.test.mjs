@@ -76,6 +76,48 @@ test("client isolation is enforced in SQL, not only in the UI", async () => {
   assert.match(operations, /not exists \(\s*select 1 from public\.client_blocklist b/);
 });
 
+test("client blocklists remove current matches and guard future imports without deleting master data", async () => {
+  const migration = await readFile(new URL("../supabase/migrations/20260829090337_enforce_client_blocklist_exclusion.sql", import.meta.url), "utf8");
+
+  assert.match(migration, /client_block_reason_v1/);
+  assert.match(migration, /sync_client_prospects_from_lists/);
+  assert.match(migration, /case when block\.reason is null then 'active' else 'blocked' end/);
+  assert.match(migration, /cp\.status = 'active'/);
+  assert.match(migration, /pi\.client_ids @> array\[p_client_id\]/);
+  assert.match(migration, /client_company_prospects/);
+  assert.match(migration, /membership\.added_by not in \('membership-backfill', 'prospect-membership', 'prospect-company-change'\)/);
+  assert.doesNotMatch(migration, /delete from public\.prospects\b/);
+  assert.doesNotMatch(migration, /delete from public\.companies\b/);
+});
+
+test("clients can be created before any list is imported", async () => {
+  const [panel, route] = await Promise.all([
+    readFile(new URL("../app/components/ClientsPanel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/clients/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(panel, /> New client</);
+  assert.match(panel, /\/api\/clients/);
+  assert.match(panel, /add the blocklist before importing any prospects/i);
+  assert.match(route, /export async function POST/);
+  assert.match(route, /from\("clients"\)\.insert\(client\)/);
+});
+
+test("bulk actions are grouped into consistent toolbars", async () => {
+  const [people, companies, css] = await Promise.all([
+    readFile(new URL("../app/components/ProspectTable.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/CompaniesWorkspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/workspace.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(people, /bulk-selection-summary/);
+  assert.match(people, /bulk-action-group-primary/);
+  assert.match(companies, /bulk-selection-summary/);
+  assert.match(companies, /bulk-action-group-danger/);
+  assert.match(css, /\.bulk-action-group \{/);
+  assert.match(css, /\.bulk-bar \.bulk-clear/);
+});
+
 test("bulk client operations resolve their own ids server-side", async () => {
   const operations = await readFile(new URL("../supabase/migrations/20260825050000_client_operations.sql", import.meta.url), "utf8");
   // Each one accepts a filter payload so a whole segment is one request rather

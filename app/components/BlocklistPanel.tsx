@@ -8,9 +8,9 @@ import type { BlocklistEntry, ClientRecord } from "../../lib/types";
 import { EmptyCompact } from "./DashboardUi";
 import { AppIcon } from "./DashboardUi";
 
-// The blocklist is per client and it suppresses rather than deletes: a blocked
-// record keeps its place in the client database with a badge, so the decision
-// and its reason survive. Nothing here touches the master People DB.
+// The blocklist is per client. Matching memberships are retained internally for
+// audit/restore, but disappear from the client's People and Company databases.
+// Nothing here deletes the shared master People DB record.
 export default function BlocklistPanel({ client, onChanged }: { client: ClientRecord; onChanged: () => void }) {
   const [entries, setEntries] = useState<BlocklistEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -56,7 +56,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
       const parts = [`${formatNumber(data.result.added)} added`];
       if (data.domains) parts.push(`${formatNumber(data.domains)} domains`);
       if (data.emails) parts.push(`${formatNumber(data.emails)} emails`);
-      if (data.result.suppressed) parts.push(`${formatNumber(data.result.suppressed)} records suppressed`);
+      if (data.result.suppressed) parts.push(`${formatNumber(data.result.suppressed)} existing client records removed`);
       if (data.unrecognisedCount) parts.push(`${formatNumber(data.unrecognisedCount)} unrecognised (${data.unrecognised.slice(0, 3).join(", ")})`);
       setNotice(`${parts.join(" · ")}.`);
       setText("");
@@ -97,7 +97,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
       <div>
         <p className="eyebrow">CLIENT BLOCKLIST</p>
         <h3>Never contact for {client.name}</h3>
-        <p>Domains and email addresses this client is off-limits for. Matching records stay in the database but are excluded from exports and pushes, so you keep the reason. Other clients are unaffected.</p>
+        <p>Domains and emails this client is off-limits for. Matching records are removed from this client&apos;s People and Company databases immediately, while the shared master records and original list history stay safe. Other clients are unaffected.</p>
       </div>
       <label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label="Search the blocklist" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search blocked domains and emails…"/></label>
     </div>
@@ -124,7 +124,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
 
     <article className="panel table-panel">
       <div className="panel-head">
-        <div><h3>Blocked entries</h3><p>{formatNumber(total)} total{client.blocked_count ? ` · ${formatNumber(client.blocked_count)} records currently suppressed` : ""}</p></div>
+        <div><h3>Blocked entries</h3><p>{formatNumber(total)} total{client.blocked_count ? ` · ${formatNumber(client.blocked_count)} client records currently removed` : ""}</p></div>
         {selected.size ? <button className="row-danger" disabled={busy} onClick={() => void removeSelected()}>Remove {formatNumber(selected.size)} selected</button> : null}
       </div>
       {loading ? <div className="workspace-loading">Loading the blocklist…</div> : entries.length ? <div className="table-wrap"><table>

@@ -258,17 +258,19 @@ export function CompanyTable({ companies, clients = [], total, covered, prospect
     <div className={`people-layout ${onFilters && filtersOpen ? "" : "filters-collapsed"}`}>
     <article className="panel company-table-panel"><div className="panel-head company-panel-head"><div><h3>Company database</h3><p>Showing {formatNumber(resultStart)}–{formatNumber(resultEnd)} of {formatNumber(total)} companies. Click any row to open its details.</p></div><span className="directory-badge">{formatNumber(total)} total</span></div>
       {selectedCount ? <div className="bulk-bar company-bulk-bar">
-        <strong>{formatNumber(selectedCount)} selected {selectionMode === "all_matching" ? "across all pages" : "across pages"}</strong>
-        {selectionMode === "explicit" && selectedCount < total ? <button onClick={selectAllMatching}>Select all {formatNumber(total)}</button> : null}
+        <div className="bulk-selection-summary"><strong>{formatNumber(selectedCount)} selected {selectionMode === "all_matching" ? "across all pages" : "across pages"}</strong>
+        {selectionMode === "explicit" && selectedCount < total ? <button onClick={selectAllMatching}>Select all {formatNumber(total)}</button> : null}</div>
         {canDelete ? <>
-          <select aria-label="Client to receive selected companies" value={pushClientId} disabled={pushing} onChange={(event) => setPushClientId(event.target.value)}><option value="">Choose client…</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>
+          <div className="bulk-action-group bulk-action-group-primary"><select aria-label="Client to receive selected companies" value={pushClientId} disabled={pushing} onChange={(event) => setPushClientId(event.target.value)}><option value="">Choose client…</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>
           <button className="bulk-verify" disabled={pushing || !pushClientId} onClick={() => void pushCompaniesToClient()}><AppIcon name="arrow" size={14}/> {pushing ? "Pushing…" : "Push to Client"}</button>
-          <button className="row-danger bulk-delete" disabled={deleting || pushing} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? formatNumber(selectedCount) : "selected"}</button>
+          </div><div className="bulk-action-group bulk-action-group-danger"><button className="row-danger bulk-delete" disabled={deleting || pushing} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? formatNumber(selectedCount) : "selected"}</button></div>
         </> : <>
+          <div className="bulk-action-group bulk-action-group-primary">
           <button className="bulk-verify" disabled={updatingIcp} onClick={() => void setCompanyIcpValidation(true)}><AppIcon name="check" size={14}/> Mark ICP verified</button>
           <button disabled={updatingIcp} onClick={() => void setCompanyIcpValidation(false)}><AppIcon name="close" size={14}/> Remove ICP verification</button>
+          </div>
         </>}
-        <button disabled={updatingIcp || deleting || pushing} onClick={clearSelection}>Clear</button>
+        <button className="bulk-clear" disabled={updatingIcp || deleting || pushing} onClick={clearSelection}>Clear</button>
       </div> : null}
       {companies.length ? <><div className="table-wrap"><table className="company-table"><thead><tr>{showSelection ? <th className="select-column"><input aria-label="Select all companies on this page" title="Select all companies on this page" type="checkbox" checked={companies.length > 0 && companies.every((company) => isSelected(company.id))} onChange={togglePageSelection}/></th> : null}<th>Company</th><th>Website</th><th>Prospects</th><th>Client coverage</th><th>Added</th><th>Status</th>{clientId ? <th className="company-icp-column">ICP verified</th> : null}{canDelete ? <th className="row-detail-column">Actions</th> : null}</tr></thead><tbody>{companies.map((company) => <CompanyTableRow key={company.id} company={company} selected={isSelected(company.id)} showSelection={showSelection} canDelete={canDelete} clientScoped={Boolean(clientId)} onOpen={openCompany} onToggleSelected={toggleSelected} onDelete={deleteCompany}/>)}</tbody></table></div><div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}><AppIcon name="back" size={14}/> Previous</button><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button></div></div></> : <EmptyState title="No known companies yet" text="Companies found in imported lists will appear here automatically." action="Import CSV" onAction={onImport} />}
     </article>
