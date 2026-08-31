@@ -100,21 +100,6 @@ echo "=== Company filter suggestions ==="
 psql_run -tAc "select 'Refreshed ' || public.refresh_company_value_suggestions_v1() || ' company filter suggestions.';"
 
 echo
-echo "=== Company Boolean search vector ==="
-# Boolean search reads companies.search_tsv instead of recomputing to_tsvector for
-# every row (~21s -> ~2.9s). A trigger keeps it current for new and edited
-# companies; this fills whatever the initial backfill has not reached. Bounded
-# batches on purpose, so it never holds a long lock -- populating all 418k rows in
-# one statement measured at six minutes, which is why it does not live in the
-# migration. Safe to re-run; it stops once nothing is outstanding.
-for _ in $(seq 1 200); do
-  remaining="$(psql_run -tAc "select public.refresh_company_search_tsv_v1(5000);" | tr -d '[:space:]')"
-  [ -z "$remaining" ] && break
-  [ "$remaining" = "0" ] && break
-done
-psql_run -tAc "select count(*) || ' companies still awaiting a Boolean search vector (0 means complete).' from public.companies where search_tsv is null;"
-
-echo
 echo "=== Capacity ==="
 psql_run -tAc "select 'Database: ' || pg_size_pretty(pg_database_size('${POSTGRES_DB}'));"
 df -h / | tail -1 | awk '{print "Disk:     " $3 " used of " $2 " (" $5 "), " $4 " free"}'
