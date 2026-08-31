@@ -13,6 +13,10 @@ import test from "node:test";
 const migration = () =>
   readFile(new URL("../supabase/migrations/20260901000040_filter_values_scan_one_column.sql", import.meta.url), "utf8");
 
+// The header comment quotes the v3 body it replaces, `union all` and `select ps.*`
+// included, so absence assertions have to look at the statements alone.
+const statementsOnly = (sql) => sql.replace(/^\s*--.*$/gm, "");
+
 test("filter values build one branch instead of unioning every field", async () => {
   const sql = await migration();
 
@@ -22,8 +26,9 @@ test("filter values build one branch instead of unioning every field", async () 
   assert.match(sql, /return query execute v_sql;/);
 
   // The three costs that made v3 slow must all be gone.
-  assert.doesNotMatch(sql, /select ps\.\*/, "must not carry all 52 columns");
-  assert.doesNotMatch(sql, /union all/i, "must not union every field's branch");
+  const statements = statementsOnly(sql);
+  assert.doesNotMatch(statements, /select ps\.\*/, "must not carry all 52 columns");
+  assert.doesNotMatch(statements, /union all/i, "must not union every field's branch");
 
   // The search predicate belongs in the scan, so a trigram index can serve it.
   assert.match(sql, /v_conditions := v_conditions \|\| format\('\(%s\) ilike %L'/);
