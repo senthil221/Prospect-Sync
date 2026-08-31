@@ -1,9 +1,9 @@
 "use client";
 
 import { ChangeEvent, useRef, useState } from "react";
-import { describeBulkMerge, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
+import { describeBulkMerge, exactMatchThreshold, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
 import { isXlsxFile, readXlsxRows } from "../lib/spreadsheet";
-import { filterId, IncludeExcludeFilter, TextBooleanFilter, type ProspectFilter } from "./ApolloFilterPanel";
+import { filterId, IncludeExcludeFilter, TextBooleanFilter, type ProspectFilter, type ProspectFilterOperator } from "./ApolloFilterPanel";
 import type { CompanyKeywordScope } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
 import { AppIcon } from "./components/DashboardUi";
@@ -118,7 +118,10 @@ export default function CompanyFilterPanel({ filters, onChange }: {
       seen.add(key);
       merged.push(value);
     }
-    replaceField(field, [...others, { id: include?.id ?? filterId(field, "contains"), field, operator: "contains", values: merged }]);
+    // An uploaded column of names or websites is the same case as a paste, and
+    // reaches the same unindexable predicate at the same size.
+    const operator: ProspectFilterOperator = merged.length > exactMatchThreshold ? "equals" : "contains";
+    replaceField(field, [...others, { id: include?.id ?? filterId(field, operator), field, operator, values: merged }]);
   }
 
   async function importNamesWebsites(event: ChangeEvent<HTMLInputElement>) {
@@ -247,7 +250,11 @@ export function addDomainsToWebsiteFilter(filters: ProspectFilter[], domains: st
     seen.add(key);
     merged.push(value);
   }
-  return [...filters.filter((filter) => filter.field !== field), ...others, { id: include?.id ?? filterId(field, "contains"), field, operator: "contains", values: merged }];
+  // Same rule as the People panel: a pasted list is a list of exact websites, and
+  // only equality is indexable. Below the threshold a typed value or two stays a
+  // substring match, which is what someone typing "acme" into the box expects.
+  const operator: ProspectFilterOperator = merged.length > exactMatchThreshold ? "equals" : "contains";
+  return [...filters.filter((filter) => filter.field !== field), ...others, { id: include?.id ?? filterId(field, operator), field, operator, values: merged }];
 }
 
 export function BulkDomainPaste({ onAdd }: { onAdd: (domains: string[]) => void }) {

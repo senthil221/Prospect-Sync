@@ -1,7 +1,7 @@
 "use client";
 
 import { ClipboardEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { bulkFieldKind, describeBulkMerge, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
+import { bulkFieldKind, describeBulkMerge, exactMatchThreshold, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
 import type { ProspectFieldDefinition } from "../lib/prospect-fields";
 import type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
@@ -187,7 +187,18 @@ export function IncludeExcludeFilter({ field, filters, clientId, valuesEndpoint,
 
   function setValues(side: "include" | "exclude", values: string[]) {
     const current = side === "include" ? includeRule : excludeRule;
-    const operator: ProspectFilterOperator = side === "include" ? "contains" : "not_contains";
+    // A pasted column of hundreds of values means "these exact values", not "anything
+    // containing one of them". Substring matching also widens the result set: 781
+    // pasted domains matched 5,904 companies, because acme.com is a substring of
+    // notacme.com.au. And equality is a single indexable array test where a chain of
+    // ILIKE '%…%' is not -- above 40 values the prefilter falls back to a correlated
+    // EXISTS that no index can serve, which measured 83s on 418k companies.
+    //
+    // Both sides switch on their own length, so include and exclude stay symmetric.
+    const exact = values.length > exactMatchThreshold;
+    const operator: ProspectFilterOperator = side === "include"
+      ? (exact ? "equals" : "contains")
+      : (exact ? "not_equals" : "not_contains");
     const opposite = side === "include" ? excludeRule : includeRule;
     const next = [...otherRules];
     if (opposite?.values.length) next.push(opposite);
