@@ -141,7 +141,9 @@ export default function CompanyFilterPanel({ filters, onChange }: {
     const fieldFilters = filters.filter((filter) => filter.field === definition.id);
     const count = activeCount(fieldFilters);
     const isExpanded = expanded === definition.id;
-    const autocompleteField = definition.autocomplete ? definition.id : undefined;
+    // This panel always asks the COMPANY value endpoint. Which database to ask is
+    // not a per-field choice: passing undefined here made TokenValuePicker fall
+    // back to the People endpoint, so company fields queried prospect_index.
     return <section className={`apollo-filter-section ${isExpanded ? "expanded" : ""}`} key={definition.id}>
       <button type="button" className="apollo-filter-summary" aria-expanded={isExpanded} onClick={() => setExpanded(isExpanded ? "" : definition.id)}>
         <span className="apollo-filter-mark"><AppIcon name={definition.kind === "employee" || definition.kind === "year" ? "hash" : "target"} size={14}/></span>
@@ -158,8 +160,8 @@ export default function CompanyFilterPanel({ filters, onChange }: {
           : definition.kind === "year"
             ? <RangeFilter field={definition.id} filters={fieldFilters} presets={foundedYearRanges} unknownLabel="Founded year is unknown" minPlaceholder="e.g. 2005" maxPlaceholder="e.g. 2015" onChange={(next) => replaceField(definition.id, next)} />
             : definition.kind === "text"
-              ? <TextBooleanFilter key={fieldFilters.map((filter) => `${filter.id}:${filter.values.join("|")}`).join(";")} definition={definition} filters={fieldFilters} valuesEndpoint={autocompleteField ? COMPANY_VALUES_ENDPOINT : undefined} onChange={(next) => replaceField(definition.id, next)} />
-              : <IncludeExcludeFilter field={definition.id} filters={fieldFilters} valuesEndpoint={autocompleteField ? COMPANY_VALUES_ENDPOINT : undefined} onChange={(next) => replaceField(definition.id, next)} />}
+              ? <TextBooleanFilter key={fieldFilters.map((filter) => `${filter.id}:${filter.values.join("|")}`).join(";")} definition={definition} filters={fieldFilters} valuesEndpoint={COMPANY_VALUES_ENDPOINT} onChange={(next) => replaceField(definition.id, next)} />
+              : <IncludeExcludeFilter field={definition.id} filters={fieldFilters} valuesEndpoint={COMPANY_VALUES_ENDPOINT} onChange={(next) => replaceField(definition.id, next)} />}
         {count ? <button type="button" className="clear-section-filter" onClick={() => replaceField(definition.id, [])}>Clear {definition.label}</button> : null}
       </div> : null}
     </section>;
@@ -214,9 +216,14 @@ function CompanyKeywordFilter({ filters, onChange }: { filters: ProspectFilter[]
       </label>)}
     </fieldset>
     <p className="company-keyword-scope-note">Selected fields are searched together. Description increases recall and may return more companies.</p>
+    {/* Without an explicit endpoint TokenValuePicker falls back to the PEOPLE
+        one, so typing here asked prospect_filter_values_v3 for a company field.
+        It has no case for it, so every keystroke scanned 674k prospect_index
+        rows to return nothing -- 2.4s a time, and a statement timeout under load. */}
     <TextBooleanFilter
       definition={{ id: "__company_keywords", label: "Company keywords" }}
       filters={filters}
+      valuesEndpoint={COMPANY_VALUES_ENDPOINT}
       onChange={(next) => onChange(next.map((filter) => ({ ...filter, scopes })))}
     />
   </div>;

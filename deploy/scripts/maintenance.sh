@@ -90,6 +90,16 @@ psql_run -c "
 psql_run -q -c "select pg_stat_statements_reset();" >/dev/null 2>&1 || true
 
 echo
+echo "=== Company filter suggestions ==="
+# Keyword/technology autocomplete reads a summary of 2.3M distinct values
+# rather than unnesting them out of 418k companies on every keystroke, which
+# used to take 6-15s and time out. The summary is rebuilt here rather than by a
+# trigger: company imports write in bulk, and a per-row trigger on that table is
+# how a slow import becomes a failed one. Suggestions are allowed to lag -- the
+# filter itself never reads this table, so an unlisted keyword still works.
+psql_run -tAc "select 'Refreshed ' || public.refresh_company_value_suggestions_v1() || ' company filter suggestions.';"
+
+echo
 echo "=== Capacity ==="
 psql_run -tAc "select 'Database: ' || pg_size_pretty(pg_database_size('${POSTGRES_DB}'));"
 df -h / | tail -1 | awk '{print "Disk:     " $3 " used of " $2 " (" $5 "), " $4 " free"}'
