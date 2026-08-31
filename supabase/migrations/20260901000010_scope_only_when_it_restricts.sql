@@ -246,6 +246,15 @@ begin
 end;
 $function$;
 
+-- All three run as SECURITY DEFINER. On an existing database CREATE OR REPLACE
+-- preserves the ACL, but replaying this file onto a fresh one creates them with
+-- the default PUBLIC EXECUTE -- which would put definer-rights functions in reach
+-- of anon, the key that ships in the client bundle. Revoke in the same file, so
+-- the migration is safe standalone rather than only as a follow-on.
+revoke execute on function public.company_scope_ids_v2(text, jsonb) from public, anon, authenticated;
+revoke execute on function public.search_prospect_workspace_v12(text, jsonb, text, text, integer, integer, text, jsonb, boolean) from public, anon, authenticated;
+revoke execute on function public.search_prospect_export_v4(text, jsonb, text, jsonb, timestamp with time zone, text, integer, boolean) from public, anon, authenticated;
+
 grant execute on function public.company_scope_ids_v2(text, jsonb) to service_role;
 grant execute on function public.search_prospect_workspace_v12(text, jsonb, text, text, integer, integer, text, jsonb, boolean) to service_role;
 grant execute on function public.search_prospect_export_v4(text, jsonb, text, jsonb, timestamp with time zone, text, integer, boolean) to service_role;
