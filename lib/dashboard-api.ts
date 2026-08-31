@@ -4,6 +4,34 @@ import type { CompanyScope, PeopleScope } from "./workspace-scopes.ts";
 const apiResponseCache = new Map<string, { data: unknown; expiresAt: number }>();
 const apiRequests = new Map<string, Promise<unknown>>();
 
+function failedRequestMessage(response: Response, body: string, parsed: unknown) {
+  if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
+    const error = String((parsed as { error?: unknown }).error ?? "").trim();
+    if (error) return error;
+  }
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.toLowerCase().startsWith("text/plain")) {
+    const text = body.trim().slice(0, 300);
+    if (text) return text;
+  }
+  return response.statusText || `Request failed (${response.status}).`;
+}
+
+async function parseApiResponse<T>(response: Response): Promise<T> {
+  const body = await response.text();
+  let parsed: unknown = null;
+  if (body) {
+    try { parsed = JSON.parse(body); }
+    catch {
+      if (!response.ok) throw new Error(failedRequestMessage(response, body, null));
+      throw new Error("The server returned an invalid response. Please try again.");
+    }
+  }
+  if (!response.ok) throw new Error(failedRequestMessage(response, body, parsed));
+  if (!body) throw new Error("The server returned an empty response. Please try again.");
+  return parsed as T;
+}
+
 export function clearApiCache() {
   apiResponseCache.clear();
 }
@@ -21,8 +49,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   }
   const request = (async () => {
     const response = await fetch(path, options);
-    const data = await response.json() as T & { error?: string };
-    if (!response.ok) throw new Error(data.error || "Something went wrong.");
+    const data = await parseApiResponse<T>(response);
     if (cacheable) apiResponseCache.set(path, { data, expiresAt: Date.now() + 5 * 60_000 });
     else if (method !== "GET") clearApiCache();
     return data;

@@ -24,6 +24,28 @@ test("polling requests bypass the client response cache", async () => {
   }
 });
 
+test("API errors remain actionable when a proxy returns an empty or non-JSON body", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (path) => {
+    if (String(path).includes("plain")) {
+      return new Response("Upstream database request timed out.", {
+        status: 502,
+        statusText: "Bad Gateway",
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+    return new Response("", { status: 504, statusText: "Gateway Timeout" });
+  };
+  try {
+    clearApiCache();
+    await assert.rejects(api("/empty-error"), /Gateway Timeout/);
+    await assert.rejects(api("/plain-error"), /Upstream database request timed out/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearApiCache();
+  }
+});
+
 test("company keyword scopes survive every workspace serialization boundary", () => {
   const filters = [{ id: "keywords", field: "__company_keywords", operator: "contains", values: ["security"], scopes: ["description"] }];
   const payload = filterPayload(filters);
@@ -31,6 +53,20 @@ test("company keyword scopes survive every workspace serialization boundary", ()
   assert.deepEqual(parsePeopleScope(JSON.stringify({ search: "", filters: payload, limit: 999999 }))?.filters[0].scopes, ["description"]);
   assert.deepEqual(parseCompanyScope(JSON.stringify({ search: "", filters: payload, limit: 999999 }))?.filters[0].scopes, ["description"]);
   assert.equal(parseCompanyScope(JSON.stringify({ filters: payload, limit: 999999 }))?.limit, 250000);
+});
+
+test("company description filters retain the indexed prefilter before exact verification", async () => {
+  const migration = await readFile(new URL(
+    "../supabase/migrations/20260831130211_restore_indexed_company_filter_prefilter.sql",
+    import.meta.url,
+  ), "utf8");
+  assert.match(migration, /company_effective_filter_sql_v1/);
+  assert.match(migration, /v_prefilter <> 'true'/);
+  assert.match(migration, /return '\(' \|\| v_prefilter \|\| '\) and \(' \|\| v_complete/);
+  assert.match(migration, /built_sql not like '%c\.short_description ilike%'/);
+  assert.match(migration, /field_key = '__keywords'[\s\S]*c\.keywords &&/);
+  assert.match(migration, /field_key = '__technologies'[\s\S]*c\.technologies &&/);
+  assert.match(migration, /v_complete := public\.company_effective_filter_sql_v1/g);
 });
 
 test("prospect signed uploads are scoped to the authenticated owner", async () => {
