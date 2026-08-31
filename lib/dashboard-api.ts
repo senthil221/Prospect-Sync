@@ -88,6 +88,73 @@ export function companyApiPath({ search = "", page = 1, clientId = "", filters =
   return `/api/companies?${params.toString()}`;
 }
 
+// Node answers 431 Request Header Fields Too Large once the request line passes
+// its 16KB header budget, before any application code runs. Measured against
+// production: 400 domains in the __website filter is a 12.9KB URL and is
+// accepted; 600 is 19.3KB and is rejected. Bulk domains allows 1000 values, so
+// any sizeable paste failed outright.
+//
+// 8KB leaves room for the rest of the request's headers (cookies, auth) and is
+// well under the wall. Past it the identical query goes in a POST body instead.
+const maxCompanyQueryUrlBytes = 8000;
+
+type CompanyQuery = {
+  search?: string;
+  page?: number;
+  clientId?: string;
+  filters?: ProspectFilter[];
+  peopleScope?: PeopleScope | null;
+};
+
+export async function fetchCompanies<T>(query: CompanyQuery, init?: RequestInit): Promise<T> {
+  const path = companyApiPath(query);
+  if (path.length <= maxCompanyQueryUrlBytes) return api<T>(path, init);
+
+  // Deliberately not routed through api(): it keys its cache on the path, and
+  // treats every non-GET as a mutation that clears the whole cache. Neither is
+  // right for a read that simply outgrew the URL.
+  const response = await fetch("/api/companies", {
+    ...init,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    body: JSON.stringify({
+      search: query.search ?? "",
+      page: String(query.page ?? 1),
+      pageSize: "50",
+      ...(query.clientId ? { clientId: query.clientId } : {}),
+      ...(query.filters?.length ? { filters: encodeFilters(query.filters) } : {}),
+      ...(query.peopleScope ? { peopleScope: JSON.stringify(query.peopleScope) } : {}),
+    }),
+  });
+  return parseApiResponse<T>(response);
+}
+
+type ProspectQuery = Parameters<typeof prospectApiPath>[0];
+
+// The People filters have the same 1000-value ceiling and the same query-string
+// transport, so they hit the same 431 wall. Same remedy.
+export async function fetchProspects<T>(query: ProspectQuery, init?: RequestInit): Promise<T> {
+  const path = prospectApiPath(query);
+  if (path.length <= maxCompanyQueryUrlBytes) return api<T>(path, init);
+  const response = await fetch("/api/prospects", {
+    ...init,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    body: JSON.stringify({
+      search: query.search ?? "",
+      page: String(query.page ?? 1),
+      sort: query.sort ?? "created_at",
+      direction: query.direction ?? "desc",
+      filters: query.filters ?? "[]",
+      includeFields: query.includeFields === false ? "0" : "1",
+      withTotal: (query.withTotal ?? (query.page ?? 1) === 1) ? "1" : "0",
+      ...(query.clientId ? { clientId: query.clientId } : {}),
+      ...(query.companyScope ? { companyScope: JSON.stringify(query.companyScope) } : {}),
+    }),
+  });
+  return parseApiResponse<T>(response);
+}
+
 export function isAbortError(error: unknown) {
   return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
 }

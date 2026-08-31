@@ -3,7 +3,7 @@
 import { useCallback, useDeferredValue, useEffect, useState } from "react";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import CompanyFilterPanel, { BulkDomainPaste, addDomainsToWebsiteFilter } from "../CompanyFilterPanel";
-import { api, companyApiPath, encodeFilters, isAbortError } from "../../lib/dashboard-api";
+import { api, encodeFilters, fetchCompanies, isAbortError } from "../../lib/dashboard-api";
 import { colorTone, formatNumber, initials } from "../../lib/dashboard-helpers";
 import type { ClientRecord, Company, Prospect, ProspectFilter } from "../../lib/types";
 import { AppIcon, EmptyState } from "./DashboardUi";
@@ -26,7 +26,7 @@ export function useCompaniesWorkspaceController({ active, search, filters, peopl
     void (async () => {
       onLoading(true); onError("");
       try {
-        const data = await api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(companyApiPath({ search: debouncedSearch, page, filters, peopleScope }), { signal: controller.signal });
+        const data = await fetchCompanies<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>({ search: debouncedSearch, page, filters, peopleScope }, { signal: controller.signal });
         if (current) { setCompanies(data.companies); setSummary({ total: data.total, covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); }
       } catch (caught) { if (current && !isAbortError(caught)) onError(caught instanceof Error ? caught.message : "Unable to load workspace data."); }
       finally { if (current) onLoading(false); }

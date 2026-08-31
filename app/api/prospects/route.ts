@@ -45,10 +45,10 @@ function workspaceSummary(data: unknown) {
   return summary && typeof summary === "object" ? summary as { result_rows?: unknown; total_count?: unknown } : {};
 }
 
-export async function GET(request: Request) {
-  const unauthorized = await authorizeApi();
-  if (unauthorized) return unauthorized;
-  const url = new URL(request.url);
+// Shared by GET and POST. Same query either way; only the transport differs,
+// because a pasted filter list can be far too large for a request line.
+async function respondToProspectQuery(params: URLSearchParams) {
+  const url = { searchParams: params };
   const search = (url.searchParams.get("search") ?? "").trim().slice(0, 300);
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
   const sort = ["created_at", "name", "company", "title", "last_contacted"].includes(url.searchParams.get("sort") ?? "") ? String(url.searchParams.get("sort")) : "created_at";
@@ -145,4 +145,32 @@ export async function DELETE(request: Request) {
   }
 
   return Response.json({ error: "Nothing selected to delete." }, { status: 400 });
+}
+
+export async function GET(request: Request) {
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
+  return respondToProspectQuery(new URL(request.url).searchParams);
+}
+
+// Same query, carried in the body.
+//
+// The People filters accept a pasted list up to maxFilterValues (1000), and
+// prospectApiPath puts the whole set in the query string. Node answers 431
+// Request Header Fields Too Large once the request line passes its 16KB budget,
+// before any application code runs -- measured at roughly 450 values. This is
+// the same failure Bulk domains hit on the Company DB, and the same remedy.
+export async function POST(request: Request) {
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
+  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (!body || typeof body !== "object") {
+    return Response.json({ error: "Invalid prospect query." }, { status: 400 });
+  }
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(body)) {
+    if (value === null || value === undefined) continue;
+    params.set(key, typeof value === "string" ? value : JSON.stringify(value));
+  }
+  return respondToProspectQuery(params);
 }

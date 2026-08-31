@@ -118,3 +118,23 @@ test("Date Contacted, bounded pivots, Storage, and worker readiness are wired en
   assert.match(compose, /IMPORT_WORKER_HEALTH_URL: http:\/\/import-worker:9090\/health/);
   assert.ok(update.indexOf("wait_for_container prospect-import-worker") < update.indexOf("Waiting for backend-aware candidate health"));
 });
+
+test("large filter sets travel in a body, not the request line", async () => {
+  const [companies, prospects, transport] = await Promise.all([
+    readFile(new URL("../app/api/companies/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/prospects/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/dashboard-api.ts", import.meta.url), "utf8"),
+  ]);
+  // Bulk domains pastes up to 1000 values into one filter. Measured against
+  // production: 400 domains is a 12.9KB URL and is accepted, 600 is 19.3KB and
+  // Node answers 431 before any handler runs. Both listings must accept the same
+  // query in a POST body, and the client must switch before reaching the wall.
+  for (const route of [companies, prospects]) {
+    assert.match(route, /export async function POST\(request: Request\)/);
+    assert.match(route, /respondTo(Company|Prospect)Query/);
+  }
+  assert.match(transport, /export async function fetchCompanies/);
+  assert.match(transport, /export async function fetchProspects/);
+  const limit = Number(transport.match(/maxCompanyQueryUrlBytes = (\d+)/)?.[1]);
+  assert.ok(limit > 0 && limit <= 12000, `URL switch threshold must stay under the 16KB wall, found ${limit}`);
+});

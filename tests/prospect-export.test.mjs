@@ -36,7 +36,12 @@ test("bulk prospect export shares the full workspace query contract", async () =
   // before writing a byte, so it must not come back.
   assert.match(route, /async function runProspectWorkspace/);
   assert.doesNotMatch(route, /exportProspects|prospectsCsv|X-Exported-Rows|export === "csv"/);
-  assert.doesNotMatch(route, /export async function POST/);
+  // POST on this route is the LISTING carried in a body, not an export: a pasted
+  // filter list can exceed Node's 16KB request line and be rejected with 431
+  // before any handler runs. The export ban is the assertion above, which checks
+  // for the export machinery itself rather than for a verb.
+  assert.match(route, /respondToProspectQuery/);
+  assert.doesNotMatch(route, /export async function PUT|export async function PATCH/);
   const exportRoute = await readFile(new URL("../app/api/prospects/export/route.ts", import.meta.url), "utf8");
   assert.match(exportRoute, /p_after_created_at/);
   assert.match(exportRoute, /nextCursor/);

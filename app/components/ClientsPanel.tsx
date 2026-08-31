@@ -2,7 +2,7 @@
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
-import { api, companyApiPath, encodeFilters, filterPayload, isAbortError, prospectApiPath } from "../../lib/dashboard-api";
+import { api, encodeFilters, fetchCompanies, fetchProspects, filterPayload, isAbortError } from "../../lib/dashboard-api";
 import { formatNumber, initials } from "../../lib/dashboard-helpers";
 import type { ClientRecord, Company, ListRecord, Prospect, ProspectFilter } from "../../lib/types";
 import { AppIcon, EmptyCompact, EmptyState } from "./DashboardUi";
@@ -99,11 +99,10 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
     let current = true;
     const controller = new AbortController();
     if (deferredSearch !== debouncedSearch) return () => { current = false; controller.abort(); };
-    const path = prospectApiPath({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, clientId: client.id, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !totalCache.current.has(countKey) });
     void (async () => {
       setRefreshing(true);
       try {
-        const data = await api<{ prospects: Prospect[]; total: number | null; fields?: string[] }>(path, { signal: controller.signal });
+        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, clientId: client.id, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !totalCache.current.has(countKey) }, { signal: controller.signal });
         if (current) {
           setProspects(data.prospects);
           if (data.total !== null) { totalCache.current.set(countKey, data.total); setTotal(data.total); }
@@ -142,11 +141,10 @@ function ClientCompanyDatabase({ client, peopleScope, onClearPeopleScope, onSeeP
     let current = true;
     const controller = new AbortController();
     if (deferredSearch !== debouncedSearch) return () => { current = false; controller.abort(); };
-    const path = companyApiPath({ search: debouncedSearch, clientId: client.id, page, filters, peopleScope });
     void (async () => {
       setRefreshing(true);
       try {
-        const data = await api<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>(path, { signal: controller.signal });
+        const data = await fetchCompanies<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>({ search: debouncedSearch, clientId: client.id, page, filters, peopleScope }, { signal: controller.signal });
         if (current) { setCompanies(data.companies); setSummary({ total: data.total, covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); setError(""); }
       } catch (caught) { if (current && !isAbortError(caught)) setError(caught instanceof Error ? caught.message : "Unable to load the client company database."); }
       finally { if (current) { setLoading(false); setRefreshing(false); } }

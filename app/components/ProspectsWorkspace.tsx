@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { api, encodeFilters, isAbortError, prospectApiPath } from "../../lib/dashboard-api";
+import { encodeFilters, fetchProspects, isAbortError } from "../../lib/dashboard-api";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import type { ClientRecord, Prospect, ProspectFilter } from "../../lib/types";
 import ProspectTable from "./ProspectTable";
@@ -29,7 +29,7 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
     void (async () => {
       onLoading(true); onError("");
       try {
-        const data = await api<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; fields?: string[] }>(prospectApiPath({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !totalCache.current.has(countKey) }), { signal: controller.signal });
+        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !totalCache.current.has(countKey) }, { signal: controller.signal });
         if (current) {
           setProspects(data.prospects);
           if (data.total !== null) {

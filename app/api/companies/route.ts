@@ -115,10 +115,10 @@ export async function DELETE(request: Request) {
   return Response.json({ error: "Nothing selected to delete." }, { status: 400 });
 }
 
-export async function GET(request: Request) {
-  const unauthorized = await authorizeApi();
-  if (unauthorized) return unauthorized;
-  const url = new URL(request.url);
+// Shared by GET and POST. The query is identical either way; only how it arrives
+// differs, because a filter set can be far too large to survive a request line.
+async function respondToCompanyQuery(params: URLSearchParams) {
+  const url = { searchParams: params };
   const search = (url.searchParams.get("search") ?? "").trim().replace(/[,()]/g, " ");
   const clientId = (url.searchParams.get("clientId") ?? "").trim();
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
@@ -223,4 +223,37 @@ export async function GET(request: Request) {
     page,
     pageSize,
   });
+}
+
+export async function GET(request: Request) {
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
+  return respondToCompanyQuery(new URL(request.url).searchParams);
+}
+
+// Same query, carried in the body.
+//
+// Bulk domains pastes up to maxFilterValues (1000) values into the __website
+// filter, and companyApiPath puts the whole filter set in the query string.
+// Measured against production: 400 domains is a 12.9KB URL and is accepted, 600
+// is 19.3KB and Node answers 431 Request Header Fields Too Large before any of
+// our code runs. So every bulk paste past roughly 450 domains failed -- which is
+// most of the point of the feature.
+//
+// Raising Node's --max-http-header-size would only move the wall; a request line
+// is the wrong place for kilobytes of filter values. The client switches to this
+// once the URL would get close to the limit.
+export async function POST(request: Request) {
+  const unauthorized = await authorizeApi();
+  if (unauthorized) return unauthorized;
+  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (!body || typeof body !== "object") {
+    return Response.json({ error: "Invalid company query." }, { status: 400 });
+  }
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(body)) {
+    if (value === null || value === undefined) continue;
+    params.set(key, typeof value === "string" ? value : JSON.stringify(value));
+  }
+  return respondToCompanyQuery(params);
 }
