@@ -165,7 +165,7 @@ async function respondToCompanyQuery(params: URLSearchParams) {
     let companies;
     try { companies = await withClientIcpValidation(supabase, summary?.result_rows ?? [], clientId); }
     catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to load company verification." }, { status: 500 }); }
-    return Response.json({ companies, total: Number(summary?.total_count ?? 0), covered: Number(summary?.covered_count ?? 0), prospectTotal: Number(summary?.prospect_count ?? 0), page, pageSize });
+    return Response.json({ companies, total: Number(summary?.total_count ?? 0), totalCapped: Boolean(summary?.total_capped), covered: Number(summary?.covered_count ?? 0), prospectTotal: Number(summary?.prospect_count ?? 0), page, pageSize });
   }
 
   // Company-column filters (and the People-DB pivot scope) run through
@@ -192,6 +192,9 @@ async function respondToCompanyQuery(params: URLSearchParams) {
     return Response.json({
       companies,
       total: Number(summary?.total_count ?? 0),
+      // True when the match set was larger than the count cap, so the UI can say
+      // "50,000+" rather than present a bounded number as an exact one.
+      totalCapped: Boolean(summary?.total_capped),
       covered: Number(summary?.covered_count ?? 0),
       prospectTotal: Number(summary?.prospect_total ?? 0),
       page,

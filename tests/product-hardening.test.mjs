@@ -138,3 +138,20 @@ test("large filter sets travel in a body, not the request line", async () => {
   const limit = Number(transport.match(/maxCompanyQueryUrlBytes = (\d+)/)?.[1]);
   assert.ok(limit > 0 && limit <= 12000, `URL switch threshold must stay under the 16KB wall, found ${limit}`);
 });
+
+test("company listing counts are bounded, but only when a filter narrows the set", async () => {
+  const [migration, workspace] = await Promise.all([
+    readFile(new URL("../supabase/migrations/20260831200000_cap_company_listing_counts.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/CompaniesWorkspace.tsx", import.meta.url), "utf8"),
+  ]);
+  // Counting every match was ~98 percent of the request and grew with the data,
+  // which is what pushed a cold description-scope filter past the timeout. The
+  // page itself is cheap because it is ordered off an index.
+  assert.match(migration, /limit %8\$s/);
+  assert.match(migration, /total_capped/);
+  // The unfiltered listing is the headline "how many companies do I have"
+  // number. It must never be capped.
+  assert.match(migration, /v_count_cap := case when v_match_clause = 'true' and p_people_scope is null then 'all'/);
+  // And a bounded total has to read as a floor, not as an exact count.
+  assert.match(workspace, /totalCapped \? `\$\{formatNumber\(total\)\}\+`/);
+});
