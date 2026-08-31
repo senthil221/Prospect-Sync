@@ -70,6 +70,12 @@ test("deployment runs storage and one bounded import worker", async () => {
   assert.match(bootstrap, /deptype = 'e'/);
   assert.match(bootstrap, /still owned by supabase_admin/i);
   assert.match(compose, /PGUSER: authenticator/);
+  // One slow listing holds a pool connection for its whole run, so a pool this
+  // small let a single expensive filter starve every other request with
+  // "Timed out acquiring connection from connection pool". Keep the slack.
+  const pool = Number(compose.match(/PGRST_DB_POOL: "(\d+)"/)?.[1]);
+  assert.ok(pool >= 24, `PGRST_DB_POOL must stay >= 24 for headroom, found ${pool}`);
+  assert.match(compose, /PGRST_DB_POOL_ACQUISITION_TIMEOUT: "10"/);
   assert.match(worker, /copyFrom\("copy prospect_import\.staged_rows/);
   assert.match(worker, /process_staged_batch_v1/);
 });

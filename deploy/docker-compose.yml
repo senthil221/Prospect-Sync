@@ -238,8 +238,21 @@ services:
       PGRST_DB_USE_LEGACY_GUCS: "false"
       PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
       PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY}
-      # 2 vCPU box: a big pool just causes context-switch thrash.
-      PGRST_DB_POOL: "15"
+      # 2 vCPU box: a big pool just causes context-switch thrash, so this stays
+      # modest. 15 was too tight for a different reason though -- a single slow
+      # listing holds a connection for its whole run, and the Companies tab plus
+      # a reload can occupy the pool in seconds. Every other request then dies on
+      # acquisition with "Timed out acquiring connection from connection pool",
+      # so one expensive filter broke the workspace for everyone.
+      #
+      # 24 buys enough slack that a couple of long queries cannot starve the
+      # short ones, without inviting thrash: idle connections are nearly free and
+      # the active ones are bounded by each function's statement_timeout (30s for
+      # the company listings, see 20260831180000). Well inside max_connections=100
+      # alongside auth, storage, meta, studio and the import worker.
+      PGRST_DB_POOL: "24"
+      # Fail fast and legibly rather than letting a request hang: the UI turns
+      # this into a visible error, which beats a spinner that never resolves.
       PGRST_DB_POOL_ACQUISITION_TIMEOUT: "10"
       PGRST_ADMIN_SERVER_PORT: "3001"
       PGRST_LOG_LEVEL: error
