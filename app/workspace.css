@@ -1198,3 +1198,15 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 .classifier-missing.both { background: var(--danger-soft); color: var(--danger); }
 .classifier-empty { margin: var(--space-4) 0 0; padding: var(--space-6); border: 1px dashed var(--ph-border-strong); border-radius: var(--radius-md); color: var(--text-secondary); font-size: var(--text-xs); text-align: center; }
 @media (max-width: 720px) { .classifier-actions { width: 100%; } }
+
+/* Render-time failure recovery. Before app/error.tsx existed a throw during
+   render blanked the workspace, and a refresh blanked it again -- which is how
+   a timed-out search presented to the user. */
+.boundary-shell { min-height: 100vh; display: grid; place-items: center; padding: var(--space-6); background: var(--ph-bg); }
+.boundary-card { max-width: 34rem; width: 100%; padding: var(--space-6); text-align: center; }
+.boundary-card .warning-mark { margin-inline: auto; }
+.boundary-card h1 { margin: var(--space-2) 0 var(--space-3); font-size: var(--text-lg); }
+.boundary-card > p { margin: 0 auto var(--space-4); max-width: 46ch; color: var(--text-secondary); font-size: var(--text-xs); line-height: 1.65; }
+.boundary-detail { max-height: 9rem; margin: 0 0 var(--space-3); padding: var(--space-3); overflow: auto; border: 1px solid var(--ph-border); border-radius: var(--radius-md); background: var(--ph-surface-soft); color: var(--text-secondary); font-family: var(--ph-mono, ui-monospace, monospace); font-size: var(--text-2xs); line-height: 1.55; text-align: left; white-space: pre-wrap; word-break: break-word; }
+.boundary-digest { display: block; margin-bottom: var(--space-3); color: var(--text-tertiary); font-size: var(--text-2xs); }
+.boundary-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); }
