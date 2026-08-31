@@ -60,6 +60,50 @@ export type BulkMergeResult = {
   invalid: string[];
 };
 
+export const MAX_BLOCKLIST_PASTE_VALUES = 5_000;
+export const BLOCKLIST_REQUEST_VALUES = 200;
+
+export type BlocklistPartition = {
+  domains: string[];
+  emails: string[];
+  duplicates: number;
+  invalid: string[];
+  invalidCount: number;
+  submitted: number;
+};
+
+// Keep processing data separate from the short diagnostic sample shown to the
+// user. The old route reused mergeBulkValues().invalid as the domain payload;
+// because that sample intentionally stops at ten, a paste of 1,875 domains sent
+// only ten to Postgres.
+export function partitionBlocklistValues(raw: string): BlocklistPartition {
+  const candidates = splitPastedValues(raw);
+  const domains: string[] = [];
+  const emails: string[] = [];
+  const invalid: string[] = [];
+  const seen = new Set<string>();
+  let duplicates = 0;
+  let invalidCount = 0;
+
+  for (const candidate of candidates) {
+    const email = normalizeBulkValue(candidate, "email");
+    const domain = normalizeBulkValue(candidate, "domain");
+    const kind = isValidBulkValue(email, "email") ? "email" : isValidBulkValue(domain, "domain") ? "domain" : null;
+    const value = kind === "email" ? email : domain;
+    if (!kind) {
+      invalidCount += 1;
+      if (invalid.length < 10) invalid.push(candidate);
+      continue;
+    }
+    const key = `${kind}:${value.toLocaleLowerCase()}`;
+    if (seen.has(key)) { duplicates += 1; continue; }
+    seen.add(key);
+    if (kind === "email") emails.push(value); else domains.push(value);
+  }
+
+  return { domains, emails, duplicates, invalid, invalidCount, submitted: candidates.length };
+}
+
 // Merge pasted text into an existing value list, reporting what happened so the
 // UI can say "412 added · 38 duplicates · 6 unrecognised" instead of silently
 // dropping rows.

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../lib/dashboard-api";
 import { formatNumber } from "../../lib/dashboard-helpers";
-import { splitPastedValues } from "../../lib/bulk-values.ts";
+import { BLOCKLIST_REQUEST_VALUES, MAX_BLOCKLIST_PASTE_VALUES, partitionBlocklistValues } from "../../lib/bulk-values.ts";
 import type { BlocklistEntry, ClientRecord } from "../../lib/types";
 import { EmptyCompact } from "./DashboardUi";
 import { AppIcon } from "./DashboardUi";
@@ -22,48 +22,103 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
+  const [progress, setProgress] = useState<{ entries: number; total: number; records: number } | null>(null);
 
-  const pending = useMemo(() => splitPastedValues(text).length, [text]);
+  const parsedPending = useMemo(() => partitionBlocklistValues(text), [text]);
+  const pending = parsedPending.submitted;
+  const validPending = parsedPending.domains.length + parsedPending.emails.length;
+  const pasteTooLarge = pending > MAX_BLOCKLIST_PASTE_VALUES;
+  const totalPages = Math.max(1, Math.ceil(total / 100));
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (requestedPage = page) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (search.trim()) params.set("search", search.trim());
+      params.set("page", String(requestedPage));
       const data = await api<{ entries: BlocklistEntry[]; total: number }>(
         `/api/clients/${encodeURIComponent(client.id)}/blocklist?${params}`);
       setEntries(data.entries); setTotal(data.total); setError("");
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to load the blocklist."); }
     finally { setLoading(false); }
-  }, [client.id, search]);
+  }, [client.id, page, search]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, search ? 300 : 0);
     return () => window.clearTimeout(timer);
   }, [load, search]);
 
+  async function submitBlocklistChunk(chunk: string[], requestId: string) {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await api<{
+          result: { added: number; suppressed: number; remaining: boolean; reindexed: number; queued: number };
+        }>(`/api/clients/${encodeURIComponent(client.id)}/blocklist`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: chunk.join("\n"), reason, requestId }),
+        });
+      } catch (caught) {
+        lastError = caught;
+        if (attempt < 3) await new Promise((resolve) => window.setTimeout(resolve, attempt * 500));
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Unable to process this blocklist batch.");
+  }
+
   async function addEntries() {
+    if (pasteTooLarge) {
+      setError(`For safety, one operation can contain up to ${formatNumber(MAX_BLOCKLIST_PASTE_VALUES)} domains and emails. Split this paste into smaller groups.`);
+      return;
+    }
+    if (!validPending) {
+      setError("No valid domains or email addresses were found.");
+      return;
+    }
     setBusy(true); setNotice(""); setError("");
+    let processedEntries = 0;
+    let blockedRecords = 0;
+    let addedEntries = 0;
+    let queuedReindexes = 0;
     try {
-      const data = await api<{
-        result: { added: number; suppressed: number };
-        domains: number; emails: number; unrecognised: string[]; unrecognisedCount: number;
-      }>(`/api/clients/${encodeURIComponent(client.id)}/blocklist`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, reason }),
-      });
-      const parts = [`${formatNumber(data.result.added)} added`];
-      if (data.domains) parts.push(`${formatNumber(data.domains)} domains`);
-      if (data.emails) parts.push(`${formatNumber(data.emails)} emails`);
-      if (data.result.suppressed) parts.push(`${formatNumber(data.result.suppressed)} existing client records removed`);
-      if (data.unrecognisedCount) parts.push(`${formatNumber(data.unrecognisedCount)} unrecognised (${data.unrecognised.slice(0, 3).join(", ")})`);
+      const values = [...parsedPending.domains, ...parsedPending.emails];
+      for (let offset = 0; offset < values.length; offset += BLOCKLIST_REQUEST_VALUES) {
+        const chunk = values.slice(offset, offset + BLOCKLIST_REQUEST_VALUES);
+        let remaining = true;
+        let passes = 0;
+        while (remaining) {
+          setProgress({ entries: Math.min(offset + chunk.length, values.length), total: values.length, records: blockedRecords });
+          const data = await submitBlocklistChunk(chunk, crypto.randomUUID());
+          addedEntries += Number(data.result.added ?? 0);
+          blockedRecords += Number(data.result.suppressed ?? 0);
+          queuedReindexes += Number(data.result.queued ?? 0);
+          remaining = Boolean(data.result.remaining);
+          passes += 1;
+          setProgress({ entries: Math.min(offset + chunk.length, values.length), total: values.length, records: blockedRecords });
+          if (passes >= 200 && remaining) throw new Error("This operation reached the one-million-record safety boundary.");
+        }
+        processedEntries = Math.min(offset + chunk.length, values.length);
+      }
+      const parts = [`${formatNumber(addedEntries)} added`];
+      if (parsedPending.domains.length) parts.push(`${formatNumber(parsedPending.domains.length)} domains`);
+      if (parsedPending.emails.length) parts.push(`${formatNumber(parsedPending.emails.length)} emails`);
+      if (parsedPending.duplicates) parts.push(`${formatNumber(parsedPending.duplicates)} duplicates ignored`);
+      if (blockedRecords) parts.push(`${formatNumber(blockedRecords)} existing client records removed`);
+      if (queuedReindexes) parts.push(`${formatNumber(queuedReindexes)} index updates queued safely`);
+      if (parsedPending.invalidCount) parts.push(`${formatNumber(parsedPending.invalidCount)} unrecognised (${parsedPending.invalid.slice(0, 3).join(", ")})`);
       setNotice(`${parts.join(" · ")}.`);
       setText("");
-      await load();
+      setPage(1);
+      await load(1);
       onChanged();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to update the blocklist."); }
-    finally { setBusy(false); }
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Unable to update the blocklist.";
+      setError(`${message}${processedEntries || blockedRecords ? ` Progress was saved (${formatNumber(processedEntries)} entries processed, ${formatNumber(blockedRecords)} records removed); click Block again to continue safely.` : ""}`);
+      if (processedEntries || blockedRecords) { await load(1); onChanged(); }
+    }
+    finally { setBusy(false); setProgress(null); }
   }
 
   async function removeSelected() {
@@ -78,7 +133,8 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
         });
       setNotice(`Removed ${formatNumber(data.result.removed)} entries · ${formatNumber(data.result.restored)} records restored to this client.`);
       setSelected(new Set());
-      await load();
+      setPage(1);
+      await load(1);
       onChanged();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to remove those entries."); }
     finally { setBusy(false); }
@@ -99,7 +155,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
         <h3>Never contact for {client.name}</h3>
         <p>Domains and emails this client is off-limits for. Matching records are removed from this client&apos;s People and Company databases immediately, while the shared master records and original list history stay safe. Other clients are unaffected.</p>
       </div>
-      <label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label="Search the blocklist" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search blocked domains and emails…"/></label>
+      <label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label="Search the blocklist" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search blocked domains and emails…"/></label>
     </div>
 
     {error ? <div className="inline-error" role="alert">{error}</div> : null}
@@ -115,10 +171,12 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
       />
       <div className="blocklist-add-actions">
         <input aria-label="Reason (optional)" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reason (optional) - e.g. existing customer"/>
-        <button className="primary" disabled={busy || !pending} onClick={() => void addEntries()}>
-          {busy ? "Blocking…" : `Block ${pending ? formatNumber(pending) : ""}`}
+        <button className="primary" disabled={busy || !pending || !validPending || pasteTooLarge} onClick={() => void addEntries()}>
+          {busy ? `Blocking… ${formatNumber(progress?.records ?? 0)} records` : `Block ${pending ? formatNumber(pending) : ""}`}
         </button>
       </div>
+      {pasteTooLarge ? <p className="form-error" role="alert">Maximum {formatNumber(MAX_BLOCKLIST_PASTE_VALUES)} entries per operation. Split this paste into smaller groups.</p> : null}
+      {progress ? <p className="blocklist-note" role="status">Processing {formatNumber(progress.entries)} of {formatNumber(progress.total)} valid entries · {formatNumber(progress.records)} client records removed so far.</p> : null}
       {notice ? <p className="blocklist-note" role="status">{notice}</p> : null}
     </article>
 
@@ -137,6 +195,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
           <td>{new Date(entry.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
         </tr>)}</tbody>
       </table></div> : <EmptyCompact text={search ? `No blocked entries match “${search}”.` : "Nothing is blocked for this client yet."} />}
+      {totalPages > 1 ? <div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={loading || page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><AppIcon name="back" size={14}/> Previous</button><button disabled={loading || page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Next</button></div></div> : null}
     </article>
   </section>;
 }

@@ -90,6 +90,40 @@ test("client blocklists remove current matches and guard future imports without 
   assert.doesNotMatch(migration, /delete from public\.companies\b/);
 });
 
+test("large client blocklists are bounded, resumable, and paginated without truncation", async () => {
+  const [migration, route, panel] = await Promise.all([
+    readFile(new URL("../supabase/migrations/20260829124348_batch_client_blocklist_safely.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/clients/[id]/blocklist/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/BlocklistPanel.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(migration, /add_client_blocklist_batch_v2/);
+  assert.match(migration, /create table if not exists public\.client_blocklist_batch_results/);
+  assert.match(migration, /request_id text primary key/);
+  assert.match(migration, /if found then[\s\S]*return v_result/);
+  assert.match(migration, /limit v_limit/);
+  assert.match(migration, /'remaining', v_remaining/);
+  assert.match(migration, /p_batch => 1000/);
+  assert.match(migration, /queued safely|v_queued/);
+  assert.match(migration, /revoke execute on function public\.add_client_blocklist_batch_v2/);
+  assert.match(migration, /grant execute on function public\.add_client_blocklist_batch_v2[\s\S]*to service_role/);
+  assert.doesNotMatch(migration, /delete from public\.(prospects|companies)\b/);
+
+  assert.match(route, /partitionBlocklistValues/);
+  assert.match(route, /BLOCKLIST_REQUEST_VALUES/);
+  assert.match(route, /add_client_blocklist_batch_v2/);
+  assert.match(route, /p_request_id: requestId/);
+  assert.match(route, /\.range\(offset, offset \+ pageSize - 1\)/);
+  assert.doesNotMatch(route, /domainSource = emails\.invalid/);
+
+  assert.match(panel, /MAX_BLOCKLIST_PASTE_VALUES/);
+  assert.match(panel, /offset \+= BLOCKLIST_REQUEST_VALUES/);
+  assert.match(panel, /while \(remaining\)/);
+  assert.match(panel, /attempt <= 3/);
+  assert.match(panel, /crypto\.randomUUID\(\)/);
+  assert.match(panel, /Progress was saved/);
+});
+
 test("clients can be created before any list is imported", async () => {
   const [panel, route] = await Promise.all([
     readFile(new URL("../app/components/ClientsPanel.tsx", import.meta.url), "utf8"),

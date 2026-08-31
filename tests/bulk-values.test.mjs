@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bulkFieldKind, describeBulkMerge, isValidBulkValue, mergeBulkValues, normalizeBulkValue, splitPastedValues } from "../lib/bulk-values.ts";
+import { bulkFieldKind, describeBulkMerge, isValidBulkValue, mergeBulkValues, normalizeBulkValue, partitionBlocklistValues, splitPastedValues } from "../lib/bulk-values.ts";
 import { parseFilters } from "../lib/prospect-filters.ts";
 
 test("splits the separators a pasted spreadsheet column actually uses", () => {
@@ -38,6 +38,17 @@ test("merging reports added, duplicate, and skipped counts instead of dropping r
   assert.equal(result.duplicates, 1, "the pasted URL normalizes onto the existing acme.com");
   assert.deepEqual(result.invalid, ["Website"]);
   assert.match(describeBulkMerge(result, "domain"), /2 domains added · 1 already listed · 1 skipped \(Website\)/);
+});
+
+test("a large domain blocklist keeps every processing value while bounding only diagnostics", () => {
+  const domains = Array.from({ length: 1875 }, (_, index) => `https://www.company-${index}.com/careers`);
+  const result = partitionBlocklistValues([...domains, "NO WEBSITE", "NO DOMAIN", "person@example.com"].join("\n"));
+  assert.equal(result.submitted, 1878);
+  assert.equal(result.domains.length, 1875, "the processing payload must not inherit the ten-item diagnostic cap");
+  assert.equal(result.emails.length, 1);
+  assert.equal(result.invalidCount, 2);
+  assert.deepEqual(result.invalid, ["NO WEBSITE", "NO DOMAIN"]);
+  assert.equal(result.domains.at(-1), "company-1874.com");
 });
 
 test("field ids map to the normalization their stored column needs", () => {

@@ -1,5 +1,5 @@
 import { authorizeApi, getAuthorizedUser } from "../../../../../lib/auth.ts";
-import { mergeBulkValues } from "../../../../../lib/bulk-values.ts";
+import { BLOCKLIST_REQUEST_VALUES, partitionBlocklistValues } from "../../../../../lib/bulk-values.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883", "42P01"]);
@@ -18,13 +18,17 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const { id } = await context.params;
   const url = new URL(request.url);
   const search = (url.searchParams.get("search") ?? "").trim().slice(0, 200);
+  const page = Math.max(1, Math.min(Number(url.searchParams.get("page") ?? 1) || 1, 100_000));
+  const pageSize = 100;
+  const offset = (page - 1) * pageSize;
 
   let query = createAdminClient()
     .from("client_blocklist")
     .select("id,kind,value,reason,source,created_at", { count: "exact" })
     .eq("client_id", id)
     .order("created_at", { ascending: false })
-    .limit(500);
+    .order("id", { ascending: true })
+    .range(offset, offset + pageSize - 1);
   if (search) query = query.ilike("value", `%${search}%`);
 
   const { data, error, count } = await query;
@@ -40,42 +44,46 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
   const user = await getAuthorizedUser();
 
-  const payload = await request.json().catch(() => null) as { text?: unknown; reason?: unknown } | null;
+  const payload = await request.json().catch(() => null) as { text?: unknown; reason?: unknown; requestId?: unknown } | null;
   if (!payload) return Response.json({ error: "Invalid request." }, { status: 400 });
   const text = String(payload.text ?? "");
+  const requestId = String(payload.requestId ?? "").trim();
   if (!text.trim()) return Response.json({ error: "Paste the domains or email addresses to block." }, { status: 400 });
+  if (!/^[a-zA-Z0-9-]{8,100}$/.test(requestId)) return Response.json({ error: "A valid blocklist request id is required." }, { status: 400 });
+  if (text.length > 250_000) return Response.json({ error: "This blocklist batch is too large. Please use the in-app batch processor." }, { status: 413 });
 
-  // Run the same text through both parsers: an entry is an email if it parses as
-  // one, otherwise a domain. Normalization matches the import path, so a pasted
-  // "https://www.acme.com/careers" blocks acme.com.
-  const emails = mergeBulkValues([], text, "email");
-  const emailSet = new Set(emails.values.map((value) => value.toLocaleLowerCase()));
-  const domainSource = emails.invalid.join("\n");
-  const domains = mergeBulkValues([], domainSource, "domain");
-  const unrecognised = domains.invalid;
+  const parsed = partitionBlocklistValues(text);
+  if (parsed.submitted > BLOCKLIST_REQUEST_VALUES) {
+    return Response.json({
+      error: `For reliability, each request can process ${BLOCKLIST_REQUEST_VALUES.toLocaleString("en-IN")} entries. The app submits larger pastes automatically in batches.`,
+    }, { status: 413 });
+  }
 
-  if (!emails.values.length && !domains.values.length) {
+  if (!parsed.emails.length && !parsed.domains.length) {
     return Response.json({
       error: "No valid domains or email addresses found in that list.",
-      unrecognised: unrecognised.slice(0, 10),
+      unrecognised: parsed.invalid,
     }, { status: 400 });
   }
 
-  const { data, error } = await createAdminClient().rpc("add_client_blocklist_v1", {
+  const { data, error } = await createAdminClient().rpc("add_client_blocklist_batch_v2", {
     p_client_id: id,
-    p_domains: domains.values,
-    p_emails: [...emailSet],
+    p_domains: parsed.domains,
+    p_emails: parsed.emails,
     p_reason: String(payload.reason ?? "").trim().slice(0, 300),
     p_actor: user?.email ?? "",
+    p_request_id: requestId,
+    p_match_limit: 5_000,
   });
   if (error) return failure(error);
 
   return Response.json({
     result: data,
-    domains: domains.values.length,
-    emails: emailSet.size,
-    unrecognised: unrecognised.slice(0, 10),
-    unrecognisedCount: unrecognised.length,
+    domains: parsed.domains.length,
+    emails: parsed.emails.length,
+    duplicates: parsed.duplicates,
+    unrecognised: parsed.invalid,
+    unrecognisedCount: parsed.invalidCount,
   });
 }
 
