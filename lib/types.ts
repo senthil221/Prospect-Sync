@@ -26,7 +26,10 @@ export type QualitySummary = { total: number; missingEmail: number; missingTitle
 export type BlocklistEntry = { id: string; kind: "domain" | "email"; value: string; reason: string; source: string; created_at: string };
 export type EnrichmentPreview = { companies: number; fields: number; sample: Array<{ companyId: string; company: string; domain: string; fields: number }> };
 export type PushResult = { added: number; alreadyPresent: number; blocked: number; queued: number };
-export type IndexDrift = { prospects: number; indexed: number; missingFromIndex: number; staleInIndex: number; queued: number; queuedFailing: number; oldestQueuedAt: string | null };
+// companyCountsDrifted is optional: an older database returns the drift report
+// without it, and the panel treats a missing value as "not checked" rather than
+// as a clean bill of health.
+export type IndexDrift = { prospects: number; indexed: number; missingFromIndex: number; staleInIndex: number; queued: number; queuedFailing: number; oldestQueuedAt: string | null; companies?: number; companyCountsSampled?: number; companyCountsDrifted?: number };
 export type DuplicateCandidate = { left: Prospect; right: Prospect; reason: string; confidence: number };
 
 export const emptyStats = { prospects: 0, companies: 0, clients: 0, lists: 0, rowsImported: 0, duplicatesDetected: 0 };

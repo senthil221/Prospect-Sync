@@ -70,9 +70,12 @@ test("a pasted column of hundreds of values survives filter parsing", () => {
 });
 
 test("filter parsing stays bounded against a hostile payload", () => {
-  const values = Array.from({ length: 5000 }, (_, index) => `v${index}`);
+  // The ceiling moved from 1,000 to 5,000 once a pasted list became an indexed
+  // equality test and the company scope stopped calling the per-row predicate.
+  // It is still a ceiling: values past it are dropped, so the bound has to hold.
+  const values = Array.from({ length: 20000 }, (_, index) => `v${index}`);
   const [filter] = parseFilters(JSON.stringify([{ field: "__title", operator: "contains", values }]));
-  assert.equal(filter.values.length, 1000);
+  assert.equal(filter.values.length, 5000);
   const many = Array.from({ length: 100 }, () => ({ field: "__title", operator: "contains", values: ["x"] }));
   assert.equal(parseFilters(JSON.stringify(many)).length, 40);
 });
