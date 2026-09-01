@@ -1,7 +1,7 @@
 "use client";
 
 import { ClipboardEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import { bulkFieldKind, describeBulkMerge, exactMatchThreshold, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
+import { bulkFieldKind, describeBulkMerge, describeMatchMode, exactMatchThreshold, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
 import type { ProspectFieldDefinition } from "../lib/prospect-fields";
 import type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
@@ -245,7 +245,9 @@ export function TokenValuePicker({ field, values, clientId, placeholder, valuesE
   function applyBulk(replace: boolean) {
     const result = mergeBulkValues(replace ? [] : values, bulkText, kind);
     onChange(result.values);
-    setBulkNote(describeBulkMerge(result));
+    // Crossing exactMatchThreshold switches the operator, which changes how many
+    // rows come back. Say so, so the count moving does not read as a bug.
+    setBulkNote(`${describeBulkMerge(result)} ${describeMatchMode(result.values.length)}`.trim());
     if (!replace) setBulkText("");
   }
 

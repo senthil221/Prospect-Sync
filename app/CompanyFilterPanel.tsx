@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, useRef, useState } from "react";
-import { describeBulkMerge, exactMatchThreshold, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
+import { describeBulkMerge, describeMatchMode, exactMatchThreshold, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
 import { isXlsxFile, readXlsxRows } from "../lib/spreadsheet";
 import { filterId, IncludeExcludeFilter, TextBooleanFilter, type ProspectFilter, type ProspectFilterOperator } from "./ApolloFilterPanel";
 import type { CompanyKeywordScope } from "../lib/types";
@@ -268,7 +268,7 @@ export function BulkDomainPaste({ onAdd }: { onAdd: (domains: string[]) => void 
     const result = mergeBulkValues([], text, "domain");
     if (!result.added) { setNote(describeBulkMerge(result, "domain")); return; }
     onAdd(result.values);
-    setNote(describeBulkMerge(result, "domain"));
+    setNote(`${describeBulkMerge(result, "domain")} ${describeMatchMode(result.values.length, "domain")}`.trim());
     setText("");
   }
 

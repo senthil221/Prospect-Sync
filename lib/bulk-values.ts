@@ -143,3 +143,17 @@ export function describeBulkMerge(result: BulkMergeResult, noun = "value") {
 // whose domain contains this string" - and an equality test is indexable where a
 // chain of ILIKE '%…%' is not. Above this size the picker switches operators.
 export const exactMatchThreshold = 25;
+
+export function matchesExactly(valueCount: number) {
+  return valueCount > exactMatchThreshold;
+}
+
+// The operator switch changes which rows come back, so the count on screen moves
+// when a list crosses the threshold. Say which mode is in force instead of
+// letting that look like a bug.
+export function describeMatchMode(valueCount: number, noun = "value") {
+  if (!valueCount) return "";
+  return matchesExactly(valueCount)
+    ? `Matching these ${valueCount.toLocaleString("en-IN")} ${noun}s exactly.`
+    : `Matching any ${noun} that contains what you entered.`;
+}

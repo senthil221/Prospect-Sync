@@ -42,7 +42,7 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
 
 function workspaceSummary(data: unknown) {
   const summary = Array.isArray(data) ? data[0] : data;
-  return summary && typeof summary === "object" ? summary as { result_rows?: unknown; total_count?: unknown } : {};
+  return summary && typeof summary === "object" ? summary as { result_rows?: unknown; total_count?: unknown; scope_capped?: unknown } : {};
 }
 
 // Shared by GET and POST. Same query either way; only the transport differs,
@@ -93,6 +93,10 @@ async function respondToProspectQuery(params: URLSearchParams) {
     prospects: summary.result_rows ?? [],
     total: summary.total_count === null || summary.total_count === undefined ? null : Number(summary.total_count),
     totalEstimated,
+    // True when the company scope matched more companies than its own cap, so the
+    // people shown are drawn from a truncated set. The UI says so rather than
+    // presenting a short list as the whole answer.
+    scopeCapped: summary.scope_capped === true,
     page,
     limit,
     fields: (fields.data ?? []).map((item) => item.field_name),

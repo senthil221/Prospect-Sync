@@ -204,17 +204,20 @@ async function respondToCompanyQuery(params: URLSearchParams) {
 
   let companiesQuery = supabase.from("company_summaries").select("*", { count: "exact" });
   let coveredQuery = supabase.from("company_summaries").select("id", { count: "exact", head: true }).gt("prospect_count", 0);
-  let prospectQuery = supabase.from("prospect_summaries").select("id", { count: "exact", head: true }).not("company_id", "is", null);
   if (search) {
     companiesQuery = companiesQuery.or(`name.ilike.%${search}%,domain.ilike.%${search}%`);
     coveredQuery = coveredQuery.or(`name.ilike.%${search}%,domain.ilike.%${search}%`);
-    prospectQuery = prospectQuery.or(`company_name.ilike.%${search}%,company_domain.ilike.%${search}%`);
   }
 
+  // prospect_summaries is a live aggregating view - it joins lists and clients and
+  // computes count(DISTINCT ...) per prospect - so counting rows through it re-ran
+  // that aggregation for all 674,804 prospects to produce one number: 26.1s cold,
+  // 10.7s mean warm, on every unfiltered page load. prospect_index is the
+  // denormalized form of the same data and answers it in 321ms.
   const [companies, covered, prospects] = await Promise.all([
     companiesQuery.order("prospect_count", { ascending: false }).order("name").range(from, from + pageSize - 1),
     coveredQuery,
-    prospectQuery,
+    supabase.rpc("linked_prospect_total_v1", { p_search: search }),
   ]);
   const failure = [companies, covered, prospects].find((result) => result.error)?.error;
   if (failure) return Response.json({ error: failure.message }, { status: 500 });
@@ -222,7 +225,7 @@ async function respondToCompanyQuery(params: URLSearchParams) {
     companies: companies.data ?? [],
     total: Number(companies.count ?? 0),
     covered: Number(covered.count ?? 0),
-    prospectTotal: Number(prospects.count ?? 0),
+    prospectTotal: Number(prospects.data ?? 0),
     page,
     pageSize,
   });
