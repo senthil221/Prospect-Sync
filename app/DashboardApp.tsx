@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, companyApiPath, encodeFilters, prefetchApi, prospectApiPath } from "../lib/dashboard-api";
 import { initials } from "../lib/dashboard-helpers";
-import type { CompanyScope, PeopleScope } from "../lib/workspace-scopes";
+import { scopeRestricts, type CompanyScope, type PeopleScope } from "../lib/workspace-scopes";
 import { emptyStats, type ClientRecord, type DeleteRequest, type ImportRecord, type ListRecord, type Prospect, type ProspectFilter, type Section } from "../lib/types";
 import ClientsPanel from "./components/ClientsPanel";
 import CompaniesWorkspace, { useCompaniesWorkspaceController } from "./components/CompaniesWorkspace";
@@ -110,12 +110,18 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
     if (next !== "clients") setSelectedClient(null);
   }, [setCompanyPage, setProspectPage]);
 
+  // Only carry a scope that actually narrows something. An unfiltered tab pivots to
+  // "everyone", which is what the workspace functions already compute -- keeping the
+  // empty scope only produced a banner claiming a restriction that was not applied,
+  // so the pivot looked broken while showing the right rows.
   const seePeople = useCallback((scope: CompanyScope) => {
-    setCompanyPeopleScope(scope); setProspectFilters([]); setProspectPage(1); setSearch(""); setSection("prospects"); setSelectedClient(null);
+    setCompanyPeopleScope(scopeRestricts(scope) ? scope : null);
+    setProspectFilters([]); setProspectPage(1); setSearch(""); setSection("prospects"); setSelectedClient(null);
   }, [setProspectPage]);
 
   const seeCompanies = useCallback((scope: PeopleScope) => {
-    setPeopleCompanyScope(scope); setCompanyFilters([]); setCompanyPage(1); setSearch(""); setSection("companies"); setSelectedClient(null);
+    setPeopleCompanyScope(scopeRestricts(scope) ? scope : null);
+    setCompanyFilters([]); setCompanyPage(1); setSearch(""); setSection("companies"); setSelectedClient(null);
   }, [setCompanyPage]);
 
   const confirmDelete = useCallback(async () => {
