@@ -59,3 +59,23 @@ test("the SECURITY DEFINER function revokes EXECUTE in the same file", async () 
     /revoke execute on function public\.prospect_filter_values_v3\(text, text, text, integer\) from public, anon, authenticated;/,
   );
 });
+
+// v_conditions is text[]. Appending a bare string literal to it made the parser
+// read `array || unknown` as anyarray || anyarray and try to parse the string as
+// an array literal, so opening the "Last contacted" filter errored:
+//   ERROR: malformed array literal: "ps.last_contacted_at is not null"
+// format() returns explicitly typed text and resolves correctly, which is why
+// only the one branch that used a bare literal broke.
+test("conditions are appended in a form that does not depend on literal typing", async () => {
+  const fix = await readFile(
+    new URL("../supabase/migrations/20260901000070_fix_last_contacted_filter_values.sql", import.meta.url),
+    "utf8",
+  );
+  const statements = fix.replace(/^\s*--.*$/gm, "");
+
+  assert.match(statements, /v_conditions := array_append\(v_conditions, 'ps\.last_contacted_at is not null'\)/);
+  // Any remaining `v_conditions || ...` must wrap its text in format().
+  for (const line of statements.split("\n").filter((l) => /v_conditions := v_conditions \|\|/.test(l))) {
+    assert.match(line, /\|\| format\(/, `bare literal appended to a text[]: ${line.trim()}`);
+  }
+});
