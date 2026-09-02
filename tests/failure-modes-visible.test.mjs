@@ -69,3 +69,15 @@ test("health reports load alongside readiness, and never caches it", async () =>
   assert.match(health, /status: "unhealthy", checks: checkStatus, load/);
   assert.match(health, /no-store/);
 });
+
+test("the counters are not readable by an anonymous caller", async () => {
+  const health = await readFile(new URL("../app/api/health/route.ts", import.meta.url), "utf8");
+  // The endpoint has to stay publicly reachable: the deploy smoke test reads its
+  // status and X-App-Version from a GitHub runner. But the admission limit is
+  // exactly the number of slow requests needed to fill the guard, so the
+  // counters go only to a signed-in caller. Readiness itself stays public.
+  assert.match(health, /const authorized = await getAuthorizedUser\(\)/);
+  assert.match(health, /authorized \? \{ admission: admissionState\(\), \.\.\.observabilitySnapshot\(\) \} : undefined/);
+  // Resolving the user must never take readiness down with it.
+  assert.match(health, /getAuthorizedUser\(\)\.catch\(\(\) => null\)/);
+});

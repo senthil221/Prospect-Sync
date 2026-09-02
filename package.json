@@ -12,6 +12,7 @@
     "test": "npm run build && npm run test:unit",
     "test:unit": "node --experimental-strip-types --test \"tests/**/*.test.mjs\"",
     "test:e2e": "playwright test",
+    "load": "node scripts/load-test.mjs",
     "lint": "eslint . --ignore-pattern .next"
   },
   "dependencies": {

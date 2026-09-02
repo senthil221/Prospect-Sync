@@ -1,4 +1,5 @@
 import { admissionState } from "../../../lib/admission";
+import { getAuthorizedUser } from "../../../lib/auth";
 import { observabilitySnapshot } from "../../../lib/observability";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
@@ -55,7 +56,14 @@ export async function GET() {
   // whether the interactive guard, the filter caps or the 10s statement ceiling
   // are set right for real traffic - each of which refuses a user silently
   // otherwise. Per-process and reset on deploy: a signal, not an audit.
-  const load = { admission: admissionState(), ...observabilitySnapshot() };
+  //
+  // Only for a signed-in user. This endpoint is public by necessity - the deploy
+  // smoke test reads its status and X-App-Version from a GitHub runner - and the
+  // counters would otherwise tell an anonymous caller the exact concurrency
+  // limit, which is the number of slow requests needed to fill the guard.
+  // Readiness itself stays public and unchanged.
+  const authorized = await getAuthorizedUser().catch(() => null);
+  const load = authorized ? { admission: admissionState(), ...observabilitySnapshot() } : undefined;
   if (!failed.length) return Response.json({ status: "ok", checks: checkStatus, load }, { headers: noStoreHeaders });
   console.error("Readiness check failed", { failed });
   return Response.json({ status: "unhealthy", checks: checkStatus, load }, { status: 503, headers: noStoreHeaders });
