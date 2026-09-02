@@ -9,6 +9,7 @@ import { api, filterPayload } from "../../lib/dashboard-api";
 import { filterChipValue, formatNumber } from "../../lib/dashboard-helpers";
 import { defaultProspectColumns, defaultProspectExportFields, standardProspectExportFields, standardProspectFields } from "../../lib/prospect-field-definitions";
 import type { ClientRecord, Prospect, ProspectFilter, SavedView } from "../../lib/types";
+import { intentKey, requestIdFor, settleIntent } from "../../lib/request-intent";
 import { useDismiss } from "../use-dismiss";
 import { AppIcon, EmptyState } from "./DashboardUi";
 import ProspectTableRow from "./ProspectTableRow";
@@ -320,12 +321,29 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
 
   async function clientAction(action: "push" | "set_date_contacted", targetClientId: string, dateContacted?: string | null) {
     if (!selectedCount || !targetClientId) return;
+    // One id per intent, not per click. A click that fails and is tried again is
+    // the same operation and must reuse this; a genuinely new push gets a new
+    // one, because the key below changes. Generating a fresh uuid per call
+    // would make every retry a second push, which is the thing being prevented.
+    const key = intentKey({
+      action,
+      target: targetClientId,
+      selectionMode,
+      ids: selectionMode === "all_matching" ? [] : [...selectedIds],
+      extra: selectionMode === "all_matching"
+        ? { search, filters: filterPayload(effectiveFilters), excluded: [...excludedIds] }
+        : dateContacted ?? null,
+    });
+    const requestId = requestIdFor(key);
     setBulkBusy(true); setNotice("");
     try {
-      const data = await api<{ result: { added?: number; alreadyPresent?: number; blocked?: number; updated?: number; queued?: number } }>(
+      const data = await api<{ result: { added?: number; alreadyPresent?: number; blocked?: number; updated?: number; queued?: number }; replayed?: boolean }>(
         `/api/clients/${encodeURIComponent(targetClientId)}/prospects`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...selectionPayload(), ...(action === "set_date_contacted" ? { dateContacted } : {}) }) },
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, requestId, ...selectionPayload(), ...(action === "set_date_contacted" ? { dateContacted } : {}) }) },
       );
+      // Settled: the next deliberate action of this shape is a new operation.
+      // Deliberately not cleared on failure, so a retry reuses the id.
+      settleIntent(key);
       const result = data.result ?? {};
       if (action === "push") {
         const parts = [`${formatNumber(Number(result.added ?? 0))} pushed`];

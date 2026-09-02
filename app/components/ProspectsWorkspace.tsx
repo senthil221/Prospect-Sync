@@ -2,6 +2,7 @@
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { encodeFilters, fetchProspects, isAbortError } from "../../lib/dashboard-api";
+import { filterPayloadWithSets } from "../../lib/filter-set-client";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import type { ClientRecord, Prospect, ProspectFilter } from "../../lib/types";
 import ProspectTable from "./ProspectTable";
@@ -37,7 +38,13 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
       onLoading(true); onError("");
       try {
         const cached = totalCache.current.get(countKey);
-        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; scopeCapped?: boolean; versions?: Record<string, number> | null; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !cached, knownVersions: cached?.versions ?? null }, { signal: controller.signal });
+        // A big pasted list is stored once and sent as an id from then on. Note
+        // this changes the transport only: countKey above still uses the plain
+        // encoding, because a set's random uuid must not affect logical
+        // identity (section 4.1) - the same question asked with values or with
+        // a set id is the same question, and must hit the same cached count.
+        const requestFilters = JSON.stringify(await filterPayloadWithSets(JSON.parse(encodedFilters), "prospect", ""));
+        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; scopeCapped?: boolean; versions?: Record<string, number> | null; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: requestFilters, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !cached, knownVersions: cached?.versions ?? null }, { signal: controller.signal });
         if (current) {
           setProspects(data.prospects);
           setScopeCapped(data.scopeCapped === true);
