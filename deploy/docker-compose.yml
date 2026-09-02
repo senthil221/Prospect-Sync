@@ -373,6 +373,47 @@ services:
     stop_grace_period: 30s
     networks: [internal]
 
+  # Builds durable result sets and runs retention.
+  #
+  # Unlike import-worker this one has no PostgREST client at all: everything it
+  # does goes down its own Postgres connection as prospect_ops_worker, so it
+  # never draws on the pool that serves the browser. It reads nothing directly
+  # either - the five functions it may call are SECURITY DEFINER, and
+  # 20260902000130 asserts it cannot read prospect_index or stored ids.
+  #
+  # Half a core and 256 MB: a build is bounded batches of ids, not a CSV parse,
+  # so it needs far less than the import worker and must not compete with it.
+  operations-worker:
+    image: ${APP_IMAGE}
+    container_name: prospect-operations-worker
+    <<: [*default-restart]
+    logging: *default-logging
+    command: ["node", "worker/operations-worker.mjs"]
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB}
+      # Its own login, created by postgres/init/00-prospect-bootstrap.sh with
+      # CONNECTION LIMIT 2. Deliberately not authenticator and not
+      # prospect_import_worker.
+      PGUSER: prospect_ops_worker
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      OPERATIONS_BATCH_SIZE: "25000"
+      NODE_OPTIONS: "--max-old-space-size=256"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9091/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    mem_limit: 320m
+    cpus: "0.5"
+    stop_grace_period: 30s
+    networks: [internal]
+
   # Stable internal proxy between the public Caddy listener and the two app
   # slots. Its configuration reload is graceful, so ports 80/443 and existing
   # public connections are never bounced during an application release.

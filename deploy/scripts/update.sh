@@ -280,6 +280,8 @@ rollback_on_error() {
     set_app_image "$PREVIOUS_IMAGE"
     docker compose up -d --no-deps import-worker >/dev/null 2>&1 \
       || echo "WARNING: the previous import worker image could not be restored automatically." >&2
+    docker compose up -d --no-deps operations-worker >/dev/null 2>&1 \
+      || echo "WARNING: the previous operations worker image could not be restored automatically." >&2
   fi
   exit "$status"
 }
@@ -305,6 +307,17 @@ docker compose up -d --no-deps --pull always import-worker
 if ! wait_for_container prospect-import-worker 18; then
   echo "Import worker did not become healthy. Last 80 log lines:" >&2
   docker compose logs --tail 80 import-worker >&2 || true
+  rollback_on_error 1
+fi
+
+# The operations worker builds durable result sets and runs retention. It starts
+# after the bootstrap and the migrations above, because both its login role and
+# the five functions it is allowed to call are created by those two steps.
+echo "==> Starting and verifying the operations worker on ${NEW_IMAGE}"
+docker compose up -d --no-deps --pull always operations-worker
+if ! wait_for_container prospect-operations-worker 18; then
+  echo "Operations worker did not become healthy. Last 80 log lines:" >&2
+  docker compose logs --tail 80 operations-worker >&2 || true
   rollback_on_error 1
 fi
 

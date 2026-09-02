@@ -103,6 +103,44 @@ psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
 	end
 	\$\$;
 
+	-- The operations worker: a second narrow capability role, and a login for it.
+	--
+	-- Section 8.3 asks for prospect_ops_worker as its own login with its own
+	-- statement_timeout, idle timeout and CONNECTION LIMIT, inheriting only a
+	-- narrow NOLOGIN capability role - never service_role.
+	--
+	-- prospect_operator holds nothing but EXECUTE on the handful of
+	-- prospect_results functions that drive a build. Those are SECURITY DEFINER,
+	-- so the worker needs no privilege on prospect_index, companies or even on
+	-- result_set_items: it can claim work, fill a batch, fail a set and expire
+	-- old ones, and it cannot read a single prospect directly. The functions the
+	-- application owns - request_set_v1, page_v1, status_v1 - are deliberately
+	-- not granted to it.
+	do \$\$
+	begin
+	  if not exists (select 1 from pg_roles where rolname = 'prospect_operator') then
+	    create role prospect_operator nologin noinherit;
+	  end if;
+	  if not exists (select 1 from pg_roles where rolname = 'prospect_ops_worker') then
+	    create role prospect_ops_worker login;
+	  end if;
+	end
+	\$\$;
+	alter role prospect_ops_worker with login password '${POSTGRES_PASSWORD}';
+	grant prospect_operator to prospect_ops_worker;
+	do \$\$
+	begin
+	  if exists (
+	    select 1 from pg_auth_members am
+	    join pg_roles granted on granted.oid = am.roleid
+	    join pg_roles member on member.oid = am.member
+	    where member.rolname = 'prospect_ops_worker' and granted.rolname = 'service_role'
+	  ) then
+	    revoke service_role from prospect_ops_worker;
+	  end if;
+	end
+	\$\$;
+
 	-- JWT settings PostgREST and legacy helpers read from the database ------
 	alter database "${DB}" set "app.settings.jwt_secret" to '${JWT_SECRET}';
 	alter database "${DB}" set "app.settings.jwt_exp" to '${JWT_EXP:-3600}';
@@ -146,6 +184,14 @@ psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
 	-- and auth, storage, meta, studio and psql draw on the rest.
 	alter role authenticator connection limit 30;
 	alter role prospect_import_worker connection limit 4;
+
+	-- Building a result set is one bounded batch at a time, so it never needs a
+	-- long statement; 5 minutes is generous for the largest batch and still
+	-- bounded. Two connections: one worker, plus a restart overlap.
+	alter role prospect_ops_worker set statement_timeout = '5min';
+	alter role prospect_ops_worker set idle_in_transaction_session_timeout = '2min';
+	alter role prospect_ops_worker set lock_timeout = '15s';
+	alter role prospect_ops_worker connection limit 2;
 
 	-- Application objects belong to postgres ---------------------------------
 	-- scripts/migrate.sh connects as postgres, and CREATE OR REPLACE FUNCTION
