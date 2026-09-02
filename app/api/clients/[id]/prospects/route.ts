@@ -1,5 +1,6 @@
 import { authorizeApi, getAuthorizedUser } from "../../../../../lib/auth.ts";
 import { isEmptySelection, parseBulkSelection, selectionArgs } from "../../../../../lib/client-operations.ts";
+import { beginOperation, freezeSelection, parseRequestId, recordOperationResult, selectionContentHash } from "../../../../../lib/operation-jobs.ts";
 import { filterErrorResponse } from "../../../../../lib/prospect-filters.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 
@@ -47,6 +48,42 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const supabase = createAdminClient();
 
+  // Section 9.2: a retry of the same request is the same operation, keyed on the
+  // client-generated request id rather than on the content - two identical
+  // pushes a week apart are two legitimate operations. A request that arrives
+  // without an id is not refused; it simply gets no protection, which is what
+  // happens today.
+  const requestId = parseRequestId(payload.requestId);
+  const operation = await beginOperation(supabase, {
+    requestId,
+    actor,
+    action,
+    entityType: "prospect",
+    clientScope: id,
+    contentHash: selectionContentHash({
+      action, clientScope: id, search: selection.search, filters: selection.filters,
+      prospectIds: selection.prospectIds, excludedIds: selection.excludedIds,
+    }),
+    versionVector: null,
+    payload: { clientId: id },
+    excludedIds: selection.excludedIds,
+  });
+  // Already done. Answer with what it answered the first time rather than
+  // running the mutation a second time.
+  if (operation.kind === "replay") {
+    return Response.json({ result: operation.result, replayed: true, jobId: operation.jobId });
+  }
+  // Section 9.3: freeze the explicit selection so the operation cannot widen
+  // between choosing and running. "All matching" resolves server-side and is
+  // frozen through a result set instead, which is not routed here yet.
+  if (operation.kind === "run" && selection.prospectIds?.length) {
+    await freezeSelection(supabase, operation.jobId, actor, selection.prospectIds);
+  }
+  const finish = async (result: unknown) => {
+    if (operation.kind === "run") await recordOperationResult(supabase, operation.jobId, actor, result);
+    return Response.json(operation.kind === "run" ? { result, jobId: operation.jobId } : { result });
+  };
+
   if (action === "push") {
     const { data, error } = await supabase.rpc("push_prospects_to_client_v1", {
       p_client_id: id,
@@ -55,7 +92,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       p_actor: actor,
     });
     if (error) return failure(error, "pushing records into a client");
-    return Response.json({ result: data });
+    return finish(data);
   }
 
   if (action === "set_icp_verified" || action === "clear_icp_verified") {
