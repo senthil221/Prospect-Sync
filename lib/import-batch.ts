@@ -40,6 +40,12 @@ export async function importProspectChunk(payload: ProspectChunkPayload) {
   });
 
   const supabase = createAdminClient();
+  // This path goes through PostgREST, so import_prospect_batch_v5's declared
+  // `SET statement_timeout = '15s'` is genuinely in force here - measured on
+  // production, a function declaring 10s was cancelled at 10.004s over HTTP and
+  // ignored entirely on a direct connection. The 250-row chunk cap above is
+  // what keeps a browser import inside that 15s; the import worker sends 1,000
+  // rows down a direct connection and sets its own bound instead.
   const result = await supabase.rpc("import_prospect_batch_v5", {
     p_import_id: importId,
     p_list_id: listId,

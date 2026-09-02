@@ -14,6 +14,27 @@ const workerId = `${process.env.HOSTNAME ?? "import-worker"}:${process.pid}`;
 const bucket = "prospect-imports";
 const leaseSeconds = 300;
 const batchSize = Math.max(100, Math.min(5000, Number(process.env.IMPORT_BATCH_SIZE ?? 1000)));
+// How long one batch may take, set on this connection because nothing else
+// bounds it.
+//
+// import_prospect_batch_v5 declares `SET statement_timeout = '15s'`, and that
+// declaration is NOT in force here. Measured on production 2026-09-02: a
+// function's declared timeout binds when the function is called through
+// PostgREST, and does not bind on a direct connection like this one - a probe
+// declaring 10s slept 20s through psql and was cancelled at 10.004s over HTTP.
+// So the only bound on a batch was prospect_import_worker's role setting of
+// 15 minutes.
+//
+// The 15s is not wrong, it is just sized for a different caller: the browser
+// path (lib/import-batch.ts) sends at most 250 rows and finishes well inside
+// it. This worker sends 1,000, which measured 10.7-14.3s idle and 23s at 2,000
+// rows, so 15s here would fail every batch. 120s keeps roughly 5-10x headroom
+// over the measured time while still catching a genuine runaway long before
+// the role's 15 minutes would.
+const batchTimeout = process.env.IMPORT_BATCH_TIMEOUT ?? "120s";
+// Staging is a COPY of the whole CSV and is legitimately minutes long, so it
+// keeps the generous bound; only the batch loop is tightened.
+const stagingTimeout = process.env.IMPORT_STAGING_TIMEOUT ?? "10min";
 const skipImportField = "Skip column";
 let stopping = false;
 let lastProgressAt = Date.now();
@@ -161,7 +182,7 @@ async function processJob(job) {
   await client.connect();
   try {
     await client.query("set role prospect_importer");
-    await client.query("set statement_timeout = '10min'");
+    await client.query(`set statement_timeout = '${stagingTimeout}'`);
     const committedStart = Number(job.committedRowOffset ?? 0);
     let state = await stageState(client, job.id);
     let totalRows = Number(job.totalRows ?? 0);
@@ -179,6 +200,10 @@ async function processJob(job) {
 
     let committedRows = committedStart;
     await heartbeat(job, totalRows, committedRows);
+    // Staging is done; from here every statement is one batch, so tighten the
+    // bound to what a batch should actually take. See batchTimeout above for
+    // why the function's own declaration does not do this for us.
+    await client.query(`set statement_timeout = '${batchTimeout}'`);
     while (committedRows < totalRows) {
       const result = await client.query(
         "select * from prospect_import.process_staged_batch_v1($1, $2, $3, $4)",

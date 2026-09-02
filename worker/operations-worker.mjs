@@ -29,6 +29,16 @@
 // A build of a million ids is many short transactions against a keyset cursor
 // rather than one long one, so nothing holds a snapshot open while it runs and
 // a restart resumes instead of starting again.
+//
+// THE TIMEOUT COMES FROM HERE, NOT FROM THE FUNCTIONS. build_batch_v1 and
+// apply_batch_v1 both declare `SET statement_timeout = '120s'`, and neither
+// declaration is in force on this connection. Measured on production
+// 2026-09-02: a function's declared timeout binds when it is called through
+// PostgREST and does nothing on a direct connection - a probe declaring 10s
+// slept its full 20s through psql and was cancelled at 10.004s over HTTP. So
+// the real bound was prospect_ops_worker's role setting of 5 minutes, not the
+// 120s the migrations appear to promise. Setting it explicitly below makes the
+// declared intent true for this path as well.
 import pg from "pg";
 import { createServer } from "node:http";
 
@@ -40,6 +50,11 @@ const batchSize = Math.max(1000, Math.min(100_000, Number(process.env.OPERATIONS
 // short enough that a restart loses very little.
 const applyBatchSize = Math.max(50, Math.min(5000, Number(process.env.OPERATIONS_APPLY_BATCH ?? 500)));
 const idleDelayMs = Math.max(1000, Number(process.env.OPERATIONS_IDLE_MS ?? 3000));
+// Matches what build_batch_v1 and apply_batch_v1 declare, which is the bound
+// they were designed for; see the header for why declaring it is not enough on
+// a direct connection. Every other statement this worker runs - claim,
+// retention - is short, so one session-level value covers them all.
+const statementTimeout = process.env.OPERATIONS_STATEMENT_TIMEOUT ?? "120s";
 // Retention is cheap and must actually run: a TTL nothing enforces is not a TTL.
 const retentionIntervalMs = Math.max(60_000, Number(process.env.OPERATIONS_RETENTION_MS ?? 900_000));
 
@@ -182,8 +197,9 @@ async function runRetention() {
 
 async function main() {
   await client.connect();
-  const { rows } = await client.query("select current_user, session_user");
-  console.log(`Prospect operations worker ${workerId} started as ${rows[0].current_user}; result batches of ${batchSize}, operation batches of ${applyBatchSize}.`);
+  await client.query(`set statement_timeout = '${statementTimeout}'`);
+  const { rows } = await client.query("select current_user, session_user, current_setting('statement_timeout') as timeout");
+  console.log(`Prospect operations worker ${workerId} started as ${rows[0].current_user}; result batches of ${batchSize}, operation batches of ${applyBatchSize}, statement timeout ${rows[0].timeout}.`);
 
   while (!stopping) {
     markProgress("");

@@ -163,6 +163,29 @@ test("company bulk domains reach the server as a set id, scoped to where they we
   assert.match(clients, /filterPayloadWithSets\(JSON\.parse\(encodedFilters\), "company", client\.id\)/);
 });
 
+test("each worker bounds its own statements, because its functions cannot", async () => {
+  // Measured on production 2026-09-02: `ALTER FUNCTION ... SET statement_timeout`
+  // binds when the function is reached through PostgREST and does nothing on a
+  // direct connection. A probe declaring 10s was cancelled at 10.004s over HTTP
+  // and slept its full 20s through psql. Both workers connect directly, so
+  // every declared timeout in their call path is decorative and the bound has
+  // to be set on the connection.
+  const operations = await read("../worker/operations-worker.mjs");
+  assert.match(operations, /const statementTimeout = process\.env\.OPERATIONS_STATEMENT_TIMEOUT \?\? "120s";/);
+  assert.match(operations, /await client\.query\(`set statement_timeout = '\$\{statementTimeout\}'`\);/);
+
+  const imports = await read("../worker/import-worker.mjs");
+  // 15s is right for the 250-row browser chunk and would fail every one of the
+  // worker's 1,000-row batches, which measured 10.7-14.3s. So the worker sets a
+  // bound sized for what it actually sends, rather than inheriting the role's
+  // 15 minutes.
+  assert.match(imports, /const batchTimeout = process\.env\.IMPORT_BATCH_TIMEOUT \?\? "120s";/);
+  assert.match(imports, /await client\.query\(`set statement_timeout = '\$\{batchTimeout\}'`\);/);
+  // Staging is a COPY of the whole file and stays generous.
+  assert.match(imports, /const stagingTimeout = process\.env\.IMPORT_STAGING_TIMEOUT \?\? "10min";/);
+  assert.doesNotMatch(codeOnly(imports), /set statement_timeout = '10min'/);
+});
+
 test("the worker runs operations without being able to decide what they are", async () => {
   const worker = await read("../worker/operations-worker.mjs");
   const code = codeOnly(worker);
