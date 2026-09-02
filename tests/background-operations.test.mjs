@@ -131,6 +131,21 @@ test("a capped count can be turned into a real one, and is dropped when the ques
   assert.match(table, /selectionMode === "all_matching"\s*\n\s*\? \(await runAllMatching\(action, targetClientId, requestId, dateContacted\)\)\.result \?\? \{\}/);
 });
 
+test("a database-wide action is refused under a scope it cannot carry", async () => {
+  const table = await read("../app/components/ProspectTable.tsx");
+  const code = codeOnly(table);
+
+  // The listing and the export both apply the Company DB pivot; the bulk RPCs
+  // take a search and filters and nothing else, and a result set is built from
+  // those two as well. So "all matching" under a pivot acted on everyone
+  // matching the filters - 674,000 people where the screen said 12,000. That
+  // predates any of this; freezing it would only have made the wrong set final.
+  assert.match(code, /const scopeBlocksAllMatching = scopeRestricts\(companyScope\);/);
+  assert.equal(code.match(/scopeBlocksAllMatching\) \{ setNotice\(scopeRefusal\); return; \}/g)?.length, 3);
+  // A selection made under one pivot must not survive into another.
+  assert.match(code, /const selectionKey = JSON\.stringify\(\{ clientId, search: search\.trim\(\), filters: filterPayload\(effectiveFilters\), companyScope \}\);/);
+});
+
 test("company bulk domains reach the server as a set id, scoped to where they were pasted", async () => {
   const api = await read("../lib/dashboard-api.ts");
   // A path builder cannot store a list first, so the substitution happens in the

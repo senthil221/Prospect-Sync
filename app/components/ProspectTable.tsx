@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
+import { scopeRestricts, type CompanyScope, type PeopleScope } from "../../lib/workspace-scopes";
 import ApolloFilterPanel, { filterLabel } from "../ApolloFilterPanel";
 import { fileSystemAccessSupported, runProspectExport, type ExportFormat } from "../../lib/export-runner";
 import { buildCustomFieldDefinitions } from "../../lib/prospect-fields";
@@ -135,7 +135,19 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const configuredDefinitions = useMemo(() => visibleColumns.map((id) => allColumns.find((column) => column.id === id)).filter((column): column is { id: string; label: string } => Boolean(column)), [allColumns, visibleColumns]);
   const visibleDefinitions = useMemo(() => configuredDefinitions.length ? configuredDefinitions : standardProspectFields.slice(0, 4), [configuredDefinitions]);
   const effectiveFilters = filters.filter((filter) => filter.values.length || filter.operator === "empty" || filter.operator === "not_empty");
-  const selectionKey = JSON.stringify({ clientId, search: search.trim(), filters: filterPayload(effectiveFilters) });
+  // companyScope belongs in here: it narrows what the listing counts and shows,
+  // so a selection made under one pivot is not a selection under another.
+  const selectionKey = JSON.stringify({ clientId, search: search.trim(), filters: filterPayload(effectiveFilters), companyScope });
+  // A company-DB pivot is an extra predicate that only the listing and the
+  // export know how to apply: the bulk RPCs take a search and filters and
+  // nothing else, and a result set is built from those two as well. So a
+  // database-wide action under a pivot would act on everything matching the
+  // filters, ignoring the companies entirely - 674,000 people where the screen
+  // says 12,000. That was already true before any of this was frozen; freezing
+  // it would only have made the wrong set the definite one. Refuse instead, and
+  // say which selection does work.
+  const scopeBlocksAllMatching = scopeRestricts(companyScope);
+  const scopeRefusal = "This view is scoped to a Company DB search, and a database-wide action cannot carry that scope - it would act on every person matching the filters, not only those companies. Tick the rows you want, or clear the company scope first.";
   const selectionMatchesQuery = selectionQueryKey === selectionKey;
   const selectedCount = !selectionMatchesQuery ? 0 : selectionMode === "all_matching" ? Math.max(0, total - excludedIds.size) : selectedIds.size;
   const totalPages = Math.max(1, Math.ceil(total / 50));
@@ -336,6 +348,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   // bounded batches and reports how many rows it found.
   async function countAllMatching() {
     if (countingAll) return;
+    if (scopeBlocksAllMatching) { setNotice(scopeRefusal); return; }
     setCountingAll(true); setNotice("");
     try {
       const set = await buildResultSet(
@@ -378,6 +391,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
 
   async function clientAction(action: "push" | "set_date_contacted", targetClientId: string, dateContacted?: string | null) {
     if (!selectedCount || !targetClientId) return;
+    if (selectionMode === "all_matching" && scopeBlocksAllMatching) { setNotice(scopeRefusal); return; }
     // One id per intent, not per click. A click that fails and is tried again is
     // the same operation and must reuse this; a genuinely new push gets a new
     // one, because the key below changes. Generating a fresh uuid per call
@@ -420,6 +434,9 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
 
   function requestDeleteSelected() {
     if (!selectedCount) return;
+    // Same refusal as the client actions, and it matters most here: a delete
+    // that quietly ignored the company scope is not recoverable.
+    if (selectionMode === "all_matching" && scopeBlocksAllMatching) { setNotice(scopeRefusal); return; }
     if (selectionMode === "all_matching") setDeleteRequest({ mode: "all_matching", count: selectedCount });
     else setDeleteRequest({ mode: "ids", count: selectedIds.size, ids: [...selectedIds] });
   }
