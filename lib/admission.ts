@@ -29,6 +29,8 @@ const maxConcurrentInteractive = Number(process.env.INTERACTIVE_CONCURRENCY ?? 8
 // that grows until every request has timed out anyway.
 const admissionWaitMs = Number(process.env.INTERACTIVE_ADMISSION_WAIT_MS ?? 2000);
 
+import { recordRequest, routeOf } from "./observability.ts";
+
 type Waiter = { resolve: (admitted: boolean) => void; timer: ReturnType<typeof setTimeout> };
 
 let inFlight = 0;
@@ -89,10 +91,22 @@ export async function withInteractiveSlot(
   request: Request,
   work: () => Promise<Response>,
 ): Promise<Response> {
+  const route = routeOf(request.url);
+  const startedAt = Date.now();
   const admitted = await acquire(request.signal);
-  if (!admitted) return overloadedResponse();
+  if (!admitted) {
+    const refused = overloadedResponse();
+    recordRequest(route, refused.status, Date.now() - startedAt);
+    return refused;
+  }
   try {
-    return await work();
+    const response = await work();
+    recordRequest(route, response.status, Date.now() - startedAt);
+    return response;
+  } catch (error) {
+    // A throw becomes a 500 upstream; count it as one rather than losing it.
+    recordRequest(route, 500, Date.now() - startedAt);
+    throw error;
   } finally {
     release();
   }

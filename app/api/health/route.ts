@@ -1,3 +1,5 @@
+import { admissionState } from "../../../lib/admission";
+import { observabilitySnapshot } from "../../../lib/observability";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
 const timeoutMs = 5_000;
@@ -49,7 +51,12 @@ export async function GET() {
   const entries = Object.keys(checks).map((name, index) => [name, results[index].status === "fulfilled" ? "ok" : "failed"]);
   const checkStatus = Object.fromEntries(entries);
   const failed = entries.filter(([, status]) => status === "failed").map(([name]) => name);
-  if (!failed.length) return Response.json({ status: "ok", checks: checkStatus }, { headers: noStoreHeaders });
+  // Load and refusal counts ride along with readiness. They are what says
+  // whether the interactive guard, the filter caps or the 10s statement ceiling
+  // are set right for real traffic - each of which refuses a user silently
+  // otherwise. Per-process and reset on deploy: a signal, not an audit.
+  const load = { admission: admissionState(), ...observabilitySnapshot() };
+  if (!failed.length) return Response.json({ status: "ok", checks: checkStatus, load }, { headers: noStoreHeaders });
   console.error("Readiness check failed", { failed });
-  return Response.json({ status: "unhealthy", checks: checkStatus }, { status: 503, headers: noStoreHeaders });
+  return Response.json({ status: "unhealthy", checks: checkStatus, load }, { status: 503, headers: noStoreHeaders });
 }
