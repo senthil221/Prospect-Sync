@@ -66,9 +66,19 @@ test("every interactive route is admitted through the guard and carries an abort
     "../app/api/prospects/filter-values/route.ts",
     "../app/api/companies/filter-values/route.ts",
   ];
+  // A streaming export is not one query: it is dozens, with CSV going to the
+  // client in between. Those take a slot per database call through acquireSlot
+  // rather than one for the whole request, because holding an interactive slot
+  // while the browser writes a file is exactly the pool collapse this guards
+  // against. Both shapes are admitted; neither may query without a slot.
+  const streamed = new Set(["../app/api/prospects/export/route.ts", "../app/api/companies/route.ts"]);
   for (const path of routes) {
     const source = await read(path);
-    assert.match(source, /withInteractiveSlot\(request,/, `${path} must be admitted through the guard`);
+    assert.match(source, /withInteractiveSlot\(request,|await acquireSlot\(signal\)/, `${path} must be admitted through the guard`);
+    if (streamed.has(path)) {
+      assert.match(source, /await acquireSlot\(signal\)/, `${path} must take a slot per streamed page`);
+      assert.match(source, /release\(\);/, `${path} must give the per-page slot back`);
+    }
     // PostgREST does not cancel on disconnect, so the signal does not free the
     // database - but it must still stop this process waiting on a dead request.
     assert.match(source, /\.abortSignal\(/, `${path} must propagate an abort signal`);

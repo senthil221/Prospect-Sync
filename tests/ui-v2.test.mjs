@@ -27,7 +27,7 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
   assert.match(dashboard, /All companies/);
   assert.match(dashboard, /Only with websites/);
   assert.match(dashboard, /Export CSV/);
-  assert.match(dashboard, /X-Exported-Rows/);
+  assert.match(dashboard, /downloadCsvStream/);
   assert.doesNotMatch(dashboard, /company-prospect-row/);
   assert.match(dashboard, /filtersOpen/);
   assert.match(filterPanel, /aria-multiselectable/);
@@ -36,12 +36,17 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
   assert.doesNotMatch(dashboard, /Reuse eligibility/);
   assert.match(companiesRoute, /\.range\(from, from \+ pageSize - 1\)/);
   assert.match(companiesRoute, /prospectTotal/);
-  assert.match(companiesRoute, /exportCompanies\(search, websitesOnly,/);
+  assert.match(companiesRoute, /streamCompanyExport\(search, websitesOnly,/);
   assert.match(companiesRoute, /website.*required/);
-  assert.match(companiesRoute, /\.neq\("domain", ""\)/);
-  assert.match(companiesRoute, /\.range\(offset, offset \+ exportBatchSize - 1\)/);
+  // The export is a keyset walk now, not a growing OFFSET, and it is rendered a
+  // page at a time instead of accumulated into one string. The row count moves
+  // with it: a streamed response cannot carry a total in its headers, because
+  // the total is not known when the headers are sent.
+  assert.match(companiesRoute, /search_company_export_v1/);
+  assert.match(companiesRoute, /p_after_name: cursor\?\.name \?\? null/);
+  assert.doesNotMatch(companiesRoute, /\.range\(offset, offset \+ exportBatchSize - 1\)/);
   assert.match(companiesRoute, /Content-Disposition/);
-  assert.match(companiesRoute, /X-Exported-Rows/);
+  assert.doesNotMatch(companiesRoute, /X-Exported-Rows/);
   assert.doesNotMatch(companiesRoute, /\.limit\(100\)/);
   assert.match(companyProspectsRoute, /prospect_summaries/);
   assert.match(companyProspectsRoute, /\.range\(from, from \+ pageSize - 1\)/);

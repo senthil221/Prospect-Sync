@@ -116,3 +116,24 @@ export async function withInteractiveSlot(
 export function admissionState() {
   return { inFlight, waiting: waiting.length, limit: maxConcurrentInteractive };
 }
+
+// One slot, held for exactly as long as one database call.
+//
+// withInteractiveSlot wraps a whole request, which is right when the request is
+// one query. A streaming export is not: it is a few dozen bounded queries with
+// CSV being written to the client in between, and holding a slot for the whole
+// download would take an interactive slot out of circulation for minutes while
+// most of that time is spent on the network rather than on the database.
+//
+// Returns null when the guard is full, in which case the caller has not taken a
+// slot and must not call the database.
+export async function acquireSlot(signal?: AbortSignal): Promise<(() => void) | null> {
+  const admitted = await acquire(signal);
+  if (!admitted) return null;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    release();
+  };
+}

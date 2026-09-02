@@ -63,7 +63,10 @@ test("ownership is re-checked on every use, not inferred from the id", async () 
   ]) {
     const source = await read(path);
     assert.match(source, /authorizeFilterSets\(/, `${path} must authorize filter sets`);
-    assert.match(source, /if \(setDenial\) return setDenial;/, `${path} must refuse on denial`);
+    // The export route answers through a helper that records the outcome, so
+    // the refusal reads `return answer(setDenial)` there and `return setDenial`
+    // everywhere else. Either way it is returned before anything is queried.
+    assert.match(source, /if \(setDenial\) return (?:answer\()?setDenial/, `${path} must refuse on denial`);
   }
 });
 

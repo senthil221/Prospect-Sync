@@ -18,9 +18,10 @@ import {
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
 test("every prospect export runs the same predicate as the grid above it", async () => {
-  const [route, exportV4, exportV1, columns, compiler] = await Promise.all([
+  const [route, exportV4, exportV5, exportV1, columns, compiler] = await Promise.all([
     read("../app/api/prospects/export/route.ts"),
     read("../supabase/migrations/20260902000020_people_workspace_uses_complete_sql.sql"),
+    read("../supabase/migrations/20260902000170_export_without_holding_it_all.sql"),
     read("../supabase/migrations/20260811000000_prospect_search_index.sql"),
     read("../lib/prospect-export.ts"),
     read("../supabase/migrations/20260902000050_restore_combined_title_and_esp_filters.sql"),
@@ -28,7 +29,7 @@ test("every prospect export runs the same predicate as the grid above it", async
 
   // One function, chosen unconditionally. The scope is always passed, empty or
   // not, so there is no second code path to keep in step.
-  assert.match(route, /supabase\.rpc\("search_prospect_export_v4"/);
+  assert.match(route, /supabase\.rpc\("search_prospect_export_v5"/);
   assert.doesNotMatch(route, /search_prospect_export_v1/);
   assert.match(route, /p_company_scope: companyScope \?\? \{\}/);
 
@@ -36,6 +37,13 @@ test("every prospect export runs the same predicate as the grid above it", async
   // compiler search_prospect_workspace_v12 uses, in the same migration.
   const v4Body = exportV4.slice(exportV4.indexOf("search_prospect_export_v4"));
   assert.match(v4Body, /prospect_filter_sql_v1/);
+  // v5 is v4 plus the column projection, and it has to keep compiling the same
+  // predicate. A projection that arrived alongside a private copy of the filter
+  // CASE would be the v1 drift happening a second time.
+  const v5Body = exportV5.slice(exportV5.indexOf("search_prospect_export_v5"));
+  assert.match(v5Body, /prospect_filter_sql_v1/);
+  assert.match(v5Body, /prospect_prefilter_sql/);
+  assert.match(v5Body, /company_scope_ids_v2/);
   assert.match(exportV4, /search_prospect_workspace_v12[\s\S]*prospect_filter_sql_v1/);
 
   // The measured drift this removes: v1's inlined CASE never learned

@@ -3,6 +3,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import CompanyFilterPanel, { BulkDomainPaste, addDomainsToWebsiteFilter } from "../CompanyFilterPanel";
+import { csvStreamError, downloadCsvStream } from "../../lib/csv-download";
 import { api, encodeFilters, fetchCompanies, isAbortError } from "../../lib/dashboard-api";
 import { filterPayloadWithSets } from "../../lib/filter-set-client";
 import { colorTone, formatNumber, initials } from "../../lib/dashboard-helpers";
@@ -243,17 +244,14 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
       if (filters.length) params.set("filters", encodeFilters(filters));
       if (peopleScope) params.set("peopleScope", JSON.stringify(peopleScope));
       const response = await fetch(`/api/companies?${params.toString()}`);
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({ error: "Unable to export companies." })) as { error?: string };
-        throw new Error(body.error || "Unable to export companies.");
-      }
-      const blobUrl = URL.createObjectURL(await response.blob());
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = `prospect-sync-companies-${companyExportScope === "with_websites" ? "with-websites" : "all"}-${new Date().toISOString().slice(0, 10)}.csv`;
-      link.click();
-      URL.revokeObjectURL(blobUrl);
-      const exported = Number(response.headers.get("X-Exported-Rows") ?? 0);
+      if (!response.ok) throw await csvStreamError(response, "Unable to export companies.");
+      // The endpoint streams now, so there is no X-Exported-Rows header to read:
+      // the count is not known when the headers are sent. It is counted here
+      // instead, from the records as they arrive.
+      const exported = await downloadCsvStream(
+        response,
+        `prospect-sync-companies-${companyExportScope === "with_websites" ? "with-websites" : "all"}-${new Date().toISOString().slice(0, 10)}.csv`,
+      );
       setCompanyNotice(`Exported ${formatNumber(exported)} ${search.trim() || filters.length || peopleScope ? "matching " : ""}companies${companyExportScope === "with_websites" ? " with websites" : ""}.`);
     } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to export companies."); }
     finally { setExportingCompanies(false); }

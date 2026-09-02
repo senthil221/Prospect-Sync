@@ -90,7 +90,7 @@ test("People and Company DB pivots preserve the source filter contract", async (
   assert.match(dashboard, /peopleScope/);
   assert.match(prospectsRoute, /search_prospect_workspace_v12/);
   assert.match(companiesRoute, /p_people_scope: peopleScope/);
-  assert.match(exportRoute, /search_prospect_export_v4/);
+  assert.match(exportRoute, /search_prospect_export_v5/);
   assert.match(migration, /company_matches_scope_v1/);
   assert.match(migration, /prospect_index_matches_v1/);
 });

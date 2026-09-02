@@ -1,4 +1,5 @@
-// Builds durable result sets, runs frozen bulk operations, and runs retention.
+// Builds durable result sets and background export files, runs frozen bulk
+// operations, and runs retention.
 //
 // Section 9.1 asks for a dedicated operations worker: its own process, pool and
 // login role, reusing the import worker's queue primitives - FOR UPDATE SKIP
@@ -50,6 +51,13 @@ const batchSize = Math.max(1000, Math.min(100_000, Number(process.env.OPERATIONS
 // next_batch_v1 refuses more than 5,000 anyway. 500 keeps each transaction
 // short enough that a restart loses very little.
 const applyBatchSize = Math.max(50, Math.min(5000, Number(process.env.OPERATIONS_APPLY_BATCH ?? 500)));
+// An export part is a jsonb array held whole in memory while it is written, so
+// it is sized by bytes rather than by rows: 5,000 wide prospect rows is a few
+// megabytes, which is what a 320 MB container and a 2 vCPU box can absorb
+// without noticing. Nothing streams here - the rows go straight from
+// prospect_index into job_parts inside the database - so this bounds the
+// server's working set, not the worker's.
+const exportBatchSize = Math.max(500, Math.min(25_000, Number(process.env.OPERATIONS_EXPORT_BATCH ?? 5000)));
 const idleDelayMs = Math.max(1000, Number(process.env.OPERATIONS_IDLE_MS ?? 3000));
 // Matches what build_batch_v1 and apply_batch_v1 declare, which is the bound
 // they were designed for; see the header for why declaring it is not enough on
@@ -180,6 +188,55 @@ async function runOperation(job) {
   }
 }
 
+// --- Background export files -----------------------------------------------
+
+// Only jobs whose result set is already built are returned, so a file never
+// waits on a list this same worker has not finished making. That is why the
+// export queue is drained after the sets rather than before them.
+async function claimNextExport() {
+  const { rows } = await client.query(
+    "select job_id, entity_type, result_set_id, row_count, next_ordinal, set_rows from prospect_exports.claim_next_v1($1, $2)",
+    [workerId, leaseSeconds],
+  );
+  return rows[0] ?? null;
+}
+
+async function buildExportBatch(jobId) {
+  const { rows } = await client.query(
+    "select appended, total_rows, total_parts, done from prospect_exports.build_batch_v1($1, $2, $3)",
+    [jobId, exportBatchSize, leaseSeconds],
+  );
+  return rows[0] ?? { appended: 0, total_rows: 0, total_parts: 0, done: true };
+}
+
+async function failExport(jobId, error) {
+  await client.query("select prospect_exports.fail_v1($1, $2)", [jobId, String(error?.message ?? error)])
+    .catch((failure) => console.error("Could not record the export failure", failure));
+}
+
+async function runExport(job) {
+  const jobId = job.job_id;
+  let batches = 0;
+  for (;;) {
+    if (stopping) {
+      // next_ordinal says exactly how far the file got, and a part is written
+      // once under its own index, so resuming appends rather than repeating.
+      console.log(`Stopping mid-export ${jobId}; it will resume from row ${job.next_ordinal}.`);
+      return;
+    }
+    const { appended, total_rows: rows, total_parts: parts, done } = await buildExportBatch(jobId);
+    batches += 1;
+    markProgress(`export:${jobId}`);
+    if (Number(appended) > 0) {
+      console.log(`Export ${jobId}: part ${parts} added ${appended}, ${rows}/${job.set_rows} rows written.`);
+    }
+    if (done) {
+      console.log(`Export ${jobId} is ready: ${rows} rows in ${parts} part(s) after ${batches} batch(es).`);
+      return;
+    }
+  }
+}
+
 async function runRetention() {
   if (Date.now() - lastRetentionAt < retentionIntervalMs) return;
   lastRetentionAt = Date.now();
@@ -187,8 +244,11 @@ async function runRetention() {
     const results = await client.query("select prospect_results.expire_sets_v1() as removed");
     const filters = await client.query("select prospect_filters.expire_sets_v1() as removed");
     const jobs = await client.query("select prospect_operations.expire_jobs_v1() as removed");
+    // Export jobs carry the files themselves, so this is the one retention pass
+    // that reclaims real space rather than rows.
+    const exports = await client.query("select prospect_exports.expire_jobs_v1() as removed");
     const removed = Number(results.rows[0]?.removed ?? 0) + Number(filters.rows[0]?.removed ?? 0)
-      + Number(jobs.rows[0]?.removed ?? 0);
+      + Number(jobs.rows[0]?.removed ?? 0) + Number(exports.rows[0]?.removed ?? 0);
     if (removed > 0) console.log(`Retention removed ${removed} expired set(s) or job(s).`);
   } catch (error) {
     // Retention failing must never stop the worker doing its actual job.
@@ -200,16 +260,23 @@ async function main() {
   await client.connect();
   await client.query(`set statement_timeout = '${statementTimeout}'`);
   const { rows } = await client.query("select current_user, session_user, current_setting('statement_timeout') as timeout");
-  console.log(`Prospect operations worker ${workerId} started as ${rows[0].current_user}; result batches of ${batchSize}, operation batches of ${applyBatchSize}, statement timeout ${rows[0].timeout}.`);
+  console.log(`Prospect operations worker ${workerId} started as ${rows[0].current_user}; result batches of ${batchSize}, operation batches of ${applyBatchSize}, export batches of ${exportBatchSize}, statement timeout ${rows[0].timeout}.`);
 
   while (!stopping) {
     markProgress("");
     await runRetention();
 
     // Operations first. Someone is watching a progress bar for one of these,
-    // whereas a result set is usually feeding a count. Both queues are drained
-    // to empty before the other is checked, so neither can starve: a pass that
-    // finds an operation loops straight back and looks for another.
+    // whereas a result set is usually feeding a count. Each queue is drained to
+    // empty before the next is checked, so a pass that finds work loops
+    // straight back and looks for more of the same kind.
+    //
+    // Exports come second and result sets third, which looks backwards - an
+    // export is built FROM a set - and is deliberate. claim_next_v1 only offers
+    // an export whose set is already 'ready', so an export waiting on its list
+    // is simply not claimable and this pass falls through to build that list.
+    // Putting exports after the sets instead would let a steady stream of sets
+    // starve the files indefinitely.
     let operation = null;
     try {
       operation = await claimNextOperation();
@@ -223,6 +290,23 @@ async function main() {
       // A job that cannot run must say so rather than being reclaimed forever.
       // Whatever it already applied stays applied and is recorded as such.
       if (operation) await failOperation(operation.job_id, error);
+      else await wait(5000);
+      continue;
+    }
+
+    let exportJob = null;
+    try {
+      exportJob = await claimNextExport();
+      if (exportJob) {
+        console.log(`Building export ${exportJob.job_id} (${exportJob.entity_type}) from row ${exportJob.next_ordinal} of ${exportJob.set_rows}.`);
+        await runExport(exportJob);
+        continue;
+      }
+    } catch (error) {
+      console.error(`Export ${exportJob?.job_id ?? "claim"} failed`, error);
+      // Same contract as the other two queues: a file that cannot be built says
+      // so, rather than being reclaimed forever while the user waits.
+      if (exportJob) await failExport(exportJob.job_id, error);
       else await wait(5000);
       continue;
     }

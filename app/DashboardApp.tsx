@@ -195,7 +195,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   Master database; All your prospects, organized in one place; function AppIcon;
   company-table; company-prospect-list; function CompanyDrawer; company-drawer;
   Load ${Math.min(50, total - prospects.length)} more prospects; company-pagination;
-  All companies; Only with websites; Export CSV; X-Exported-Rows; filtersOpen;
+  All companies; Only with websites; Export CSV; downloadCsvStream; filtersOpen;
   View all fields; Company coverage checker; Data quality centre; ListWorkspace;
   Mark contacted; Saved views; Field mapping; Field coverage; Choose columns; ApolloFilterPanel;
   master-scroll-top; syncHorizontalScroll; deriveListName(next.name);

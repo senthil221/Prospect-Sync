@@ -138,3 +138,32 @@ export function prospectsCsv(rows: ProspectRow[], fields: string[], requestedFie
   const columns = buildExportColumns(fields, requestedFields);
   return csvDocument(columns.map((column) => column.header), rows.map((row) => columns.map((column) => column.value(row))));
 }
+
+// The row keys an export actually reads, discovered by running the renderer.
+//
+// Section 9.4 asks exports to fetch "requested columns only". The obvious way to
+// do that is a second table mapping field ids to prospect_index columns - and a
+// second table is a second thing to keep in step. The export functions in this
+// repository have already been through that once: search_prospect_export_v1
+// carried its own copy of the filter CASE, the copies drifted, and a domain
+// filter silently exported the wrong rows.
+//
+// So the key list is not a copy of anything. Every column's value function is
+// handed a recording proxy and run: whatever it reads is what the query has to
+// return. A column that starts reading a new field is covered the moment it is
+// written, because the thing being asked is the renderer itself.
+//
+// id and created_at are always included: they are the keyset cursor and the
+// identity the excluded-id list is matched on, neither of which appears in any
+// column.
+export function exportRowKeys(fields: string[], requestedFields?: string[]) {
+  const keys = new Set<string>(["id", "created_at"]);
+  const probe = new Proxy({}, {
+    get(_target, key) {
+      if (typeof key === "string") keys.add(key);
+      return undefined;
+    },
+  }) as ProspectRow;
+  for (const column of buildExportColumns(fields, requestedFields)) column.value(probe);
+  return [...keys].sort();
+}
