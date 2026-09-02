@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { scopeRestricts, type CompanyScope, type PeopleScope } from "../../lib/workspace-scopes";
 import ApolloFilterPanel, { filterLabel } from "../ApolloFilterPanel";
-import { fileSystemAccessSupported, runProspectExport, type ExportFormat, type ExportProgress } from "../../lib/export-runner";
+import { backgroundExportNotice, fileSystemAccessSupported, runProspectExport, type ExportFormat, type ExportProgress } from "../../lib/export-runner";
 import { buildCustomFieldDefinitions } from "../../lib/prospect-fields";
 import { api, filterPayload } from "../../lib/dashboard-api";
 import { buildResultSet, runFrozenAction } from "../../lib/background-operation";
@@ -332,8 +332,12 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
         // Deliberately not cleared on failure, so a retry reuses the id.
         settleIntent(intent);
         setExportDialogOpen(false);
-        setNotice(result.handedOff
-          ? `Built ${formatNumber(result.exported)} prospects in the background; the download has started and the link stays valid for 24 hours.`
+        setNotice(result.handedOff && result.plan
+          // Say why it went to the background, and say plainly that a "split
+          // into parts" choice did not apply - silently handing back one file
+          // when two were asked for is the kind of thing people only notice
+          // after they have opened it.
+          ? `Built ${formatNumber(result.exported)} prospects. ${backgroundExportNotice(result.plan, exportFormat)}`
           : `Exported ${formatNumber(result.exported)} prospects${result.files > 1 ? ` across ${formatNumber(result.files)} files` : ""} with ${formatNumber(exportFields.length)} selected fields.`);
       }
     } catch (caught) {
