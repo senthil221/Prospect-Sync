@@ -63,10 +63,14 @@ export function prefetchApi(path: string) {
   void api(path).catch(() => undefined);
 }
 
-export function prospectApiPath({ search = "", page = 1, sort = "created_at", direction = "desc", filters = "[]", clientId = "", includeFields = true, companyScope = null, withTotal = page === 1 }: { search?: string; page?: number; sort?: string; direction?: "asc" | "desc"; filters?: string; clientId?: string; includeFields?: boolean; companyScope?: CompanyScope | null; withTotal?: boolean }) {
+export function prospectApiPath({ search = "", page = 1, sort = "created_at", direction = "desc", filters = "[]", clientId = "", includeFields = true, companyScope = null, withTotal = page === 1, knownVersions = null }: { search?: string; page?: number; sort?: string; direction?: "asc" | "desc"; filters?: string; clientId?: string; includeFields?: boolean; companyScope?: CompanyScope | null; withTotal?: boolean; knownVersions?: Record<string, number> | null }) {
   const params = new URLSearchParams({ search, page: String(page), sort, direction, filters, includeFields: includeFields ? "1" : "0", withTotal: withTotal ? "1" : "0" });
   if (clientId) params.set("clientId", clientId);
   if (companyScope) params.set("companyScope", JSON.stringify(companyScope));
+  // The version vector the caller's cached total was counted at. The server
+  // recounts when it no longer matches, so a stale total cannot survive a
+  // completed mutation until some later page load happens to notice.
+  if (knownVersions) params.set("knownVersions", JSON.stringify(knownVersions));
   return `/api/prospects?${params.toString()}`;
 }
 

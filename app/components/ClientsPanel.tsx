@@ -91,7 +91,9 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const fieldsLoaded = useRef(false);
-  const totalCache = useRef(new Map<string, number>());
+  // Total plus the version vector it was counted at; the server recounts when
+  // the vector it is given no longer matches the live one.
+  const totalCache = useRef(new Map<string, { total: number; versions: Record<string, number> | null }>());
   const deferredSearch = useDeferredValue(search);
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);
   const encodedFilters = useMemo(() => encodeFilters(filters), [filters]);
@@ -103,15 +105,16 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
     void (async () => {
       setRefreshing(true);
       try {
-        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, clientId: client.id, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !totalCache.current.has(countKey) }, { signal: controller.signal });
+        const cached = totalCache.current.get(countKey);
+        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; versions?: Record<string, number> | null; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, clientId: client.id, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !cached, knownVersions: cached?.versions ?? null }, { signal: controller.signal });
         if (current) {
           setProspects(data.prospects);
           // A client view is never the unfiltered whole database, so its count is
           // always the capped one -- carry the flag through or a bounded number
           // would read here as an exact one.
           setTotalCapped(data.totalCapped === true);
-          if (data.total !== null) { totalCache.current.set(countKey, data.total); setTotal(data.total); }
-          else if (totalCache.current.has(countKey)) setTotal(totalCache.current.get(countKey) ?? client.prospect_count);
+          if (data.total !== null) { totalCache.current.set(countKey, { total: data.total, versions: data.versions ?? null }); setTotal(data.total); }
+          else if (cached) setTotal(cached.total);
           if (data.fields?.length) { fieldsLoaded.current = true; setFields(data.fields); }
           setError("");
         }

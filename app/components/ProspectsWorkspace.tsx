@@ -20,7 +20,9 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
   const [page, setPage] = useState(1);
   const [refresh, setRefresh] = useState(0);
   const fieldsLoaded = useRef(false);
-  const totalCache = useRef(new Map<string, { total: number; estimated: boolean; capped: boolean }>());
+  // A cached total is only meaningful alongside the dependency-version vector it
+  // was counted at, so the two are stored together and sent back as a pair.
+  const totalCache = useRef(new Map<string, { total: number; estimated: boolean; capped: boolean; versions: Record<string, number> | null }>());
   const deferredSearch = useDeferredValue(search);
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);
   const encodedFilters = useMemo(() => encodeFilters(filters), [filters]);
@@ -34,12 +36,13 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
     void (async () => {
       onLoading(true); onError("");
       try {
-        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; scopeCapped?: boolean; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !totalCache.current.has(countKey) }, { signal: controller.signal });
+        const cached = totalCache.current.get(countKey);
+        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; scopeCapped?: boolean; versions?: Record<string, number> | null; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !cached, knownVersions: cached?.versions ?? null }, { signal: controller.signal });
         if (current) {
           setProspects(data.prospects);
           setScopeCapped(data.scopeCapped === true);
           if (data.total !== null) {
-            const cachedTotal = { total: data.total, estimated: data.totalEstimated, capped: data.totalCapped === true };
+            const cachedTotal = { total: data.total, estimated: data.totalEstimated, capped: data.totalCapped === true, versions: data.versions ?? null };
             totalCache.current.set(countKey, cachedTotal);
             setTotal(cachedTotal.total); setTotalEstimated(cachedTotal.estimated); setTotalCapped(cachedTotal.capped);
           } else {

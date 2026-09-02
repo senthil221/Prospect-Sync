@@ -14,6 +14,7 @@ type WorkspaceQuery = {
   clientId: string | null;
   companyScope: CompanyScope | null;
   withTotal: boolean;
+  knownVersions: Record<string, number> | null;
 };
 
 const missingFunctionCodes = new Set(["PGRST202", "42883"]);
@@ -37,13 +38,14 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
     p_client_id: query.clientId,
     p_company_scope: query.companyScope ?? {},
     p_with_total: query.withTotal,
+    p_known_versions: query.knownVersions,
   });
   return { ...workspace, version: "v12" };
 }
 
 function workspaceSummary(data: unknown) {
   const summary = Array.isArray(data) ? data[0] : data;
-  return summary && typeof summary === "object" ? summary as { result_rows?: unknown; total_count?: unknown; scope_capped?: unknown; total_capped?: unknown } : {};
+  return summary && typeof summary === "object" ? summary as { result_rows?: unknown; total_count?: unknown; scope_capped?: unknown; total_capped?: unknown; data_versions?: unknown } : {};
 }
 
 // Shared by GET and POST. Same query either way; only the transport differs,
@@ -60,6 +62,15 @@ async function respondToProspectQuery(params: URLSearchParams) {
   catch (error) { return filterErrorResponse(error, "Invalid company navigation scope."); }
   const includeFields = url.searchParams.get("includeFields") !== "0";
   const withTotal = url.searchParams.get("withTotal") === null ? page === 1 : url.searchParams.get("withTotal") !== "0";
+  // Opaque to this route: it is handed back to the database, which compares it
+  // with the live vector and recounts if they differ. A malformed value simply
+  // never matches, which recounts -- the safe direction.
+  let knownVersions: Record<string, number> | null = null;
+  try {
+    const raw = url.searchParams.get("knownVersions");
+    const parsed = raw ? JSON.parse(raw) as unknown : null;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) knownVersions = parsed as Record<string, number>;
+  } catch { knownVersions = null; }
   const limit = 50;
   let filters: ProspectFilter[];
   try { filters = parseFilters(url.searchParams.get("filters")); }
@@ -76,6 +87,7 @@ async function respondToProspectQuery(params: URLSearchParams) {
     clientId,
     companyScope,
     withTotal,
+    knownVersions,
   });
   const fieldsRequest = includeFields
     ? supabase.from("prospect_fields").select("field_name").order("field_name").limit(500)
@@ -104,6 +116,9 @@ async function respondToProspectQuery(params: URLSearchParams) {
     // The count stopped at its cap, so `total` is a floor and the UI shows
     // "50,000+" rather than presenting a bounded number as an exact one.
     totalCapped: summary.total_capped === true,
+    // The vector this answer was computed at. Cache the total against it and
+    // send it back; the next request recounts only if something moved.
+    versions: summary.data_versions ?? null,
     page,
     limit,
     fields: (fields.data ?? []).map((item) => item.field_name),
