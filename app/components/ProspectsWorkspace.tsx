@@ -11,6 +11,8 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [total, setTotal] = useState(0);
   const [totalEstimated, setTotalEstimated] = useState(false);
+  // The count stopped at its cap, so the total on screen is a floor.
+  const [totalCapped, setTotalCapped] = useState(false);
   // The company scope matched more companies than its own cap, so these people
   // come from a truncated set. Reported per page, not cached with the count.
   const [scopeCapped, setScopeCapped] = useState(false);
@@ -18,7 +20,7 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
   const [page, setPage] = useState(1);
   const [refresh, setRefresh] = useState(0);
   const fieldsLoaded = useRef(false);
-  const totalCache = useRef(new Map<string, { total: number; estimated: boolean }>());
+  const totalCache = useRef(new Map<string, { total: number; estimated: boolean; capped: boolean }>());
   const deferredSearch = useDeferredValue(search);
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);
   const encodedFilters = useMemo(() => encodeFilters(filters), [filters]);
@@ -32,17 +34,17 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
     void (async () => {
       onLoading(true); onError("");
       try {
-        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; scopeCapped?: boolean; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !totalCache.current.has(countKey) }, { signal: controller.signal });
+        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; scopeCapped?: boolean; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !totalCache.current.has(countKey) }, { signal: controller.signal });
         if (current) {
           setProspects(data.prospects);
           setScopeCapped(data.scopeCapped === true);
           if (data.total !== null) {
-            const cachedTotal = { total: data.total, estimated: data.totalEstimated };
+            const cachedTotal = { total: data.total, estimated: data.totalEstimated, capped: data.totalCapped === true };
             totalCache.current.set(countKey, cachedTotal);
-            setTotal(cachedTotal.total); setTotalEstimated(cachedTotal.estimated);
+            setTotal(cachedTotal.total); setTotalEstimated(cachedTotal.estimated); setTotalCapped(cachedTotal.capped);
           } else {
             const cachedTotal = totalCache.current.get(countKey);
-            if (cachedTotal) { setTotal(cachedTotal.total); setTotalEstimated(cachedTotal.estimated); }
+            if (cachedTotal) { setTotal(cachedTotal.total); setTotalEstimated(cachedTotal.estimated); setTotalCapped(cachedTotal.capped); }
           }
           if (data.fields?.length) { fieldsLoaded.current = true; setFields(data.fields); }
         }
@@ -53,11 +55,11 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
   }, [active, deferredSearch, debouncedSearch, statsProspects, page, encodedFilters, sort, direction, refresh, companyScope, countKey, onError, onLoading]);
 
   const refreshWorkspace = useCallback(() => setRefresh((current) => current + 1), []);
-  return { prospects, total, totalEstimated, scopeCapped, fields, page, setPage, deferredSearch, fieldsLoaded: fields.length > 0, refreshWorkspace };
+  return { prospects, total, totalEstimated, totalCapped, scopeCapped, fields, page, setPage, deferredSearch, fieldsLoaded: fields.length > 0, refreshWorkspace };
 }
 
 export default function ProspectsWorkspace({ controller, filters, sort, direction, clients, companyScope, onClearCompanyScope, onSeeCompanies, onFiltersChange, onSortChange, onSelect, onImport }: { controller: ReturnType<typeof useProspectsWorkspaceController>; filters: ProspectFilter[]; sort: string; direction: "asc" | "desc"; clients: ClientRecord[]; companyScope: CompanyScope | null; onClearCompanyScope: () => void; onSeeCompanies: (scope: PeopleScope) => void; onFiltersChange: (filters: ProspectFilter[]) => void; onSortChange: (sort: string, direction: "asc" | "desc") => void; onSelect: (prospect: Prospect) => void; onImport: () => void }) {
   const handleSortChange = useCallback((nextSort: string, nextDirection: "asc" | "desc") => { onSortChange(nextSort, nextDirection); controller.setPage(1); }, [controller, onSortChange]);
   const handleFiltersChange = useCallback((next: ProspectFilter[]) => { onFiltersChange(next); controller.setPage(1); }, [controller, onFiltersChange]);
-  return <ProspectTable prospects={controller.prospects} total={controller.total} totalEstimated={controller.totalEstimated} scopeCapped={controller.scopeCapped} fields={controller.fields} filters={filters} page={controller.page} clients={clients} search={controller.deferredSearch} sort={sort} direction={direction} companyScope={companyScope} onClearCompanyScope={onClearCompanyScope} onSeeCompanies={onSeeCompanies} onSortChange={handleSortChange} onFiltersChange={handleFiltersChange} onPageChange={controller.setPage} onSelect={onSelect} onImport={onImport} onRefresh={controller.refreshWorkspace}/>;
+  return <ProspectTable prospects={controller.prospects} total={controller.total} totalEstimated={controller.totalEstimated} totalCapped={controller.totalCapped} scopeCapped={controller.scopeCapped} fields={controller.fields} filters={filters} page={controller.page} clients={clients} search={controller.deferredSearch} sort={sort} direction={direction} companyScope={companyScope} onClearCompanyScope={onClearCompanyScope} onSeeCompanies={onSeeCompanies} onSortChange={handleSortChange} onFiltersChange={handleFiltersChange} onPageChange={controller.setPage} onSelect={onSelect} onImport={onImport} onRefresh={controller.refreshWorkspace}/>;
 }
