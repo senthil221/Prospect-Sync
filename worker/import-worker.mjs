@@ -237,7 +237,10 @@ async function failOrRetry(job, error) {
 }
 
 async function main() {
-  console.log(`Prospect import worker ${workerId} started; batch size ${batchSize}.`);
+  // The bounds are worth printing because they are otherwise invisible: this
+  // worker only holds a connection while a job runs, and the function-declared
+  // timeouts that appear in the migrations are not what applies here.
+  console.log(`Prospect import worker ${workerId} started; batch size ${batchSize}, staging timeout ${stagingTimeout}, batch timeout ${batchTimeout}.`);
   while (!stopping) {
     markProgress("");
     let job = null;
