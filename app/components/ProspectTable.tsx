@@ -6,6 +6,7 @@ import ApolloFilterPanel, { filterLabel } from "../ApolloFilterPanel";
 import { fileSystemAccessSupported, runProspectExport, type ExportFormat } from "../../lib/export-runner";
 import { buildCustomFieldDefinitions } from "../../lib/prospect-fields";
 import { api, filterPayload } from "../../lib/dashboard-api";
+import { buildResultSet, runFrozenAction } from "../../lib/background-operation";
 import { filterChipValue, formatNumber } from "../../lib/dashboard-helpers";
 import { defaultProspectColumns, defaultProspectExportFields, standardProspectExportFields, standardProspectFields } from "../../lib/prospect-field-definitions";
 import type { ClientRecord, Prospect, ProspectFilter, SavedView } from "../../lib/types";
@@ -43,6 +44,9 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const [selectionMode, setSelectionMode] = useState<"explicit" | "all_matching">("explicit");
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [selectionQueryKey, setSelectionQueryKey] = useState("");
+  // The exact count behind a capped total, once someone has asked for it.
+  const [exactTotal, setExactTotal] = useState<{ key: string; count: number } | null>(null);
+  const [countingAll, setCountingAll] = useState(false);
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [bulkClientId, setBulkClientId] = useState("");
   const [pushClientId, setPushClientId] = useState("");
@@ -140,7 +144,14 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   // Every count on screen says which of the three kinds it is: "674,065" exact,
   // "≈674,065" the planner's estimate for the whole database, "50,000+" a count
   // that stopped at its cap. A bounded number must never read as an exact one.
-  const displayedTotal = `${totalEstimated ? "≈" : ""}${formatNumber(total)}${totalCapped ? "+" : ""}`;
+  // A capped count can be turned into a real one: the operations worker counts
+  // the whole match set in the background and says how many there were. Keyed
+  // on the question, so changing a filter drops the answer rather than showing
+  // last question's number against this one.
+  const countedExactly = exactTotal && exactTotal.key === selectionKey ? exactTotal.count : null;
+  const displayedTotal = countedExactly !== null
+    ? formatNumber(countedExactly)
+    : `${totalEstimated ? "≈" : ""}${formatNumber(total)}${totalCapped ? "+" : ""}`;
   // A capped total is a floor, so a selection drawn from it is a floor too: the
   // bulk action resolves its own ids server-side and will act on all of them.
   const selectedLabel = `${formatNumber(selectedCount)}${totalCapped && selectionMode === "all_matching" ? "+" : ""}`;
@@ -319,6 +330,52 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
       : { prospectIds: [...selectedIds] };
   }
 
+  // Turn "50,000+" into a number. Counting past the cap is exactly the work the
+  // interactive query refuses to do - it stops at 50,000 so the page stays
+  // fast - so it goes to the worker, which counts the whole match set in
+  // bounded batches and reports how many rows it found.
+  async function countAllMatching() {
+    if (countingAll) return;
+    setCountingAll(true); setNotice("");
+    try {
+      const set = await buildResultSet(
+        { entityType: "prospect", clientScope: clientId, search: search.trim(), filters: filterPayload(effectiveFilters) },
+        { onProgress: ({ done }) => setNotice(`Counting all matches… ${formatNumber(done)} so far.`) },
+      );
+      setExactTotal({ key: selectionKey, count: set.rowCount });
+      setNotice(`${formatNumber(set.rowCount)} records match — counted in full${set.stale ? ", as of a moment ago" : ""}.`);
+    } catch (caught) {
+      setNotice(caught instanceof Error ? caught.message : "That count could not be completed.");
+    } finally { setCountingAll(false); }
+  }
+
+  // "All matching", frozen. The ids are built into a result set first, the
+  // action runs over exactly those ids, and the worker applies them in batches.
+  //
+  // The alternative - what this replaces - passed the search and filters to the
+  // mutation and let it resolve its own ids at execution time, so an import
+  // landing between choosing and running silently widened the action.
+  async function runAllMatching(action: string, targetClientId: string, requestId: string, dateContacted?: string | null) {
+    const wireFilters = filterPayload(effectiveFilters);
+    const set = await buildResultSet(
+      { entityType: "prospect", clientScope: clientId, search: search.trim(), filters: wireFilters },
+      { onProgress: ({ done }) => setNotice(`Preparing ${formatNumber(done)} records…`) },
+    );
+    return runFrozenAction(
+      {
+        clientId: targetClientId,
+        action,
+        requestId,
+        resultSetId: set.setId,
+        search: search.trim(),
+        filters: wireFilters,
+        excludedIds: [...excludedIds],
+        dateContacted,
+      },
+      { onProgress: ({ done, total: items }) => setNotice(`Working… ${formatNumber(done)} of ${formatNumber(items)}.`) },
+    );
+  }
+
   async function clientAction(action: "push" | "set_date_contacted", targetClientId: string, dateContacted?: string | null) {
     if (!selectedCount || !targetClientId) return;
     // One id per intent, not per click. A click that fails and is tried again is
@@ -337,14 +394,15 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     const requestId = requestIdFor(key);
     setBulkBusy(true); setNotice("");
     try {
-      const data = await api<{ result: { added?: number; alreadyPresent?: number; blocked?: number; updated?: number; queued?: number }; replayed?: boolean }>(
-        `/api/clients/${encodeURIComponent(targetClientId)}/prospects`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, requestId, ...selectionPayload(), ...(action === "set_date_contacted" ? { dateContacted } : {}) }) },
-      );
+      const result = selectionMode === "all_matching"
+        ? (await runAllMatching(action, targetClientId, requestId, dateContacted)).result ?? {}
+        : (await api<{ result: { added?: number; alreadyPresent?: number; blocked?: number; updated?: number; queued?: number }; replayed?: boolean }>(
+            `/api/clients/${encodeURIComponent(targetClientId)}/prospects`,
+            { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, requestId, ...selectionPayload(), ...(action === "set_date_contacted" ? { dateContacted } : {}) }) },
+          )).result ?? {};
       // Settled: the next deliberate action of this shape is a new operation.
       // Deliberately not cleared on failure, so a retry reuses the id.
       settleIntent(key);
-      const result = data.result ?? {};
       if (action === "push") {
         const parts = [`${formatNumber(Number(result.added ?? 0))} pushed`];
         if (result.alreadyPresent) parts.push(`${formatNumber(Number(result.alreadyPresent))} already there`);
@@ -464,7 +522,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     </article> : <div className={`people-layout ${filtersOpen ? "" : "filters-collapsed"}`}>
       <article className="panel results-panel">
         <div className="results-toolbar">
-          <div className="results-count"><strong title={totalHint}>{displayedTotal} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `All ${displayedTotal} selected` : `Select all ${displayedTotal} across pages`}</button> : null}</div>
+          <div className="results-count"><strong title={totalHint}>{displayedTotal} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `All ${displayedTotal} selected` : `Select all ${displayedTotal} across pages`}</button> : null}{totalCapped && countedExactly === null ? <button className="select-all-matching-button" disabled={countingAll} title="Counts every matching record in the background instead of stopping at 50,000." onClick={() => void countAllMatching()}>{countingAll ? "Counting…" : "Count them all"}</button> : null}</div>
           <div className="workspace-actions">
             <label><span className="sr-only">Saved ICP view</span><select defaultValue="" onChange={(event) => applyView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.needsReview ? `${view.name} (needs review)` : view.name}</option>)}</select></label>
             <button className="outline-button" onClick={() => void saveCurrentView()}><AppIcon name="star" size={14}/> Save view</button>

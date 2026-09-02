@@ -120,10 +120,21 @@ export function encodeFilters(filters: ProspectFilter[]) {
   return JSON.stringify(filterPayload(filters));
 }
 
-export function companyApiPath({ search = "", page = 1, clientId = "", filters = [], peopleScope = null }: { search?: string; page?: number; clientId?: string; filters?: ProspectFilter[]; peopleScope?: PeopleScope | null }) {
+// A caller may hand over filters that are already encoded. That is how a large
+// pasted list reaches the server as a set id instead of as thousands of values:
+// the substitution is asynchronous (it stores the list first), so it cannot
+// happen inside a path builder. The array form stays for callers with nothing
+// to substitute - a prefetch, a client-scoped view with no filters at all.
+function companyFilterParam(filters: ProspectFilter[], encodedFilters: string) {
+  const encoded = encodedFilters || (filters.length ? encodeFilters(filters) : "");
+  return encoded && encoded !== "[]" ? encoded : "";
+}
+
+export function companyApiPath({ search = "", page = 1, clientId = "", filters = [], encodedFilters = "", peopleScope = null }: { search?: string; page?: number; clientId?: string; filters?: ProspectFilter[]; encodedFilters?: string; peopleScope?: PeopleScope | null }) {
   const params = new URLSearchParams({ search, page: String(page), pageSize: "50" });
   if (clientId) params.set("clientId", clientId);
-  if (filters.length) params.set("filters", encodeFilters(filters));
+  const encoded = companyFilterParam(filters, encodedFilters);
+  if (encoded) params.set("filters", encoded);
   if (peopleScope) params.set("peopleScope", JSON.stringify(peopleScope));
   return `/api/companies?${params.toString()}`;
 }
@@ -143,6 +154,7 @@ type CompanyQuery = {
   page?: number;
   clientId?: string;
   filters?: ProspectFilter[];
+  encodedFilters?: string;
   peopleScope?: PeopleScope | null;
 };
 
@@ -153,6 +165,7 @@ export async function fetchCompanies<T>(query: CompanyQuery, init?: RequestInit)
   // Deliberately not routed through api(): it keys its cache on the path, and
   // treats every non-GET as a mutation that clears the whole cache. Neither is
   // right for a read that simply outgrew the URL.
+  const encoded = companyFilterParam(query.filters ?? [], query.encodedFilters ?? "");
   const response = await fetch("/api/companies", {
     ...init,
     method: "POST",
@@ -162,7 +175,7 @@ export async function fetchCompanies<T>(query: CompanyQuery, init?: RequestInit)
       page: String(query.page ?? 1),
       pageSize: "50",
       ...(query.clientId ? { clientId: query.clientId } : {}),
-      ...(query.filters?.length ? { filters: encodeFilters(query.filters) } : {}),
+      ...(encoded ? { filters: encoded } : {}),
       ...(query.peopleScope ? { peopleScope: JSON.stringify(query.peopleScope) } : {}),
     }),
   });

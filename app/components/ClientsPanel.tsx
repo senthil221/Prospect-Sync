@@ -3,6 +3,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import { api, encodeFilters, fetchCompanies, fetchProspects, filterPayload, isAbortError } from "../../lib/dashboard-api";
+import { filterPayloadWithSets } from "../../lib/filter-set-client";
 import { formatNumber, initials } from "../../lib/dashboard-helpers";
 import type { ClientRecord, Company, ListRecord, Prospect, ProspectFilter } from "../../lib/types";
 import { AppIcon, EmptyCompact, EmptyState } from "./DashboardUi";
@@ -145,6 +146,7 @@ function ClientCompanyDatabase({ client, peopleScope, onClearPeopleScope, onSeeP
   const [refresh, setRefresh] = useState(0);
   const deferredSearch = useDeferredValue(search);
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);
+  const encodedFilters = useMemo(() => encodeFilters(filters), [filters]);
   useEffect(() => {
     let current = true;
     const controller = new AbortController();
@@ -152,12 +154,17 @@ function ClientCompanyDatabase({ client, peopleScope, onClearPeopleScope, onSeeP
     void (async () => {
       setRefreshing(true);
       try {
-        const data = await fetchCompanies<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>({ search: debouncedSearch, clientId: client.id, page, filters, peopleScope }, { signal: controller.signal });
+        // Scoped to this client, and stored that way: resolve_filter_set_v1
+        // checks the client scope as well as the owner, so a set made here
+        // cannot be replayed against the global company database.
+        const requestFilters = JSON.stringify(await filterPayloadWithSets(JSON.parse(encodedFilters), "company", client.id));
+        if (!current) return;
+        const data = await fetchCompanies<{ companies: Company[]; total: number; covered: number; prospectTotal: number; pageSize: number }>({ search: debouncedSearch, clientId: client.id, page, encodedFilters: requestFilters, peopleScope }, { signal: controller.signal });
         if (current) { setCompanies(data.companies); setSummary({ total: data.total, covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); setError(""); }
       } catch (caught) { if (current && !isAbortError(caught)) setError(caught instanceof Error ? caught.message : "Unable to load the client company database."); }
       finally { if (current) { setLoading(false); setRefreshing(false); } }
     })();
     return () => { current = false; controller.abort(); };
-  }, [client.id, client.prospect_count, deferredSearch, debouncedSearch, page, filters, peopleScope, refresh]);
+  }, [client.id, client.prospect_count, deferredSearch, debouncedSearch, page, encodedFilters, peopleScope, refresh]);
   return <section className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT COMPANY DB</p><h3>{client.name} companies</h3><p>Companies pushed to this client or represented by its prospects.</p></div><button className="secondary" title="Safely scope up to 250,000 matching companies" onClick={() => onSeePeople({ search: deferredSearch.trim(), filters, limit: 250000 })}>See People <AppIcon name="arrow" size={14}/></button><label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label={`Search ${client.name} companies`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search client companies…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client companies…</div> : null}{loading ? <div className="workspace-loading">Preparing company database…</div> : <CompanyTable companies={companies} total={summary.total} covered={summary.covered} prospectTotal={summary.prospectTotal} page={page} pageSize={summary.pageSize} clientId={client.id} search={deferredSearch} filters={filters} peopleScope={peopleScope} onClearPeopleScope={onClearPeopleScope} onSeePeople={onSeePeople} onFilters={(next) => { setFilters(next); setPage(1); }} onPageChange={setPage} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)}/>}</section>;
 }

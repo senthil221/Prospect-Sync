@@ -1,11 +1,49 @@
-import { authorizeApi } from "../../../lib/auth";
+import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { indexNotice, reindexProspects } from "../../../lib/reindex.ts";
+import { ownerIdentity } from "../../../lib/result-sets.ts";
 import { createAdminClient } from "../../../lib/supabase/admin";
+
+// How a background bulk action reports itself. The mutation is being applied in
+// batches by the operations worker, so the only honest thing this can do is say
+// how far it has got - and it says so from operation_jobs, which the worker
+// updates in the same transaction as the mutation itself.
+async function jobStatus(jobId: string) {
+  const actor = ownerIdentity(await getAuthorizedUser());
+  if (!actor) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const { data, error } = await createAdminClient().rpc("operation_status_v1", {
+    p_job_id: jobId,
+    p_actor: actor,
+    p_version_vector: null,
+  });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      return Response.json({ error: "Apply the latest database migration to enable background bulk actions." }, { status: 503 });
+    }
+    // Not yours and never existed answer identically, so an id is not a probe.
+    if (error.code === "P0002") return Response.json({ error: "That action is no longer available." }, { status: 404 });
+    return Response.json({ error: error.message }, { status: error.code === "22P02" ? 400 : 500 });
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) return Response.json({ error: "That action is no longer available." }, { status: 404 });
+  return Response.json({
+    jobId,
+    status: row.status,
+    totalItems: Number(row.total_items ?? 0),
+    appliedItems: Number(row.applied_items ?? 0),
+    excludedCount: Number(row.excluded_count ?? 0),
+    frozenAt: row.frozen_at ?? null,
+    error: row.error ?? null,
+    result: row.result ?? null,
+  });
+}
 
 export async function GET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const prospectId = new URL(request.url).searchParams.get("prospectId");
+  const params = new URL(request.url).searchParams;
+  const jobId = (params.get("jobId") ?? "").trim();
+  if (jobId) return jobStatus(jobId);
+  const prospectId = params.get("prospectId");
   const supabase = createAdminClient();
   const [tags, events] = await Promise.all([
     supabase.from("prospect_tags").select("*").order("name"),

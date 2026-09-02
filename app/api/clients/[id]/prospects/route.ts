@@ -1,7 +1,8 @@
 import { authorizeApi, getAuthorizedUser } from "../../../../../lib/auth.ts";
 import { isEmptySelection, parseBulkSelection, selectionArgs } from "../../../../../lib/client-operations.ts";
-import { beginOperation, freezeSelection, parseRequestId, recordOperationResult, selectionContentHash } from "../../../../../lib/operation-jobs.ts";
+import { beginOperation, freezeFromResultSet, freezeSelection, parseRequestId, recordOperationResult, selectionContentHash } from "../../../../../lib/operation-jobs.ts";
 import { filterErrorResponse } from "../../../../../lib/prospect-filters.ts";
+import { ownerIdentity } from "../../../../../lib/result-sets.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883", "42P01"]);
@@ -31,7 +32,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
   const user = await getAuthorizedUser();
-  const actor = user?.email ?? "";
+  // The same identity a result set is owned by, so a job can freeze from one.
+  const actor = ownerIdentity(user);
 
   const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
   if (!payload) return Response.json({ error: "Invalid request." }, { status: 400 });
@@ -40,6 +42,25 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   let selection;
   try { selection = parseBulkSelection(payload); }
   catch (error) { return filterErrorResponse(error, "Invalid filter."); }
+
+  // Validated before the job is created, not inside the branch that runs it: a
+  // job that runs in the background carries its own parameters, and the worker
+  // has nobody to ask if the date turns out to be nonsense.
+  const dateContacted = action === "set_date_contacted" ? validDateContacted(payload.dateContacted) : null;
+  if (action === "set_date_contacted" && dateContacted === undefined) {
+    return Response.json({ error: "Choose a valid Date Contacted between 1900-01-01 and today, or select no contact date." }, { status: 400 });
+  }
+  const jobPayload: Record<string, unknown> = {
+    clientId: id,
+    ...(selection.sourceClientId ? { sourceClientId: selection.sourceClientId } : {}),
+    // Present-and-null means "clear the date", which is different from absent.
+    ...(action === "set_date_contacted" ? { dateContacted: dateContacted ?? null } : {}),
+  };
+
+  // Section 9.3, the part that was still missing: "all matching" freezes from a
+  // result set the user already built and owns, so the ids are the ones that
+  // matched when they looked - not whatever matches when the mutation runs.
+  const resultSetId = String(payload.resultSetId ?? "").trim();
 
   // Without ids and without filters, these would act on the entire database.
   if (isEmptySelection(selection)) {
@@ -65,7 +86,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       prospectIds: selection.prospectIds, excludedIds: selection.excludedIds,
     }),
     versionVector: null,
-    payload: { clientId: id },
+    payload: jobPayload,
     excludedIds: selection.excludedIds,
   });
   // Already done. Answer with what it answered the first time rather than
@@ -73,9 +94,28 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (operation.kind === "replay") {
     return Response.json({ result: operation.result, replayed: true, jobId: operation.jobId });
   }
+
+  // The background path. The selection is frozen from the result set and the
+  // operations worker applies it in bounded batches; this request answers 202
+  // with the job to watch rather than holding an interactive slot for the
+  // minutes a 250,000-row push actually takes.
+  if (resultSetId) {
+    if (operation.kind !== "run") {
+      return Response.json({ error: "A background action needs a request id." }, { status: 400 });
+    }
+    const frozen = await freezeFromResultSet(supabase, operation.jobId, actor, resultSetId);
+    if (frozen.error) return frozen.error;
+    return Response.json({
+      jobId: operation.jobId,
+      status: "frozen",
+      background: true,
+      totalItems: frozen.totalItems,
+      excludedCount: frozen.excludedCount,
+    }, { status: 202 });
+  }
+
   // Section 9.3: freeze the explicit selection so the operation cannot widen
-  // between choosing and running. "All matching" resolves server-side and is
-  // frozen through a result set instead, which is not routed here yet.
+  // between choosing and running.
   if (operation.kind === "run" && selection.prospectIds?.length) {
     await freezeSelection(supabase, operation.jobId, actor, selection.prospectIds);
   }
@@ -103,14 +143,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       p_actor: actor,
     });
     if (error) return failure(error, "ICP verification");
-    return Response.json({ result: data });
+    // Recorded like every other action. Without this the job stays open and a
+    // retry of the same request id re-runs the mutation instead of being
+    // answered from what it did the first time.
+    return finish(data);
   }
 
   if (action === "set_date_contacted") {
-    const dateContacted = validDateContacted(payload.dateContacted);
-    if (dateContacted === undefined) {
-      return Response.json({ error: "Choose a valid Date Contacted between 1900-01-01 and today, or select no contact date." }, { status: 400 });
-    }
     const { data, error } = await supabase.rpc("set_client_date_contacted_v1", {
       p_client_id: id,
       p_date_contacted: dateContacted,
@@ -118,7 +157,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       p_actor: actor,
     });
     if (error) return failure(error, "Date Contacted updates");
-    return Response.json({ result: data });
+    return finish(data);
   }
 
   if (action === "remove") {
@@ -128,7 +167,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       p_actor: actor,
     });
     if (error) return failure(error, "bulk removal from a client");
-    return Response.json({ result: data });
+    return finish(data);
   }
 
   return Response.json({ error: "Unsupported client action." }, { status: 400 });

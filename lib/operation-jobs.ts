@@ -115,6 +115,42 @@ export async function freezeSelection(
   if (error) console.warn(JSON.stringify({ at: new Date().toISOString(), event: "operation_freeze_failed", message: error.message }));
 }
 
+// Freeze "all matching" from a result set the caller already built and owns.
+//
+// Unlike freezeSelection, a failure here is fatal and is reported. Freezing an
+// explicit id list is belt-and-braces - the ids are in the request either way -
+// but this IS the selection: if it does not land there is nothing to run, and
+// falling through would resolve the filters at execution time, which is exactly
+// what the result set exists to prevent.
+export async function freezeFromResultSet(
+  supabase: ReturnType<typeof createAdminClient>,
+  jobId: string,
+  actor: string,
+  resultSetId: string,
+): Promise<{ error: Response } | { error: null; totalItems: number; excludedCount: number }> {
+  const { data, error } = await supabase.rpc("freeze_operation_from_result_set_v1", {
+    p_job_id: jobId,
+    p_actor: actor,
+    p_result_set_id: resultSetId,
+  });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") {
+      return { error: Response.json({ error: "Apply the latest database migration to enable background bulk actions." }, { status: 503 }) };
+    }
+    // P0002 is "not yours, or gone"; 22023 is "still being built". Both are the
+    // caller's to act on, and neither is a server fault.
+    if (error.code === "P0002") {
+      return { error: Response.json({ error: "That result set is no longer available. Rebuild it and try again." }, { status: 404 }) };
+    }
+    if (error.code === "22023") {
+      return { error: Response.json({ error: "That result set is still being built. Wait for it to finish before running the action." }, { status: 409 }) };
+    }
+    return { error: Response.json({ error: error.message }, { status: 500 }) };
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  return { error: null, totalItems: Number(row?.total_items ?? 0), excludedCount: Number(row?.excluded_count ?? 0) };
+}
+
 // Record what the operation answered, so a retry is answered from here.
 export async function recordOperationResult(
   supabase: ReturnType<typeof createAdminClient>,

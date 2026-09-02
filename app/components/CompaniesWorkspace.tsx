@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useDeferredValue, useEffect, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import CompanyFilterPanel, { BulkDomainPaste, addDomainsToWebsiteFilter } from "../CompanyFilterPanel";
 import { api, encodeFilters, fetchCompanies, isAbortError } from "../../lib/dashboard-api";
+import { filterPayloadWithSets } from "../../lib/filter-set-client";
 import { colorTone, formatNumber, initials } from "../../lib/dashboard-helpers";
 import type { ClientRecord, Company, Prospect, ProspectFilter } from "../../lib/types";
 import { AppIcon, EmptyState } from "./DashboardUi";
@@ -17,6 +18,12 @@ export function useCompaniesWorkspaceController({ active, search, filters, peopl
   const [refresh, setRefresh] = useState(0);
   const deferredSearch = useDeferredValue(search);
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);
+  // The question, not the array that expresses it. Bulk domains is the biggest
+  // producer of large value lists in the product - up to 1,000 domains in one
+  // paste - so this is the path the durable sets of 20260902000100 were built
+  // for. Depending on the encoding rather than the array also stops a parent
+  // re-render from re-fetching an unchanged query.
+  const encodedFilters = useMemo(() => encodeFilters(filters), [filters]);
 
   useEffect(() => {
     let current = true;
@@ -26,13 +33,15 @@ export function useCompaniesWorkspaceController({ active, search, filters, peopl
     void (async () => {
       onLoading(true); onError("");
       try {
-        const data = await fetchCompanies<{ companies: Company[]; total: number; totalCapped?: boolean; covered: number; prospectTotal: number; pageSize: number }>({ search: debouncedSearch, page, filters, peopleScope }, { signal: controller.signal });
+        const requestFilters = JSON.stringify(await filterPayloadWithSets(JSON.parse(encodedFilters), "company", ""));
+        if (!current) return;
+        const data = await fetchCompanies<{ companies: Company[]; total: number; totalCapped?: boolean; covered: number; prospectTotal: number; pageSize: number }>({ search: debouncedSearch, page, encodedFilters: requestFilters, peopleScope }, { signal: controller.signal });
         if (current) { setCompanies(data.companies); setSummary({ total: data.total, totalCapped: Boolean(data.totalCapped), covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); }
       } catch (caught) { if (current && !isAbortError(caught)) onError(caught instanceof Error ? caught.message : "Unable to load workspace data."); }
       finally { if (current) onLoading(false); }
     })();
     return () => { current = false; controller.abort(); };
-  }, [active, deferredSearch, debouncedSearch, page, filters, refresh, peopleScope, onError, onLoading]);
+  }, [active, deferredSearch, debouncedSearch, page, encodedFilters, refresh, peopleScope, onError, onLoading]);
 
   const refreshWorkspace = useCallback(() => setRefresh((current) => current + 1), []);
   return { companies, page, setPage, summary, deferredSearch, refreshWorkspace };
