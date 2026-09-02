@@ -1,3 +1,4 @@
+import { withInteractiveSlot } from "../../../../lib/admission";
 import { isStatementTimeout, statementTimeoutResponse } from "../../../../lib/api-errors";
 import { authorizeApi } from "../../../../lib/auth";
 import { filterErrorResponse, parseFilters } from "../../../../lib/prospect-filters";
@@ -27,6 +28,10 @@ function rowsOf(data: unknown): ProspectRow[] {
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
+  return withInteractiveSlot(request, () => runExport(request));
+}
+
+async function runExport(request: Request) {
 
   const payload = await request.json().catch(() => null) as {
     search?: unknown;
@@ -80,7 +85,7 @@ export async function POST(request: Request) {
       p_after_id: cursor?.id ?? null,
       p_limit: limit,
       p_with_total: withTotal,
-    }),
+    }).abortSignal(request.signal ?? AbortSignal.timeout(60_000)),
     supabase.from("prospect_fields").select("field_name").order("field_name").limit(500),
   ]);
 

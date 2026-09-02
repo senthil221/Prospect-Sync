@@ -1,3 +1,4 @@
+import { withInteractiveSlot } from "../../../lib/admission";
 import { isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
 import { authorizeApi } from "../../../lib/auth";
 import { csvDocument } from "../../../lib/csv";
@@ -118,7 +119,7 @@ export async function DELETE(request: Request) {
 
 // Shared by GET and POST. The query is identical either way; only how it arrives
 // differs, because a filter set can be far too large to survive a request line.
-async function respondToCompanyQuery(params: URLSearchParams) {
+async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSignal) {
   const url = { searchParams: params };
   const search = (url.searchParams.get("search") ?? "").trim().replace(/[,()]/g, " ");
   const clientId = (url.searchParams.get("clientId") ?? "").trim();
@@ -181,7 +182,7 @@ async function respondToCompanyQuery(params: URLSearchParams) {
       p_people_scope: peopleScope,
       p_limit: pageSize,
       p_offset: from,
-    });
+    }).abortSignal(signal ?? AbortSignal.timeout(40_000));
     if (isStatementTimeout(error)) {
       return statementTimeoutResponse("This filter combination", "Narrow it - fewer filters, or a search term alongside them - or export the full set instead.");
     }
@@ -241,7 +242,7 @@ async function respondToCompanyQuery(params: URLSearchParams) {
 export async function GET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  return respondToCompanyQuery(new URL(request.url).searchParams);
+  return withInteractiveSlot(request, () => respondToCompanyQuery(new URL(request.url).searchParams, request.signal));
 }
 
 // Same query, carried in the body.
@@ -268,5 +269,5 @@ export async function POST(request: Request) {
     if (value === null || value === undefined) continue;
     params.set(key, typeof value === "string" ? value : JSON.stringify(value));
   }
-  return respondToCompanyQuery(params);
+  return withInteractiveSlot(request, () => respondToCompanyQuery(params, request.signal));
 }

@@ -50,9 +50,9 @@ psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
 	end
 	\$\$;
 
-	-- The bulk import worker connects as authenticator, then assumes this
-	-- narrowly-scoped NOLOGIN role. Recreate role membership after a logical
-	-- disaster recovery where database objects survive but cluster roles do not.
+	-- The bulk import worker assumes this narrowly-scoped NOLOGIN role.
+	-- Recreate role membership after a logical disaster recovery where database
+	-- objects survive but cluster roles do not.
 	do \$\$
 	begin
 	  if not exists (select 1 from pg_roles where rolname = 'prospect_importer') then
@@ -61,6 +61,47 @@ psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
 	end
 	\$\$;
 	grant prospect_importer to authenticator;
+
+	-- ...and it now has its own login role to assume it from.
+	--
+	-- It used to connect as authenticator, the same login PostgREST uses, which
+	-- meant two things. Per-role connection limits could not separate the import
+	-- pool from the interactive pool, because both were the same role. And the
+	-- worker inherited authenticator's membership of service_role, so a bug in it
+	-- carried the whole database's authority rather than the narrow set it needs.
+	--
+	-- prospect_import_worker is a member of prospect_importer and nothing else.
+	-- Everything the worker runs directly is covered by that membership: usage on
+	-- the prospect_import schema, select/insert/delete on staged_rows, and
+	-- execute on process_staged_batch_v1. Its existing `set role
+	-- prospect_importer` still works, because a member may assume its role.
+	--
+	-- Same password as every other role here, so no new secret has to be
+	-- generated, distributed or rotated separately.
+	do \$\$
+	begin
+	  if not exists (select 1 from pg_roles where rolname = 'prospect_import_worker') then
+	    create role prospect_import_worker login;
+	  end if;
+	end
+	\$\$;
+	alter role prospect_import_worker with login password '${POSTGRES_PASSWORD}';
+	grant prospect_importer to prospect_import_worker;
+	-- Deliberately not service_role, and asserted rather than assumed: if a
+	-- future change needs the worker to do something privileged, that belongs in
+	-- an audited SECURITY DEFINER function with its own scope check.
+	do \$\$
+	begin
+	  if exists (
+	    select 1 from pg_auth_members am
+	    join pg_roles granted on granted.oid = am.roleid
+	    join pg_roles member on member.oid = am.member
+	    where member.rolname = 'prospect_import_worker' and granted.rolname = 'service_role'
+	  ) then
+	    revoke service_role from prospect_import_worker;
+	  end if;
+	end
+	\$\$;
 
 	-- JWT settings PostgREST and legacy helpers read from the database ------
 	alter database "${DB}" set "app.settings.jwt_secret" to '${JWT_SECRET}';
@@ -80,6 +121,31 @@ psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
 
 	-- Studio and psql sessions get more rope, but not unlimited.
 	alter role postgres set idle_in_transaction_session_timeout = '300s';
+
+	-- An import batch is legitimately long, so the worker's ceiling is generous
+	-- but bounded. It was inheriting authenticator's 120s and then overriding it
+	-- per session to 10 minutes anyway, which put the guard rail in the
+	-- application rather than on the role.
+	alter role prospect_import_worker set statement_timeout = '15min';
+	alter role prospect_import_worker set idle_in_transaction_session_timeout = '5min';
+	alter role prospect_import_worker set lock_timeout = '30s';
+
+	-- Pool separation, database side.
+	--
+	-- Measured on this deployment: PostgREST does not cancel a statement when
+	-- the browser gives up on the request. An export abandoned after 2.1s kept
+	-- its backend busy for the full 7.9s, holding a pool connection nobody was
+	-- waiting for. The application's admission guard fails fast, but it lives in
+	-- one process and blue/green runs two slots at once, so these limits are the
+	-- authority rather than the guard.
+	--
+	-- PGRST_DB_POOL is 24; 30 leaves PostgREST headroom while making it
+	-- impossible for the interactive pool alone to exhaust the cluster. The
+	-- worker holds a single direct connection, so 4 covers a restart overlap
+	-- without letting it take the box. max_connections is 100 with 3 reserved,
+	-- and auth, storage, meta, studio and psql draw on the rest.
+	alter role authenticator connection limit 30;
+	alter role prospect_import_worker connection limit 4;
 
 	-- Application objects belong to postgres ---------------------------------
 	-- scripts/migrate.sh connects as postgres, and CREATE OR REPLACE FUNCTION

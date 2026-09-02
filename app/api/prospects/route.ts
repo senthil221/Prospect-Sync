@@ -1,3 +1,4 @@
+import { withInteractiveSlot } from "../../../lib/admission";
 import { isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
 import { authorizeApi } from "../../../lib/auth";
 import { filterErrorResponse, parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
@@ -15,6 +16,7 @@ type WorkspaceQuery = {
   companyScope: CompanyScope | null;
   withTotal: boolean;
   knownVersions: Record<string, number> | null;
+  signal: AbortSignal | undefined;
 };
 
 const missingFunctionCodes = new Set(["PGRST202", "42883"]);
@@ -39,7 +41,7 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
     p_company_scope: query.companyScope ?? {},
     p_with_total: query.withTotal,
     p_known_versions: query.knownVersions,
-  });
+  }).abortSignal(query.signal ?? AbortSignal.timeout(30_000));
   return { ...workspace, version: "v12" };
 }
 
@@ -50,7 +52,7 @@ function workspaceSummary(data: unknown) {
 
 // Shared by GET and POST. Same query either way; only the transport differs,
 // because a pasted filter list can be far too large for a request line.
-async function respondToProspectQuery(params: URLSearchParams) {
+async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSignal) {
   const url = { searchParams: params };
   const search = (url.searchParams.get("search") ?? "").trim().slice(0, 300);
   const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
@@ -88,6 +90,7 @@ async function respondToProspectQuery(params: URLSearchParams) {
     companyScope,
     withTotal,
     knownVersions,
+    signal,
   });
   const fieldsRequest = includeFields
     ? supabase.from("prospect_fields").select("field_name").order("field_name").limit(500)
@@ -176,7 +179,7 @@ export async function DELETE(request: Request) {
 export async function GET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  return respondToProspectQuery(new URL(request.url).searchParams);
+  return withInteractiveSlot(request, () => respondToProspectQuery(new URL(request.url).searchParams, request.signal));
 }
 
 // Same query, carried in the body.
@@ -198,5 +201,5 @@ export async function POST(request: Request) {
     if (value === null || value === undefined) continue;
     params.set(key, typeof value === "string" ? value : JSON.stringify(value));
   }
-  return respondToProspectQuery(params);
+  return withInteractiveSlot(request, () => respondToProspectQuery(params, request.signal));
 }

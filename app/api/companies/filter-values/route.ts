@@ -1,3 +1,4 @@
+import { withInteractiveSlot } from "../../../../lib/admission";
 import { isStatementTimeout, statementTimeoutResponse } from "../../../../lib/api-errors";
 import { authorizeApi } from "../../../../lib/auth";
 import { createAdminClient } from "../../../../lib/supabase/admin";
@@ -5,6 +6,10 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 export async function GET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
+  return withInteractiveSlot(request, () => suggestValues(request));
+}
+
+async function suggestValues(request: Request) {
 
   const url = new URL(request.url);
   const field = (url.searchParams.get("field") ?? "").trim().slice(0, 160);
@@ -17,7 +22,7 @@ export async function GET(request: Request) {
     p_field: field,
     p_search: search,
     p_limit: limit,
-  });
+  }).abortSignal(request.signal ?? AbortSignal.timeout(30_000));
 
   if (isStatementTimeout(error)) {
     return statementTimeoutResponse("Loading values for this field", "Type a few more characters to narrow the list, or enter the value directly.");

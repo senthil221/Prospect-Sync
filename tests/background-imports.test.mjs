@@ -69,7 +69,11 @@ test("deployment runs storage and one bounded import worker", async () => {
   assert.match(bootstrap, /alter %s owner to postgres/i);
   assert.match(bootstrap, /deptype = 'e'/);
   assert.match(bootstrap, /still owned by supabase_admin/i);
-  assert.match(compose, /PGUSER: authenticator/);
+  // The worker used to share authenticator with PostgREST, which made per-role
+  // connection limits useless and handed it service_role. It has its own login
+  // now; see tests/pool-collapse-protection.test.mjs.
+  assert.match(compose, /PGUSER: prospect_import_worker/);
+  assert.doesNotMatch(compose, /PGUSER: authenticator/);
   // One slow listing holds a pool connection for its whole run, so a pool this
   // small let a single expensive filter starve every other request with
   // "Timed out acquiring connection from connection pool". Keep the slack.

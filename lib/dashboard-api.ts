@@ -36,6 +36,39 @@ export function clearApiCache() {
   apiResponseCache.clear();
 }
 
+// The server refuses rather than queues when the interactive pool is under
+// pressure, and says so with 503 + Retry-After. A read is idempotent, so it is
+// worth retrying; a mutation is not retried here, because without an
+// idempotency key a retry can apply the same change twice.
+//
+// The wait is jittered around the server's Retry-After. Without jitter every
+// client refused in the same burst comes back in the same millisecond, which is
+// the burst again.
+const overloadRetries = 2;
+
+function retryDelayMs(response: Response, attempt: number) {
+  const header = Number(response.headers.get("Retry-After"));
+  const base = Number.isFinite(header) && header > 0 ? header * 1000 : 1000;
+  const backoff = base * Math.pow(2, attempt);
+  return Math.min(8000, backoff) * (0.5 + Math.random());
+}
+
+function isOverloaded(response: Response) {
+  return response.status === 503 || response.status === 429;
+}
+
+async function fetchWithBackpressure(path: string, options: RequestInit | undefined, idempotent: boolean) {
+  let response = await fetch(path, options);
+  if (!idempotent) return response;
+  for (let attempt = 0; attempt < overloadRetries && isOverloaded(response); attempt += 1) {
+    const wait = retryDelayMs(response, attempt);
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    if (options?.signal?.aborted) return response;
+    response = await fetch(path, options);
+  }
+  return response;
+}
+
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const method = String(options?.method ?? "GET").toUpperCase();
   // Polling callers opt out with `cache: "no-store"`. Without this guard the
@@ -48,9 +81,12 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     if (pending) return pending as Promise<T>;
   }
   const request = (async () => {
-    const response = await fetch(path, options);
+    const response = await fetchWithBackpressure(path, options, method === "GET");
+    // An overload response is never cached: it says nothing about the data, and
+    // caching it would keep answering "busy" for five minutes after the load
+    // had passed.
     const data = await parseApiResponse<T>(response);
-    if (cacheable) apiResponseCache.set(path, { data, expiresAt: Date.now() + 5 * 60_000 });
+    if (cacheable && !isOverloaded(response)) apiResponseCache.set(path, { data, expiresAt: Date.now() + 5 * 60_000 });
     else if (method !== "GET") clearApiCache();
     return data;
   })();

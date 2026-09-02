@@ -1,3 +1,4 @@
+import { withInteractiveSlot } from "../../../../lib/admission";
 import { isStatementTimeout, statementTimeoutResponse } from "../../../../lib/api-errors";
 import { authorizeApi } from "../../../../lib/auth";
 import { createAdminClient } from "../../../../lib/supabase/admin";
@@ -5,6 +6,13 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 export async function GET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
+  return withInteractiveSlot(request, () => suggestValues(request));
+}
+
+// Typing in a filter box is the highest-frequency database call there is, so it
+// is admitted through the same guard as everything else rather than being
+// treated as free.
+async function suggestValues(request: Request) {
 
   const url = new URL(request.url);
   const field = (url.searchParams.get("field") ?? "").trim().slice(0, 160);
@@ -25,7 +33,7 @@ export async function GET(request: Request) {
       p_search: search,
       p_client_id: clientId,
       p_limit: limit,
-    });
+    }).abortSignal(request.signal ?? AbortSignal.timeout(30_000));
     if (classified.error) {
       const migrationMissing = missing(classified);
       return Response.json(
@@ -44,7 +52,7 @@ export async function GET(request: Request) {
     p_search: search,
     p_client_id: clientId,
     p_limit: limit,
-  });
+  }).abortSignal(request.signal ?? AbortSignal.timeout(30_000));
   if (missing(result)) {
     result = await supabase.rpc("prospect_filter_values_v2", {
       p_field: field,

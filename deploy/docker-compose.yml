@@ -354,7 +354,12 @@ services:
       PGHOST: db
       PGPORT: "5432"
       PGDATABASE: ${POSTGRES_DB}
-      PGUSER: authenticator
+      # Its own login role, not the one PostgREST uses. Per-role connection
+      # limits cannot separate the import pool from the interactive pool while
+      # both are `authenticator`, and that login is a member of service_role.
+      # Created by postgres/init/00-prospect-bootstrap.sh with this same
+      # password; migration 20260902000090 fails the release if it is missing.
+      PGUSER: prospect_import_worker
       PGPASSWORD: ${POSTGRES_PASSWORD}
       NODE_OPTIONS: "--max-old-space-size=512"
     healthcheck:
