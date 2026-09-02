@@ -1,5 +1,6 @@
+import { isStatementTimeout, statementTimeoutResponse } from "../../../../lib/api-errors";
 import { authorizeApi } from "../../../../lib/auth";
-import { parseFilters } from "../../../../lib/prospect-filters";
+import { filterErrorResponse, parseFilters } from "../../../../lib/prospect-filters";
 import { availableExportFieldIds, buildExportColumns, csvHeaderLine, csvRowsBody, type ProspectRow } from "../../../../lib/prospect-export";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { parseCompanyScope } from "../../../../lib/workspace-scopes";
@@ -43,11 +44,11 @@ export async function POST(request: Request) {
   const search = String(payload.search ?? "").trim().slice(0, 300);
   let filters;
   try { filters = parseFilters(JSON.stringify(payload.filters ?? [])); }
-  catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Invalid Boolean filter." }, { status: 400 }); }
+  catch (error) { return filterErrorResponse(error, "Invalid Boolean filter."); }
   const clientId = String(payload.clientId ?? "").trim() || null;
   let companyScope;
   try { companyScope = parseCompanyScope(payload.companyScope ? JSON.stringify(payload.companyScope) : null); }
-  catch { return Response.json({ error: "Invalid company navigation scope." }, { status: 400 }); }
+  catch (error) { return filterErrorResponse(error, "Invalid company navigation scope."); }
   const requestedFields = Array.isArray(payload.fields)
     ? [...new Set(payload.fields.map((field) => String(field).trim()).filter(Boolean))].slice(0, 600)
     : [];
@@ -62,12 +63,19 @@ export async function POST(request: Request) {
   const withTotal = payload.withTotal === true;
 
   const supabase = createAdminClient();
+  // One export function, scoped or not. v1 carried its own inlined copy of the
+  // filter CASE, and the copies had drifted: v1 never learned __company_domain,
+  // which the compiler and the row predicate both have, so a domain filter
+  // exported as though it had not been set. v4 compiles the same predicate the
+  // workspace listing does (prospect_filter_sql_v1), so the rows in the file and
+  // the count above the grid answer the same question. An empty scope costs
+  // nothing - v_has_scope is false, so no scope CTE is emitted.
   const [page, fieldRows] = await Promise.all([
-    supabase.rpc(companyScope ? "search_prospect_export_v4" : "search_prospect_export_v1", {
+    supabase.rpc("search_prospect_export_v4", {
       p_search: search,
       p_filters: filters,
       p_client_id: clientId,
-      ...(companyScope ? { p_company_scope: companyScope } : {}),
+      p_company_scope: companyScope ?? {},
       p_after_created_at: cursor?.createdAt ?? null,
       p_after_id: cursor?.id ?? null,
       p_limit: limit,
@@ -80,6 +88,9 @@ export async function POST(request: Request) {
     return Response.json({ error: "Apply the search-index migration to enable large exports." }, { status: 503 });
   }
   const failure = page.error ?? fieldRows.error;
+  if (isStatementTimeout(failure)) {
+    return statementTimeoutResponse("This export page", "Narrow the filters, or export in smaller pages.");
+  }
   if (failure) return Response.json({ error: failure.message }, { status: 500 });
 
   const customFieldNames = (fieldRows.data ?? []).map((field) => String(field.field_name ?? "")).filter(Boolean);

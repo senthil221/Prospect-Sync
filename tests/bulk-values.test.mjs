@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { bulkFieldKind, describeBulkMerge, isValidBulkValue, mergeBulkValues, normalizeBulkValue, partitionBlocklistValues, splitPastedValues } from "../lib/bulk-values.ts";
-import { parseFilters } from "../lib/prospect-filters.ts";
+import { FilterLimitError, maxFilterValues, maxFilters, parseFilters } from "../lib/prospect-filters.ts";
 
 test("splits the separators a pasted spreadsheet column actually uses", () => {
   assert.deepEqual(splitPastedValues("acme.com\nstripe.com"), ["acme.com", "stripe.com"]);
@@ -69,15 +69,35 @@ test("a pasted column of hundreds of values survives filter parsing", () => {
   assert.equal(filter.values.at(-1), "company-499.com");
 });
 
-test("filter parsing stays bounded against a hostile payload", () => {
+test("an over-cap payload is refused, never trimmed to fit", () => {
   // The ceiling moved from 1,000 to 5,000 once a pasted list became an indexed
   // equality test and the company scope stopped calling the per-row predicate.
-  // It is still a ceiling: values past it are dropped, so the bound has to hold.
+  // It is still a ceiling -- but crossing it is now an error, not a quiet trim
+  // that returns a confidently wrong answer for the values that survived.
   const values = Array.from({ length: 20000 }, (_, index) => `v${index}`);
-  const [filter] = parseFilters(JSON.stringify([{ field: "__title", operator: "contains", values }]));
-  assert.equal(filter.values.length, 5000);
-  const many = Array.from({ length: 100 }, () => ({ field: "__title", operator: "contains", values: ["x"] }));
-  assert.equal(parseFilters(JSON.stringify(many)).length, 40);
+  assert.throws(
+    () => parseFilters(JSON.stringify([{ field: "__title", operator: "contains", values }])),
+    (error) => error instanceof FilterLimitError
+      && error.kind === "values"
+      && error.received === 20000
+      && error.allowed === maxFilterValues
+      && error.field === "__title",
+  );
+
+  // Exactly at the cap still parses: the boundary is inclusive.
+  const atCap = Array.from({ length: maxFilterValues }, (_, index) => `v${index}`);
+  const [filter] = parseFilters(JSON.stringify([{ field: "__title", operator: "contains", values: atCap }]));
+  assert.equal(filter.values.length, maxFilterValues);
+
+  const many = Array.from({ length: maxFilters + 1 }, () => ({ field: "__title", operator: "contains", values: ["x"] }));
+  assert.throws(
+    () => parseFilters(JSON.stringify(many)),
+    (error) => error instanceof FilterLimitError && error.kind === "filters" && error.allowed === maxFilters,
+  );
+
+  // The stated target workload is 50 simultaneously active filters.
+  const fifty = Array.from({ length: 50 }, () => ({ field: "__title", operator: "contains", values: ["x"] }));
+  assert.equal(parseFilters(JSON.stringify(fifty)).length, 50);
 });
 
 test("company keyword scopes are defaulted, whitelisted, and preserved", () => {

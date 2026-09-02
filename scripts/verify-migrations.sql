@@ -221,6 +221,49 @@ with checks(sort_key, area, check_name, ok, detail) as (
     (select count(*) from public.prospects where title_classified_at is null) = 0,
     (select count(*)::text || ' still unclassified -- POST /api/prospects/classify until remaining=false'
      from public.prospects where title_classified_at is null)
+
+  -- 9. Release 1A: no untimed hot function ------------------------------------
+  --
+  -- 20260902000040 sets these through ALTER FUNCTION, so a later
+  -- CREATE OR REPLACE without a SET statement_timeout clause silently drops
+  -- them. proconfig is the authoritative record either way.
+  union all
+  select 130, 'timeouts', 'linked_prospect_total_v1 has a statement timeout',
+    coalesce((select proconfig::text[] && array['statement_timeout=20s']
+      from pg_proc where oid = to_regprocedure('public.linked_prospect_total_v1(text)')), false),
+    coalesce((select array_to_string(proconfig, ', ')
+      from pg_proc where oid = to_regprocedure('public.linked_prospect_total_v1(text)')), 'function missing')
+
+  union all
+  select 131, 'timeouts', 'prospect_filter_values_v3 has a statement timeout',
+    coalesce((select proconfig::text[] && array['statement_timeout=30s']
+      from pg_proc where oid = to_regprocedure('public.prospect_filter_values_v3(text,text,text,integer)')), false),
+    coalesce((select array_to_string(proconfig, ', ')
+      from pg_proc where oid = to_regprocedure('public.prospect_filter_values_v3(text,text,text,integer)')), 'function missing')
+
+  union all
+  select 132, 'timeouts', 'search_prospect_export_v1 has a statement timeout',
+    coalesce((select proconfig::text[] && array['statement_timeout=60s']
+      from pg_proc where oid = to_regprocedure('public.search_prospect_export_v1(text,jsonb,text,timestamptz,text,integer,boolean)')), false),
+    coalesce((select array_to_string(proconfig, ', ')
+      from pg_proc where oid = to_regprocedure('public.search_prospect_export_v1(text,jsonb,text,timestamptz,text,integer,boolean)')), 'function missing')
+
+  -- Nothing else on the interactive read path may be untimed.
+  union all
+  select 133, 'timeouts', 'no SECURITY DEFINER search/filter function is left untimed',
+    not exists (
+      select 1 from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public'
+        and p.prosecdef
+        and (p.proname like 'search\_%' or p.proname like '%\_filter\_values%' or p.proname like 'filter\_companies%')
+        and not coalesce(array_to_string(p.proconfig, ',') like '%statement_timeout%', false)
+    ),
+    coalesce((select string_agg(p.proname, ', ')
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.prosecdef
+        and (p.proname like 'search\_%' or p.proname like '%\_filter\_values%' or p.proname like 'filter\_companies%')
+        and not coalesce(array_to_string(p.proconfig, ',') like '%statement_timeout%', false)), '')
 )
 select
   area,

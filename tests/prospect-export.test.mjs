@@ -62,20 +62,23 @@ test("large exports stream keyset pages to disk in one file or split parts", asy
     readFile(new URL("../app/api/prospects/export/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/export-runner.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/DashboardApp.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../supabase/migrations/20260811000000_prospect_search_index.sql", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260902000020_people_workspace_uses_complete_sql.sql", import.meta.url), "utf8"),
   ]);
 
   // Keyset export endpoint: bounded page + cursor, safe under the 60s Hobby cap.
-  assert.match(endpoint, /search_prospect_export_v1/);
+  // One function for scoped and unscoped exports alike; release-1a-correctness
+  // records why v1 must not come back.
+  assert.match(endpoint, /search_prospect_export_v4/);
+  assert.doesNotMatch(endpoint, /search_prospect_export_v1/);
   assert.match(endpoint, /maxPageSize/);
   assert.match(endpoint, /nextCursor/);
   assert.match(endpoint, /excludedIds/);
   assert.match(endpoint, /buildExportColumns/);
 
   // SQL traverses (created_at, id) by cursor instead of a deep OFFSET.
-  assert.match(migration, /function public\.search_prospect_export_v1/);
+  assert.match(migration, /FUNCTION public\.search_prospect_export_v4/);
   assert.match(migration, /p_after_created_at/);
-  assert.match(migration, /order by filtered\.created_at desc, filtered\.id desc/);
+  assert.match(migration, /order by matched\.created_at desc, matched\.id desc/);
 
   // Client runner streams to disk (File System Access) with single vs parts output.
   assert.match(runner, /showSaveFilePicker/);

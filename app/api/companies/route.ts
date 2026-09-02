@@ -1,7 +1,8 @@
+import { isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
 import { authorizeApi } from "../../../lib/auth";
 import { csvDocument } from "../../../lib/csv";
 import { createAdminClient } from "../../../lib/supabase/admin";
-import { parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
+import { filterErrorResponse, parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
 import { parsePeopleScope, type PeopleScope } from "../../../lib/workspace-scopes";
 
 const exportBatchSize = 1000;
@@ -105,7 +106,7 @@ export async function DELETE(request: Request) {
     const search = String(payload.search ?? "").trim().replace(/[,()]/g, " ");
     let filters: ProspectFilter[];
     try { filters = parseFilters(JSON.stringify(payload.filters ?? [])); }
-    catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Invalid company filters." }, { status: 400 }); }
+    catch (error) { return filterErrorResponse(error, "Invalid company filters."); }
     const excludedIds = Array.isArray(payload.excludedIds) ? [...new Set(payload.excludedIds.map((id) => String(id).trim()).filter(Boolean))].slice(0, 50000) : [];
     const { data, error } = await supabase.rpc("delete_companies_matching_v1", { p_search: search, p_filters: filters, p_excluded_ids: excludedIds });
     if (error) return Response.json({ error: missing(error) ? "Apply the latest database migration to enable company delete." : error.message }, { status: missing(error) ? 503 : 500 });
@@ -129,11 +130,11 @@ async function respondToCompanyQuery(params: URLSearchParams) {
 
   let filters: ProspectFilter[];
   try { filters = parseFilters(url.searchParams.get("filters")); }
-  catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Invalid company filters." }, { status: 400 }); }
+  catch (error) { return filterErrorResponse(error, "Invalid company filters."); }
 
   let peopleScope: PeopleScope | null;
   try { peopleScope = parsePeopleScope(url.searchParams.get("peopleScope")); }
-  catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Invalid people navigation scope." }, { status: 400 }); }
+  catch (error) { return filterErrorResponse(error, "Invalid people navigation scope."); }
 
   if (exportCsv) {
     if (clientId) return Response.json({ error: "Client-scoped company export is not available." }, { status: 400 });
@@ -181,6 +182,9 @@ async function respondToCompanyQuery(params: URLSearchParams) {
       p_limit: pageSize,
       p_offset: from,
     });
+    if (isStatementTimeout(error)) {
+      return statementTimeoutResponse("This filter combination", "Narrow it - fewer filters, or a search term alongside them - or export the full set instead.");
+    }
     if (error) {
       const migrationMissing = error.code === "PGRST202" || error.code === "42883";
       return Response.json({ error: migrationMissing ? "Apply the latest database migration to enable company filters." : error.message }, { status: migrationMissing ? 503 : 500 });
@@ -220,6 +224,9 @@ async function respondToCompanyQuery(params: URLSearchParams) {
     supabase.rpc("linked_prospect_total_v1", { p_search: search }),
   ]);
   const failure = [companies, covered, prospects].find((result) => result.error)?.error;
+  if (isStatementTimeout(failure)) {
+    return statementTimeoutResponse("The company directory", "Search for a name or domain to narrow it.");
+  }
   if (failure) return Response.json({ error: failure.message }, { status: 500 });
   return Response.json({
     companies: companies.data ?? [],
@@ -239,7 +246,7 @@ export async function GET(request: Request) {
 
 // Same query, carried in the body.
 //
-// Bulk domains pastes up to maxFilterValues (1000) values into the __website
+// Bulk domains pastes up to maxFilterValues values into the __website
 // filter, and companyApiPath puts the whole filter set in the query string.
 // Measured against production: 400 domains is a 12.9KB URL and is accepted, 600
 // is 19.3KB and Node answers 431 Request Header Fields Too Large before any of

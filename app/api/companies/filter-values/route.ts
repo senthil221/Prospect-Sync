@@ -1,3 +1,4 @@
+import { isStatementTimeout, statementTimeoutResponse } from "../../../../lib/api-errors";
 import { authorizeApi } from "../../../../lib/auth";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
@@ -18,6 +19,9 @@ export async function GET(request: Request) {
     p_limit: limit,
   });
 
+  if (isStatementTimeout(error)) {
+    return statementTimeoutResponse("Loading values for this field", "Type a few more characters to narrow the list, or enter the value directly.");
+  }
   if (error) {
     const migrationMissing = error.code === "PGRST202" || error.code === "42883";
     return Response.json(

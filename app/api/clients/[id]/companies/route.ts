@@ -1,6 +1,6 @@
 import { authorizeApi, getAuthorizedUser } from "../../../../../lib/auth.ts";
 import { MAX_BULK_COMPANY_MATCHES, parseCompanyBulkSelection } from "../../../../../lib/company-bulk-selection.ts";
-import { parseFilters } from "../../../../../lib/prospect-filters.ts";
+import { filterErrorResponse, parseFilters } from "../../../../../lib/prospect-filters.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { parsePeopleScope } from "../../../../../lib/workspace-scopes.ts";
 
@@ -63,7 +63,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     filters = parseFilters(JSON.stringify(payload.filters ?? []));
     peopleScope = payload.peopleScope ? parsePeopleScope(JSON.stringify(payload.peopleScope)) : null;
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "Invalid company selection." }, { status: 400 });
+    return filterErrorResponse(error, "Invalid company selection.");
   }
 
   const excludedIds = Array.isArray(payload.excludedIds)

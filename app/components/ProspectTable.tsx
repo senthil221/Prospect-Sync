@@ -391,6 +391,9 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   function applyView(viewId: string) {
     const view = savedViews.find((item) => item.id === viewId);
     if (!view) return;
+    // Applying a flagged view would put the grid in a state every request refuses.
+    // Say why instead, and leave the saved view untouched for the user to edit.
+    if (view.needsReview) { setNotice(`“${view.name}” needs review. ${view.needsReview.reason} ${view.needsReview.alternative}`); return; }
     onFiltersChange(view.definition.filters ?? []);
     if (view.definition.columns?.length) {
       setVisibleColumns(view.definition.columns);
@@ -434,7 +437,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
         <div className="results-toolbar">
           <div className="results-count"><strong title={totalHint}>{displayedTotal} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `All ${displayedTotal} selected` : `Select all ${displayedTotal} across pages`}</button> : null}</div>
           <div className="workspace-actions">
-            <label><span className="sr-only">Saved ICP view</span><select defaultValue="" onChange={(event) => applyView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}</select></label>
+            <label><span className="sr-only">Saved ICP view</span><select defaultValue="" onChange={(event) => applyView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.needsReview ? `${view.name} (needs review)` : view.name}</option>)}</select></label>
             <button className="outline-button" onClick={() => void saveCurrentView()}><AppIcon name="star" size={14}/> Save view</button>
             <button className="outline-button" disabled={exportingProspects} title="Choose rows and fields for a CSV export" onClick={() => openExportDialog("all_matching")}>{exportingProspects ? "Exporting…" : "Export CSV"}</button>
             {!clientId ? <button className="outline-button" disabled={espScanning} title="Detect MX-visible gateways and mailbox providers. API-only email security products are not visible in MX records." onClick={() => void scanEmailProviders()}>{espScanning ? "Scanning MX…" : "Detect ESPs"}</button> : null}

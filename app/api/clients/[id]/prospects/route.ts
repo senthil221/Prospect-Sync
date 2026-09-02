@@ -1,5 +1,6 @@
 import { authorizeApi, getAuthorizedUser } from "../../../../../lib/auth.ts";
 import { isEmptySelection, parseBulkSelection, selectionArgs } from "../../../../../lib/client-operations.ts";
+import { filterErrorResponse } from "../../../../../lib/prospect-filters.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883", "42P01"]);
@@ -37,7 +38,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   let selection;
   try { selection = parseBulkSelection(payload); }
-  catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Invalid filter." }, { status: 400 }); }
+  catch (error) { return filterErrorResponse(error, "Invalid filter."); }
 
   // Without ids and without filters, these would act on the entire database.
   if (isEmptySelection(selection)) {

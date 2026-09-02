@@ -10,10 +10,15 @@ const allowedOperators = new Set<string>([
   "contains", "equals", "not_contains", "not_equals", "empty", "not_empty", "boolean", "number_ranges",
 ]);
 
+const companyKeywordScopes = new Set(["name", "keywords", "description"]);
+const defaultCompanyKeywordScopes = ["name", "keywords"];
+
 // A pasted spreadsheet column is routinely hundreds of domains long. The old cap
 // of 50 silently discarded everything past the fiftieth value, so a 500-domain
-// filter quietly returned the wrong answer. Values past this cap are still
-// dropped silently, so the number has to be comfortably above real list sizes.
+// filter quietly returned the wrong answer. Values past this cap are no longer
+// dropped -- the request is refused with a FilterLimitError (413) before it
+// reaches the database -- so the number still has to sit comfortably above real
+// list sizes.
 //
 // Raised from 1,000 once pasted lists became an indexed equality test rather than
 // a chain of ILIKE (20260901000000) and the company scope stopped calling the
@@ -30,25 +35,102 @@ const allowedOperators = new Set<string>([
 // because it carries the whole value list into the scope. 5,000 keeps every
 // surface under about 4.5s with room as the database grows toward 2M, where
 // 10,000 sits at ten seconds today and would only get worse.
-const maxFilterValues = 5000;
-const maxFilters = 40;
-const companyKeywordScopes = new Set(["name", "keywords", "description"]);
-const defaultCompanyKeywordScopes = ["name", "keywords"];
+export const maxFilterValues = 5000;
+
+// 50 simultaneously active filters is the stated target workload, so the refusal
+// threshold sits above it rather than on it. Past 60 the generated SQL grows
+// faster than the answer improves -- see 20260902000030 on values x filters.
+export const maxFilters = 60;
+
+// Per-value length. A Boolean value is one compiled tsquery expression, so it
+// gets a larger budget than a pasted cell. Trimming either one silently changes
+// which rows match, so both are refusals rather than clamps.
+export const maxValueLength = 160;
+export const maxBooleanValueLength = 1000;
+
+export type FilterLimitKind = "filters" | "values" | "value_length";
+
+// Thrown instead of trimming. Carries everything an API route needs to answer
+// 413 with actionable numbers: what arrived, what is allowed, which filter, and
+// what to do instead.
+export class FilterLimitError extends Error {
+  readonly kind: FilterLimitKind;
+  readonly received: number;
+  readonly allowed: number;
+  readonly field: string | null;
+  readonly alternative: string;
+
+  constructor(kind: FilterLimitKind, received: number, allowed: number, field: string | null, alternative: string) {
+    const subject = kind === "filters" ? "filters"
+      : kind === "values" ? "filter values"
+      : "characters in a filter value";
+    super(`This request carries ${received} ${subject}; at most ${allowed} are allowed.`);
+    this.name = "FilterLimitError";
+    this.kind = kind;
+    this.received = received;
+    this.allowed = allowed;
+    this.field = field;
+    this.alternative = alternative;
+  }
+}
+
+// One rejection shape for every filter entry point. A limit breach is a 413
+// carrying the numbers needed to fix the request; anything else parseFilters
+// throws (a Boolean expression that will not compile) stays a 400.
+//
+// The remedy is folded into `error` as well as returned as a field, because every
+// current UI surface shows that one string (lib/dashboard-api.ts). A caller that
+// wants to build its own message reads the structured fields instead.
+export function filterErrorResponse(error: unknown, fallback: string): Response {
+  if (error instanceof FilterLimitError) {
+    return Response.json({
+      error: `${error.message} ${error.alternative}`,
+      limit: error.kind,
+      received: error.received,
+      allowed: error.allowed,
+      field: error.field,
+      alternative: error.alternative,
+    }, { status: 413 });
+  }
+  return Response.json({ error: error instanceof Error ? error.message : fallback }, { status: 400 });
+}
 
 // Sanitize an untrusted filters JSON string into a bounded, well-formed filter list.
-// Throws only when a Boolean expression fails to compile.
+// Throws FilterLimitError when the request exceeds a cap, or a compile error when a
+// Boolean expression is malformed. Nothing is silently trimmed: a filter this
+// function cannot honour exactly is refused, never narrowed.
 export function parseFilters(value: string | null): ProspectFilter[] {
   if (!value) return [];
   const parsed = JSON.parse(value) as unknown;
   if (!Array.isArray(parsed)) return [];
-  return parsed.slice(0, maxFilters).flatMap((item) => {
+  if (parsed.length > maxFilters) {
+    throw new FilterLimitError("filters", parsed.length, maxFilters, null,
+      `Remove filters until at most ${maxFilters} remain, or save the narrow ones as a view and apply them in two passes.`);
+  }
+  return parsed.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
     const candidate = item as Record<string, unknown>;
     const field = String(candidate.field ?? "").trim().slice(0, 160);
     const operator = String(candidate.operator ?? "contains");
-    const rawValues = Array.isArray(candidate.values) ? candidate.values : [candidate.value];
-    let values = rawValues.map((entry) => String(entry ?? "").trim().slice(0, operator === "boolean" ? 1000 : 160)).filter(Boolean).slice(0, maxFilterValues);
+    // Unknown fields and operators are dropped rather than refused: they carry no
+    // rows either way, and the field catalogue check belongs with the versioned
+    // AST. The caps below only ever fire on a filter that would have been used.
     if (!field || !allowedOperators.has(operator)) return [];
+    const rawValues = Array.isArray(candidate.values) ? candidate.values : [candidate.value];
+    if (rawValues.length > maxFilterValues) {
+      throw new FilterLimitError("values", rawValues.length, maxFilterValues, field,
+        `Split this list into batches of ${maxFilterValues} values or fewer and run them one at a time.`);
+    }
+    const allowedLength = operator === "boolean" ? maxBooleanValueLength : maxValueLength;
+    const trimmed = rawValues.map((entry) => String(entry ?? "").trim());
+    const overlong = trimmed.find((entry) => entry.length > allowedLength);
+    if (overlong !== undefined) {
+      throw new FilterLimitError("value_length", overlong.length, allowedLength, field,
+        operator === "boolean"
+          ? "Shorten the Boolean expression."
+          : "Check for a pasted cell that ran together with the next one; each value must be a single entry.");
+    }
+    let values = trimmed.filter(Boolean);
     if (!["empty", "not_empty"].includes(operator) && !values.length) return [];
     if (operator === "boolean") values = [compileBooleanSearch(values[0])];
     if (operator === "number_ranges") values = values.filter((range) => range === "unknown" || /^[0-9]+:[0-9]*$/.test(range));

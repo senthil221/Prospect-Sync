@@ -1,5 +1,6 @@
+import { isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
 import { authorizeApi } from "../../../lib/auth";
-import { parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
+import { filterErrorResponse, parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { parseCompanyScope, type CompanyScope } from "../../../lib/workspace-scopes";
 
@@ -56,13 +57,13 @@ async function respondToProspectQuery(params: URLSearchParams) {
   const clientId = (url.searchParams.get("clientId") ?? "").trim() || null;
   let companyScope: CompanyScope | null;
   try { companyScope = parseCompanyScope(url.searchParams.get("companyScope")); }
-  catch { return Response.json({ error: "Invalid company navigation scope." }, { status: 400 }); }
+  catch (error) { return filterErrorResponse(error, "Invalid company navigation scope."); }
   const includeFields = url.searchParams.get("includeFields") !== "0";
   const withTotal = url.searchParams.get("withTotal") === null ? page === 1 : url.searchParams.get("withTotal") !== "0";
   const limit = 50;
   let filters: ProspectFilter[];
   try { filters = parseFilters(url.searchParams.get("filters")); }
-  catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Invalid Boolean filter." }, { status: 400 }); }
+  catch (error) { return filterErrorResponse(error, "Invalid Boolean filter."); }
   const supabase = createAdminClient();
 
   const workspaceRequest = runProspectWorkspace(supabase, {
@@ -84,6 +85,9 @@ async function respondToProspectQuery(params: URLSearchParams) {
     return Response.json({ error: "Apply the latest database migration to enable the new prospect filters." }, { status: 503 });
   }
   const error = workspace.error ?? fields.error;
+  if (isStatementTimeout(error)) {
+    return statementTimeoutResponse("This filter combination", "Narrow it - fewer filters, or a search term alongside them - or export the full set instead.");
+  }
   if (error) return Response.json({ error: error.message }, { status: 500 });
   const summary = workspaceSummary(workspace.data);
   // Only the completely unscoped People DB count comes from the planner estimate;
@@ -135,7 +139,7 @@ export async function DELETE(request: Request) {
     const search = String(payload.search ?? "").trim().slice(0, 300);
     let filters: ProspectFilter[];
     try { filters = parseFilters(JSON.stringify(payload.filters ?? [])); }
-    catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Invalid filter." }, { status: 400 }); }
+    catch (error) { return filterErrorResponse(error, "Invalid filter."); }
     const excludedIds = Array.isArray(payload.excludedIds) ? [...new Set(payload.excludedIds.map((id) => String(id).trim()).filter(Boolean))].slice(0, 50000) : [];
     const { data, error } = await supabase.rpc("delete_prospects_matching_v1", {
       p_search: search,
@@ -159,7 +163,7 @@ export async function GET(request: Request) {
 
 // Same query, carried in the body.
 //
-// The People filters accept a pasted list up to maxFilterValues (1000), and
+// The People filters accept a pasted list up to maxFilterValues, and
 // prospectApiPath puts the whole set in the query string. Node answers 431
 // Request Header Fields Too Large once the request line passes its 16KB budget,
 // before any application code runs -- measured at roughly 450 values. This is
