@@ -1,6 +1,7 @@
 import { withInteractiveSlot } from "../../../lib/admission";
+import { authorizeFilterSets } from "../../../lib/filter-sets";
 import { isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
-import { authorizeApi } from "../../../lib/auth";
+import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { csvDocument } from "../../../lib/csv";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { filterErrorResponse, parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
@@ -136,6 +137,10 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
   let peopleScope: PeopleScope | null;
   try { peopleScope = parsePeopleScope(url.searchParams.get("peopleScope")); }
   catch (error) { return filterErrorResponse(error, "Invalid people navigation scope."); }
+
+  // A set id is not authorization: re-check ownership on every use.
+  const setDenial = await authorizeFilterSets(createAdminClient(), filters, (await getAuthorizedUser())?.id ?? "", "company", clientId);
+  if (setDenial) return setDenial;
 
   if (exportCsv) {
     if (clientId) return Response.json({ error: "Client-scoped company export is not available." }, { status: 400 });

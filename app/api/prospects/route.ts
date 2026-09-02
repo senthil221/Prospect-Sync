@@ -1,6 +1,7 @@
 import { withInteractiveSlot } from "../../../lib/admission";
+import { authorizeFilterSets } from "../../../lib/filter-sets";
 import { isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
-import { authorizeApi } from "../../../lib/auth";
+import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { filterErrorResponse, parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { parseCompanyScope, type CompanyScope } from "../../../lib/workspace-scopes";
@@ -78,6 +79,11 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   try { filters = parseFilters(url.searchParams.get("filters")); }
   catch (error) { return filterErrorResponse(error, "Invalid Boolean filter."); }
   const supabase = createAdminClient();
+
+  // A set id is not authorization: re-check ownership on every use, before the
+  // query that would read the set runs (section 4.1).
+  const setDenial = await authorizeFilterSets(supabase, filters, (await getAuthorizedUser())?.id ?? "", "prospect", clientId ?? "");
+  if (setDenial) return setDenial;
 
   const workspaceRequest = runProspectWorkspace(supabase, {
     search,

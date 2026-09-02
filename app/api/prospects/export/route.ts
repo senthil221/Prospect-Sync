@@ -1,6 +1,7 @@
 import { withInteractiveSlot } from "../../../../lib/admission";
+import { authorizeFilterSets } from "../../../../lib/filter-sets";
 import { isStatementTimeout, statementTimeoutResponse } from "../../../../lib/api-errors";
-import { authorizeApi } from "../../../../lib/auth";
+import { authorizeApi, getAuthorizedUser } from "../../../../lib/auth";
 import { filterErrorResponse, parseFilters } from "../../../../lib/prospect-filters";
 import { availableExportFieldIds, buildExportColumns, csvHeaderLine, csvRowsBody, type ProspectRow } from "../../../../lib/prospect-export";
 import { createAdminClient } from "../../../../lib/supabase/admin";
@@ -68,6 +69,11 @@ async function runExport(request: Request) {
   const withTotal = payload.withTotal === true;
 
   const supabase = createAdminClient();
+
+  // An export reads the same sets the grid did, and re-checks them the same way.
+  const setDenial = await authorizeFilterSets(supabase, filters, (await getAuthorizedUser())?.id ?? "", "prospect", clientId ?? "");
+  if (setDenial) return setDenial;
+
   // One export function, scoped or not. v1 carried its own inlined copy of the
   // filter CASE, and the copies had drifted: v1 never learned __company_domain,
   // which the compiler and the row predicate both have, so a domain filter

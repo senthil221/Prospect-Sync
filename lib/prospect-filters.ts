@@ -4,7 +4,16 @@ export type ProspectFilterOperator =
   | "contains" | "equals" | "not_contains" | "not_equals"
   | "empty" | "not_empty" | "boolean" | "number_ranges";
 
-export type ProspectFilter = { field: string; operator: ProspectFilterOperator; values: string[]; scopes?: string[] };
+export type ProspectFilter = { field: string; operator: ProspectFilterOperator; values: string[]; scopes?: string[]; setId?: string };
+
+// A durable filter set is addressed by id; its values are rows in the database
+// (migration 20260902000100). The id is checked for shape here and for ownership
+// before the query runs - a set id is not authorization on its own.
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function filterSetIds(filters: ProspectFilter[]) {
+  return [...new Set(filters.map((filter) => filter.setId).filter((id): id is string => Boolean(id)))];
+}
 
 const allowedOperators = new Set<string>([
   "contains", "equals", "not_contains", "not_equals", "empty", "not_empty", "boolean", "number_ranges",
@@ -107,7 +116,7 @@ export function parseFilters(value: string | null): ProspectFilter[] {
     throw new FilterLimitError("filters", parsed.length, maxFilters, null,
       `Remove filters until at most ${maxFilters} remain, or save the narrow ones as a view and apply them in two passes.`);
   }
-  return parsed.flatMap((item) => {
+  return parsed.flatMap((item): ProspectFilter[] => {
     if (!item || typeof item !== "object") return [];
     const candidate = item as Record<string, unknown>;
     const field = String(candidate.field ?? "").trim().slice(0, 160);
@@ -116,6 +125,16 @@ export function parseFilters(value: string | null): ProspectFilter[] {
     // rows either way, and the field catalogue check belongs with the versioned
     // AST. The caps below only ever fire on a filter that would have been used.
     if (!field || !allowedOperators.has(operator)) return [];
+
+    // Set-backed: the values live in the database, so none of the size caps
+    // below apply - nothing is being carried. Only equality is expressible
+    // against a set, matching what the compilers emit.
+    const rawSetId = typeof candidate.setId === "string" ? candidate.setId.trim() : "";
+    if (rawSetId) {
+      if (!uuidPattern.test(rawSetId) || operator !== "equals") return [];
+      return [{ field, operator: operator as ProspectFilterOperator, values: [], setId: rawSetId }];
+    }
+
     const rawValues = Array.isArray(candidate.values) ? candidate.values : [candidate.value];
     if (rawValues.length > maxFilterValues) {
       throw new FilterLimitError("values", rawValues.length, maxFilterValues, field,
