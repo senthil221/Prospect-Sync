@@ -41,6 +41,7 @@
 // declared intent true for this path as well.
 import pg from "pg";
 import { createServer } from "node:http";
+import { pgInterval } from "./pg-interval.mjs";
 
 const workerId = `${process.env.HOSTNAME ?? "operations-worker"}:${process.pid}`;
 const leaseSeconds = Math.max(60, Number(process.env.OPERATIONS_LEASE_SECONDS ?? 300));
@@ -54,7 +55,7 @@ const idleDelayMs = Math.max(1000, Number(process.env.OPERATIONS_IDLE_MS ?? 3000
 // they were designed for; see the header for why declaring it is not enough on
 // a direct connection. Every other statement this worker runs - claim,
 // retention - is short, so one session-level value covers them all.
-const statementTimeout = process.env.OPERATIONS_STATEMENT_TIMEOUT ?? "120s";
+const statementTimeout = pgInterval(process.env.OPERATIONS_STATEMENT_TIMEOUT, "120s", "OPERATIONS_STATEMENT_TIMEOUT");
 // Retention is cheap and must actually run: a TTL nothing enforces is not a TTL.
 const retentionIntervalMs = Math.max(60_000, Number(process.env.OPERATIONS_RETENTION_MS ?? 900_000));
 

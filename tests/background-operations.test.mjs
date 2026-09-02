@@ -171,7 +171,7 @@ test("each worker bounds its own statements, because its functions cannot", asyn
   // every declared timeout in their call path is decorative and the bound has
   // to be set on the connection.
   const operations = await read("../worker/operations-worker.mjs");
-  assert.match(operations, /const statementTimeout = process\.env\.OPERATIONS_STATEMENT_TIMEOUT \?\? "120s";/);
+  assert.match(operations, /const statementTimeout = pgInterval\(process\.env\.OPERATIONS_STATEMENT_TIMEOUT, "120s", "OPERATIONS_STATEMENT_TIMEOUT"\);/);
   assert.match(operations, /await client\.query\(`set statement_timeout = '\$\{statementTimeout\}'`\);/);
 
   const imports = await read("../worker/import-worker.mjs");
@@ -179,11 +179,24 @@ test("each worker bounds its own statements, because its functions cannot", asyn
   // worker's 1,000-row batches, which measured 10.7-14.3s. So the worker sets a
   // bound sized for what it actually sends, rather than inheriting the role's
   // 15 minutes.
-  assert.match(imports, /const batchTimeout = process\.env\.IMPORT_BATCH_TIMEOUT \?\? "120s";/);
+  assert.match(imports, /const batchTimeout = pgInterval\(process\.env\.IMPORT_BATCH_TIMEOUT, "120s", "IMPORT_BATCH_TIMEOUT"\);/);
   assert.match(imports, /await client\.query\(`set statement_timeout = '\$\{batchTimeout\}'`\);/);
   // Staging is a COPY of the whole file and stays generous.
-  assert.match(imports, /const stagingTimeout = process\.env\.IMPORT_STAGING_TIMEOUT \?\? "10min";/);
+  assert.match(imports, /const stagingTimeout = pgInterval\(process\.env\.IMPORT_STAGING_TIMEOUT, "10min", "IMPORT_STAGING_TIMEOUT"\);/);
   assert.doesNotMatch(codeOnly(imports), /set statement_timeout = '10min'/);
+});
+
+test("a timeout without a unit is refused, not silently read as milliseconds", async () => {
+  // Postgres reads a bare `120` as 120ms. Left unchecked, a compose file typo
+  // would cancel every batch instantly and present as a database fault.
+  const { pgInterval } = await import("../worker/pg-interval.mjs");
+
+  assert.equal(pgInterval(undefined, "120s", "X"), "120s");
+  assert.equal(pgInterval("", "120s", "X"), "120s");
+  assert.equal(pgInterval(" 5min ", "120s", "X"), "5min");
+  for (const bad of ["120", "2 minutes", "abc", "-5s", "5sec"]) {
+    assert.throws(() => pgInterval(bad, "120s", "X"), /must be a number with a unit/, `"${bad}" should be refused`);
+  }
 });
 
 test("the worker runs operations without being able to decide what they are", async () => {

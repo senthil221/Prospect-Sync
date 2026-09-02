@@ -5,6 +5,7 @@ import pg from "pg";
 import { from as copyFrom } from "pg-copy-streams";
 import { createServer } from "node:http";
 import { mapProspect, normalizeText } from "./prospect-map.mjs";
+import { pgInterval } from "./pg-interval.mjs";
 
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 const restUrl = (process.env.SUPABASE_REST_URL ?? "http://rest:3000").replace(/\/$/, "");
@@ -31,10 +32,10 @@ const batchSize = Math.max(100, Math.min(5000, Number(process.env.IMPORT_BATCH_S
 // rows, so 15s here would fail every batch. 120s keeps roughly 5-10x headroom
 // over the measured time while still catching a genuine runaway long before
 // the role's 15 minutes would.
-const batchTimeout = process.env.IMPORT_BATCH_TIMEOUT ?? "120s";
+const batchTimeout = pgInterval(process.env.IMPORT_BATCH_TIMEOUT, "120s", "IMPORT_BATCH_TIMEOUT");
 // Staging is a COPY of the whole CSV and is legitimately minutes long, so it
 // keeps the generous bound; only the batch loop is tightened.
-const stagingTimeout = process.env.IMPORT_STAGING_TIMEOUT ?? "10min";
+const stagingTimeout = pgInterval(process.env.IMPORT_STAGING_TIMEOUT, "10min", "IMPORT_STAGING_TIMEOUT");
 const skipImportField = "Skip column";
 let stopping = false;
 let lastProgressAt = Date.now();
