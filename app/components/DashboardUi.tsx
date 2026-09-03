@@ -67,14 +67,28 @@ export function LoadingState({ label = "Loading" }: { label?: string }) {
  * a roving tabindex the arrow keys move between tabs, and Tab has to land
  * somewhere that is the content those tabs were selecting.
  */
-export function TabPanel({ id, active, children }: { id: string; active: boolean; children: ReactNode }) {
+export function TabPanel({ id, active, keepMounted = false, className, children }: {
+  id: string;
+  active: boolean;
+  /**
+   * Keep the panel rendered while hidden. The tabs contract requires that
+   * "hidden panels do not discard necessary form state", and the client
+   * workspace tabs hold live tables with their own search, filters and page -
+   * unmounting them on every tab switch would throw all of that away and
+   * re-fetch on the way back.
+   */
+  keepMounted?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
   return <div
     id={`tabpanel-${id}`}
     role="tabpanel"
     aria-labelledby={`tab-${id}`}
     tabIndex={0}
     hidden={!active}
-  >{active ? children : null}</div>;
+    className={className}
+  >{active || keepMounted ? children : null}</div>;
 }
 
 /**
@@ -139,6 +153,43 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
   return <div className="drawer-backdrop"><button className="drawer-dismiss" aria-label="Close prospect details" onClick={onClose}/><aside ref={panel} className="drawer" role="dialog" aria-modal="true" aria-labelledby="prospect-drawer-title"><button className="drawer-close" data-autofocus aria-label="Close prospect details" onClick={onClose}><AppIcon name="close" size={14}/></button><div className="drawer-person"><span>{initials(prospect.full_name)}</span><div><p className="eyebrow">PROSPECT DETAILS</p><h2 id="prospect-drawer-title">{prospect.full_name || "Unnamed prospect"}</h2><p>{prospect.title || "No title"} {prospect.company_name ? `at ${prospect.company_name}` : ""}</p></div></div><div className="drawer-summary"><span><b>{formatNumber(prospect.client_count)}</b>clients</span><span><b>{formatNumber(prospect.list_count)}</b>lists</span><span><b>{Object.keys(data).length}</b>data fields</span></div><div className="drawer-tabs"><Tabs label="Prospect details" value={tab} onChange={setTab} items={[{ id: "data" as const, label: "Saved data" }, { id: "history" as const, label: "Contact history", count: events.length }]}/></div><TabPanel id="data" active={tab === "data"}><div className="drawer-saved-data"><section className="drawer-memberships"><div><span>LIST MEMBERSHIPS</span><strong>{formatNumber(memberships.length)} linked</strong><small className={membershipCountMatches ? "verified" : "review"}>{membershipCountMatches ? "Tag count verified" : "Review membership count"}</small></div>{memberships.length ? <div className="drawer-membership-list">{memberships.map((membership) => <div key={membership.key}><span>{membership.clientName || "Client"}</span><strong>{membership.listName}</strong></div>)}</div> : <p>No master-list membership is linked to this prospect.</p>}</section><div className="field-list">{Object.entries(data).map(([field, value]) => <div key={field}><span>{field}</span><strong>{value || "-"}</strong></div>)}</div></div></TabPanel><TabPanel id="history" active={tab === "history"}><div className="contact-timeline">{events.length ? events.map((event) => { const client = Array.isArray(event.client) ? event.client[0] : event.client; return <div key={event.id}><i/><span>{new Date(event.contacted_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span><strong>{client?.name || "Unknown client"}</strong><p>{event.campaign_name || event.outcome || "Contacted"}</p></div>; }) : <div className="drawer-empty">No contact history recorded yet.</div>}</div></TabPanel></aside></div>;
 }
 
+
+/**
+ * The confirmation used for anything the shared DeleteConfirmation does not
+ * already cover.
+ *
+ * CLIENT-04. Removing a prospect from a client used window.confirm, which the
+ * rest of the product had already stopped doing: it cannot say what is and is
+ * not affected in the way the delete dialogs do, it is unstyleable, browsers
+ * suppress it in some contexts, and it has none of the focus contract that
+ * every other dialog here now keeps. The scope sentence matters most - the
+ * whole point of this dialog is that the People DB record survives.
+ */
+export function ConfirmDialog({ title, body, scopeNote, confirmLabel, busy = false, onCancel, onConfirm }: {
+  title: string;
+  body: string;
+  scopeNote?: string;
+  confirmLabel: string;
+  busy?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const panel = useRef<HTMLElement>(null);
+  useDialogFocus(panel, { onClose: onCancel, busy });
+  return <div className="modal-backdrop" role="presentation">
+    <section ref={panel} className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+      <span className="warning-mark">!</span>
+      <h2 id="confirm-title">{title}</h2>
+      <p id="confirm-body">{body}</p>
+      {scopeNote ? <p className="shared-safety">{scopeNote}</p> : null}
+      <div className="modal-actions">
+        {/* Cancel takes focus: the Enter that opened this must not confirm it. */}
+        <button className="secondary" data-autofocus disabled={busy} onClick={onCancel}>Cancel</button>
+        <button className="danger-button solid" disabled={busy} onClick={onConfirm}>{busy ? "Working…" : confirmLabel}</button>
+      </div>
+    </section>
+  </div>;
+}
 
 export function DeleteConfirmation({ target, busy, onCancel, onConfirm }: { target: DeleteRequest; busy: boolean; onCancel: () => void; onConfirm: () => Promise<void> }) {
   const panel = useRef<HTMLElement>(null);

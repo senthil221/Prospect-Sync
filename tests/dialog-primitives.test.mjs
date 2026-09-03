@@ -39,10 +39,14 @@ test("the dialog lifecycle implements all four parts of the contract", async () 
 test("every dialog and drawer uses the shared lifecycle, not its own", async () => {
   const ui = await read("../app/components/DashboardUi.tsx");
 
-  // Both surfaces claimed aria-modal while implementing at most Escape.
-  assert.equal(ui.match(/useDialogFocus\(panel/g)?.length, 2,
-    "the drawer and the delete confirmation must both use the shared hook");
-  assert.equal(ui.match(/aria-modal="true"/g)?.length, 2);
+  // Every surface that claims aria-modal must implement it. Asserted as a
+  // relationship rather than a count, so adding a dialog cannot quietly add one
+  // that only claims the contract - which is the exact bug this test exists for.
+  const modals = ui.match(/aria-modal="true"/g)?.length ?? 0;
+  const lifecycles = ui.match(/useDialogFocus\(panel/g)?.length ?? 0;
+  assert.ok(modals >= 2, "the drawer and the delete confirmation are both dialogs");
+  assert.equal(lifecycles, modals,
+    `${modals} surfaces claim aria-modal but only ${lifecycles} implement the focus lifecycle`);
 
   // The old private Escape handler must not come back alongside the shared one.
   assert.doesNotMatch(ui, /closeOnEscape/);

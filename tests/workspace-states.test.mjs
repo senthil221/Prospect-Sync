@@ -76,3 +76,35 @@ test("the button always undoes the constraint the message names", async () => {
     assert.match(source, /onClearSearch=/, `${path} must be able to clear the search it blames`);
   }
 });
+
+test("the client workspace stops using native dialogs and dangling tabs", async () => {
+  const panel = await read("../app/components/ClientsPanel.tsx");
+  const styles = await read("../app/workspace.css");
+
+  // CLIENT-04: window.confirm freezes the tab, cannot carry the scope sentence
+  // that makes this safe to agree to, and has none of the focus contract every
+  // other dialog here keeps.
+  assert.doesNotMatch(panel.replace(/^\s*\/\/.*$/gm, ""), /window\.confirm/);
+  assert.match(panel, /<ConfirmDialog/);
+  assert.match(panel, /The People database record is preserved/);
+
+  // CLIENT-03: the tab strip pointed aria-controls at ids that existed nowhere.
+  assert.equal(panel.match(/<TabPanel id="/g)?.length, 4);
+  // These panels hold live tables with their own search, filters and page, so
+  // they stay mounted while hidden rather than being thrown away per switch.
+  assert.match(panel, /keepMounted/);
+
+  // Visibility moved from an .active class to the hidden attribute. An author
+  // display rule beats the UA stylesheet on [hidden], so this has to be
+  // explicit or every panel stays on screen at once.
+  assert.match(styles, /\.client-tab-panel \{ display: block; \}/);
+  assert.match(styles, /\.client-tab-panel\[hidden\] \{ display: none; \}/);
+  assert.doesNotMatch(styles, /\.client-tab-panel\.active/);
+
+  // CLIENT-01: the directory scales past a handful of clients.
+  assert.match(panel, /className="client-directory"/);
+  assert.doesNotMatch(panel, /className="clients-grid"/);
+  for (const dead of [".clients-grid", ".client-card", ".client-stats"]) {
+    assert.ok(!styles.split("\n").some((line) => line.startsWith(`${dead} `)), `${dead} has no component left`);
+  }
+});
