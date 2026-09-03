@@ -11,9 +11,9 @@ import { filterChipValue, formatNumber } from "../../lib/dashboard-helpers";
 import { defaultProspectColumns, defaultProspectExportFields, standardProspectExportFields, standardProspectFields } from "../../lib/prospect-field-definitions";
 import type { ClientRecord, Prospect, ProspectFilter, SavedView } from "../../lib/types";
 import { intentKey, requestIdFor, settleIntent } from "../../lib/request-intent";
-import { useDismiss } from "../use-dismiss";
 import { AppIcon, EmptyState } from "./DashboardUi";
 import ProspectTableRow from "./ProspectTableRow";
+import MenuButton from "./MenuButton";
 import Tabs from "./Tabs";
 import TitleClassifierPanel from "./TitleClassifierPanel";
 
@@ -29,9 +29,6 @@ function localIsoDate() {
 
 export default function ProspectTable({ prospects, total, totalEstimated = false, totalCapped = false, scopeCapped = false, fields, filters, page, clients, search = "", sort, direction, clientId = "", active = true, companyScope = null, onClearCompanyScope, onSeeCompanies, onRemoveFromClient, onSortChange, onFiltersChange, onPageChange, onSelect, onImport, onRefresh }: { prospects: Prospect[]; total: number; totalEstimated?: boolean; totalCapped?: boolean; scopeCapped?: boolean; fields: string[]; filters: ProspectFilter[]; page: number; clients: ClientRecord[]; search?: string; sort: string; direction: "asc" | "desc"; clientId?: string; active?: boolean; companyScope?: CompanyScope | null; onClearCompanyScope?: () => void; onSeeCompanies: (scope: PeopleScope) => void; onRemoveFromClient?: (prospect: Prospect) => Promise<void>; onSortChange: (sort: string, direction: "asc" | "desc") => void; onFiltersChange: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onSelect: (row: Prospect) => void; onImport: () => void; onRefresh: () => void }) {
   const [visibleColumns, setVisibleColumns] = useState<string[]>(defaultProspectColumns);
-  const [columnMenu, setColumnMenu] = useState(false);
-  const columnMenuRef = useRef<HTMLDivElement>(null);
-  useDismiss(columnMenuRef, () => setColumnMenu(false), columnMenu);
   const [tab, setTab] = useState<"records" | "coverage" | "titles">("records");
   const [classifierGaps, setClassifierGaps] = useState<number | null>(null);
   // Row density is a viewing preference, not data - it persists per browser.
@@ -570,14 +567,19 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
         <div className="results-toolbar">
           <div className="results-count"><strong title={totalHint}>{displayedTotal} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `All ${displayedTotal} selected` : `Select all ${displayedTotal} across pages`}</button> : null}{totalCapped && countedExactly === null ? <button className="select-all-matching-button" disabled={countingAll} title="Counts every matching record in the background instead of stopping at 50,000." onClick={() => void countAllMatching()}>{countingAll ? "Counting…" : "Count them all"}</button> : null}</div>
           <div className="workspace-actions">
-            <label><span className="sr-only">Saved ICP view</span><select defaultValue="" onChange={(event) => applyView(event.target.value)}><option value="">Saved views</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.needsReview ? `${view.name} (needs review)` : view.name}</option>)}</select></label>
-            <button className="outline-button" onClick={() => void saveCurrentView()}><AppIcon name="star" size={14}/> Save view</button>
-            <button className="outline-button" disabled={exportingProspects} title="Choose rows and fields for a CSV export" onClick={() => openExportDialog("all_matching")}>{exportingProspects ? "Exporting…" : "Export CSV"}</button>
-            {!clientId ? <button className="outline-button" disabled={espScanning} title="Detect MX-visible gateways and mailbox providers. API-only email security products are not visible in MX records." onClick={() => void scanEmailProviders()}>{espScanning ? "Scanning MX…" : "Detect ESPs"}</button> : null}
             <label><span className="sr-only">Sort prospects</span><select value={`${sort}:${direction}`} onChange={(event) => { const [nextSort, nextDirection] = event.target.value.split(":"); onSortChange(nextSort, nextDirection as "asc" | "desc"); }}><option value="created_at:desc">Newest first</option><option value="name:asc">Name A to Z</option><option value="company:asc">Company A to Z</option><option value="title:asc">Title A to Z</option><option value="last_contacted:desc">Recently contacted</option></select></label>
             <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {effectiveFilters.length ? <span>{effectiveFilters.length}</span> : null}</button>
-            <button className="outline-button density-control" title={DENSITY_LABEL[density]} aria-label={DENSITY_LABEL[density]} onClick={cycleDensity}><AppIcon name="rows" size={14}/> {density === "default" ? "Rows" : DENSITY_LABEL[density].replace(" rows", "")}</button>
-            <div className="column-control" ref={columnMenuRef}><button className="outline-button" aria-expanded={columnMenu} onClick={() => setColumnMenu((open) => !open)}><AppIcon name="columns" size={14}/> Columns <span>{visibleDefinitions.length}</span></button>{columnMenu && <div className="column-menu"><div><strong>Choose columns</strong><button onClick={() => { setVisibleColumns(defaultProspectColumns); localStorage.setItem("prospecthub-visible-columns", JSON.stringify(defaultProspectColumns)); }}>Reset</button></div>{allColumns.map((field) => <label key={field.id}><input type="checkbox" checked={visibleColumns.includes(field.id)} onChange={() => toggleColumn(field.id)} />{field.label}</label>)}</div>}</div>
+            <MenuButton label="View" icon="rows" panelLabel="View options" count={visibleDefinitions.length}>
+              <label className="ds-menu-field"><span>Saved view</span><select defaultValue="" onChange={(event) => applyView(event.target.value)}><option value="">Choose a saved view</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.needsReview ? `${view.name} (needs review)` : view.name}</option>)}</select></label>
+              <button className="ds-menu-item" onClick={() => void saveCurrentView()}><AppIcon name="star" size={14}/> Save this view</button>
+              <button className="ds-menu-item" onClick={cycleDensity}><AppIcon name="rows" size={14}/> {DENSITY_LABEL[density]}</button>
+              <div className="ds-menu-section"><strong>Columns</strong><button className="ds-menu-reset" onClick={() => { setVisibleColumns(defaultProspectColumns); localStorage.setItem("prospecthub-visible-columns", JSON.stringify(defaultProspectColumns)); }}>Reset</button></div>
+              <div className="ds-menu-checks">{allColumns.map((field) => <label key={field.id}><input type="checkbox" checked={visibleColumns.includes(field.id)} onChange={() => toggleColumn(field.id)} />{field.label}</label>)}</div>
+            </MenuButton>
+            {!clientId ? <MenuButton label="Actions" icon="grid" panelLabel="Prospect actions">
+              <button className="ds-menu-item" disabled={espScanning} title="Detect MX-visible gateways and mailbox providers. API-only email security products are not visible in MX records." onClick={() => void scanEmailProviders()}><AppIcon name="target" size={14}/> {espScanning ? "Scanning MX…" : "Detect ESPs"}</button>
+            </MenuButton> : null}
+            <button className="outline-button" disabled={exportingProspects} title="Choose rows and fields for a CSV export" onClick={() => openExportDialog("all_matching")}><AppIcon name="download" size={14}/> {exportingProspects ? "Exporting…" : "Export CSV"}</button>
           </div>
         </div>
         {notice ? <div className="inline-notice" role="status">{notice}<button aria-label="Dismiss notification" onClick={() => setNotice("")}><AppIcon name="close" size={14}/></button></div> : null}

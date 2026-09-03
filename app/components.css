@@ -626,3 +626,76 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
   cursor: pointer;
 }
 .compact-person .row-open:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+
+/* The grouped command menu (COMMANDS-01).
+   People had eight controls in one row and Companies seven, all at the same
+   weight, so no screen had an obvious primary action and neither bar fit at
+   1024px. Related controls now live behind View and Actions, leaving one
+   primary and a short row beside it. */
+.ds-menu { position: relative; display: inline-flex; }
+.ds-menu-panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--space-1));
+  min-width: 232px;
+  max-height: min(60vh, 460px);
+  padding: var(--space-2);
+  display: grid;
+  gap: 2px;
+  overflow-y: auto;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  /* Level 1 for a popover; drawers and modals take level 2. */
+  box-shadow: var(--elevation-3);
+}
+.ds-menu-start .ds-menu-panel { left: 0; }
+/* Right-aligned where the trigger sits at the end of a bar, so the panel opens
+   inward instead of off the edge of the viewport. */
+.ds-menu-end .ds-menu-panel { right: 0; }
+
+.ds-menu-item {
+  min-height: var(--control-dense);
+  padding: 0 var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.ds-menu-item:hover:not(:disabled) { background: var(--surface-hover); }
+.ds-menu-item:disabled { opacity: .5; cursor: not-allowed; }
+.ds-menu-item[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); }
+
+.ds-menu-field { padding: var(--space-1) var(--space-2) var(--space-2); display: grid; gap: var(--space-1); }
+.ds-menu-field > span { color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-wide); text-transform: uppercase; }
+.ds-menu-field select { width: 100%; }
+
+.ds-menu-section {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--border-subtle);
+}
+.ds-menu-section > strong { color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-wide); text-transform: uppercase; }
+.ds-menu-reset { padding: 0; border: 0; background: none; color: var(--accent); font-size: var(--text-2xs); font-weight: var(--weight-semibold); cursor: pointer; }
+.ds-menu-checks { display: grid; gap: 2px; }
+.ds-menu-checks label {
+  min-height: var(--control-dense);
+  padding: 0 var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.ds-menu-checks label:hover { background: var(--surface-hover); }
