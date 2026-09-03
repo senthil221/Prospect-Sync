@@ -603,3 +603,26 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
   0%   { transform: translateX(-100%); }
   100% { transform: translateX(340%); }
 }
+
+/* The row's identity, as a real control (DATA-ACCESS-01).
+   The rows in People, Companies and Lists carried onClick on a bare <tr>, which
+   is unreachable by Tab and does nothing on Enter - the entire table was
+   pointer-only. The identity is now a button, so it is a tab stop with a focus
+   ring, Enter and Space open the drawer, and closing it returns focus here
+   rather than to <body>. The <tr> keeps its click for mouse users; what changes
+   is that it is no longer the only way in. */
+.compact-person .row-open {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.compact-person .row-open:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }

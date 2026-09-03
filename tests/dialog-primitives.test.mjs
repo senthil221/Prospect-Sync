@@ -102,3 +102,24 @@ test("asynchronous change is announced, and progress carries its numbers", async
   assert.match(styles, /\.sr-only \{/);
   assert.match(styles, /\[role="tabpanel"\]:focus-visible/);
 });
+
+test("row identity is a control, not a click handler on a table row", async () => {
+  // A11Y-02. All three tables carried onClick on a bare <tr>: not a tab stop,
+  // no response to Enter, no focus ring. The entire grid was pointer-only.
+  for (const path of ["../app/components/ProspectTableRow.tsx", "../app/components/ListsPanel.tsx"]) {
+    const source = await read(path);
+    assert.match(source, /<button type="button" className="row-open"/, `${path} must open its row from a real control`);
+    // Opening must not also toggle the row's own click handler.
+    assert.match(source, /className="row-open" onClick=\{\(event\) => \{ event\.stopPropagation\(\);/, `${path} must not double-fire the row click`);
+  }
+  // Companies already had this shape; it is the pattern the other two now follow.
+  const company = await read("../app/components/CompanyTableRow.tsx");
+  assert.match(company, /className="company-open" aria-label=/);
+
+  // Selection must never navigate - the checkbox cell stops the row click.
+  const prospectRow = await read("../app/components/ProspectTableRow.tsx");
+  assert.match(prospectRow, /className="select-column" onClick=\{\(event\) => event\.stopPropagation\(\)\}/);
+
+  const styles = await read("../app/components.css");
+  assert.match(styles, /\.compact-person \.row-open \{/);
+});
