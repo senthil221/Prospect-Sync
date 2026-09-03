@@ -346,6 +346,11 @@
 .outline-button.active > span:first-child { color: var(--accent); }
 .outline-button:disabled { opacity: .5; cursor: not-allowed; }
 
+/* A disclosure that is text, not a control: used where a button-shaped thing
+   would compete with the real action beside it. */
+.link-button { width: fit-content; padding: var(--space-1) 0; border: 0; background: none; color: var(--accent-text); cursor: pointer; font-size: var(--text-2xs); font-weight: var(--weight-semibold); text-decoration: underline; text-underline-offset: 3px; }
+.link-button:hover { color: var(--accent); }
+
 /* -----------------------------------------------------------------------------
    Data table
    Row height is a token so the density toggle changes it without touching CSS.
