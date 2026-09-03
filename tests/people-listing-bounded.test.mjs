@@ -78,7 +78,13 @@ test("the three kinds of total stay distinguishable end to end", async () => {
   assert.match(clients, /totalCapped=\{totalCapped\}/);
 
   // The grid shows which kind it is, and never presents a bounded number as exact.
-  assert.match(table, /\$\{totalEstimated \? "≈" : ""\}\$\{formatNumber\(total\)\}\$\{totalCapped \? "\+" : ""\}/);
+  // The leading "≈" is gone: mathematical notation in a sales tool, colliding
+  // with the digit grouping right beside it. A capped total keeps its "+",
+  // because a floor genuinely reads differently from an exact number, and the
+  // estimate is explained in words on hover rather than encoded in a glyph.
+  assert.match(table, /\$\{formatNumber\(total\)\}\$\{totalCapped \? "\+" : ""\}/);
+  assert.doesNotMatch(table, /totalEstimated \? "≈"/);
+  assert.match(table, /Approximate: the whole-database total is PostgreSQL/);
   assert.match(table, /Counting stopped at 50,000/);
   // A selection drawn from a capped total is a floor too.
   assert.match(table, /const selectedLabel = /);

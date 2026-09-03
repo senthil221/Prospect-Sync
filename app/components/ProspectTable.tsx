@@ -155,8 +155,12 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const firstRecord = total ? (page - 1) * 50 + 1 : 0;
   const lastRecord = Math.min(page * 50, total);
   // Every count on screen says which of the three kinds it is: "674,065" exact,
-  // "≈674,065" the planner's estimate for the whole database, "50,000+" a count
-  // that stopped at its cap. A bounded number must never read as an exact one.
+  // the planner's estimate for the whole database, or "50,000+" for a count that
+  // stopped at its cap. A bounded number must never read as an exact one.
+  // The estimate used to carry a leading "≈". It was mathematical notation in a
+  // sales tool, it collided with the Indian digit grouping beside it, and the
+  // hover text below already says the same thing in words - so the number now
+  // reads plainly and the explanation stays where it can be read.
   // A capped count can be turned into a real one: the operations worker counts
   // the whole match set in the background and says how many there were. Keyed
   // on the question, so changing a filter drops the answer rather than showing
@@ -164,7 +168,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const countedExactly = exactTotal && exactTotal.key === selectionKey ? exactTotal.count : null;
   const displayedTotal = countedExactly !== null
     ? formatNumber(countedExactly)
-    : `${totalEstimated ? "≈" : ""}${formatNumber(total)}${totalCapped ? "+" : ""}`;
+    : `${formatNumber(total)}${totalCapped ? "+" : ""}`;
   // A capped total is a floor, so a selection drawn from it is a floor too: the
   // bulk action resolves its own ids server-side and will act on all of them.
   const selectedLabel = `${formatNumber(selectedCount)}${totalCapped && selectionMode === "all_matching" ? "+" : ""}`;
@@ -174,7 +178,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   // The unfiltered People DB total comes from PostgreSQL's maintained row estimate
   // rather than a full count, so it can drift by a fraction of a percent until the
   // next autovacuum. Anything narrower than the whole database is counted exactly
-  // and loses the "≈" -- say which of the two you are looking at.
+  // and becomes exact -- say which of the two you are looking at.
   const totalHint = totalCapped
     ? "Counting stopped at 50,000 to keep this page fast. More records match than the number shown, and every action here still applies to all of them."
     : totalEstimated
@@ -597,7 +601,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
           const prefix = filter.operator === "not_contains" || filter.operator === "not_equals" ? "Exclude " : filter.operator === "boolean" ? "Boolean " : "";
           return filter.values.map((value) => <button key={`${filter.id}-${value}`} onClick={() => updateFilter(filter.id, { values: filter.values.filter((item) => item !== value) })}>{prefix}{label}: {filterChipValue(filter.field, value)} <span><AppIcon name="close" size={14}/></span></button>);
         })}<button className="clear-filter-chip" onClick={() => onFiltersChange([])}>Clear all</button></div> : null}
-        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" data-density={density} ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select all prospects on this page" title="Select all prospects on this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => isProspectSelected(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id} className={field.id === "__employee_count" ? "numeric-cell" : undefined}>{field.label}</th>)}{clientId ? <><th className="date-added-column">Date Contacted</th><th className="icp-column">ICP verified</th></> : null}<th className="row-detail-column">{onRemoveFromClient || canDeleteMaster ? "Actions" : ""}</th></tr></thead><tbody>{prospects.map((person) => <ProspectTableRow key={person.id} prospect={person} visibleDefinitions={visibleDefinitions} selected={isProspectSelected(person.id)} includeClient={!clientId} canDeleteMaster={canDeleteMaster} clientId={clientId} onSelect={onSelect} onToggleSelected={toggleSelected} onRemoveFromClient={onRemoveFromClient} onDelete={deleteProspect}/>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {displayedTotal} matching records</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}><AppIcon name="back" size={14}/> Previous</button><span>Page {page} of {totalEstimated ? "≈" : ""}{formatNumber(totalPages)}{totalCapped ? "+" : ""}</span><button disabled={boundedTotal ? prospects.length < 50 : page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button></div></div></> : <WorkspaceEmpty state={emptyWorkspaceState({ entity: "people", search, filterCount: effectiveFilters.length, scoped: scopeRestricts(companyScope), clientScoped: Boolean(clientId) })} onClearSearch={onClearSearch} onClearFilters={() => onFiltersChange([])} onClearScope={onClearCompanyScope} onImport={onImport} />}
+        {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" data-density={density} ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select all prospects on this page" title="Select all prospects on this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => isProspectSelected(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id} className={field.id === "__employee_count" ? "numeric-cell" : undefined}>{field.label}</th>)}{clientId ? <><th className="date-added-column">Date Contacted</th><th className="icp-column">ICP verified</th></> : null}<th className="row-detail-column">{onRemoveFromClient || canDeleteMaster ? "Actions" : ""}</th></tr></thead><tbody>{prospects.map((person) => <ProspectTableRow key={person.id} prospect={person} visibleDefinitions={visibleDefinitions} selected={isProspectSelected(person.id)} includeClient={!clientId} canDeleteMaster={canDeleteMaster} clientId={clientId} onSelect={onSelect} onToggleSelected={toggleSelected} onRemoveFromClient={onRemoveFromClient} onDelete={deleteProspect}/>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {displayedTotal} matching records</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}><AppIcon name="back" size={14}/> Previous</button><span>Page {page} of {formatNumber(totalPages)}{totalCapped ? "+" : ""}</span><button disabled={boundedTotal ? prospects.length < 50 : page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button></div></div></> : <WorkspaceEmpty state={emptyWorkspaceState({ entity: "people", search, filterCount: effectiveFilters.length, scoped: scopeRestricts(companyScope), clientScoped: Boolean(clientId) })} onClearSearch={onClearSearch} onClearFilters={() => onFiltersChange([])} onClearScope={onClearCompanyScope} onImport={onImport} />}
       </article>
       {filtersOpen ? <ApolloFilterPanel filters={filters} customFields={customFields} clientId={clientId} onChange={onFiltersChange}/> : null}
     </div>}

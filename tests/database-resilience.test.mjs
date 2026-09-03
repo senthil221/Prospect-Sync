@@ -18,7 +18,12 @@ test("uses conditional totals in the current workspace RPC", async () => {
   assert.match(migration, /grant execute on function public\.search_prospect_workspace_v12[\s\S]*to service_role/);
   assert.match(route, /p_with_total: query\.withTotal/);
   assert.match(dashboard, /withTotal: prospectPage === 1 && !prospectTotalCache\.current\.has/);
-  assert.match(dashboard, /totalEstimated \? "≈"/);
+  // Asserted where the flag is plumbed rather than where it used to be painted:
+  // it has to survive the response, the cache and the props, which is what lets
+  // the count say what kind of number it is at all.
+  const workspace = await readFile(new URL("../app/components/ProspectsWorkspace.tsx", import.meta.url), "utf8");
+  assert.match(workspace, /estimated: data\.totalEstimated/);
+  assert.match(workspace, /totalEstimated=\{controller\.totalEstimated\}/);
 });
 
 // The whole point of the pre-filter is that the opaque scalar matcher must never

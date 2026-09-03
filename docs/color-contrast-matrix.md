@@ -15,7 +15,7 @@ is a **product** target - WCAG exempts inactive controls.
 
 | Foreground | Rendered bg | State | Ratio | Gate | |
 |---|---|---|---:|---:|---|
-| `--text-primary` #182230 | `--canvas` #f5f6f8 | default | 14.82:1 | 4.5:1 | pass |
+| `--text-primary` #182230 | `--canvas` #edf0f5 | default | 14.03:1 | 4.5:1 | pass |
 | `--text-primary` #182230 | `--surface` #ffffff | default | 16.03:1 | 4.5:1 | pass |
 | `--text-primary` #182230 | `--surface-raised` #ffffff | default | 16.03:1 | 4.5:1 | pass |
 | `--text-primary` #182230 | `--surface-sunken` #f8fafc | default | 15.32:1 | 4.5:1 | pass |
@@ -23,7 +23,7 @@ is a **product** target - WCAG exempts inactive controls.
 | `--text-primary` #182230 | `--surface-active` #e6ebf2 | pressed | 13.38:1 | 4.5:1 | pass |
 | `--text-primary` #182230 | `--surface-selected` #eaf0ff | selected | 14.05:1 | 4.5:1 | pass |
 | `--text-primary` #182230 | `--surface-selected-hover` #e0e9ff | selected + hover | 13.18:1 | 4.5:1 | pass |
-| `--text-secondary` #475467 | `--canvas` #f5f6f8 | default | 7.11:1 | 4.5:1 | pass |
+| `--text-secondary` #475467 | `--canvas` #edf0f5 | default | 6.73:1 | 4.5:1 | pass |
 | `--text-secondary` #475467 | `--surface` #ffffff | default | 7.69:1 | 4.5:1 | pass |
 | `--text-secondary` #475467 | `--surface-raised` #ffffff | default | 7.69:1 | 4.5:1 | pass |
 | `--text-secondary` #475467 | `--surface-sunken` #f8fafc | default | 7.35:1 | 4.5:1 | pass |
@@ -31,7 +31,7 @@ is a **product** target - WCAG exempts inactive controls.
 | `--text-secondary` #475467 | `--surface-active` #e6ebf2 | pressed | 6.42:1 | 4.5:1 | pass |
 | `--text-secondary` #475467 | `--surface-selected` #eaf0ff | selected | 6.74:1 | 4.5:1 | pass |
 | `--text-secondary` #475467 | `--surface-selected-hover` #e0e9ff | selected + hover | 6.32:1 | 4.5:1 | pass |
-| `--accent-text` #234bbc | `--canvas` #f5f6f8 | default | 6.93:1 | 4.5:1 | pass |
+| `--accent-text` #234bbc | `--canvas` #edf0f5 | default | 6.56:1 | 4.5:1 | pass |
 | `--accent-text` #234bbc | `--surface` #ffffff | default | 7.49:1 | 4.5:1 | pass |
 | `--accent-text` #234bbc | `--surface-raised` #ffffff | default | 7.49:1 | 4.5:1 | pass |
 | `--accent-text` #234bbc | `--surface-sunken` #f8fafc | default | 7.16:1 | 4.5:1 | pass |
@@ -39,12 +39,12 @@ is a **product** target - WCAG exempts inactive controls.
 | `--accent-text` #234bbc | `--surface-active` #e6ebf2 | pressed | 6.25:1 | 4.5:1 | pass |
 | `--accent-text` #234bbc | `--surface-selected` #eaf0ff | selected | 6.56:1 | 4.5:1 | pass |
 | `--accent-text` #234bbc | `--surface-selected-hover` #e0e9ff | selected + hover | 6.16:1 | 4.5:1 | pass |
-| `--text-tertiary` #5f6b7c | `--canvas` #f5f6f8 | default | 5.00:1 | 4.5:1 | pass |
+| `--text-tertiary` #5f6b7c | `--canvas` #edf0f5 | default | 4.74:1 | 4.5:1 | pass |
 | `--text-tertiary` #5f6b7c | `--surface` #ffffff | default | 5.41:1 | 4.5:1 | pass |
 | `--text-tertiary` #5f6b7c | `--surface-raised` #ffffff | default | 5.41:1 | 4.5:1 | pass |
 | `--text-tertiary` #5f6b7c | `--surface-sunken` #f8fafc | default | 5.17:1 | 4.5:1 | pass |
 | `--text-tertiary` #5f6b7c | `--surface-hover` #f1f4f8 | hover | 4.91:1 | 4.5:1 | pass |
-| `--border-control` #6f7c90 | `--canvas` #f5f6f8 | control boundary | 3.91:1 | 3:1 | pass |
+| `--border-control` #6f7c90 | `--canvas` #edf0f5 | control boundary | 3.71:1 | 3:1 | pass |
 | `--border-control` #6f7c90 | `--surface` #ffffff | control boundary | 4.23:1 | 3:1 | pass |
 | `--border-control` #6f7c90 | `--surface-raised` #ffffff | control boundary | 4.23:1 | 3:1 | pass |
 | `--border-control` #6f7c90 | `--surface-sunken` #f8fafc | control boundary | 4.05:1 | 3:1 | pass |
@@ -52,7 +52,7 @@ is a **product** target - WCAG exempts inactive controls.
 | `--border-control` #6f7c90 | `--surface-active` #e6ebf2 | control boundary | 3.53:1 | 3:1 | pass |
 | `--border-control` #6f7c90 | `--surface-selected` #eaf0ff | control boundary | 3.71:1 | 3:1 | pass |
 | `--border-control` #6f7c90 | `--surface-selected-hover` #e0e9ff | control boundary | 3.48:1 | 3:1 | pass |
-| `--focus-color` #2b59d9 | `--canvas` #f5f6f8 | focus-visible | 5.50:1 | 3:1 | pass |
+| `--focus-color` #2b59d9 | `--canvas` #edf0f5 | focus-visible | 5.20:1 | 3:1 | pass |
 | `--focus-color` #2b59d9 | `--surface` #ffffff | focus-visible | 5.94:1 | 3:1 | pass |
 | `--focus-color` #2b59d9 | `--surface-raised` #ffffff | focus-visible | 5.94:1 | 3:1 | pass |
 | `--focus-color` #2b59d9 | `--surface-sunken` #f8fafc | focus-visible | 5.68:1 | 3:1 | pass |

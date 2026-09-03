@@ -21,10 +21,17 @@
      ~90% of the visible area. The canvas is deliberately DARKER than a card,
      so a card reads as a surface lifted off it without needing a shadow, and
      a field inside that card is a hair lighter again.
+
+     The canvas was #f5f6f8 and measured 3.1 L* from white - a step small enough
+     that a white sidebar, a white topbar, a near-white canvas and white cards
+     read as one flat field, which is what "clean but basic" actually describes.
+     It is 5.3 L* now: still quiet, but the chrome and the content are visibly
+     two different planes and a card lifts off the page without needing a shadow
+     to say so.
      --------------------------------------------------------------------- */
   --ds-neutral-0:   #ffffff;  /* surface, raised surface */
   --ds-neutral-25:  #f8fafc;  /* nested field, table header */
-  --ds-neutral-50:  #f5f6f8;  /* application canvas */
+  --ds-neutral-50:  #edf0f5;  /* application canvas - see the note below */
   --ds-neutral-100: #f1f4f8;  /* neutral hover */
   --ds-neutral-150: #e9edf2;  /* disabled background */
   --ds-neutral-200: #e6ebf2;  /* neutral pressed */

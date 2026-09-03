@@ -293,7 +293,6 @@ main { min-width: 0; grid-column: 2; }
 .company-intro { padding-bottom: var(--space-4); }
 .company-summary { margin-bottom: var(--space-4); display: grid; grid-template-columns: repeat(3, minmax(0, 210px)) 1fr; gap: var(--space-3); }
 .company-summary > div { position: relative; min-height: 98px; padding: var(--space-4) var(--space-5); display: flex; flex-direction: column; justify-content: center; overflow: hidden; border: 1px solid var(--ph-border); border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--ph-shadow); }
-.company-summary > div::after { content: ""; position: absolute; width: 72px; height: 72px; right: -25px; top: -28px; border-radius: 50%; background: currentColor; opacity: .08; }
 .company-summary > div.summary-violet { border-color: var(--border-default); background: var(--surface); color: var(--text-primary); }
 .company-summary > div.summary-blue { border-color: var(--border-default); background: var(--surface); color: var(--text-primary); }
 .company-summary > div.summary-green { border-color: var(--border-default); background: var(--surface); color: var(--text-primary); }
@@ -1046,6 +1045,12 @@ main { min-width: 0; grid-column: 2; }
 .client-remove-prospect { padding: var(--space-1) var(--space-2); border: 1px solid var(--danger); border-radius: var(--radius-md); background: var(--danger-soft); text-decoration: none; white-space: nowrap; }
 .data-source-badge { display: inline-flex; padding: var(--space-1) var(--space-2); border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent-text); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
 .import-workspace { display: flex; flex-direction: column; gap: var(--space-1); }
+
+/* The task pages are a column, not a field. At 1700px a 560px upload card sat
+   in the top-left quarter of an empty page, which reads as unfinished rather
+   than as minimal - the line length was never the constraint, the absence of a
+   deliberate measure was. Tables keep the full 1700px: they earn it. */
+.operations-page, .import-workspace { max-width: 1160px; margin-inline: auto; }
 .import-setup { max-width: 1160px; width: 100%; margin: 0 auto; padding: var(--space-5); display: grid; gap: var(--space-4); }
 .import-setup h2 { margin: var(--space-1) 0 var(--space-1); font-size: var(--text-lg); }
 .import-setup p { margin: 0; color: var(--ph-muted); font-size: var(--text-2xs); }
