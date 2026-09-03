@@ -1,79 +1,105 @@
 /* =============================================================================
    Prospect Sync - Design System
    -----------------------------------------------------------------------------
-   Direction: "precision instrument". Near-neutral surfaces, ONE accent reserved
-   for selection and primary action, hierarchy carried by typography and spacing
-   rather than colour. Every value below is a step on a scale - nothing in the
+   Direction: "Porcelain + Ink + Cobalt" in light, "Graphite + Cobalt" in dark.
+   Near-neutral surfaces carry the hierarchy through controlled lightness steps;
+   ONE cobalt identifies interaction; green, amber and red mean states and are
+   never page themes. Every value below is a step on a scale - nothing in the
    product should introduce a size, weight, radius or colour that is not here.
 
    Layer order: design-system.css (this file) -> workspace.css (components).
+
+   Contrast: every pair this file defines is measured by tests/color-contrast
+   .test.mjs, which parses THIS FILE, resolves the var() chains, composites the
+   translucent values over their real backdrops, and fails the build on a ratio
+   below its gate. Do not adjust a value here without running it.
    ========================================================================== */
 
 :root {
   /* ---------------------------------------------------------------------
-     1. Neutral ramp - faintly cool, low chroma. Carries 90% of the surface.
+     1. Neutral ramp - "porcelain": a cool, very low-chroma family. Carries
+     ~90% of the visible area. The canvas is deliberately DARKER than a card,
+     so a card reads as a surface lifted off it without needing a shadow, and
+     a field inside that card is a hair lighter again.
      --------------------------------------------------------------------- */
-  --ds-neutral-0:   #ffffff;
-  --ds-neutral-25:  #fcfcfd;
-  --ds-neutral-50:  #f7f7f8;
-  --ds-neutral-100: #f0f0f2;
-  --ds-neutral-150: #e7e7ea;
-  --ds-neutral-200: #dcdce0;
-  --ds-neutral-300: #c6c6cc;
-  --ds-neutral-400: #9e9ea7;
-  --ds-neutral-500: #76767f;
-  --ds-neutral-600: #57575f;
-  --ds-neutral-700: #3e3e45;
-  --ds-neutral-800: #292930;
-  --ds-neutral-900: #18181c;
-  --ds-neutral-950: #0b0d12;
+  --ds-neutral-0:   #ffffff;  /* surface, raised surface */
+  --ds-neutral-25:  #f8fafc;  /* nested field, table header */
+  --ds-neutral-50:  #f5f6f8;  /* application canvas */
+  --ds-neutral-100: #f1f4f8;  /* neutral hover */
+  --ds-neutral-150: #e9edf2;  /* disabled background */
+  --ds-neutral-200: #e6ebf2;  /* neutral pressed */
+  --ds-neutral-250: #e1e6ee;  /* decorative divider */
+  --ds-neutral-300: #d5dce6;  /* visible card boundary */
+  --ds-neutral-400: #748094;  /* disabled text */
+  --ds-neutral-450: #6f7c90;  /* essential control boundary - 3:1 on white */
+  --ds-neutral-500: #5f6b7c;  /* muted text */
+  --ds-neutral-600: #475467;  /* secondary text */
+  --ds-neutral-700: #344054;
+  --ds-neutral-800: #232f3e;
+  --ds-neutral-900: #182230;  /* primary text - "ink" */
+  --ds-neutral-950: #0f141c;  /* dark canvas */
 
   /* ---------------------------------------------------------------------
-     2. Accent - a single cobalt. Selection, primary action, active nav.
-        It is deliberately the only chromatic family in the chrome.
+     2. Accent - a single cobalt, unchanged from the existing brand. Solid
+        action, selection, focus and link text are FOUR roles taken from it,
+        not one value doing all four: they sit on different backgrounds and
+        only two of them ever carry text.
      --------------------------------------------------------------------- */
-  --ds-accent-50:  #eff3fe;
-  --ds-accent-100: #dde6fd;
+  --ds-accent-50:  #edf3ff;
+  --ds-accent-75:  #eaf0ff;
+  --ds-accent-100: #e0e9ff;
   --ds-accent-200: #c0d0fa;
-  --ds-accent-300: #96b0f6;
+  --ds-accent-300: #aec5ff;
+  --ds-accent-350: #9ebaff;
   --ds-accent-400: #6689ef;
-  --ds-accent-500: #4169e4;
+  --ds-accent-500: #3b5fd6;
   --ds-accent-600: #2b59d9;
-  --ds-accent-700: #2247b5;
-  --ds-accent-800: #1e3c93;
+  --ds-accent-700: #234bbc;
+  --ds-accent-750: #1f4db8;
+  --ds-accent-800: #1d3f9e;
   --ds-accent-900: #1c3576;
   --ds-accent-950: #142248;
 
   /* ---------------------------------------------------------------------
-     3. Status - muted on purpose. These appear in data, never in chrome.
+     3. Status - these appear in data and in state, never in chrome.
+        A status TEXT colour is not automatically usable as a solid fill with
+        white on it, so the one solid status button in the product (the final
+        Delete / Cancel import) gets its own measured ramp.
      --------------------------------------------------------------------- */
-  --ds-success-600: #0f7a52;
-  --ds-success-700: #0b6041;
-  --ds-success-soft: #e8f5ef;
-  --ds-success-line: #c3e3d4;
+  --ds-success-600: #087a55;
+  --ds-success-700: #066242;
+  --ds-success-soft: #eaf8f0;
+  --ds-success-line: #b6e2cd;
 
-  --ds-warning-600: #8a5a00;
-  --ds-warning-700: #6e4800;
-  --ds-warning-soft: #fbf2df;
+  --ds-warning-600: #925f00;
+  --ds-warning-700: #744c00;
+  --ds-warning-soft: #fff4d6;
   --ds-warning-line: #ecd9ab;
 
-  --ds-danger-600: #b3261e;
-  --ds-danger-700: #8f1d17;
-  --ds-danger-soft: #fbebe9;
-  --ds-danger-line: #eec9c5;
+  --ds-danger-600: #b42318;
+  --ds-danger-700: #912018;
+  --ds-danger-800: #7a1b14;
+  --ds-danger-soft: #fff0ee;
+  --ds-danger-line: #f4cfca;
+
+  --ds-info-600: #1f4db8;
+  --ds-info-soft: #edf3ff;
+  --ds-info-line: #c8daff;
 
   /* ---------------------------------------------------------------------
-     4. Type scale - 8 steps. 13px is the workhorse (controls, table cells).
-        Replaces the 27 ad-hoc sizes the product used to carry.
+     4. Readability-first type scale. Rem units respect the reader's default
+        font size. At a 16px root, captions start at 12px, supporting text is
+        13px and working text is 14px. Keep --text-sm as the legacy UI alias.
      --------------------------------------------------------------------- */
-  --text-2xs:  11px;  /* tracked uppercase micro-labels only */
-  --text-xs:   12px;  /* secondary meta, timestamps, counts */
-  --text-sm:   13px;  /* controls, table cells, nav - the workhorse */
-  --text-base: 14px;  /* body copy, descriptions */
-  --text-md:   16px;  /* panel titles */
-  --text-lg:   20px;  /* page heading */
-  --text-xl:   26px;  /* metric values */
-  --text-2xl:  34px;  /* hero heading */
+  --text-2xs:  .75rem;    /* 12px: captions and compact badges, never inputs */
+  --text-xs:   .8125rem;  /* 13px: supporting text and optional compact rows */
+  --text-sm:   .875rem;   /* 14px: controls, table cells and navigation */
+  --text-base: .875rem;   /* 14px: body copy and descriptions */
+  --text-md:   1rem;      /* 16px: panel titles */
+  --text-lg:   1.25rem;   /* 20px: shell heading */
+  --text-xl:   1.625rem;  /* 26px: page headings and metric values */
+  --text-2xl:  2.125rem;  /* 34px: hero heading */
+  --font-mono: ui-monospace, "SF Mono", Consolas, monospace;
 
   /* Weight scale - 4 steps, replacing 24 arbitrary variable-font weights. */
   --weight-normal:   400;
@@ -126,12 +152,13 @@
   --radius-full: 999px;
 
   /* ---------------------------------------------------------------------
-     6. Elevation - 4 levels. Tight, low-opacity, neutral-tinted.
+     6. Elevation - 4 levels. Tight, low-opacity, NEUTRAL-tinted. A floating
+        surface separates itself by elevation, never by a saturated tint.
      --------------------------------------------------------------------- */
-  --elevation-1: 0 1px 2px rgba(11, 13, 18, .05);
-  --elevation-2: 0 1px 2px rgba(11, 13, 18, .04), 0 2px 6px -1px rgba(11, 13, 18, .06);
-  --elevation-3: 0 2px 4px -1px rgba(11, 13, 18, .05), 0 8px 20px -6px rgba(11, 13, 18, .10);
-  --elevation-4: 0 4px 10px -4px rgba(11, 13, 18, .08), 0 18px 44px -12px rgba(11, 13, 18, .18);
+  --elevation-1: 0 1px 2px rgba(15, 20, 28, .05);
+  --elevation-2: 0 1px 2px rgba(15, 20, 28, .04), 0 2px 6px -1px rgba(15, 20, 28, .06);
+  --elevation-3: 0 2px 4px -1px rgba(15, 20, 28, .05), 0 8px 20px -6px rgba(15, 20, 28, .10);
+  --elevation-4: 0 4px 10px -4px rgba(15, 20, 28, .08), 0 18px 44px -12px rgba(15, 20, 28, .18);
 
   /* ---------------------------------------------------------------------
      7. Motion - one easing language, three durations.
@@ -150,36 +177,61 @@
      8. Semantic aliases - everything downstream references these, never the
         ramps above. Swapping a theme means redefining only this block.
      --------------------------------------------------------------------- */
-  --canvas:          var(--ds-neutral-50);
-  --surface:         var(--ds-neutral-0);
-  --surface-raised:  var(--ds-neutral-0);
-  --surface-sunken:  var(--ds-neutral-25);
-  --surface-hover:   var(--ds-neutral-50);
-  --surface-active:  var(--ds-neutral-100);
 
+  /* 8a. Surfaces, in stacking order. */
+  --canvas:                 var(--ds-neutral-50);
+  --surface:                var(--ds-neutral-0);
+  --surface-raised:         var(--ds-neutral-0);
+  --surface-sunken:         var(--ds-neutral-25);
+  --surface-hover:          var(--ds-neutral-100);
+  --surface-active:         var(--ds-neutral-200);
+  /* Selection is its own surface, not a reuse of the informational tint.
+     They looked alike and meant different things: one says "you picked this",
+     the other says "here is a fact". */
+  --surface-selected:       var(--ds-accent-75);
+  --surface-selected-hover: var(--ds-accent-100);
+  --surface-disabled:       var(--ds-neutral-150);
+
+  /* 8b. Text. */
   --text-primary:    var(--ds-neutral-900);
   --text-secondary:  var(--ds-neutral-600);
   --text-tertiary:   var(--ds-neutral-500);
+  /* Only for genuinely disabled controls. Never metadata, placeholders,
+     counts or labels - those are tertiary at worst. */
   --text-disabled:   var(--ds-neutral-400);
   --text-inverse:    var(--ds-neutral-0);
   /* Text on a SOLID accent fill. Deliberately not --text-inverse: that means
      "text on an inverted surface" and flips to near-black in dark mode, but an
      accent button stays blue in both themes. Measured: white gives 5.94:1 on
-     the light accent and 4.81:1 on the dark one, both AA; --text-inverse gives
+     the light accent and 5.54:1 on the dark one, both AA; --text-inverse gives
      4.04:1 in dark, which is a fail on every primary button in the product. */
   --on-accent:       var(--ds-neutral-0);
+  --on-danger:       var(--ds-neutral-0);
+  /* Pressed and selected content is primary/secondary, never muted: those two
+     surfaces are the ones where muted stopped clearing 4.5:1. Named so a
+     component cannot inherit the wrong one by accident. */
+  --text-on-selected: var(--text-primary);
+  --text-on-pressed:  var(--text-primary);
 
-  --border-subtle:   var(--ds-neutral-150);
-  --border-default:  var(--ds-neutral-200);
-  --border-strong:   var(--ds-neutral-300);
+  /* 8c. Lines. A decorative divider and the boundary that tells you something
+     is a control are different jobs with different gates: the first has none,
+     the second needs 3:1 against BOTH the field and the surface behind it. */
+  --border-subtle:   var(--ds-neutral-250);
+  --border-default:  var(--ds-neutral-300);
+  --border-control:  var(--ds-neutral-450);
+  --border-strong:   var(--ds-neutral-450);
 
-  --accent:          var(--ds-accent-600);
+  /* 8d. Accent, split into its four real roles. */
+  --accent:          var(--ds-accent-600);  /* solid fill */
   --accent-hover:    var(--ds-accent-700);
-  --accent-text:     var(--ds-accent-700);
-  --accent-soft:     var(--ds-accent-50);
+  --accent-pressed:  var(--ds-accent-800);
+  --accent-text:     var(--ds-accent-700);  /* link/label ON a light surface */
+  --accent-soft:     var(--ds-accent-50);   /* informational tint */
   --accent-line:     var(--ds-accent-200);
+  --focus-color:     var(--ds-accent-600);  /* the ring, opaque */
   --accent-ring:     rgba(43, 89, 217, .22);
 
+  /* 8e. Status: a foreground and the soft background it is measured against. */
   --success:      var(--ds-success-600);
   --success-soft: var(--ds-success-soft);
   --success-line: var(--ds-success-line);
@@ -189,22 +241,33 @@
   --danger:       var(--ds-danger-600);
   --danger-soft:  var(--ds-danger-soft);
   --danger-line:  var(--ds-danger-line);
+  --info:         var(--ds-info-600);
+  --info-soft:    var(--ds-info-soft);
+  --info-line:    var(--ds-info-line);
 
-  --scrollbar-thumb: var(--ds-neutral-300);
+  /* The one solid destructive button. Explicit in both themes, because the
+     dark theme's danger TEXT is a pastel that white cannot sit on. */
+  --danger-solid:         var(--ds-danger-600);
+  --danger-solid-hover:   var(--ds-danger-700);
+  --danger-solid-pressed: var(--ds-danger-800);
+
+  --scrollbar-thumb: var(--ds-neutral-400);
   --scrollbar-track: transparent;
-  --overlay:         rgba(11, 13, 18, .32);
+  --overlay:         rgba(15, 20, 28, .40);
 
   /* Channel values, for the few places that need alpha over a token colour
      (focus rings, tinted shadows, pulse animations). */
   --accent-rgb:  43, 89, 217;
-  --success-rgb: 15, 122, 82;
-  --shadow-rgb:  11, 13, 18;
+  --success-rgb: 8, 122, 85;
+  --shadow-rgb:  15, 20, 28;
 
   /* Translucent surfaces sitting over scrolling content - the sticky topbar,
      progress strips, glass chips. These must be tokens: a literal white here
-     is a white bar floating on a dark page. */
-  --surface-veil:       rgba(255, 255, 255, .78);
-  --surface-veil-solid: rgba(255, 255, 255, .92);
+     is a white bar floating on a dark page. The solid variant is what data
+     screens use, so scrolling rows never change the text contrast behind a
+     sticky header. */
+  --surface-veil:       rgba(255, 255, 255, .86);
+  --surface-veil-solid: var(--ds-neutral-0);
 
   /* Row density - driven by the density toggle, read by the data tables. */
   --row-height: 44px;
@@ -212,113 +275,147 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Dark theme. Only the semantic block is redefined - ramps stay put.
-   Surfaces lift as they stack; borders get lighter, not darker.
+   Dark theme - "graphite + cobalt". Only the semantic block is redefined.
+   Surfaces LIFT as they stack (a menu is lighter than the canvas, never
+   darker); borders get lighter, not darker; nested fields are set explicitly
+   rather than mechanically inverted.
+
    Both the system preference and an explicit [data-theme] are honoured, so an
    in-app toggle works in both directions without touching this file.
    --------------------------------------------------------------------------- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --canvas:         #0b0d12;
-    --surface:        #131519;
-    --surface-raised: #191c21;
-    --surface-sunken: #0f1116;
-    --surface-hover:  #1e2127;
-    --surface-active: #24272e;
+    --canvas:                 #0f141c;
+    --surface:                #171e28;
+    --surface-raised:         #202a36;
+    --surface-sunken:         #121a24;
+    --surface-hover:          #243041;
+    --surface-active:         #2c3b4f;
+    --surface-selected:       #22365b;
+    --surface-selected-hover: #2b416a;
+    --surface-disabled:       #273241;
 
-    --text-primary:   #eceef2;
-    --text-secondary: #a7abb5;
-    --text-tertiary:  #868b96;
-    --text-disabled:  #5f646e;
-    --text-inverse:   #0b0d12;
+    --text-primary:   #e9eef5;
+    --text-secondary: #b8c3d3;
+    --text-tertiary:  #93a1b5;
+    --text-disabled:  #8290a4;
+    --text-inverse:   #0f141c;
     --on-accent:      var(--ds-neutral-0);
+    --on-danger:      var(--ds-neutral-0);
 
-    --border-subtle:  #23262c;
-    --border-default: #2c3037;
-    --border-strong:  #3a3f48;
+    --border-subtle:  #2f3a49;
+    --border-default: #3a4757;
+    --border-control: #8292a8;
+    --border-strong:  #8292a8;
 
     --accent:         var(--ds-accent-500);
-    --accent-hover:   var(--ds-accent-400);
+    --accent-hover:   #3354c2;
+    --accent-pressed: #2c49a9;
     --accent-text:    var(--ds-accent-300);
-    --accent-soft:    rgba(65, 105, 228, .14);
-    --accent-line:    rgba(65, 105, 228, .34);
-    --accent-ring:    rgba(102, 137, 239, .34);
+    --accent-soft:    #202f50;
+    --accent-line:    rgba(59, 95, 214, .42);
+    --focus-color:    var(--ds-accent-350);
+    --accent-ring:    rgba(158, 186, 255, .34);
 
-    --success:      #4fc79a;
-    --success-soft: rgba(79, 199, 154, .12);
-    --success-line: rgba(79, 199, 154, .28);
-    --warning:      #e0aa4a;
-    --warning-soft: rgba(224, 170, 74, .12);
-    --warning-line: rgba(224, 170, 74, .28);
-    --danger:       #f0776c;
-    --danger-soft:  rgba(240, 119, 108, .12);
-    --danger-line:  rgba(240, 119, 108, .28);
+    --success:      #71d7b3;
+    --success-soft: #132d25;
+    --success-line: rgba(113, 215, 179, .34);
+    --warning:      #f2c66d;
+    --warning-soft: #332a17;
+    --warning-line: rgba(242, 198, 109, .34);
+    --danger:       #ffb4ab;
+    --danger-soft:  #3a2022;
+    --danger-line:  rgba(255, 180, 171, .34);
+    --info:         #adc6ff;
+    --info-soft:    #202f50;
+    --info-line:    rgba(173, 198, 255, .34);
+
+    /* Unchanged across themes on purpose: a destructive confirmation is the
+       one place the fill must stay unambiguous, and the pastel danger text
+       above is a foreground, not a fill. */
+    --danger-solid:         var(--ds-danger-600);
+    --danger-solid-hover:   var(--ds-danger-700);
+    --danger-solid-pressed: var(--ds-danger-800);
 
     --elevation-1: 0 1px 2px rgba(0, 0, 0, .4);
     --elevation-2: 0 1px 2px rgba(0, 0, 0, .35), 0 2px 6px -1px rgba(0, 0, 0, .45);
     --elevation-3: 0 2px 4px -1px rgba(0, 0, 0, .4), 0 8px 20px -6px rgba(0, 0, 0, .5);
     --elevation-4: 0 4px 10px -4px rgba(0, 0, 0, .45), 0 18px 44px -12px rgba(0, 0, 0, .6);
 
-    --scrollbar-thumb: #3a3f48;
-    --overlay:         rgba(0, 0, 0, .58);
-    --accent-rgb:  65, 105, 228;
-    --success-rgb: 79, 199, 154;
+    --scrollbar-thumb: #4a5768;
+    --overlay:         rgba(0, 0, 0, .64);
+    --accent-rgb:  59, 95, 214;
+    --success-rgb: 113, 215, 179;
     --shadow-rgb:  0, 0, 0;
-    --surface-veil:       rgba(19, 21, 25, .78);
-    --surface-veil-solid: rgba(19, 21, 25, .92);
+    --surface-veil:       rgba(23, 30, 40, .86);
+    --surface-veil-solid: #171e28;
 
     color-scheme: dark;
   }
 }
 
 :root[data-theme="dark"] {
-  --canvas:         #0b0d12;
-  --surface:        #131519;
-  --surface-raised: #191c21;
-  --surface-sunken: #0f1116;
-  --surface-hover:  #1e2127;
-  --surface-active: #24272e;
+  --canvas:                 #0f141c;
+  --surface:                #171e28;
+  --surface-raised:         #202a36;
+  --surface-sunken:         #121a24;
+  --surface-hover:          #243041;
+  --surface-active:         #2c3b4f;
+  --surface-selected:       #22365b;
+  --surface-selected-hover: #2b416a;
+  --surface-disabled:       #273241;
 
-  --text-primary:   #eceef2;
-  --text-secondary: #a7abb5;
-  --text-tertiary:  #868b96;
-  --text-disabled:  #5f646e;
-  --text-inverse:   #0b0d12;
+  --text-primary:   #e9eef5;
+  --text-secondary: #b8c3d3;
+  --text-tertiary:  #93a1b5;
+  --text-disabled:  #8290a4;
+  --text-inverse:   #0f141c;
   --on-accent:      var(--ds-neutral-0);
+  --on-danger:      var(--ds-neutral-0);
 
-  --border-subtle:  #23262c;
-  --border-default: #2c3037;
-  --border-strong:  #3a3f48;
+  --border-subtle:  #2f3a49;
+  --border-default: #3a4757;
+  --border-control: #8292a8;
+  --border-strong:  #8292a8;
 
   --accent:         var(--ds-accent-500);
-  --accent-hover:   var(--ds-accent-400);
+  --accent-hover:   #3354c2;
+  --accent-pressed: #2c49a9;
   --accent-text:    var(--ds-accent-300);
-  --accent-soft:    rgba(65, 105, 228, .14);
-  --accent-line:    rgba(65, 105, 228, .34);
-  --accent-ring:    rgba(102, 137, 239, .34);
+  --accent-soft:    #202f50;
+  --accent-line:    rgba(59, 95, 214, .42);
+  --focus-color:    var(--ds-accent-350);
+  --accent-ring:    rgba(158, 186, 255, .34);
 
-  --success:      #4fc79a;
-  --success-soft: rgba(79, 199, 154, .12);
-  --success-line: rgba(79, 199, 154, .28);
-  --warning:      #e0aa4a;
-  --warning-soft: rgba(224, 170, 74, .12);
-  --warning-line: rgba(224, 170, 74, .28);
-  --danger:       #f0776c;
-  --danger-soft:  rgba(240, 119, 108, .12);
-  --danger-line:  rgba(240, 119, 108, .28);
+  --success:      #71d7b3;
+  --success-soft: #132d25;
+  --success-line: rgba(113, 215, 179, .34);
+  --warning:      #f2c66d;
+  --warning-soft: #332a17;
+  --warning-line: rgba(242, 198, 109, .34);
+  --danger:       #ffb4ab;
+  --danger-soft:  #3a2022;
+  --danger-line:  rgba(255, 180, 171, .34);
+  --info:         #adc6ff;
+  --info-soft:    #202f50;
+  --info-line:    rgba(173, 198, 255, .34);
+
+  --danger-solid:         #d92d20;
+  --danger-solid-hover:   var(--ds-danger-600);
+  --danger-solid-pressed: var(--ds-danger-700);
 
   --elevation-1: 0 1px 2px rgba(0, 0, 0, .4);
   --elevation-2: 0 1px 2px rgba(0, 0, 0, .35), 0 2px 6px -1px rgba(0, 0, 0, .45);
   --elevation-3: 0 2px 4px -1px rgba(0, 0, 0, .4), 0 8px 20px -6px rgba(0, 0, 0, .5);
   --elevation-4: 0 4px 10px -4px rgba(0, 0, 0, .45), 0 18px 44px -12px rgba(0, 0, 0, .6);
 
-  --scrollbar-thumb: #3a3f48;
-  --overlay:         rgba(0, 0, 0, .58);
-  --accent-rgb:  65, 105, 228;
-  --success-rgb: 79, 199, 154;
+  --scrollbar-thumb: #4a5768;
+  --overlay:         rgba(0, 0, 0, .64);
+  --accent-rgb:  59, 95, 214;
+  --success-rgb: 113, 215, 179;
   --shadow-rgb:  0, 0, 0;
-  --surface-veil:       rgba(19, 21, 25, .78);
-  --surface-veil-solid: rgba(19, 21, 25, .92);
+  --surface-veil:       rgba(23, 30, 40, .86);
+  --surface-veil-solid: #171e28;
 
   color-scheme: dark;
 }
@@ -331,14 +428,27 @@
    Focus. One ring for the whole product. Custom controls must never zero this
    out without re-applying it - that was the single worst accessibility hole in
    the previous stylesheet (outline: 0 appeared ten times).
+
+   The 2px offset is not decoration: on a solid accent button the ring and the
+   fill are the same family, and the gap - painted in the surface behind - is
+   what separates them. Without it the ring is invisible on the one control
+   people reach for most.
    --------------------------------------------------------------------------- */
 :where(button, input, select, textarea, a, [tabindex]):focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-color);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
 
-::selection { background: var(--accent-soft); color: var(--accent-text); }
+/* Forced colours: hand the ring back to the system rather than painting our
+   own, which the mode discards anyway. */
+@media (forced-colors: active) {
+  :where(button, input, select, textarea, a, [tabindex]):focus-visible {
+    outline: 2px solid CanvasText;
+  }
+}
+
+::selection { background: var(--surface-selected); color: var(--text-primary); }
 
 /* Respect reduced-motion globally rather than per-component. */
 @media (prefers-reduced-motion: reduce) {

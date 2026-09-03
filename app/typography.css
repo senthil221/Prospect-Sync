@@ -1,0 +1,140 @@
+/* Readability layer: shared text roles across every workspace.
+   Loaded after component styles so older 11px-era control overrides cannot
+   shrink important information. Colors continue to belong to the theme.
+   Standard rows use 14px; only the user's compact preference opts into 13px. */
+:root { --table-text-size: var(--text-base); }
+
+/* Controls: ordinary labels do not compete with bold page titles. */
+.primary, .secondary, .panel-head button, .empty button, .compact button,
+.outline-button, .workspace-actions select, .bulk-bar select, .bulk-bar button,
+.table-footer button, .filter-panel-head > button, .clear-section-filter,
+.apollo-mode-tabs button, .token-mode-tabs button, .token-bulk-actions button,
+.company-filter-import, .company-filter-clear, .company-bulk-clear,
+.bulk-domain-actions button, .icp-toggle, .classifier-actions select,
+.form-field input, .form-field select, .import-source-fields input,
+.import-source-fields select, .mapping-list select, .blocklist-add-actions input,
+.filter-rule-head select, .filter-condition, .multi-value-control input,
+.token-input input, .search input, .workspace-search input,
+.filter-panel-search input, .ds-menu-field select, .ds-menu-item,
+.filter-panel-footer button, .select-all-matching-button, .link-button,
+.company-pagination button, .boolean-search-box textarea {
+  font-size: var(--text-base);
+  line-height: var(--leading-snug);
+}
+.primary, .secondary, .panel-head button, .empty button, .compact button,
+.outline-button, .bulk-bar button, .table-footer button {
+  font-weight: var(--weight-medium);
+}
+.sidebar nav button.active { font-weight: var(--weight-semibold); }
+
+/* Controls in dense bars may wrap as text grows. Never clip a second line. */
+.workspace-actions, .results-toolbar, .top-actions, .section-intro-actions {
+  flex-wrap: wrap;
+}
+.topbar { height: auto; min-height: 76px; gap: var(--space-3); }
+.outline-button { height: auto; }
+.apollo-mode-tabs { height: auto; min-height: var(--control-dense); flex-wrap: wrap; }
+.apollo-filter-summary strong { font-size: var(--text-base); white-space: normal; line-height: var(--leading-snug); }
+.ds-menu-item { padding-block: var(--space-1); }
+.import-step button { font-size: var(--text-xs); line-height: var(--leading-snug); padding-block: var(--space-1); }
+.import-step-mark { width: 1.75em; height: 1.75em; line-height: 1; }
+
+/* Give numbers room instead of cropping them at laptop widths or large text.
+   Rem-based minimums also respond to the reader's chosen default font size. */
+.metric-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); }
+.quality-metrics, .quality-metrics.four { grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); }
+.metric-card { min-width: 0; }
+@media (min-width: 761px) {
+  .sidebar { overflow-y: auto; }
+  .sidebar > .brand, .sidebar > .workspace, .sidebar nav { flex-shrink: 0; }
+}
+
+/* Distinct heading levels; no overly tight negative tracking or heavy body. */
+.people-heading h2, .section-intro h2, .compact-intro h2,
+.drawer-person h2, .import-success h2 {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-snug);
+}
+.welcome h2, .import-copy h2 {
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+}
+.topbar h1, .panel-head h3 { font-weight: var(--weight-semibold); }
+.eyebrow { line-height: var(--leading-snug); letter-spacing: var(--tracking-wide); }
+.form-field label, .import-source-fields label > span { font-weight: var(--weight-medium); }
+
+/* Instructions and validation are working information, not micro captions. */
+.apollo-filter-description, .company-keyword-scope-note,
+.company-keyword-scopes label, .company-keyword-scopes legend,
+.import-setup p, .import-source-fields label > span, .form-error,
+.privacy-note, .import-rollback-note, .import-partial-note,
+.quality-issue-body p, .index-health-head p, .classifier-head p,
+.merge-mode-hint, .merge-mode-chooser small, .dropzone small,
+.coverage-note, .coverage-spotlight span, .required-field-list span,
+.mapping-list label > span, .import-mapping > p,
+.bulk-domain-note, .token-bulk-note, .blocklist-note, .paste-zone label > span {
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+.activity strong, .esp-cell strong { font-size: var(--text-base); }
+.quality-metrics span, .metric-card p { font-size: var(--text-xs); }
+
+/* Table data stays readable in ALL tables, including coverage and imports. */
+table td, .company-table td, .master-data-table td {
+  font-size: var(--table-text-size);
+  line-height: var(--leading-snug);
+  font-variant-numeric: normal;
+}
+table th, .company-table th, .master-data-table th {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-normal);
+  text-transform: none;
+  line-height: var(--leading-snug);
+}
+.compact-person strong, .compact-person .row-open,
+.company-identity strong { font-size: var(--table-text-size); font-weight: var(--weight-medium); }
+[data-density="compact"] { --table-text-size: var(--text-xs); }
+[data-density="compact"] .compact-person > span { width: 24px; height: 24px; }
+
+/* Tabular digits keep counts steady; names/emails keep proportional spacing.
+   Right alignment belongs to explicitly numeric columns, not every table cell. */
+.numeric-cell, .master-data-table :is(th, td).numeric-cell,
+.company-table :is(th, td).numeric-cell {
+  font-variant-numeric: lining-nums tabular-nums;
+  text-align: right;
+}
+.date-added-column, .master-data-table td.date-added-column,
+.company-table td.date-added-column,
+.metric-card strong, .company-summary strong, .quality-metrics strong,
+.quality-issue-count strong, .duplicate-confidence strong, .coverage-row strong,
+.coverage-spotlight strong, .prospect-count-badge, .result-grid strong,
+.drawer-summary b, .client-row-metric b, .table-footer,
+.activity-result, .index-health-metrics strong, .classifier-summary strong {
+  font-variant-numeric: lining-nums tabular-nums;
+  letter-spacing: var(--tracking-normal);
+}
+
+/* Preserve monospace only for literal/code input, not ordinary table content. */
+.bulk-domain-paste textarea, .token-bulk textarea, .blocklist-add textarea,
+.paste-zone textarea, .resume-paste textarea, .boundary-detail, .classifier-head code,
+.title-classifier tbody code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-feature-settings: normal;
+  line-height: var(--leading-normal);
+}
+
+/* Mobile comes last: keep reading sizes, and prevent input-focus auto-zoom.
+   The table continues to scroll horizontally rather than shrinking its text. */
+@media (max-width: 700px) {
+  .topbar { min-height: 64px; }
+  .app-shell input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+  .app-shell select, .app-shell textarea,
+  .login-page input:not([type="checkbox"]):not([type="radio"]) {
+    font-size: var(--text-md);
+  }
+}

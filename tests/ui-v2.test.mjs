@@ -54,9 +54,9 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
   // contract is checked in two halves: the component references the token, and
   // the token resolves to the size the product is specified at.
   assert.match(styles, /html, body[\s\S]*font-size: var\(--text-base\)/);
-  assert.match(tokens, /--text-base:\s*14px/);
+  assert.match(tokens, /--text-base:\s*\.875rem/);
   assert.match(styles, /\.master-data-table td[\s\S]*font-size: var\(--text-sm\)/);
-  assert.match(tokens, /--text-sm:\s*13px/);
+  assert.match(tokens, /--text-sm:\s*\.875rem/);
   // No raw colour, size, weight or radius may re-enter the component sheet.
   assert.doesNotMatch(styles, /#[0-9a-fA-F]{3,8}\b/);
   assert.doesNotMatch(styles, /font-size:\s*[0-9.]+px/);

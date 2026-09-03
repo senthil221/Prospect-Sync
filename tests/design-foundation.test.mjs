@@ -38,9 +38,12 @@ test("every search box shows focus, since its input suppresses its own ring", as
       `${container} suppresses its input's outline and must show focus itself`);
   }
 
-  // And the global ring must still exist for everything else.
+  // And the global ring must still exist for everything else. It reads
+  // --focus-color rather than --accent: the ring and the solid action fill are
+  // separate roles now, because on a primary button they are the same value
+  // and the ring is only visible thanks to the offset gap.
   const system = await read("../app/design-system.css");
-  assert.match(system, /:focus-visible\s*\{\s*outline: 2px solid var\(--accent\)/);
+  assert.match(system, /:focus-visible\s*\{\s*outline: 2px solid var\(--focus-color\)/);
 });
 
 test("controls use the two height tokens and nothing else", async () => {

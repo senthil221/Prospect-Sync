@@ -43,7 +43,7 @@
 .ds-tabs button.active { color: var(--text-primary); font-weight: var(--weight-semibold); }
 
 .ds-tab-icon { display: grid; place-items: center; color: var(--text-tertiary); transition: color var(--duration-fast) var(--ease); }
-.ds-tabs button.active .ds-tab-icon { color: var(--accent); }
+.ds-tabs button.active .ds-tab-icon { color: var(--accent-text); }
 
 /* The count is a quiet companion to the label - it must never out-weigh it. */
 .ds-tab-count {
@@ -51,7 +51,7 @@
   padding: 2px var(--space-1);
   border-radius: var(--radius-full);
   background: var(--surface-active);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: var(--text-2xs);
   font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
@@ -147,7 +147,7 @@
   flex: none;
   border-radius: var(--radius-md);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .filter-panel-search {
@@ -173,7 +173,7 @@
   color: var(--text-primary);
   font-size: var(--text-sm);
 }
-.filter-panel-search input::placeholder { color: var(--text-disabled); }
+.filter-panel-search input::placeholder { color: var(--text-tertiary); }
 
 .apollo-filter-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: var(--space-2); }
 
@@ -209,7 +209,7 @@
 .apollo-filter-section.expanded .apollo-filter-summary strong { font-weight: var(--weight-semibold); }
 
 .apollo-filter-mark { display: grid; place-items: center; flex: none; color: var(--text-disabled); transition: color var(--duration-fast) var(--ease); }
-.apollo-filter-section.expanded .apollo-filter-mark { color: var(--accent); }
+.apollo-filter-section.expanded .apollo-filter-mark { color: var(--accent-text); }
 
 /* An active count is the one thing in this panel worth an accent. */
 .apollo-filter-summary .filter-count {
@@ -218,7 +218,7 @@
   flex: none;
   border-radius: var(--radius-full);
   background: var(--accent);
-  color: var(--text-inverse);
+  color: var(--on-accent);
   font-size: var(--text-2xs);
   font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
@@ -343,13 +343,13 @@
 .outline-button > span:first-child { color: var(--text-tertiary); display: grid; place-items: center; }
 .outline-button.active,
 .outline-button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
-.outline-button.active > span:first-child { color: var(--accent); }
+.outline-button.active > span:first-child { color: var(--accent-text); }
 .outline-button:disabled { opacity: .5; cursor: not-allowed; }
 
 /* A disclosure that is text, not a control: used where a button-shaped thing
    would compete with the real action beside it. */
 .link-button { width: fit-content; padding: var(--space-1) 0; border: 0; background: none; color: var(--accent-text); cursor: pointer; font-size: var(--text-2xs); font-weight: var(--weight-semibold); text-decoration: underline; text-underline-offset: 3px; }
-.link-button:hover { color: var(--accent); }
+.link-button:hover { color: var(--accent-text); }
 
 /* -----------------------------------------------------------------------------
    Data table
@@ -375,7 +375,8 @@
 }
 .master-data-table tbody tr { transition: background-color var(--duration-instant) var(--ease); }
 .master-data-table tbody tr:hover { background: var(--surface-hover); }
-.master-data-table tbody tr.selected { background: var(--accent-soft); }
+.master-data-table tbody tr.selected { background: var(--surface-selected); }
+.master-data-table tbody tr.selected:hover { background: var(--surface-selected-hover); }
 .master-data-table tbody tr.selected td:first-child { box-shadow: inset 2px 0 var(--accent); }
 
 /* Numbers in a data table should align on the decimal, always. */
@@ -414,7 +415,7 @@
 .theme-toggle button:hover { color: var(--text-primary); background: var(--surface-hover); }
 .theme-toggle button.active {
   background: var(--surface);
-  color: var(--accent);
+  color: var(--accent-text);
   box-shadow: var(--elevation-1);
 }
 /* .theme-toggle now owns the auto margin that anchors this pair to the bottom. */
@@ -480,7 +481,7 @@ select:focus-visible {
 
 select:disabled {
   border-color: var(--border-subtle);
-  background-color: var(--surface-sunken);
+  background-color: var(--surface-disabled);
   color: var(--text-disabled);
   box-shadow: none;
   cursor: not-allowed;
@@ -630,7 +631,7 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
   white-space: nowrap;
   cursor: pointer;
 }
-.compact-person .row-open:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.compact-person .row-open:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
 
 /* The grouped command menu (COMMANDS-01).
    People had eight controls in one row and Companies seven, all at the same
@@ -690,7 +691,7 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
   border-top: 1px solid var(--border-subtle);
 }
 .ds-menu-section > strong { color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-wide); text-transform: uppercase; }
-.ds-menu-reset { padding: 0; border: 0; background: none; color: var(--accent); font-size: var(--text-2xs); font-weight: var(--weight-semibold); cursor: pointer; }
+.ds-menu-reset { padding: 0; border: 0; background: none; color: var(--accent-text); font-size: var(--text-2xs); font-weight: var(--weight-semibold); cursor: pointer; }
 .ds-menu-checks { display: grid; gap: 2px; }
 .ds-menu-checks label {
   min-height: var(--control-dense);
@@ -757,7 +758,7 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
   white-space: nowrap;
   cursor: pointer;
 }
-.client-row-identity .row-open:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.client-row-identity .row-open:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
 .client-row-identity small { color: var(--text-tertiary); font-size: var(--text-2xs); }
 .client-row-metric { color: var(--text-tertiary); font-size: var(--text-xs); white-space: nowrap; }
 .client-row-metric b { margin-right: var(--space-1); color: var(--text-primary); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
