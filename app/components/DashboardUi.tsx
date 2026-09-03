@@ -155,6 +155,40 @@ export function DeleteConfirmation({ target, busy, onCancel, onConfirm }: { targ
 }
 
 
+/**
+ * The empty table, with the reason it is empty.
+ *
+ * The caller works out WHY (lib/workspace-states.ts) and this renders it,
+ * wiring the button to the handler that undoes that particular constraint. The
+ * split matters: a button labelled "Clear search" that clears filters instead
+ * is worse than no button, and keeping the decision in one pure function is
+ * what makes it testable without a browser.
+ */
+export function WorkspaceEmpty({ state, onClearSearch, onClearFilters, onClearScope, onImport }: {
+  state: import("../../lib/workspace-states").WorkspaceEmptyState;
+  onClearSearch?: () => void;
+  onClearFilters?: () => void;
+  onClearScope?: () => void;
+  onImport?: () => void;
+}) {
+  const handlers: Record<string, (() => void) | undefined> = {
+    "clear-search": onClearSearch,
+    "clear-filters": onClearFilters,
+    "clear-both": () => { onClearSearch?.(); onClearFilters?.(); },
+    "clear-scope": onClearScope,
+    import: onImport,
+  };
+  const onAction = handlers[state.intent];
+  return <div className="empty" role="status">
+    <span><AppIcon name="target" size={14}/></span>
+    <h3>{state.title}</h3>
+    <p>{state.text}</p>
+    {/* No button rather than a dead one: an action that cannot run is a
+        promise the empty state cannot keep. */}
+    {onAction ? <button className="primary" onClick={onAction}>{state.action}</button> : null}
+  </div>;
+}
+
 export function EmptyState({ title, text, action, onAction }: { title: string; text: string; action: string; onAction: () => void }) {
   return <div className="empty"><span><AppIcon name="target" size={14}/></span><h3>{title}</h3><p>{text}</p><button className="primary" onClick={onAction}>{action}</button></div>;
 }
