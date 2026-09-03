@@ -35,12 +35,6 @@ const missing = (code?: string) => code === "PGRST202" || code === "42883" || co
 const migrationNeeded = () => Response.json(
   { error: "Apply the latest database migration to enable background exports." }, { status: 503 });
 
-// A pivot cannot be carried into a result set: result_sets stores a search, a
-// filter list and a client scope, and build_batch_v1 applies exactly those. A
-// background export under a Company DB pivot would therefore write every person
-// matching the filters rather than only those in the pivoted companies - the
-// same widening the database-wide bulk actions refuse for the same reason.
-const pivotRefusal = "This view is scoped to a Company DB search, and a background export cannot carry that scope - it would write every person matching the filters, not only those companies. Export a narrower set, or clear the company scope first.";
 
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
@@ -68,7 +62,14 @@ export async function POST(request: Request) {
   let companyScope;
   try { companyScope = parseCompanyScope(payload.companyScope ? JSON.stringify(payload.companyScope) : null); }
   catch (error) { return filterErrorResponse(error, "Invalid company navigation scope."); }
-  if (scopeRestricts(companyScope)) return Response.json({ error: pivotRefusal }, { status: 400 });
+  // Carried into the set rather than refused. Until 20260902000180 a result set
+  // had nowhere to put a pivot, so a background export under one would have
+  // written every person matching the filters instead of only those companies -
+  // which is why this used to answer 400 rather than build anything.
+  const scopePayload = scopeRestricts(companyScope) ? companyScope : null;
+  if (entityType === "company" && scopePayload) {
+    return Response.json({ error: "A company export cannot carry a company scope." }, { status: 400 });
+  }
 
   const requestedFields = Array.isArray(payload.fields)
     ? [...new Set(payload.fields.map((field) => String(field).trim()).filter(Boolean))].slice(0, 600)
@@ -108,10 +109,11 @@ export async function POST(request: Request) {
     p_client_scope: clientScope,
     p_search: search,
     p_filters: filters,
-    p_content_hash: resultSetContentHash({ entityType, clientScope, search, filters }),
+    p_content_hash: resultSetContentHash({ entityType, clientScope, search, filters, companyScope: scopePayload }),
     // Null on purpose: the database takes the version vector at the moment of
     // the request, so a reused set is compared against the world as it is now.
     p_version_vector: null,
+    p_company_scope: scopePayload ?? {},
   });
   if (set.error) {
     if (missing(set.error.code)) return migrationNeeded();

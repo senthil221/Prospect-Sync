@@ -131,19 +131,49 @@ test("a capped count can be turned into a real one, and is dropped when the ques
   assert.match(table, /selectionMode === "all_matching"\s*\n\s*\? \(await runAllMatching\(action, targetClientId, requestId, dateContacted\)\)\.result \?\? \{\}/);
 });
 
-test("a database-wide action is refused under a scope it cannot carry", async () => {
+test("a database-wide action carries the pivot it was started under", async () => {
   const table = await read("../app/components/ProspectTable.tsx");
   const code = codeOnly(table);
 
-  // The listing and the export both apply the Company DB pivot; the bulk RPCs
-  // take a search and filters and nothing else, and a result set is built from
-  // those two as well. So "all matching" under a pivot acted on everyone
-  // matching the filters - 674,000 people where the screen said 12,000. That
-  // predates any of this; freezing it would only have made the wrong set final.
-  assert.match(code, /const scopeBlocksAllMatching = scopeRestricts\(companyScope\);/);
-  assert.equal(code.match(/scopeBlocksAllMatching\) \{ setNotice\(scopeRefusal\); return; \}/g)?.length, 3);
-  // A selection made under one pivot must not survive into another.
+  // The listing and the export both apply the Company DB pivot. Result sets did
+  // not - they stored a search, a filter list and a client scope, so "all
+  // matching" under a pivot froze everyone matching the filters: measured on
+  // production, 681,085 rows where the screen said 7,047. Until 20260902000180
+  // the answer was to refuse; now the pivot travels with the set, so the
+  // refusals are gone and the scope has to reach every place that freezes one.
+  assert.match(code, /const activeCompanyScope = scopeRestricts\(companyScope\) \? companyScope : null;/);
+  assert.equal(code.match(/companyScope: activeCompanyScope/g)?.length, 2,
+    "both buildResultSet calls must carry the pivot");
+  assert.doesNotMatch(code, /scopeBlocksAllMatching|scopeRefusal/);
+  // A selection made under one pivot must still not survive into another.
   assert.match(code, /const selectionKey = JSON\.stringify\(\{ clientId, search: search\.trim\(\), filters: filterPayload\(effectiveFilters\), companyScope \}\);/);
+});
+
+test("a pivot is part of a result set's identity, in three independent places", async () => {
+  const [migration, lib, route] = await Promise.all([
+    read("../supabase/migrations/20260902000180_carry_the_company_scope_into_a_result_set.sql"),
+    read("../lib/result-sets.ts"),
+    read("../app/api/result-sets/route.ts"),
+  ]);
+  const code = codeOnly(migration);
+
+  // Two questions differing only by their pivot describe different people. If
+  // identity ignored the pivot they would reuse each other's answer, which is
+  // the same silent widening arriving through the cache instead of the query.
+  // Three defences, deliberately not one, because the client-side hash is the
+  // one most easily forgotten.
+  assert.match(code, /md5\(company_scope::text\)/);          // the unique index
+  assert.match(code, /and rs\.company_scope = v_company_scope/); // the reuse lookup
+  assert.match(codeOnly(lib), /companyScope: input\.companyScope \?\? null/); // the hash
+  assert.match(codeOnly(route), /companyScope: scopePayload/);
+
+  // And the scope has to be applied when the set is built, not merely stored.
+  assert.match(code, /eligible_companies as materialized \(select company_id from public\.company_scope_ids_v2/);
+  assert.match(code, /join eligible_companies eligible on eligible\.company_id = pi\.company_id/);
+  // Applied only when it narrows: a scope with neither search nor filters
+  // matches every company, and joining a quarter of a million ids for that
+  // would be pure cost.
+  assert.match(code, /v_has_scope := v_scope <> '\{\}'::jsonb/);
 });
 
 test("company bulk domains reach the server as a set id, scoped to where they were pasted", async () => {

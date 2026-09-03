@@ -76,7 +76,16 @@ async function poll<T>(
 // A reused set that is already ready comes back on the first poll, so asking
 // the same question twice costs one request rather than a second build.
 export async function buildResultSet(
-  input: { entityType: "prospect" | "company"; clientScope?: string; search: string; filters: WireFilter[] },
+  input: {
+    entityType: "prospect" | "company";
+    clientScope?: string;
+    search: string;
+    filters: WireFilter[];
+    // The Company DB pivot. Passing it is what makes a set built from a pivoted
+    // view contain the people the screen was showing rather than everyone
+    // matching the filters - measured on production, 7,047 against 681,085.
+    companyScope?: unknown;
+  },
   options: { signal?: AbortSignal; onProgress?: (progress: Progress) => void; deadlineMs?: number } = {},
 ): Promise<ResultSetStatus> {
   const requested = await api<ResultSetStatus>("/api/result-sets", {
@@ -87,6 +96,7 @@ export async function buildResultSet(
       clientScope: input.clientScope ?? "",
       search: input.search,
       filters: input.filters,
+      companyScope: input.companyScope ?? null,
     }),
     signal: options.signal,
   });

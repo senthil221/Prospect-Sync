@@ -198,13 +198,19 @@ test("the export worker may build a file and may not read one", async () => {
   assert.equal(codeOnly(worker).match(/^\s+continue;$/gm)?.length >= 3, true);
 });
 
-test("a company scope cannot be smuggled into a background export", async () => {
+test("a background export carries the pivot rather than refusing it", async () => {
   const route = await read("../app/api/exports/route.ts");
-  // result_sets stores a search, a filter list and a client scope, and
-  // build_batch_v1 applies exactly those - so a pivot would silently widen the
-  // file to every person matching the filters. The same refusal the
-  // database-wide bulk actions make, for the same reason.
-  assert.match(route, /if \(scopeRestricts\(companyScope\)\) return Response\.json\(\{ error: pivotRefusal \}/);
+  // This used to answer 400 under a Company DB pivot, because result_sets had
+  // nowhere to put one and the file would have contained every person matching
+  // the filters. 20260902000180 gave it somewhere, so the scope is passed into
+  // both the set's identity and the set itself.
+  assert.match(route, /const scopePayload = scopeRestricts\(companyScope\) \? companyScope : null;/);
+  assert.match(route, /p_company_scope: scopePayload \?\? \{\}/);
+  assert.match(route, /companyScope: scopePayload/);
+  assert.doesNotMatch(route, /pivotRefusal/);
+  // A company set is scoped BY companies; a company scope on one is a confusion,
+  // and the database refuses it too.
+  assert.match(route, /A company export cannot carry a company scope/);
 });
 
 test("an unfinished or emptied export is refused rather than served with holes", async () => {

@@ -22,17 +22,26 @@ import { createHash } from "node:crypto";
 // stands for hash differently. That is the honest answer: this is a cache key
 // for a build, not a statement about logical identity, and a wrong reuse would
 // freeze the wrong ids into someone's bulk action.
+// The Company DB pivot is part of the question, not decoration on it. Two
+// requests differing only by their pivot describe different sets of people -
+// measured on production, 7,047 rows against 681,085 for the same filters - so
+// leaving it out of the hash would let one answer the other. 20260902000180
+// also keys the unique index and the reuse lookup on it, so this is the third
+// of three defences rather than the only one; it is the one that makes the
+// other two never fire.
 export function resultSetContentHash(input: {
   entityType: string;
   clientScope: string;
   search: string;
   filters: unknown;
+  companyScope?: unknown;
 }) {
   return createHash("sha256").update(JSON.stringify({
     entityType: input.entityType,
     clientScope: input.clientScope,
     search: input.search.trim(),
     filters: input.filters ?? [],
+    companyScope: input.companyScope ?? null,
   })).digest("hex");
 }
 

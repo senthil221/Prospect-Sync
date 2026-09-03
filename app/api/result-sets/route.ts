@@ -2,6 +2,7 @@ import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { authorizeFilterSets } from "../../../lib/filter-sets";
 import { filterErrorResponse, parseFilters } from "../../../lib/prospect-filters";
 import { ownerIdentity, resultSetContentHash } from "../../../lib/result-sets";
+import { parseCompanyScope, scopeRestricts } from "../../../lib/workspace-scopes";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -42,9 +43,23 @@ export async function POST(request: Request) {
   try { filters = parseFilters(JSON.stringify(payload.filters ?? [])); }
   catch (error) { return filterErrorResponse(error, "Invalid filters."); }
 
+  // The Company DB pivot, carried into the set rather than dropped at the door.
+  // Until 20260902000180 it was dropped, so a set built from a pivoted view
+  // silently contained every person matching the filters - which is why the
+  // callers refused to build one at all.
+  let companyScope;
+  try { companyScope = parseCompanyScope(payload.companyScope ? JSON.stringify(payload.companyScope) : null); }
+  catch (error) { return filterErrorResponse(error, "Invalid company navigation scope."); }
+  if (entityType === "company" && scopeRestricts(companyScope)) {
+    return Response.json({ error: "A company set cannot carry a company scope." }, { status: 400 });
+  }
+  const scopePayload = scopeRestricts(companyScope) ? companyScope : null;
+
   // Without a search term and without filters this would freeze the entire
-  // database. That is a real thing to want, but not by accident.
-  if (!search && !filters.length) {
+  // database. That is a real thing to want, but not by accident. A pivot is a
+  // narrowing in its own right, so a scoped request has already said which
+  // rows it means.
+  if (!search && !filters.length && !scopePayload) {
     return Response.json({ error: "Apply a filter or a search term before building a result set." }, { status: 400 });
   }
 
@@ -59,11 +74,12 @@ export async function POST(request: Request) {
     p_client_scope: clientScope,
     p_search: search,
     p_filters: filters,
-    p_content_hash: resultSetContentHash({ entityType, clientScope, search, filters }),
+    p_content_hash: resultSetContentHash({ entityType, clientScope, search, filters, companyScope: scopePayload }),
     // Null on purpose: the database takes the version vector at the moment of
     // the request. See 20260902000160 - a browser-supplied vector could only
     // ever make a stale set look fresh.
     p_version_vector: null,
+    p_company_scope: scopePayload ?? {},
   });
   if (error) {
     if (missing(error.code)) return Response.json({ error: "Apply the latest database migration to enable background result sets." }, { status: 503 });
