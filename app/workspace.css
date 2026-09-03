@@ -130,7 +130,7 @@ main { min-width: 0; grid-column: 2; }
 .metric-card p { grid-column: 2; grid-row: 1; margin: 0 0 var(--space-1); color: var(--ph-muted); font-size: var(--text-xs); }
 .metric-card strong { grid-column: 2; grid-row: 2; color: var(--text-primary); font-size: var(--text-xl); font-weight: var(--weight-bold); letter-spacing: -.9px; }
 .metric-card small { grid-column: 2; grid-row: 3; margin-top: var(--space-1); color: var(--text-tertiary); font-size: var(--text-2xs); }
-.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(330px, .7fr); gap: var(--space-4); }
+.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(330px, .7fr); gap: var(--space-4); align-items: start; }
 .activity { min-height: 67px; padding: var(--space-3) var(--space-5); display: grid; grid-template-columns: 40px minmax(0, 1fr) 145px auto; align-items: center; gap: var(--space-3); border-bottom: 1px solid var(--border-subtle); }
 .activity:last-child { border-bottom: 0; }
 .csv-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: var(--radius-lg); background: var(--success-soft); color: var(--success); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
@@ -291,7 +291,7 @@ main { min-width: 0; grid-column: 2; }
 .field-chip.tone-4 { background: var(--identity-5-soft); color: var(--identity-5-text); }
 .field-chip.tone-5 { background: var(--identity-6-soft); color: var(--identity-6-text); }
 .company-intro { padding-bottom: var(--space-4); }
-.company-summary { margin-bottom: var(--space-4); display: grid; grid-template-columns: repeat(3, minmax(0, 210px)) 1fr; gap: var(--space-3); }
+.company-summary { margin-bottom: var(--space-4); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
 .company-summary > div { position: relative; min-height: 98px; padding: var(--space-4) var(--space-5); display: flex; flex-direction: column; justify-content: center; overflow: hidden; border: 1px solid var(--ph-border); border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--ph-shadow); }
 .company-summary > div.summary-violet { border-color: var(--border-default); background: var(--surface); color: var(--text-primary); }
 .company-summary > div.summary-blue { border-color: var(--border-default); background: var(--surface); color: var(--text-primary); }
@@ -299,7 +299,7 @@ main { min-width: 0; grid-column: 2; }
 .company-summary span { color: var(--ph-muted); font-size: var(--text-2xs); }
 .company-summary strong { margin-top: var(--space-1); color: var(--text-primary); font-size: var(--text-xl); letter-spacing: -.7px; }
 .company-summary small { margin-top: var(--space-1); color: currentColor; font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
-.company-summary > p { margin: 0; padding: var(--space-4) var(--space-4); display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); color: var(--text-secondary); font-size: var(--text-2xs); }
+.company-summary > p { grid-column: 1 / -1; margin: 0; padding: 0 var(--space-1); display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); font-size: var(--text-2xs); }
 .company-summary > p svg { color: var(--ph-success); }
 .company-table-panel { overflow: hidden; border-top: 2px solid var(--accent); }
 .table-wrap { overflow: auto; }
@@ -830,8 +830,6 @@ main { min-width: 0; grid-column: 2; }
 @media (max-width: 1240px) {
   .people-layout { grid-template-columns: minmax(0, 1fr) 300px; }
   .workspace-actions > label:first-child { display: none; }
-  .company-summary { grid-template-columns: repeat(3, 1fr); }
-.company-summary > p { display: none; }
   .quality-metrics { grid-template-columns: repeat(3, 1fr); }
 }
 
