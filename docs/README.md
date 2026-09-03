@@ -19,9 +19,9 @@ release needs a decision before it starts.
 **`prospect-sync-ui-audit-redesign-plan.md`** — the UI audit and redesign.
 Section H is the roadmap; the IDs it defines (`PEOPLE-01`, `CLIENT-03`,
 `COMP-AC-04` and so on) are quoted in commit messages, so this file is what
-makes that history legible. Work packages 1–11 of 13 are done: the three P0
-items, the three P1 items, `CLIENTS-01`, `COVERAGE-01`, `QUALITY-01` and
-`IMPORT-01`. `POLISH-01` and the mobile phase remain.
+makes that history legible. Work packages 1–12 of 13 are done: the three P0
+items, the three P1 items, `CLIENTS-01`, `COVERAGE-01`, `QUALITY-01`,
+`IMPORT-01` and `POLISH-01`. Only the mobile phase remains.
 
 ## Superseded
 
