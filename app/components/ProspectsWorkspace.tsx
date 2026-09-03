@@ -8,7 +8,7 @@ import type { ClientRecord, Prospect, ProspectFilter } from "../../lib/types";
 import ProspectTable from "./ProspectTable";
 import { useDebouncedValue } from "./useDebouncedValue";
 
-export function useProspectsWorkspaceController({ active, search, filters, sort, direction, companyScope, statsProspects, onLoading, onError }: { active: boolean; search: string; filters: ProspectFilter[]; sort: string; direction: "asc" | "desc"; companyScope: CompanyScope | null; statsProspects: number; onLoading: (loading: boolean) => void; onError: (error: string) => void }) {
+export function useProspectsWorkspaceController({ active, search, filters, sort, direction, companyScope, statsProspects, initialPage, onLoading, onError }: { active: boolean; search: string; filters: ProspectFilter[]; sort: string; direction: "asc" | "desc"; companyScope: CompanyScope | null; statsProspects: number; initialPage?: number; onLoading: (loading: boolean) => void; onError: (error: string) => void }) {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [total, setTotal] = useState(0);
   const [totalEstimated, setTotalEstimated] = useState(false);
@@ -18,7 +18,7 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
   // come from a truncated set. Reported per page, not cached with the count.
   const [scopeCapped, setScopeCapped] = useState(false);
   const [fields, setFields] = useState<string[]>([]);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(initialPage ?? 1);
   const [refresh, setRefresh] = useState(0);
   const fieldsLoaded = useRef(false);
   // A cached total is only meaningful alongside the dependency-version vector it

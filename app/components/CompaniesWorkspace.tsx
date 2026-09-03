@@ -12,9 +12,9 @@ import { AppIcon, EmptyState } from "./DashboardUi";
 import CompanyTableRow from "./CompanyTableRow";
 import { useDebouncedValue } from "./useDebouncedValue";
 
-export function useCompaniesWorkspaceController({ active, search, filters, peopleScope, onLoading, onError }: { active: boolean; search: string; filters: ProspectFilter[]; peopleScope: PeopleScope | null; onLoading: (loading: boolean) => void; onError: (error: string) => void }) {
+export function useCompaniesWorkspaceController({ active, search, filters, peopleScope, initialPage, onLoading, onError }: { active: boolean; search: string; filters: ProspectFilter[]; peopleScope: PeopleScope | null; initialPage?: number; onLoading: (loading: boolean) => void; onError: (error: string) => void }) {
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(initialPage ?? 1);
   const [summary, setSummary] = useState({ total: 0, totalCapped: false, covered: 0, prospectTotal: 0, pageSize: 50 });
   const [refresh, setRefresh] = useState(0);
   const deferredSearch = useDeferredValue(search);

@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { api, companyApiPath, encodeFilters, prefetchApi, prospectApiPath } from "../lib/dashboard-api";
 import { initials } from "../lib/dashboard-helpers";
 import { scopeRestricts, type CompanyScope, type PeopleScope } from "../lib/workspace-scopes";
+import { readWorkspaceUrl, writeWorkspaceUrl, type WorkspaceUrlState } from "../lib/workspace-url";
 import { emptyStats, type ClientRecord, type DeleteRequest, type ImportRecord, type ListRecord, type Prospect, type ProspectFilter, type Section } from "../lib/types";
 import ClientsPanel from "./components/ClientsPanel";
 import CompaniesWorkspace, { useCompaniesWorkspaceController } from "./components/CompaniesWorkspace";
@@ -38,7 +40,11 @@ const navGroups: Array<{ label: string; items: Array<{ id: Section; label: strin
 const navItems = navGroups.flatMap((group) => group.items);
 
 export default function DashboardApp({ currentUserEmail }: { currentUserEmail: string }) {
-  const [section, setSection] = useState<Section>("overview");
+  const searchParams = useSearchParams();
+  // Read once. After mount the URL is written FROM state, and popstate is what
+  // feeds it back in - re-reading on every render would fight the writer.
+  const initial = useMemo(() => readWorkspaceUrl(new URLSearchParams(searchParams.toString())), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [section, setSection] = useState<Section>(initial.section);
   const [stats, setStats] = useState(emptyStats);
   const [recentImports, setRecentImports] = useState<ImportRecord[]>([]);
   const [clients, setClients] = useState<ClientRecord[]>([]);
@@ -46,23 +52,86 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   const [selectedClient, setSelectedClient] = useState<ClientRecord | null>(null);
   const [selectedList, setSelectedList] = useState<ListRecord | null>(null);
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
-  const [companyPeopleScope, setCompanyPeopleScope] = useState<CompanyScope | null>(null);
-  const [peopleCompanyScope, setPeopleCompanyScope] = useState<PeopleScope | null>(null);
-  const [prospectFilters, setProspectFilters] = useState<ProspectFilter[]>([]);
-  const [prospectSort, setProspectSort] = useState("created_at");
-  const [prospectDirection, setProspectDirection] = useState<"asc" | "desc">("desc");
-  const [companyFilters, setCompanyFilters] = useState<ProspectFilter[]>([]);
-  const [search, setSearch] = useState("");
+  const [companyPeopleScope, setCompanyPeopleScope] = useState<CompanyScope | null>(initial.companyPeopleScope);
+  const [peopleCompanyScope, setPeopleCompanyScope] = useState<PeopleScope | null>(initial.peopleCompanyScope);
+  const [prospectFilters, setProspectFilters] = useState<ProspectFilter[]>(initial.prospectFilters);
+  const [prospectSort, setProspectSort] = useState(initial.sort);
+  const [prospectDirection, setProspectDirection] = useState<"asc" | "desc">(initial.direction);
+  const [companyFilters, setCompanyFilters] = useState<ProspectFilter[]>(initial.companyFilters);
+  const [search, setSearch] = useState(initial.search);
   const [loading, setLoading] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [error, setError] = useState("");
   const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const prospectsController = useProspectsWorkspaceController({ active: section === "prospects", search, filters: prospectFilters, sort: prospectSort, direction: prospectDirection, companyScope: companyPeopleScope, statsProspects: stats.prospects, onLoading: setWorkspaceLoading, onError: setError });
-  const companiesController = useCompaniesWorkspaceController({ active: section === "companies", search, filters: companyFilters, peopleScope: peopleCompanyScope, onLoading: setWorkspaceLoading, onError: setError });
+  const prospectsController = useProspectsWorkspaceController({ active: section === "prospects", search, filters: prospectFilters, sort: prospectSort, direction: prospectDirection, companyScope: companyPeopleScope, statsProspects: stats.prospects, initialPage: initial.prospectPage, onLoading: setWorkspaceLoading, onError: setError });
+  const companiesController = useCompaniesWorkspaceController({ active: section === "companies", search, filters: companyFilters, peopleScope: peopleCompanyScope, initialPage: initial.companyPage, onLoading: setWorkspaceLoading, onError: setError });
   const { setPage: setProspectPage } = prospectsController;
   const { setPage: setCompanyPage } = companiesController;
+
+  // ---- The workspace, kept in the address bar (SHELL-STATE-01) -------------
+
+  const urlState: WorkspaceUrlState = useMemo(() => ({
+    section,
+    search,
+    clientId: selectedClient?.id ?? "",
+    listId: selectedList?.id ?? "",
+    prospectPage: prospectsController.page,
+    companyPage: companiesController.page,
+    sort: prospectSort,
+    direction: prospectDirection,
+    prospectFilters,
+    companyFilters,
+    companyPeopleScope,
+    peopleCompanyScope,
+  }), [section, search, selectedClient, selectedList, prospectsController.page, companiesController.page,
+       prospectSort, prospectDirection, prospectFilters, companyFilters, companyPeopleScope, peopleCompanyScope]);
+
+  // Written with the native History API, which is what Next documents for
+  // shallow client routing: it updates the stack without a navigation and stays
+  // in sync with useSearchParams.
+  //
+  // A section change pushes, so Back returns to the section you came from.
+  // Everything else replaces, because a history entry per keystroke of a search
+  // box turns the Back button into a way to retype what you just typed.
+  const lastSection = useRef(section);
+  const restoring = useRef(false);
+  useEffect(() => {
+    if (restoring.current) { restoring.current = false; return; }
+    const next = writeWorkspaceUrl(urlState);
+    const current = `${window.location.pathname}${window.location.search}`;
+    const target = next.startsWith("?") ? `${window.location.pathname}${next}` : next;
+    if (target === current) return;
+    if (urlState.section !== lastSection.current) window.history.pushState(null, "", target);
+    else window.history.replaceState(null, "", target);
+    lastSection.current = urlState.section;
+  }, [urlState]);
+
+  // Back and Forward. `restoring` stops the writer from immediately rewriting
+  // the entry the browser just moved to, which would strand the user on it.
+  useEffect(() => {
+    const onPopState = () => {
+      const restored = readWorkspaceUrl(new URLSearchParams(window.location.search));
+      restoring.current = true;
+      lastSection.current = restored.section;
+      setSection(restored.section);
+      setSearch(restored.search);
+      setProspectFilters(restored.prospectFilters);
+      setCompanyFilters(restored.companyFilters);
+      setProspectSort(restored.sort);
+      setProspectDirection(restored.direction);
+      setCompanyPeopleScope(restored.companyPeopleScope);
+      setPeopleCompanyScope(restored.peopleCompanyScope);
+      setProspectPage(restored.prospectPage);
+      setCompanyPage(restored.companyPage);
+      setSelectedClient((current) => (current?.id === restored.clientId ? current : clients.find((client) => client.id === restored.clientId) ?? null));
+      if (!restored.listId) setSelectedList(null);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [clients, setProspectPage, setCompanyPage]);
+
   const encodedProspectFilters = useMemo(() => encodeFilters(prospectFilters), [prospectFilters]);
 
   const prefetchSection = useCallback((next: Section) => {
@@ -102,6 +171,17 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
     const data = await api<{ lists: ListRecord[] }>(`/api/lists?clientId=${encodeURIComponent(client.id)}`);
     setLists(data.lists);
   }, []);
+
+  // A client in the URL is an id; it becomes a selection once the directory has
+  // loaded, which is why this cannot happen in the initial state above.
+  const restoredClient = useRef(false);
+  useEffect(() => {
+    if (restoredClient.current || !initial.clientId || !clients.length) return;
+    restoredClient.current = true;
+    const match = clients.find((client) => client.id === initial.clientId);
+    if (match) void Promise.resolve().then(() => openClient(match));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clients]);
 
   const navigate = useCallback((next: Section) => {
     setSection(next); setSearch(""); setError(""); setWorkspaceLoading(false); setProspectPage(1); setCompanyPage(1); setSelectedList(null);
