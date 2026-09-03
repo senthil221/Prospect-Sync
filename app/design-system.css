@@ -105,6 +105,19 @@
   --space-12: 48px;
   --space-16: 64px;
 
+  /* ---------------------------------------------------------------------
+     5b. Control height - two steps, and only two.
+     The stylesheet had grown 23 distinct heights between 20px and 48px, most
+     of them one pixel from a neighbour: 33px pagination beside 34px bulk
+     buttons beside 36px selects beside 37px add-filter beside 38px primaries.
+     Nobody chose that; it accumulated. The redesign contract asks for a dense
+     control and a standard one, so those are the only two a control may use.
+     Composite fields - the text input INSIDE a bordered token box - are not
+     controls in this sense and keep their own inner height.
+     --------------------------------------------------------------------- */
+  --control-dense:    32px;
+  --control-standard: 40px;
+
   /* Radius - 4 steps plus pill. Replaces 14 values. */
   --radius-sm:   4px;
   --radius-md:   6px;
@@ -128,7 +141,10 @@
   --ease-in:   cubic-bezier(.4, 0, 1, 1);
   --duration-instant: 100ms;  /* micro-interaction: hover, press */
   --duration-fast:    160ms;  /* state change: tab, toggle, chip */
-  --duration-medium:  240ms;  /* surface: menu, drawer, panel */
+  /* 180ms, not 240ms. The redesign contract puts menu, drawer and state
+     transitions in a 120-180ms band: past that a panel stops feeling like it
+     responded to the click and starts feeling like it is loading. */
+  --duration-medium:  180ms;  /* surface: menu, drawer, panel */
 
   /* ---------------------------------------------------------------------
      8. Semantic aliases - everything downstream references these, never the
@@ -146,6 +162,12 @@
   --text-tertiary:   var(--ds-neutral-500);
   --text-disabled:   var(--ds-neutral-400);
   --text-inverse:    var(--ds-neutral-0);
+  /* Text on a SOLID accent fill. Deliberately not --text-inverse: that means
+     "text on an inverted surface" and flips to near-black in dark mode, but an
+     accent button stays blue in both themes. Measured: white gives 5.94:1 on
+     the light accent and 4.81:1 on the dark one, both AA; --text-inverse gives
+     4.04:1 in dark, which is a fail on every primary button in the product. */
+  --on-accent:       var(--ds-neutral-0);
 
   --border-subtle:   var(--ds-neutral-150);
   --border-default:  var(--ds-neutral-200);
@@ -209,6 +231,7 @@
     --text-tertiary:  #868b96;
     --text-disabled:  #5f646e;
     --text-inverse:   #0b0d12;
+    --on-accent:      var(--ds-neutral-0);
 
     --border-subtle:  #23262c;
     --border-default: #2c3037;
@@ -261,6 +284,7 @@
   --text-tertiary:  #868b96;
   --text-disabled:  #5f646e;
   --text-inverse:   #0b0d12;
+  --on-accent:      var(--ds-neutral-0);
 
   --border-subtle:  #23262c;
   --border-default: #2c3037;

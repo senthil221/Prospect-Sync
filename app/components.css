@@ -29,7 +29,7 @@
   align-items: center;
   gap: var(--space-2);
   flex: none;
-  min-height: 36px;
+  min-height: var(--control-dense);
   padding: var(--space-2) var(--space-3);
   border: 0;
   background: transparent;
@@ -157,7 +157,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 36px;
+  min-height: var(--control-standard);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--surface-sunken);
@@ -192,7 +192,7 @@
 
 .apollo-filter-summary {
   width: 100%;
-  min-height: 40px;
+  min-height: var(--control-standard);
   padding: var(--space-2) var(--space-4);
   display: flex;
   align-items: center;
@@ -327,8 +327,8 @@
 .workspace-actions select,
 .bulk-bar select,
 .outline-button {
-  height: 32px;
-  min-height: 32px;
+  height: var(--control-dense);
+  min-height: var(--control-dense);
   padding: 0 var(--space-2);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
@@ -399,7 +399,7 @@
 .theme-toggle button {
   display: grid;
   place-items: center;
-  min-height: 28px;
+  min-height: var(--control-dense);
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -442,7 +442,7 @@
 select {
   appearance: none;
   -webkit-appearance: none;
-  min-height: 36px;
+  min-height: var(--control-dense);
   padding: 0 36px 0 12px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
@@ -498,15 +498,15 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
 .classifier-actions select,
 .import-source-fields select,
 .company-import-mapping select {
-  min-height: 36px;
+  min-height: var(--control-standard);
   padding-right: 34px;
   background-position: right 10px center;
 }
 
 .export-format small select {
   width: auto;
-  min-height: 28px;
-  height: 28px;
+  min-height: var(--control-dense);
+  height: var(--control-dense);
   padding: 0 26px 0 8px;
   border-radius: var(--radius-md);
   background-position: right 7px center;
@@ -523,7 +523,7 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
 }
 
 :where(.token-options > button, .multi-value-menu button, .column-menu label) {
-  min-height: 36px;
+  min-height: var(--control-dense);
   padding: 8px 10px;
   border-radius: var(--radius-md);
 }
