@@ -52,7 +52,7 @@ begin
   end if;
 
   if not exists (select 1 from pg_roles where rolname = 'prospect_import_worker' and rolcanlogin) then
-    v_missing := v_missing || 'it cannot log in';
+    v_missing := array_append(v_missing, 'it cannot log in');
   end if;
 
   if not exists (
@@ -61,7 +61,7 @@ begin
     join pg_roles member on member.oid = am.member
     where member.rolname = 'prospect_import_worker' and granted.rolname = 'prospect_importer'
   ) then
-    v_missing := v_missing || 'it is not a member of prospect_importer, so the COPY into staged_rows will be denied';
+    v_missing := array_append(v_missing, 'it is not a member of prospect_importer, so the COPY into staged_rows will be denied');
   end if;
 
   -- The point of the separation: this must never come back.
@@ -72,19 +72,19 @@ begin
     where member.rolname = 'prospect_import_worker' and granted.rolname = 'service_role'
   ) into v_has_service_role;
   if v_has_service_role then
-    v_missing := v_missing || 'it is a member of service_role, which defeats the separation';
+    v_missing := array_append(v_missing, 'it is a member of service_role, which defeats the separation');
   end if;
 
   -- An unlimited worker role can still exhaust the cluster, which is the thing
   -- the interactive pool is being protected from.
   select rolconnlimit into v_conn_limit from pg_roles where rolname = 'prospect_import_worker';
   if v_conn_limit is null or v_conn_limit <= 0 then
-    v_missing := v_missing || 'it has no CONNECTION LIMIT';
+    v_missing := array_append(v_missing, 'it has no CONNECTION LIMIT');
   end if;
 
   select rolconnlimit into v_conn_limit from pg_roles where rolname = 'authenticator';
   if v_conn_limit is null or v_conn_limit <= 0 then
-    v_missing := v_missing || 'authenticator has no CONNECTION LIMIT, so the interactive pool is unbounded';
+    v_missing := array_append(v_missing, 'authenticator has no CONNECTION LIMIT, so the interactive pool is unbounded');
   end if;
 
   if cardinality(v_missing) > 0 then

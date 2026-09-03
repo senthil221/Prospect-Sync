@@ -483,14 +483,14 @@ declare
 begin
   if has_function_privilege('prospect_operator',
     'prospect_operations.enqueue_v1(text, uuid, text, text, text, text, jsonb, jsonb, text[], interval)', 'execute') then
-    v_failures := v_failures || 'the worker can enqueue an operation on a user''s behalf';
+    v_failures := array_append(v_failures, 'the worker can enqueue an operation on a user''s behalf');
   end if;
   if has_function_privilege('prospect_operator',
     'prospect_operations.freeze_from_result_set_v1(uuid, text, uuid)', 'execute') then
-    v_failures := v_failures || 'the worker can freeze a selection';
+    v_failures := array_append(v_failures, 'the worker can freeze a selection');
   end if;
   if has_table_privilege('prospect_operator', 'prospect_operations.operation_job_items', 'select') then
-    v_failures := v_failures || 'the worker can read frozen ids directly';
+    v_failures := array_append(v_failures, 'the worker can read frozen ids directly');
   end if;
   if cardinality(v_failures) > 0 then
     raise exception 'operation job privileges are wrong: %', array_to_string(v_failures, '; ');

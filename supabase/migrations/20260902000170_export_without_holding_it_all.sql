@@ -723,7 +723,10 @@ grant execute on function prospect_exports.expire_jobs_v1() to prospect_operator
 -- resolves it as array_cat and fails with "malformed array literal", so the
 -- assertion block would report a parse error instead of the problem it found -
 -- and only ever on the failure path, which is the one nobody exercises.
--- 20260902000130 still carries the || form for that reason; it has never fired.
+-- 20260902000090, 130, 140 and 160 carried the || form too. None had ever
+-- fired, so none had ever been seen to be wrong; they were corrected in place
+-- on 2026-09-03 rather than left as a trap for the first environment unlucky
+-- enough to trip one of those assertions.
 do $$
 declare
   v_problems text[] := array[]::text[];

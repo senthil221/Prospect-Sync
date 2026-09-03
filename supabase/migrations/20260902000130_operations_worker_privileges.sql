@@ -28,6 +28,17 @@
 -- file fails the release if the bootstrap has not been re-run, rather than
 -- letting a worker start that cannot log in.
 
+-- EDITED IN PLACE 2026-09-03, after this migration had already been applied.
+-- The assertion blocks below accumulated their messages with
+-- `v_problems := v_problems || 'text'`, which is not array_append: an untyped
+-- literal on the right makes PostgreSQL resolve || as array_cat, and the block
+-- dies with "malformed array literal" instead of reporting what it found. Those
+-- lines only run when an assertion fails, so every passing deploy hid it. See
+-- 20260902000170 for the same note at the point it was first diagnosed.
+-- migrate.sh keys supabase_migrations.schema_migrations on the filename version
+-- alone and does not checksum contents, so this edit does not re-run here; it
+-- exists for environments bootstrapped from scratch, which replay this file.
+
 begin;
 
 do $$
@@ -49,7 +60,7 @@ begin
   end if;
 
   if not exists (select 1 from pg_roles where rolname = 'prospect_ops_worker' and rolcanlogin) then
-    v_problems := v_problems || 'prospect_ops_worker cannot log in';
+    v_problems := array_append(v_problems, 'prospect_ops_worker cannot log in');
   end if;
 
   if not exists (
@@ -58,7 +69,7 @@ begin
     join pg_roles member on member.oid = am.member
     where member.rolname = 'prospect_ops_worker' and granted.rolname = 'prospect_operator'
   ) then
-    v_problems := v_problems || 'prospect_ops_worker is not a member of prospect_operator, so it can do nothing';
+    v_problems := array_append(v_problems, 'prospect_ops_worker is not a member of prospect_operator, so it can do nothing');
   end if;
 
   -- The separation this release exists for.
@@ -68,12 +79,12 @@ begin
     join pg_roles member on member.oid = am.member
     where member.rolname = 'prospect_ops_worker' and granted.rolname = 'service_role'
   ) then
-    v_problems := v_problems || 'prospect_ops_worker is a member of service_role, which defeats the separation';
+    v_problems := array_append(v_problems, 'prospect_ops_worker is a member of service_role, which defeats the separation');
   end if;
 
   select rolconnlimit into v_conn_limit from pg_roles where rolname = 'prospect_ops_worker';
   if v_conn_limit is null or v_conn_limit <= 0 then
-    v_problems := v_problems || 'prospect_ops_worker has no CONNECTION LIMIT';
+    v_problems := array_append(v_problems, 'prospect_ops_worker has no CONNECTION LIMIT');
   end if;
 
   if cardinality(v_problems) > 0 then
@@ -105,29 +116,29 @@ declare
   v_failures text[] := array[]::text[];
 begin
   if not has_function_privilege('prospect_operator', 'prospect_results.claim_next_v1(text, integer)', 'execute') then
-    v_failures := v_failures || 'cannot claim work';
+    v_failures := array_append(v_failures, 'cannot claim work');
   end if;
   if not has_function_privilege('prospect_operator', 'prospect_results.build_batch_v1(uuid, integer)', 'execute') then
-    v_failures := v_failures || 'cannot build a batch';
+    v_failures := array_append(v_failures, 'cannot build a batch');
   end if;
   if not has_function_privilege('prospect_operator', 'prospect_filters.expire_sets_v1()', 'execute') then
-    v_failures := v_failures || 'cannot run retention';
+    v_failures := array_append(v_failures, 'cannot run retention');
   end if;
 
   -- The application's entry points stay the application's.
   if has_function_privilege('prospect_operator', 'prospect_results.page_v1(uuid, text, integer, integer)', 'execute') then
-    v_failures := v_failures || 'can page a result set, which belongs to a signed-in request';
+    v_failures := array_append(v_failures, 'can page a result set, which belongs to a signed-in request');
   end if;
   if has_function_privilege('prospect_operator', 'prospect_results.request_set_v1(text, text, text, text, jsonb, text, jsonb, interval)', 'execute') then
-    v_failures := v_failures || 'can request a result set on a user''s behalf';
+    v_failures := array_append(v_failures, 'can request a result set on a user''s behalf');
   end if;
 
   -- And it reads nothing directly. SECURITY DEFINER is what makes this possible.
   if has_table_privilege('prospect_operator', 'public.prospect_index', 'select') then
-    v_failures := v_failures || 'can read prospect_index directly';
+    v_failures := array_append(v_failures, 'can read prospect_index directly');
   end if;
   if has_table_privilege('prospect_operator', 'prospect_results.result_set_items', 'select') then
-    v_failures := v_failures || 'can read stored result ids directly';
+    v_failures := array_append(v_failures, 'can read stored result ids directly');
   end if;
 
   if cardinality(v_failures) > 0 then
