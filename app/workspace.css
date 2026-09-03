@@ -286,10 +286,12 @@ main { min-width: 0; grid-column: 2; }
 .coverage-groups h3 { margin: 0 0 var(--space-3); font-size: var(--text-sm); }
 .coverage-groups section > div { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .field-chip { padding: var(--space-2) var(--space-2); border-radius: var(--radius-md); background: var(--surface-hover); color: var(--text-secondary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
-.field-chip.tone-0 { background: var(--accent-soft); color: var(--accent-text); }
-.field-chip.tone-1 { background: var(--accent-soft); color: var(--accent-text); }
-.field-chip.tone-2 { background: var(--warning-soft); color: var(--warning); }
-.field-chip.tone-3 { background: var(--success-soft); color: var(--success); }
+.field-chip.tone-0 { background: var(--identity-1-soft); color: var(--identity-1-text); }
+.field-chip.tone-1 { background: var(--identity-2-soft); color: var(--identity-2-text); }
+.field-chip.tone-2 { background: var(--identity-3-soft); color: var(--identity-3-text); }
+.field-chip.tone-3 { background: var(--identity-4-soft); color: var(--identity-4-text); }
+.field-chip.tone-4 { background: var(--identity-5-soft); color: var(--identity-5-text); }
+.field-chip.tone-5 { background: var(--identity-6-soft); color: var(--identity-6-text); }
 .company-intro { padding-bottom: var(--space-4); }
 .company-summary { margin-bottom: var(--space-4); display: grid; grid-template-columns: repeat(3, minmax(0, 210px)) 1fr; gap: var(--space-3); }
 .company-summary > div { position: relative; min-height: 98px; padding: var(--space-4) var(--space-5); display: flex; flex-direction: column; justify-content: center; overflow: hidden; border: 1px solid var(--ph-border); border-radius: var(--radius-xl); background: var(--surface); box-shadow: var(--ph-shadow); }
@@ -312,20 +314,20 @@ main { min-width: 0; grid-column: 2; }
 .company-table td, table td { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border-default); color: var(--text-secondary); font-size: var(--text-xs); }
 .company-table tbody tr:hover, table tbody tr:hover { background: var(--accent-soft); }
 .company-row:hover { background: var(--surface-hover) !important; box-shadow: inset 2px 0 var(--accent); }
-.company-row.tone-0 { --row-accent: var(--accent); }
-.company-row.tone-1 { --row-accent: var(--accent); }
-.company-row.tone-2 { --row-accent: var(--warning); }
-.company-row.tone-3 { --row-accent: var(--success); }
-.company-row.tone-4 { --row-accent: var(--danger); }
-.company-row.tone-5 { --row-accent: var(--danger); }
+.company-row.tone-0 { --row-accent: var(--identity-1-text); }
+.company-row.tone-1 { --row-accent: var(--identity-2-text); }
+.company-row.tone-2 { --row-accent: var(--identity-3-text); }
+.company-row.tone-3 { --row-accent: var(--identity-4-text); }
+.company-row.tone-4 { --row-accent: var(--identity-5-text); }
+.company-row.tone-5 { --row-accent: var(--identity-6-text); }
 .company-identity { display: flex; align-items: center; gap: var(--space-3); }
 .company-logo { width: 38px; height: 38px; display: grid; place-items: center; flex: none; border-radius: var(--radius-lg); background: var(--accent-soft); color: var(--text-secondary); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
-.company-logo.tone-0, .compact-person > span.tone-0, .drawer-person > span.tone-0 { background: var(--accent-soft); color: var(--accent-text); }
-.company-logo.tone-1, .compact-person > span.tone-1, .drawer-person > span.tone-1 { background: var(--accent-soft); color: var(--accent-text); }
-.company-logo.tone-2, .compact-person > span.tone-2, .drawer-person > span.tone-2 { background: var(--warning-soft); color: var(--warning); }
-.company-logo.tone-3, .compact-person > span.tone-3, .drawer-person > span.tone-3 { background: var(--success-soft); color: var(--success); }
-.company-logo.tone-4, .compact-person > span.tone-4, .drawer-person > span.tone-4 { background: var(--accent-soft); color: var(--danger); }
-.company-logo.tone-5, .compact-person > span.tone-5, .drawer-person > span.tone-5 { background: var(--danger-soft); color: var(--danger); }
+.company-logo.tone-0, .compact-person > span.tone-0, .drawer-person > span.tone-0 { background: var(--identity-1-soft); color: var(--identity-1-text); }
+.company-logo.tone-1, .compact-person > span.tone-1, .drawer-person > span.tone-1 { background: var(--identity-2-soft); color: var(--identity-2-text); }
+.company-logo.tone-2, .compact-person > span.tone-2, .drawer-person > span.tone-2 { background: var(--identity-3-soft); color: var(--identity-3-text); }
+.company-logo.tone-3, .compact-person > span.tone-3, .drawer-person > span.tone-3 { background: var(--identity-4-soft); color: var(--identity-4-text); }
+.company-logo.tone-4, .compact-person > span.tone-4, .drawer-person > span.tone-4 { background: var(--identity-5-soft); color: var(--identity-5-text); }
+.company-logo.tone-5, .compact-person > span.tone-5, .drawer-person > span.tone-5 { background: var(--identity-6-soft); color: var(--identity-6-text); }
 .company-identity > div { min-width: 0; }
 .company-identity strong { overflow: hidden; display: block; color: var(--text-primary); font-size: var(--text-sm); font-weight: var(--weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
 .company-identity small { display: block; margin-top: var(--space-1); color: var(--text-tertiary); font-size: var(--text-2xs); }
@@ -366,10 +368,12 @@ main { min-width: 0; grid-column: 2; }
 
 /* Clients and list workspaces */
 .client-logo { width: 44px; height: 44px; display: grid; place-items: center; flex: none; border-radius: var(--radius-xl); background: var(--surface-hover); color: var(--text-secondary); font-size: var(--text-xs); font-weight: var(--weight-bold); }
-.client-logo.tone-0 { background: var(--ph-brand-soft); color: var(--accent-text); }
-.client-logo.tone-1 { background: var(--accent-soft); color: var(--accent-text); }
-.client-logo.tone-2 { background: var(--warning-soft); color: var(--warning); }
-.client-logo.tone-3 { background: var(--accent-soft); color: var(--accent-text); }
+.client-logo.tone-0 { background: var(--identity-1-soft); color: var(--identity-1-text); }
+.client-logo.tone-1 { background: var(--identity-2-soft); color: var(--identity-2-text); }
+.client-logo.tone-2 { background: var(--identity-3-soft); color: var(--identity-3-text); }
+.client-logo.tone-3 { background: var(--identity-4-soft); color: var(--identity-4-text); }
+.client-logo.tone-4 { background: var(--identity-5-soft); color: var(--identity-5-text); }
+.client-logo.tone-5 { background: var(--identity-6-soft); color: var(--identity-6-text); }
 .back { margin: 0 0 var(--space-4); padding: 0; border: 0; background: transparent; color: var(--text-secondary); font-size: var(--text-xs); }
 .back:hover { color: var(--accent-text); }
 .client-hero { margin-bottom: var(--space-4); padding: var(--space-5) var(--space-5); display: flex; align-items: center; gap: var(--space-4); border-radius: var(--radius-xl); }

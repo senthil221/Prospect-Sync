@@ -11,7 +11,7 @@ is a **product** target - WCAG exempts inactive controls.
 
 ## Light
 
-56 pairs, 0 failing.
+62 pairs, 0 failing.
 
 | Foreground | Rendered bg | State | Ratio | Gate | |
 |---|---|---|---:|---:|---|
@@ -70,11 +70,17 @@ is a **product** target - WCAG exempts inactive controls.
 | `--warning` #925f00 | `--warning-soft` #fff4d6 | status badge | 4.97:1 | 4.5:1 | pass |
 | `--danger` #b42318 | `--danger-soft` #fff0ee | status badge | 5.93:1 | 4.5:1 | pass |
 | `--info` #1f4db8 | `--info-soft` #edf3ff | status badge | 6.71:1 | 4.5:1 | pass |
+| `--identity-1-text` #234bbc | `--identity-1-soft` #eaf0ff | identity tone | 6.56:1 | 4.5:1 | pass |
+| `--identity-2-text` #5b3bb8 | `--identity-2-soft` #f1ecfd | identity tone | 6.57:1 | 4.5:1 | pass |
+| `--identity-3-text` #146070 | `--identity-3-soft` #e6f4f6 | identity tone | 6.35:1 | 4.5:1 | pass |
+| `--identity-4-text` #414d63 | `--identity-4-soft` #eef0f4 | identity tone | 7.46:1 | 4.5:1 | pass |
+| `--identity-5-text` #99306b | `--identity-5-soft` #fbecf4 | identity tone | 6.16:1 | 4.5:1 | pass |
+| `--identity-6-text` #2f5878 | `--identity-6-soft` #e9eff5 | identity tone | 6.50:1 | 4.5:1 | pass |
 | `--text-disabled` #748094 | `--surface-disabled` #e9edf2 | disabled | 3.40:1 | 3:1 | pass |
 
 ## Dark
 
-56 pairs, 0 failing.
+62 pairs, 0 failing.
 
 | Foreground | Rendered bg | State | Ratio | Gate | |
 |---|---|---|---:|---:|---|
@@ -133,4 +139,11 @@ is a **product** target - WCAG exempts inactive controls.
 | `--warning` #f2c66d | `--warning-soft` #332a17 | status badge | 8.81:1 | 4.5:1 | pass |
 | `--danger` #ffb4ab | `--danger-soft` #3a2022 | status badge | 8.77:1 | 4.5:1 | pass |
 | `--info` #adc6ff | `--info-soft` #202f50 | status badge | 7.76:1 | 4.5:1 | pass |
+| `--identity-1-text` #aec5ff | `--identity-1-soft` #1e2f52 | identity tone | 7.72:1 | 4.5:1 | pass |
+| `--identity-2-text` #c9b8ff | `--identity-2-soft` #2b2450 | identity tone | 8.01:1 | 4.5:1 | pass |
+| `--identity-3-text` #8fd3e2 | `--identity-3-soft` #16323a | identity tone | 8.11:1 | 4.5:1 | pass |
+| `--identity-4-text` #bcc7d8 | `--identity-4-soft` #2a3340 | identity tone | 7.47:1 | 4.5:1 | pass |
+| `--identity-5-text` #f3b0d4 | `--identity-5-soft` #3a2036 | identity tone | 8.31:1 | 4.5:1 | pass |
+| `--identity-6-text` #a8c8e2 | `--identity-6-soft` #1e3040 | identity tone | 7.75:1 | 4.5:1 | pass |
 | `--text-disabled` #8290a4 | `--surface-disabled` #273241 | disabled | 4.00:1 | 3:1 | pass |
+

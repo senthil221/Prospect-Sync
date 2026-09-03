@@ -221,6 +221,29 @@ for (const [name, tokens] of Object.entries(themes)) {
     assert.ok(muted > ratio(tokens, "--text-disabled", "--surface"), "disabled text must be quieter than muted text");
   });
 
+  test(`${name}: every identity tone is readable, and none of them means anything`, () => {
+    // Avatars, company logos and field chips get a tone hashed from a name.
+    // Six of them, and they have to be as measurable as any other text pair -
+    // a deterministic generator is exactly where unmeasured pairs get born.
+    for (let tone = 1; tone <= 6; tone += 1) {
+      const measured = ratio(tokens, `--identity-${tone}-text`, `--identity-${tone}-soft`);
+      assert.ok(measured >= 4.5, `identity ${tone} is ${round(measured)}:1, below 4.5`);
+    }
+    // And none of them may be a status colour. Hashing a company name into
+    // green/amber/red said Acme was fine and Globex was an error, on no
+    // evidence whatsoever.
+    const statusValues = new Set(["success", "warning", "danger"].flatMap((status) => [
+      JSON.stringify(resolve(tokens, `--${status}`)),
+      JSON.stringify(resolve(tokens, `--${status}-soft`)),
+    ]));
+    for (let tone = 1; tone <= 6; tone += 1) {
+      for (const part of ["text", "soft"]) {
+        const value = JSON.stringify(resolve(tokens, `--identity-${tone}-${part}`));
+        assert.ok(!statusValues.has(value), `identity ${tone} ${part} is a status colour - identity is not status`);
+      }
+    }
+  });
+
   test(`${name}: the overlay actually dims what is behind it`, () => {
     const overlay = resolve(tokens, "--overlay");
     assert.ok(overlay.a >= 0.4, `--overlay at ${overlay.a} is too transparent to separate a dialog from the page`);
@@ -281,6 +304,41 @@ test("every foreground/background pair the stylesheets actually declare is measu
     }
   }
   assert.deepEqual(failures, [], `declared pairs below 4.5:1:\n${failures.join("\n")}`);
+});
+
+test("an identity tone never borrows a status colour", async () => {
+  const styles = (await read("../app/workspace.css")) + (await read("../app/components.css"));
+  const toneRules = [...styles.matchAll(/^[^{\n]*\.tone-\d[^{\n]*\{([^}]*)\}/gm)].map((match) => match[0]);
+  assert.ok(toneRules.length >= 20, "the tone families should all still be here");
+  for (const rule of toneRules) {
+    for (const status of ["--success", "--warning", "--danger", "--ph-success", "--ph-warning", "--ph-danger"]) {
+      assert.ok(!rule.includes(`var(${status})`) && !rule.includes(`var(${status}-soft)`),
+        `a hashed identity tone paints ${status}: ${rule.slice(0, 90)}`);
+    }
+  }
+});
+
+test("a placeholder is never painted as a disabled control", async () => {
+  // --text-disabled is quieter on purpose and is reserved for controls that
+  // genuinely cannot be used. A placeholder is text a sighted user has to read
+  // to know what the field wants.
+  const styles = (await read("../app/workspace.css")) + (await read("../app/components.css"));
+  const offenders = [...styles.matchAll(/^[^{\n]*::placeholder[^{\n]*\{[^}]*\}/gm)]
+    .map((match) => match[0])
+    .filter((rule) => rule.includes("var(--text-disabled)"));
+  assert.deepEqual(offenders, [], `placeholders using disabled text:\n${offenders.join("\n")}`);
+});
+
+test("an accent fill is never used as a text or icon colour", async () => {
+  // One blue cannot serve solid action, link text, focus and selection: they
+  // sit on different backgrounds. --accent is the FILL; on a light surface in
+  // dark mode it lands between 2.0:1 and 3.0:1. --accent-text is the role that
+  // exists for a mark sitting on a surface. 45 rules had this backwards.
+  const strip = (styles) => styles.replace(/\/\*[\s\S]*?\*\//g, "");
+  const styles = strip(await read("../app/workspace.css")) + strip(await read("../app/components.css"));
+  const offenders = [...styles.matchAll(/([^{}\n]+)\{[^}]*(?:^|[;{ ])color:\s*var\(--(?:ph-brand|accent|ph-brand-dark|accent-hover)\)[^}]*\}/g)]
+    .map((match) => match[1].trim());
+  assert.deepEqual(offenders, [], `accent fill used as a foreground:\n${offenders.join("\n")}`);
 });
 
 test("selection is its own surface, not the informational tint wearing its clothes", async () => {

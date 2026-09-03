@@ -92,6 +92,7 @@ function matrix(tokens) {
   for (const fill of ["--accent", "--accent-hover", "--accent-pressed"]) rows.push(row(tokens, "--on-accent", fill, "primary button", 4.5));
   for (const fill of ["--danger-solid", "--danger-solid-hover", "--danger-solid-pressed"]) rows.push(row(tokens, "--on-danger", fill, "destructive button", 4.5));
   for (const status of ["success", "warning", "danger", "info"]) rows.push(row(tokens, `--${status}`, `--${status}-soft`, "status badge", 4.5));
+  for (let tone = 1; tone <= 6; tone += 1) rows.push(row(tokens, `--identity-${tone}-text`, `--identity-${tone}-soft`, "identity tone", 4.5));
   rows.push(row(tokens, "--text-disabled", "--surface-disabled", "disabled", 3));
   return rows;
 }

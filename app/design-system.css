@@ -245,6 +245,18 @@
   --info-soft:    var(--ds-info-soft);
   --info-line:    var(--ds-info-line);
 
+  /* 8f. Identity - deterministic per-name tints for avatars, logos and field
+     chips. Six hues chosen for being TELLABLE APART and for meaning nothing:
+     no green, no amber, no red. Those three are states, and hashing a company
+     name into one of them told you Acme was a warning and Globex was an error.
+     Every pair is measured like any other text pair. */
+  --identity-1-soft: #eaf0ff;  --identity-1-text: #234bbc;  /* indigo */
+  --identity-2-soft: #f1ecfd;  --identity-2-text: #5b3bb8;  /* violet */
+  --identity-3-soft: #e6f4f6;  --identity-3-text: #146070;  /* teal   */
+  --identity-4-soft: #eef0f4;  --identity-4-text: #414d63;  /* slate  */
+  --identity-5-soft: #fbecf4;  --identity-5-text: #99306b;  /* plum   */
+  --identity-6-soft: #e9eff5;  --identity-6-text: #2f5878;  /* steel  */
+
   /* The one solid destructive button. Explicit in both themes, because the
      dark theme's danger TEXT is a pastel that white cannot sit on. */
   --danger-solid:         var(--ds-danger-600);
@@ -330,6 +342,18 @@
     --info-soft:    #202f50;
     --info-line:    rgba(173, 198, 255, .34);
 
+    /* 8f. Identity - deterministic per-name tints for avatars, logos and field
+       chips. Six hues chosen for being TELLABLE APART and for meaning nothing:
+       no green, no amber, no red. Those three are states, and hashing a company
+       name into one of them told you Acme was a warning and Globex was an error.
+       Every pair is measured like any other text pair. */
+    --identity-1-soft: #1e2f52;  --identity-1-text: #aec5ff;
+    --identity-2-soft: #2b2450;  --identity-2-text: #c9b8ff;
+    --identity-3-soft: #16323a;  --identity-3-text: #8fd3e2;
+    --identity-4-soft: #2a3340;  --identity-4-text: #bcc7d8;
+    --identity-5-soft: #3a2036;  --identity-5-text: #f3b0d4;
+    --identity-6-soft: #1e3040;  --identity-6-text: #a8c8e2;
+
     /* Unchanged across themes on purpose: a destructive confirmation is the
        one place the fill must stay unambiguous, and the pastel danger text
        above is a foreground, not a fill. */
@@ -399,6 +423,18 @@
   --info:         #adc6ff;
   --info-soft:    #202f50;
   --info-line:    rgba(173, 198, 255, .34);
+
+  /* 8f. Identity - deterministic per-name tints for avatars, logos and field
+     chips. Six hues chosen for being TELLABLE APART and for meaning nothing:
+     no green, no amber, no red. Those three are states, and hashing a company
+     name into one of them told you Acme was a warning and Globex was an error.
+     Every pair is measured like any other text pair. */
+  --identity-1-soft: #1e2f52;  --identity-1-text: #aec5ff;
+  --identity-2-soft: #2b2450;  --identity-2-text: #c9b8ff;
+  --identity-3-soft: #16323a;  --identity-3-text: #8fd3e2;
+  --identity-4-soft: #2a3340;  --identity-4-text: #bcc7d8;
+  --identity-5-soft: #3a2036;  --identity-5-text: #f3b0d4;
+  --identity-6-soft: #1e3040;  --identity-6-text: #a8c8e2;
 
   --danger-solid:         #d92d20;
   --danger-solid-hover:   var(--ds-danger-600);
