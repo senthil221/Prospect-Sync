@@ -19,9 +19,19 @@ release needs a decision before it starts.
 **`prospect-sync-ui-audit-redesign-plan.md`** — the UI audit and redesign.
 Section H is the roadmap; the IDs it defines (`PEOPLE-01`, `CLIENT-03`,
 `COMP-AC-04` and so on) are quoted in commit messages, so this file is what
-makes that history legible. Work packages 1–12 of 13 are done: the three P0
-items, the three P1 items, `CLIENTS-01`, `COVERAGE-01`, `QUALITY-01`,
-`IMPORT-01` and `POLISH-01`. Only the mobile phase remains.
+makes that history legible. All 13 work packages are done, including the mobile
+phase in section K — `MOBILE-01` through `MOBILE-04`.
+
+`MOBILE-05` is device and orientation QA on real hardware and is **UNVERIFIED**.
+So is every screenshot gate in section I. Nothing in this repository has been
+seen rendered: the app is behind a login the implementing session could not
+reach, so the evidence is source assertions and computed contrast, not pixels.
+`tests/mobile-shell.test.mjs` says which of the two it is standing in for.
+
+A third document now sits alongside them: **`prospect-sync-color-redesign-prompt.md`**,
+the colour and background brief. Its palette is implemented in
+`app/design-system.css` and gated by `tests/color-contrast.test.mjs`;
+`color-contrast-matrix.md` is the generated evidence.
 
 ## Superseded
 

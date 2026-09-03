@@ -95,7 +95,11 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
   assert.match(styles, /\.company-drawer/);
   assert.match(styles, /\.summary-violet/);
   assert.match(styles, /\.nav-group-label/);
-  assert.match(styles, /\.nav-group \{ display: contents; \}/);
+  // `.nav-group { display: contents }` was how the desktop rail flattened
+  // itself into the sideways mobile strip. That strip is gone - MOBILE-01
+  // replaces the rail with a four-slot bottom bar rather than folding it up
+  // small - so the desktop grouping now simply stops applying below 760px.
+  assert.match(styles, /\.mobile-nav \{/);
   assert.match(styles, /\.login-logo \{ display: flex; \}/);
   assert.match(styles, /@media \(max-width: 760px\)/);
   assert.match(styles, /prefers-reduced-motion/);

@@ -110,7 +110,8 @@ main { min-width: 0; grid-column: 2; }
 .primary:disabled, .secondary:disabled, .panel-head button:disabled { opacity: .48; transform: none; cursor: not-allowed; }
 .secondary, .panel-head button, .compact button { border-color: var(--ph-border-strong); background: var(--surface); color: var(--text-primary); box-shadow: none; }
 .secondary:hover, .panel-head button:hover, .compact button:hover { border-color: var(--border-strong); background: var(--surface-sunken); }
-.panel, .metric-card, .client-hero, .import-card { border: 1px solid var(--ph-border); background: var(--surface); box-shadow: var(--ph-shadow); }
+.panel, .client-hero, .import-card { border: 1px solid var(--ph-border); background: var(--surface); box-shadow: var(--ph-shadow); }
+.metric-card { border: 1px solid var(--border-default); background: var(--surface); }
 .panel { overflow: hidden; border-radius: var(--radius-xl); }
 .panel-head { min-height: 66px; padding: var(--space-4) var(--space-5); display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); border-bottom: 1px solid var(--border-default); }
 .panel-head h3 { margin: 0 0 var(--space-1); color: var(--text-primary); font-size: var(--text-base); font-weight: var(--weight-bold); letter-spacing: -.25px; }
@@ -125,10 +126,7 @@ main { min-width: 0; grid-column: 2; }
 .metric-grid { margin: var(--space-4) 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
 .metric-card { position: relative; min-height: 116px; padding: var(--space-4) var(--space-5); display: grid; grid-template-columns: 38px 1fr; grid-template-rows: auto auto auto; column-gap: var(--space-3); align-content: center; border-radius: var(--radius-xl); }
 .metric-icon { grid-column: 1; grid-row: 1 / 4; width: 38px; height: 38px; display: grid; place-items: center; border-radius: var(--radius-lg); }
-.metric-card.violet .metric-icon { color: var(--text-secondary); background: var(--surface-hover); }
-.metric-card.blue .metric-icon { color: var(--text-secondary); background: var(--surface-hover); }
-.metric-card.amber .metric-icon { color: var(--text-secondary); background: var(--surface-hover); }
-.metric-card.green .metric-icon { color: var(--text-secondary); background: var(--surface-hover); }
+.metric-icon { color: var(--text-secondary); background: var(--surface-hover); }
 .metric-card p { grid-column: 2; grid-row: 1; margin: 0 0 var(--space-1); color: var(--ph-muted); font-size: var(--text-xs); }
 .metric-card strong { grid-column: 2; grid-row: 2; color: var(--text-primary); font-size: var(--text-xl); font-weight: var(--weight-bold); letter-spacing: -.9px; }
 .metric-card small { grid-column: 2; grid-row: 3; margin-top: var(--space-1); color: var(--text-tertiary); font-size: var(--text-2xs); }
@@ -858,20 +856,22 @@ main { min-width: 0; grid-column: 2; }
 
 @media (max-width: 760px) {
   .app-shell { display: block; }
-.sidebar { position: fixed; inset: auto 0 0; z-index: 50; width: 100%; height: 72px; padding: var(--space-2) var(--space-3); overflow-x: auto; border: 0; border-top: 1px solid var(--ph-border); }
-.brand, .workspace, .profile, .nav-group-label { display: none; }
-.sidebar nav { height: 100%; display: flex; flex-direction: row; gap: var(--space-1); }
-.nav-group { display: contents; }
-.sidebar nav button { min-width: 76px; min-height: 54px; padding: var(--space-1); flex-direction: column; justify-content: center; gap: var(--space-1); font-size: var(--text-2xs); text-align: center; }
-.sidebar nav button > span { height: 20px; }
-.sidebar nav button.active { box-shadow: inset 0 -2px var(--ph-brand); }
+  /* The desktop rail is not folded up small - it is replaced. Seven
+     destinations in a scrolling strip put three of them off-screen with
+     nothing to say they were there. */
+.sidebar { display: none; }
   main { display: block; }
-.topbar { height: 68px; padding: var(--space-3) var(--space-4); }
+  /* Two rows: title and primary action, then search across the full width.
+     Search used to be hidden outright on the two screens that exist to search. */
+.topbar { height: auto; padding: var(--space-3) var(--space-4); flex-wrap: wrap; row-gap: var(--space-2); }
 .topbar .eyebrow { display: none; }
 .topbar h1 { font-size: var(--text-lg); }
-.search { display: none; }
-.top-actions .primary { padding-inline: 10px; }
-.content { padding: var(--space-4) var(--space-3) var(--space-16); }
+.top-actions { flex: 1 1 auto; min-width: 0; gap: var(--space-2); }
+.search { order: 3; flex: 1 0 100%; min-width: 0; }
+.search input { width: 100%; }
+.top-actions .primary { padding-inline: var(--space-3); }
+  /* The bar is 60px plus whatever the device reserves for its home indicator. */
+.content { padding: var(--space-4) var(--space-3) calc(var(--space-16) + env(safe-area-inset-bottom, 0px)); }
 .alert { margin: var(--space-3); }
   .welcome { min-height: auto; padding: var(--space-6) var(--space-5); align-items: stretch; flex-direction: column; gap: var(--space-5); }
 .welcome h2 { font-size: var(--text-xl); }
@@ -898,8 +898,6 @@ main { min-width: 0; grid-column: 2; }
 .export-scope { grid-template-columns: 1fr; }
 .export-fields-head { align-items: flex-start; flex-direction: column; }
 .export-field-grid { grid-template-columns: 1fr 1fr; }
-.export-modal .modal-actions { flex-direction: column-reverse; }
-.export-modal .modal-actions button { width: 100%; }
   .master-table-wrap { max-height: calc(100vh - 350px); }
 .master-data-table th { min-width: 160px; }
 .master-data-table td { font-size: var(--text-xs); }
@@ -961,23 +959,23 @@ main { min-width: 0; grid-column: 2; }
 .sidebar { box-shadow: 1px 0 0 rgba(var(--shadow-rgb), .02); }
 .sidebar nav button { transition: background-color var(--ph-dur) var(--ph-ease), color var(--ph-dur) var(--ph-ease), box-shadow var(--ph-dur) var(--ph-ease); }
 .sidebar nav button > span { transition: color var(--ph-dur) var(--ph-ease), transform var(--ph-dur) var(--ph-ease-out); }
-.sidebar nav button.active { box-shadow: inset 3px 0 var(--ph-brand), 0 1px 2px rgba(var(--accent-rgb), .06); }
-.brand-mark { box-shadow: 0 6px 16px rgba(var(--accent-rgb), .26), inset 0 1px 0 rgba(255, 255, 255, .22); }
+.sidebar nav button.active { box-shadow: inset 3px 0 var(--ph-brand); }
+.brand-mark { box-shadow: var(--elevation-1); }
 
 /* Topbar - deeper glass and a crisp hairline under the blur */
 .topbar { background: var(--surface-veil-solid); backdrop-filter: saturate(180%) blur(18px); -webkit-backdrop-filter: saturate(180%) blur(18px); box-shadow: 0 1px 0 rgba(var(--shadow-rgb), .04); }
 
-/* Surfaces - layered shadow ramp + smoother, calmer lift */
-.client-hero, .import-card { transition: box-shadow var(--duration-medium) var(--ph-ease-out), border-color var(--ph-dur) var(--ph-ease); }
-.metric-card { box-shadow: var(--ph-shadow); }
-.metric-icon { box-shadow: inset 0 0 0 1px rgba(var(--shadow-rgb), .015); }
-.welcome { box-shadow: var(--ph-shadow); }
+/* Surfaces. Inert cards sit flat: the canvas is darker than they are, so a
+   hairline is all the separation they need, and elevation stays a signal that
+   means "you can act on this". The transition that used to live here animated
+   a shadow no rule ever changed. */
+.metric-card, .welcome { box-shadow: none; }
 
 /* Buttons - tactile press + refined shadow behavior */
-.primary { box-shadow: 0 1px 2px rgba(var(--accent-rgb), .18), 0 4px 12px -4px rgba(var(--accent-rgb), .4); }
-.primary:hover { box-shadow: 0 2px 4px rgba(var(--accent-rgb), .2), 0 10px 22px -6px rgba(var(--accent-rgb), .5); }
+.primary { box-shadow: var(--elevation-1); }
+.primary:hover { box-shadow: var(--elevation-2); }
 .primary:active, .secondary:active, .outline-button:active, .company-pagination button:active:not(:disabled), .table-footer button:active:not(:disabled) { transform: translateY(1px); }
-.primary:active { box-shadow: 0 1px 2px rgba(var(--accent-rgb), .22); }
+.primary:active { box-shadow: none; }
 
 /* Tables - smoother row transitions, softer sticky header, and
    an accent rail on hover for scan-ability */
@@ -1220,3 +1218,208 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 .boundary-detail { max-height: 9rem; margin: 0 0 var(--space-3); padding: var(--space-3); overflow: auto; border: 1px solid var(--ph-border); border-radius: var(--radius-md); background: var(--ph-surface-soft); color: var(--text-secondary); font-family: var(--ph-mono, ui-monospace, monospace); font-size: var(--text-2xs); line-height: 1.55; text-align: left; white-space: pre-wrap; word-break: break-word; }
 .boundary-digest { display: block; margin-bottom: var(--space-3); color: var(--text-tertiary); font-size: var(--text-2xs); }
 .boundary-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); }
+
+/* -----------------------------------------------------------------------------
+   MOBILE-01: bottom navigation and the More sheet.
+   Hidden above 760px; the desktop sidebar owns navigation there.
+   -------------------------------------------------------------------------- */
+.mobile-nav { display: none; }
+.mobile-sheet-backdrop { display: none; }
+
+@media (max-width: 760px) {
+  .mobile-nav {
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 50;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    padding-bottom: calc(var(--space-1) + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--border-default);
+    background: var(--surface);
+  }
+  .mobile-nav button {
+    min-height: 52px;            /* 44px target plus its own padding */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: var(--space-1);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: var(--text-2xs);
+    font-weight: var(--weight-medium);
+  }
+  .mobile-nav button.active { color: var(--accent-text); background: var(--surface-selected); }
+  .mobile-nav button > span { display: grid; place-items: center; }
+
+  .mobile-sheet-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: flex-end;
+    background: var(--overlay);
+  }
+  .mobile-sheet {
+    width: 100%;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    background: var(--surface-raised);
+    box-shadow: var(--elevation-4);
+  }
+  .mobile-sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-4) var(--space-4) var(--space-2);
+  }
+  .mobile-sheet-head h2 { margin: 0; font-size: var(--text-md); font-weight: var(--weight-bold); }
+  .mobile-sheet-close {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-full);
+    background: var(--surface-hover);
+    color: var(--text-secondary);
+  }
+  .mobile-sheet-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--space-4) var(--space-4); }
+  .mobile-sheet-item {
+    width: 100%;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border: 0;
+    border-radius: var(--radius-lg);
+    background: transparent;
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    text-align: left;
+  }
+  .mobile-sheet-item.active { background: var(--surface-selected); color: var(--accent-text); font-weight: var(--weight-semibold); }
+  .mobile-sheet-item > span { display: grid; place-items: center; color: var(--text-tertiary); }
+  .mobile-sheet-item.active > span { color: var(--accent-text); }
+  .mobile-sheet-group { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border-subtle); }
+  .mobile-sheet-label { display: block; margin-bottom: var(--space-2); color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-wide); text-transform: uppercase; }
+  .mobile-sheet-account {
+    min-height: 56px;
+    margin-top: var(--space-3);
+    padding: var(--space-3);
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    color: var(--text-primary);
+    text-decoration: none;
+  }
+  .mobile-sheet-account > div { flex: 1; min-width: 0; display: grid; }
+  .mobile-sheet-account strong { overflow: hidden; font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-sheet-account small { color: var(--text-tertiary); font-size: var(--text-2xs); }
+}
+
+/* -----------------------------------------------------------------------------
+   MOBILE-02/03/04: data, sheets, and the per-page adaptations.
+   -------------------------------------------------------------------------- */
+@media (max-width: 760px) {
+  /* MOBILE-02. The gate is that no PRIMARY workflow needs horizontal scrolling.
+     Selecting a record and opening it are the primary workflows; reading the
+     ninth column is not, and pretending otherwise means either hiding data or
+     inventing a second table. So the two columns those workflows live in are
+     pinned, and the rest scroll under them - you can always see which row you
+     are acting on. */
+  .master-table-wrap { max-height: calc(100vh - 320px); }
+  .master-data-table td.select-column,
+  .master-data-table th:first-child { position: sticky; left: 0; z-index: 2; background: var(--surface); }
+  .master-data-table tbody tr.selected td.select-column { background: var(--surface-selected); }
+  .master-data-table td:nth-child(2),
+  .master-data-table th:nth-child(2) { position: sticky; left: 44px; z-index: 2; background: var(--surface); box-shadow: 1px 0 0 var(--border-subtle); }
+  .master-data-table tbody tr.selected td:nth-child(2) { background: var(--surface-selected); }
+  .master-data-table th:first-child, .master-data-table th:nth-child(2) { z-index: 3; background: var(--surface-sunken); }
+  .master-data-table th { min-width: 140px; }
+  .master-data-table th:first-child { min-width: 44px; }
+
+  /* MOBILE-03. A dialog that is 90% of a small screen is a sheet whether or not
+     it calls itself one, so it stops pretending to float: full width, anchored
+     to the bottom edge, and scrollable inside itself. The action row goes
+     column-reverse so the confirming button sits under the thumb and the
+     cancel above it - the reverse of the desktop order, deliberately. */
+  .modal-backdrop { align-items: flex-end; padding: 0; }
+  .confirm-modal, .export-modal {
+    width: 100%;
+    max-width: none;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding-bottom: calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+  .modal-actions { flex-direction: column-reverse; gap: var(--space-2); }
+  .modal-actions button { width: 100%; min-height: 44px; }
+
+  /* The record drawer is the full screen: at 390px a 480px drawer was wider
+     than the viewport anyway. */
+  .drawer { width: 100vw; max-width: 100vw; }
+  .drawer-body { padding-bottom: calc(var(--space-6) + env(safe-area-inset-bottom, 0px)); }
+
+  /* Filters: a full-height sheet with its own scroll, so Show results stays
+     reachable with the keyboard open rather than being pushed off. */
+  .apollo-filter-panel, .company-filter-panel {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+  .apollo-filter-scroll { padding-bottom: var(--space-12); }
+  .filter-panel-foot, .company-filter-actions {
+    position: sticky;
+    bottom: 0;
+    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+    background: var(--surface);
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  /* MOBILE-04, per page. */
+  .quality-issue { grid-template-columns: 1fr; gap: var(--space-2); padding: var(--space-4); }
+  .quality-issue-count { text-align: left; }
+  .quality-severity { justify-self: start; }
+  .duplicate-pair-head { align-items: stretch; flex-direction: column; }
+  .duplicate-actions { flex-direction: column; align-items: stretch; }
+  .duplicate-actions button { max-width: none; min-height: 44px; }
+  .compare-table tbody th { width: auto; }
+
+  .coverage-task { max-width: none; padding: var(--space-4); }
+  .coverage-task.wide { grid-template-columns: 1fr; }
+  .coverage-file { align-items: flex-start; flex-direction: column; }
+  .coverage-replace { width: 100%; min-height: 44px; }
+
+  /* Import: one stage at a time already, plus a footer that stays put so
+     Back/Continue never scroll away from a long mapping list. */
+  .import-layout { grid-template-columns: 1fr; }
+  .import-stepper { overflow-x: auto; scrollbar-width: none; }
+  .import-stepper::-webkit-scrollbar { display: none; }
+  .import-step-footer {
+    position: sticky;
+    bottom: 0;
+    margin: 0 calc(var(--space-5) * -1) calc(var(--space-5) * -1);
+    padding: var(--space-3) var(--space-5) calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+    background: var(--surface);
+    border-top: 1px solid var(--border-subtle);
+  }
+  .import-step-actions { flex-direction: column-reverse; gap: var(--space-2); }
+  .import-step-actions button { width: 100%; min-height: 44px; }
+
+  /* Every remaining touch target reaches 44px. */
+  .bulk-bar button, .table-footer button, .company-pagination button { min-height: 44px; }
+}

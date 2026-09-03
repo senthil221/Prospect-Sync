@@ -14,6 +14,7 @@ import DataQualityPanel from "./components/DataQualityPanel";
 import { AppIcon, DeleteConfirmation, LoadingState, ProspectDrawer, type IconName } from "./components/DashboardUi";
 import ImportsPanel from "./components/ImportsPanel";
 import ThemeToggle from "./components/ThemeToggle";
+import MobileNav from "./components/MobileNav";
 import OverviewWorkspace from "./components/OverviewWorkspace";
 import ProspectsWorkspace, { useProspectsWorkspaceController } from "./components/ProspectsWorkspace";
 
@@ -230,6 +231,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">Skip to main content</a>
     <aside className="sidebar"><div className="brand"><span className="brand-mark"><AppIcon name="database" size={17}/></span><span>Prospect <span>Sync</span></span></div><div className="workspace"><span className="workspace-avatar">PA</span><div><strong>Prospect Agency</strong><small>Internal workspace</small></div><span className="chevron"><AppIcon name="chevron" size={14}/></span></div><nav aria-label="Primary navigation">{navGroups.map((group) => <div className="nav-group" key={group.label}><span className="nav-group-label">{group.label}</span>{group.items.map((item) => <button key={item.id} aria-current={section === item.id ? "page" : undefined} className={section === item.id ? "active" : ""} onMouseEnter={() => prefetchSection(item.id)} onFocus={() => prefetchSection(item.id)} onClick={() => navigate(item.id)}><span aria-hidden="true"><AppIcon name={item.mark} size={17}/></span>{item.label}</button>)}</div>)}</nav><ThemeToggle/><a className="profile" href="/auth/signout"><span className="profile-avatar">{initials(currentUserEmail)}</span><div><strong>{currentUserEmail}</strong><small>Sign out</small></div></a></aside>
+    <MobileNav section={section} items={navItems} onNavigate={(id) => navigate(id as Section)} currentUserEmail={currentUserEmail}/>
     <main id="main-content"><header className="topbar"><div><p className="eyebrow">DATABASE WORKSPACE</p><h1>{selectedClient ? selectedClient.name : title}</h1></div><div className="top-actions">{(section === "prospects" || section === "companies") && <label className="search"><span><AppIcon name="search" size={16}/></span><input aria-label="Search" value={search} onChange={(event) => { setSearch(event.target.value); if (section === "prospects") setProspectPage(1); if (section === "companies") setCompanyPage(1); }} placeholder={`Search ${section}...`}/></label>}<button className="primary" onClick={() => navigate("imports")}><AppIcon name="plus" size={15}/> Import list</button></div></header>
       {error && <div className="alert"><span>!</span>{error}<button onClick={() => setError("")}><AppIcon name="close" size={14}/></button></div>}
       <section className="content" aria-busy={loading || workspaceLoading}>
