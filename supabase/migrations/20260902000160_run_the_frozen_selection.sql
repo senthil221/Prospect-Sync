@@ -382,13 +382,13 @@ begin
   -- The point of SECURITY DEFINER: the worker runs mutations it has no
   -- privilege to perform, and cannot read a single prospect on its own.
   if has_table_privilege('prospect_operator', 'public.prospect_index', 'select') then
-    v_failures := v_failures || 'prospect_operator must not read prospect_index';
+    v_failures := array_append(v_failures, 'prospect_operator must not read prospect_index');
   end if;
   if has_table_privilege('prospect_operator', 'public.client_prospects', 'select') then
-    v_failures := v_failures || 'prospect_operator must not read client_prospects';
+    v_failures := array_append(v_failures, 'prospect_operator must not read client_prospects');
   end if;
   if has_table_privilege('prospect_operator', 'prospect_operations.operation_job_items', 'select') then
-    v_failures := v_failures || 'prospect_operator must not read operation_job_items';
+    v_failures := array_append(v_failures, 'prospect_operator must not read operation_job_items');
   end if;
 
   -- The application's new door is service_role's alone.
