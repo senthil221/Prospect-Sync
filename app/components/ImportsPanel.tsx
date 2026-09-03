@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { mapProspect } from "../../db/normalize";
 import { companyMergeModeLabels, companyMergeModes, defaultCompanyMergeMode, type CompanyMergeMode } from "../../lib/company-merge-mode";
 import { commonDataSources } from "../../lib/data-source";
@@ -12,8 +12,14 @@ import { importHeadersMatch } from "../../lib/import-resume";
 import { unassignedClientId } from "../../lib/import-owner";
 import { canonicalImportFields } from "../../lib/prospect-field-definitions";
 import { prospectUploadFingerprint, uploadProspectCsv } from "../../lib/resumable-upload.ts";
+import {
+  destinationProblems, mapProblems, prospectImportOutcome, sourceProblems, stepIndex, uploadProblems,
+  type ImportStepId, type StepProblem,
+} from "../../lib/import-steps";
 import type { BackgroundImport, ClientRecord, FileAudit, ImportResumeDetail, InterruptedImport } from "../../lib/types";
-import { AppIcon } from "./DashboardUi";
+import { AppIcon, ProgressBar, StatusMessage } from "./DashboardUi";
+import { ImportStepper, StepFooter, focusProblem } from "./ImportStepper";
+import Tabs from "./Tabs";
 
 function localIsoDate() {
   const now = new Date();
@@ -34,6 +40,17 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelError, setCancelError] = useState("");
   const [activeImportId, setActiveImportId] = useState("");
+  // IMPORT-01: the whole flow is one step machine. Nothing below it unmounts
+  // between steps, so Back never costs you what you already entered.
+  const [step, setStep] = useState<ImportStepId>("source");
+  // A high-water mark, so going Back to fix one field does not cost you the
+  // three Continue presses it took to get here - IMPORT-AC-02.
+  const [furthest, setFurthest] = useState<ImportStepId>("source");
+  const [sourceAttempted, setSourceAttempted] = useState(false);
+  const goToStep = (next: ImportStepId) => {
+    setStep(next);
+    setFurthest((current) => stepIndex(next) > stepIndex(current) ? next : current);
+  };
   const dataSource = sourceChoice === "Other" ? customSource.trim() : sourceChoice;
   const activeDataSource = resumeImport?.dataSource ?? dataSource;
   const visibleInterruptedImports = interruptedImports.filter((item) => item.id !== activeImportId);
@@ -46,6 +63,7 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
     const timer = window.setInterval(load, 5000);
     return () => { active = false; window.clearInterval(timer); };
   }, []);
+  const sourceIssues = useMemo(() => sourceProblems({ dataSource, usingCustomSource: sourceChoice === "Other" }), [dataSource, sourceChoice]);
   const chooseResume = (item: InterruptedImport) => { setKind(item.kind); setResumeImport(item); };
   const finishResume = (id: string) => {
     setInterruptedImports((current) => current.filter((item) => item.id !== id));
@@ -74,15 +92,36 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
   return <section className="import-workspace">
     {backgroundImports.length ? <div className="interrupted-imports panel"><div><p className="eyebrow">BACKGROUND IMPORTS</p><h3>Server-side processing</h3><p>These jobs continue even when this browser is closed.</p></div>{backgroundImports.map((item) => <div className="interrupted-import" key={item.id}><div><strong>{item.fileName}</strong><small>{item.status === "failed" ? `Failed after automatic retries - ${item.lastError}` : item.totalRows ? `${formatNumber(item.committedRowOffset)} of ${formatNumber(item.totalRows)} rows committed` : "Queued or validating the CSV"}</small></div><span className="interrupted-import-actions"><span>{item.status}</span>{item.status === "failed" ? <button className="secondary" onClick={() => void retryBackgroundImport(item.id)}>Retry</button> : null}</span></div>)}</div> : null}
     {visibleInterruptedImports.length ? <div className="interrupted-imports panel"><div><p className="eyebrow">INTERRUPTED IMPORTS</p><h3>Continue an unfinished import</h3><p>Re-select the original file; committed rows will not be imported twice.</p></div>{visibleInterruptedImports.map((item) => <div className="interrupted-import" key={item.id}><div><strong>{item.fileName}</strong><small>Interrupted - resume from row {formatNumber(item.resumeFromRow)} of {formatNumber(item.totalRows)}</small></div><span className="interrupted-import-actions"><button className="secondary" onClick={() => chooseResume(item)}>Resume</button><button className="interrupted-cancel" onClick={() => { setCancelError(""); setCancelImport(item); }}>Cancel import</button></span></div>)}</div> : null}
-    <div className="import-setup panel">
+    {resumeImport ? null : <ImportStepper current={step} furthest={furthest} onSelect={setStep}/>}
+    {resumeImport || step !== "source" ? null : <div className="import-setup panel">
       <div><p className="eyebrow">IMPORT SETUP</p><h2>What are you importing?</h2><p>Every import must have a data source so its lineage remains auditable.</p></div>
-      <div className="import-kind-switch" role="tablist" aria-label="Import type"><button role="tab" aria-selected={kind === "prospects"} className={kind === "prospects" ? "active" : ""} onClick={() => { setKind("prospects"); setResumeImport(null); }}>People / prospects</button><button role="tab" aria-selected={kind === "companies"} className={kind === "companies" ? "active" : ""} onClick={() => { setKind("companies"); setResumeImport(null); }}>Companies</button></div>
-      <div className="import-source-fields"><label><span>Data source <b>*</b></span><select aria-label="Data source" value={sourceChoice} onChange={(event) => setSourceChoice(event.target.value)}><option value="">Choose source</option>{commonDataSources.map((source) => <option key={source}>{source}</option>)}<option>Other</option></select></label>{sourceChoice === "Other" ? <label><span>Custom source <b>*</b></span><input value={customSource} maxLength={80} onChange={(event) => setCustomSource(event.target.value)} placeholder="Enter the source name"/></label> : null}</div>
-      {!activeDataSource ? <p className="source-required-note">A data source is required before the import can start.</p> : <p className="source-selected-note">Source: <strong>{activeDataSource}</strong></p>}
-    </div>
+      {/* IMPORT-03: the shared tabs control, so this strip gets arrow keys and a
+          roving tabindex like every other one instead of two bare buttons. */}
+      <Tabs
+        variant="segmented"
+        label="Import type"
+        value={kind}
+        onChange={(next) => { setKind(next); setResumeImport(null); }}
+        items={[{ id: "prospects", label: "People / prospects" }, { id: "companies", label: "Companies" }]}
+      />
+      <div className="import-source-fields"><label htmlFor="import-data-source"><span>Data source <b>*</b></span><select id="import-data-source" value={sourceChoice} onChange={(event) => setSourceChoice(event.target.value)}><option value="">Choose source</option>{commonDataSources.map((source) => <option key={source}>{source}</option>)}<option>Other</option></select></label>{sourceChoice === "Other" ? <label htmlFor="import-custom-source"><span>Custom source <b>*</b></span><input id="import-custom-source" value={customSource} maxLength={80} onChange={(event) => setCustomSource(event.target.value)} placeholder="Enter the source name"/></label> : null}</div>
+      {/* IMPORT-AC-01: nothing is wrong until Continue says so. This used to
+          read "A data source is required" on first paint. */}
+      {activeDataSource ? <p className="source-selected-note">Source: <strong>{activeDataSource}</strong></p> : null}
+      <StepFooter
+        continueLabel="Continue to upload"
+        attempted={sourceAttempted}
+        problems={sourceIssues}
+        onContinue={() => {
+          setSourceAttempted(true);
+          if (sourceIssues.length) { focusProblem(sourceIssues); return; }
+          goToStep("upload");
+        }}
+      />
+    </div>}
     {kind === "prospects"
-      ? <ProspectImportView key="prospects" clients={clients} dataSource={activeDataSource} resumeImport={resumeImport?.kind === "prospects" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onComplete={onComplete}/>
-      : <CompanyImportView key="companies" dataSource={activeDataSource} resumeImport={resumeImport?.kind === "companies" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onActiveImportChange={setActiveImportId} onComplete={onComplete}/>}
+      ? <ProspectImportView key="prospects" clients={clients} dataSource={activeDataSource} step={step} onStep={goToStep} resumeImport={resumeImport?.kind === "prospects" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onComplete={onComplete}/>
+      : <CompanyImportView key="companies" dataSource={activeDataSource} step={step} onStep={goToStep} resumeImport={resumeImport?.kind === "companies" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onActiveImportChange={setActiveImportId} onComplete={onComplete}/>}
     {cancelImport ? <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-import-title"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="cancel-import-title">Cancel unfinished import?</h2><p>The unfinished session and any client-list links it created will be removed. Records already added to the People or Company database stay in place.</p><div className="delete-target"><strong>{cancelImport.fileName}</strong><span>{formatNumber(cancelImport.committedRowOffset)} of {formatNumber(cancelImport.totalRows)} rows committed</span></div>{cancelError ? <p className="form-error" role="alert">{cancelError}</p> : null}<div className="modal-actions"><button className="secondary" disabled={cancelBusy} onClick={() => setCancelImport(null)}>Keep import</button><button className="danger-button solid" disabled={cancelBusy} onClick={() => void confirmCancelImport()}>{cancelBusy ? "Cancelling…" : "Cancel import"}</button></div></section></div> : null}
   </section>;
 }
@@ -107,7 +146,7 @@ function RequiredFieldList({ title, fields }: { title: string; fields: readonly 
   return <div className="required-field-list"><strong>{title}</strong><div>{fields.map((field) => <span key={field}><AppIcon name="check" size={14}/> {field}</span>)}</div></div>;
 }
 
-function CompanyImportView({ dataSource, onComplete, resumeImport, onCancelResume, onResumed, onActiveImportChange }: { dataSource: string; onComplete: () => Promise<void>; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void; onActiveImportChange: (id: string) => void }) {
+function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport, onCancelResume, onResumed, onActiveImportChange }: { dataSource: string; step: ImportStepId; onStep: (step: ImportStepId) => void; onComplete: () => Promise<void>; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void; onActiveImportChange: (id: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   // A paste has no File behind it, so the import needs a name of its own for the
   // audit trail. Everything downstream -- mapping, merge mode, chunked upload,
@@ -130,6 +169,16 @@ function CompanyImportView({ dataSource, onComplete, resumeImport, onCancelResum
   const sourceName = inputMode === "paste" ? `Pasted companies ${new Date().toISOString().slice(0, 10)}` : file?.name ?? "";
   const hasSource = inputMode === "paste" ? Boolean(pastedText.trim()) : Boolean(file);
   const canSubmit = Boolean(hasSource && parsed?.rows.length && dataSource && !missingFields.length && phase === "idle");
+  const [attempted, setAttempted] = useState<Partial<Record<ImportStepId, boolean>>>({});
+  const uploadControl = inputMode === "paste" ? "company-paste" : "company-file";
+  const stepIssues: StepProblem[] = step === "upload"
+    ? uploadProblems({ hasSource, rows: parsed?.rows.length ?? 0 }, uploadControl)
+    : step === "map" ? mapProblems({ missingFields }, "company-mapping") : [];
+  function advance(next: ImportStepId) {
+    setAttempted((current) => ({ ...current, [step]: true }));
+    if (stepIssues.length) { focusProblem(stepIssues); return; }
+    onStep(next);
+  }
 
   function applyParsedTable(table: { headers: string[]; rows: string[][] }) {
     setFieldMap(Object.fromEntries(table.headers.map((header) => [header, suggestedCompanyImportField(header)])));
@@ -236,39 +285,79 @@ function CompanyImportView({ dataSource, onComplete, resumeImport, onCancelResum
     await resumeCompanyTable(selected.name, () => readImportTable(selected));
   }
 
-  if (phase === "done" && summary) return <div className="import-success"><span className="success-mark"><AppIcon name="check" size={14}/></span><p className="eyebrow">COMPANY IMPORT COMPLETE</p><h2>Your Company DB is updated.</h2><p>{message}</p><div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(summary.added_count)}</strong><span>Companies added</span></div><div><strong>{formatNumber(summary.updated_count)}</strong><span>Companies matched</span></div><div><strong>{formatNumber(summary.skipped_count)}</strong><span>Rows skipped</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
+  if (phase === "done" && summary) return <div className="import-success"><span className="success-mark"><AppIcon name="check" size={14}/></span><p className="eyebrow">COMPANY IMPORT COMPLETE</p><h2>Your Company DB is updated.</h2><p>{message}</p><div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(summary.added_count)}</strong><span>Companies added</span></div><div><strong>{formatNumber(summary.updated_count)}</strong><span>Companies matched</span></div><div><strong>{formatNumber(summary.skipped_count)}</strong><span>Rows skipped</span></div></div><p className="import-rollback-note">A company import updates the Company DB in place, so it cannot be rolled back as a unit. Matched companies were handled with “{companyMergeModeLabels[mergeMode].label}”.</p><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
 
-  if (resumeImport) return <div className="resume-import-card panel"><p className="eyebrow">RESUME COMPANY IMPORT</p><h3>{resumeImport.fileName}</h3><p>Interrupted - resume from row {formatNumber(resumeImport.resumeFromRow)} of {formatNumber(resumeImport.totalRows)}.</p><label className="dropzone"><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={phase !== "idle"} onChange={(event) => void resumeCompanyFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span><strong>Re-select the same file</strong><small>Its headers and row count will be verified before upload resumes.</small></label><div className="resume-paste"><label><span>…or paste the same rows again</span><textarea aria-label="Paste the same company rows to resume" rows={4} disabled={phase !== "idle"} value={pastedText} onChange={(event) => setPastedText(event.target.value)} placeholder="Paste the original block to resume a pasted import"/></label><button className="secondary" disabled={phase !== "idle" || !pastedText.trim()} onClick={() => void resumeCompanyTable("the pasted rows", async () => parsePastedCompanyTable(pastedText))}>Resume from paste</button></div>{phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="secondary" disabled={phase !== "idle"} onClick={onCancelResume}>Start a new import instead</button></div>;
+  if (resumeImport) return <div className="resume-import-card panel"><p className="eyebrow">RESUME COMPANY IMPORT</p><h3>{resumeImport.fileName}</h3><p>Interrupted - resume from row {formatNumber(resumeImport.resumeFromRow)} of {formatNumber(resumeImport.totalRows)}.</p><label className="dropzone"><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={phase !== "idle"} onChange={(event) => void resumeCompanyFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span><strong>Re-select the same file</strong><small>Its headers and row count will be verified before upload resumes.</small></label><div className="resume-paste"><label><span>…or paste the same rows again</span><textarea aria-label="Paste the same company rows to resume" rows={4} disabled={phase !== "idle"} value={pastedText} onChange={(event) => setPastedText(event.target.value)} placeholder="Paste the original block to resume a pasted import"/></label><button className="secondary" disabled={phase !== "idle" || !pastedText.trim()} onClick={() => void resumeCompanyTable("the pasted rows", async () => parsePastedCompanyTable(pastedText))}>Resume from paste</button></div>{phase === "uploading" ? <ProgressBar label={message} value={progress} total={100}/> : null}{message && phase === "idle" ? <StatusMessage tone="alert">{message}</StatusMessage> : null}<button className="secondary" disabled={phase !== "idle"} onClick={onCancelResume}>Start a new import instead</button></div>;
+
+  if (step === "source") return null;
 
   return <div className="import-layout company-import-layout">
     <div className="import-copy">
       <p className="eyebrow">COMPANY IMPORT</p>
-      <h2>Import companies from a file or a paste.</h2>
-      <p>A company name or a website is all that is required - either one identifies a company. Companies are matched by normalized website first and company name second, so a list of domains lands on the companies you already have rather than duplicating them.</p>
-      <RequiredFieldList title="Company columns" fields={companyImportFields}/>
+      {step === "upload" ? <>
+        <h2>Import companies from a file or a paste.</h2>
+        <p>A company name or a website is all that is required - either one identifies a company. Companies are matched by normalized website first and company name second, so a list of domains lands on the companies you already have rather than duplicating them.</p>
+        <RequiredFieldList title="Company columns" fields={companyImportFields}/>
+      </> : step === "map" ? <>
+        <h2>Check the columns before anything is written.</h2>
+        <p>Every column is kept as it was imported. Set one to “{skipImportField}” to drop it entirely - it is not stored and not added to the field catalog.</p>
+        <RequiredFieldList title="Company columns" fields={companyImportFields}/>
+      </> : <>
+        <h2>How matched companies are handled.</h2>
+        <p>This is the one choice on this screen that rewrites data you already have, so it is a visible set of options rather than a default nobody reads.</p>
+        <div className="import-review-summary">
+          <div><span>Source</span><strong>{dataSource || "Not set"}</strong></div>
+          <div><span>File</span><strong>{sourceName || "Pasted rows"}</strong></div>
+          <div><span>Rows</span><strong>{formatNumber(parsed?.rows.length ?? 0)}</strong></div>
+          <div><span>Mapped columns</span><strong>{formatNumber(mappedFields.length)}</strong></div>
+        </div>
+      </>}
     </div>
     <div className="import-card">
-      <div className="import-kind-switch import-input-switch" role="tablist" aria-label="How to supply the companies">
-        <button role="tab" aria-selected={inputMode === "file"} className={inputMode === "file" ? "active" : ""} disabled={phase !== "idle"} onClick={() => switchInputMode("file")}>Upload a file</button>
-        <button role="tab" aria-selected={inputMode === "paste"} className={inputMode === "paste" ? "active" : ""} disabled={phase !== "idle"} onClick={() => switchInputMode("paste")}>Paste rows</button>
-      </div>
-      {inputMode === "file"
-        ? <label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void pickCompanyFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span>{file ? <><strong>{file.name}</strong><small>{formatNumber(parsed?.rows.length)} company rows ready</small></> : <><strong>Choose a company CSV or Excel file</strong><small>A company name or website is required</small></>}</label>
-        : <div className="paste-zone"><label><span>Paste companies</span><textarea aria-label="Paste company rows" rows={9} disabled={phase !== "idle"} value={pastedText} onChange={(event) => readPastedCompanies(event.target.value)} placeholder={"Acme Corp\tacme.com\nGlobex\tglobex.com\n\nOne company per line. Names only, websites only, or both - tabs, commas or semicolons between columns. A header row is used if there is one."}/></label>{pasteNotice ? <p className="source-selected-note" role="status">{pasteNotice}</p> : null}</div>}
-      {parsed ? <>
-        <div className="mapping-list company-required-mapping">{parsed.headers.map((header) => <label key={header}><span title={header}>{header}</span><b><AppIcon name="arrow" size={14}/></b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Not mapped"} onChange={(event) => setFieldMap((current) => ({ ...current, [header]: event.target.value }))}><option>Not mapped</option><option>{skipImportField}</option>{companyImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div>
-        <p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Map a ${missingFields.join(", ")} column - one of the two identifies the company.` : `${formatNumber(parsed.rows.length)} rows ready to import.`}</p>
-        {!missingFields.length && unmappedDetails.length ? <p className="import-partial-note">Detail columns this import does not carry: {unmappedDetails.join(", ")}. They are left exactly as stored - no merge mode can blank out a value this import has nothing to say about.</p> : null}
-        <MergeModeChooser mode={mergeMode} disabled={phase !== "idle"} onChange={setMergeMode}/>
+      {step === "upload" ? <>
+        {/* IMPORT-03: the file/paste choice is the shared tabs control too. */}
+        <Tabs
+          variant="segmented"
+          label="How to supply the companies"
+          value={inputMode}
+          onChange={(next) => { if (phase === "idle") switchInputMode(next); }}
+          items={[{ id: "file", label: "Upload a file" }, { id: "paste", label: "Paste rows" }]}
+        />
+        {inputMode === "file"
+          ? <label className={`dropzone ${file ? "has-file" : ""}`}><input id="company-file" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => void pickCompanyFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span>{file ? <><strong>{file.name}</strong><small>{formatNumber(parsed?.rows.length)} company rows ready</small></> : <><strong>Choose a company CSV or Excel file</strong><small>A company name or website is required</small></>}</label>
+          : <div className="paste-zone"><label htmlFor="company-paste"><span>Paste companies</span><textarea id="company-paste" rows={9} disabled={phase !== "idle"} value={pastedText} onChange={(event) => readPastedCompanies(event.target.value)} placeholder={"Acme Corp\tacme.com\nGlobex\tglobex.com\n\nOne company per line. Names only, websites only, or both - tabs, commas or semicolons between columns. A header row is used if there is one."}/></label>{pasteNotice ? <p className="source-selected-note" role="status">{pasteNotice}</p> : null}</div>}
+        {message ? <StatusMessage tone="alert">{message}</StatusMessage> : null}
+        <StepFooter backLabel="Back to source" onBack={() => onStep("source")} continueLabel="Continue to mapping" attempted={Boolean(attempted.upload)} problems={stepIssues} onContinue={() => advance("map")}/>
       </> : null}
-      {phase === "uploading" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}
-      {message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}
-      <button className="primary import-button" disabled={!canSubmit} onClick={() => void startCompanyImport()}>{phase === "uploading" ? "Processing…" : "Import companies"}</button>
+
+      {step === "map" && parsed ? <>
+        <div id="company-mapping" tabIndex={-1} className="mapping-list company-required-mapping">{parsed.headers.map((header) => <label key={header}><span title={header}>{header}</span><b><AppIcon name="arrow" size={14}/></b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Not mapped"} onChange={(event) => setFieldMap((current) => ({ ...current, [header]: event.target.value }))}><option>Not mapped</option><option>{skipImportField}</option>{companyImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div>
+        {missingFields.length ? null : <p className="source-selected-note">{formatNumber(parsed.rows.length)} rows ready to import.</p>}
+        {!missingFields.length && unmappedDetails.length ? <p className="import-partial-note">Detail columns this import does not carry: {unmappedDetails.join(", ")}. They are left exactly as stored - no merge mode can blank out a value this import has nothing to say about.</p> : null}
+        <StepFooter backLabel="Back to upload" onBack={() => onStep("upload")} continueLabel="Continue to review" attempted={Boolean(attempted.map)} problems={stepIssues} onContinue={() => advance("review")}/>
+      </> : null}
+
+      {step === "review" && parsed ? <>
+        <MergeModeChooser mode={mergeMode} disabled={phase !== "idle"} onChange={setMergeMode}/>
+        {/* IMPORT-05: a known total, so the bar carries valuenow/valuemax and
+            reads as progress rather than as decoration. */}
+        {phase === "uploading" ? <ProgressBar label={message} value={progress} total={100}/> : null}
+        {message && phase === "idle" ? <StatusMessage tone="alert">{message}</StatusMessage> : null}
+        <StepFooter
+          backLabel="Back to mapping"
+          onBack={() => onStep("map")}
+          continueLabel={phase === "uploading" ? "Processing…" : `Import ${formatNumber(parsed.rows.length)} companies`}
+          attempted={Boolean(attempted.review)}
+          problems={canSubmit ? [] : mapProblems({ missingFields }, "company-mapping")}
+          busy={phase !== "idle"}
+          onContinue={() => { setAttempted((current) => ({ ...current, review: true })); if (canSubmit) void startCompanyImport(); }}
+        />
+      </> : null}
     </div>
   </div>;
 }
 
-function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onCancelResume, onResumed }: { clients: ClientRecord[]; onComplete: () => Promise<void>; dataSource: string; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void }) {
+function ProspectImportView({ clients, onComplete, dataSource, step, onStep, resumeImport, onCancelResume, onResumed }: { clients: ClientRecord[]; onComplete: () => Promise<void>; dataSource: string; step: ImportStepId; onStep: (step: ImportStepId) => void; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [clientId, setClientId] = useState("");
   const [newClient, setNewClient] = useState("");
@@ -286,6 +375,17 @@ function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onC
   const mappedFields = fileAudit ? resolvedImportFields(fileAudit.headers, fieldMap, suggestedPersonImportField) : [];
   const missingFields = missingRequiredFields(requiredPersonImportFields, mappedFields);
   const canSubmit = file && fileAudit && dataSource && (noDateContacted || dateContacted) && listName.trim() && (clientId || newClient.trim()) && (!missingFields.length || allowMissing) && phase === "idle";
+  const [attempted, setAttempted] = useState<Partial<Record<ImportStepId, boolean>>>({});
+  const destinationIssues = destinationProblems({ listName, clientId, newClient, dateContacted, noDateContacted });
+  const stepIssues: StepProblem[] = step === "upload"
+    ? uploadProblems({ hasSource: Boolean(file), rows: fileAudit?.rows ?? 0 }, "prospect-file")
+    : step === "map" ? mapProblems({ missingFields, allowMissing, overrideField: "import-allow-missing" }, "prospect-mapping")
+      : destinationIssues;
+  function advance(next: ImportStepId) {
+    setAttempted((current) => ({ ...current, [step]: true }));
+    if (stepIssues.length) { focusProblem(stepIssues); return; }
+    onStep(next);
+  }
 
   useEffect(() => {
     if (!activeBackgroundId) return;
@@ -417,22 +517,93 @@ function ProspectImportView({ clients, onComplete, dataSource, resumeImport, onC
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Unable to resume the import."); setPhase("idle"); }
   }
 
-  if (phase === "done" && summary) return <div className="import-success"><span className="success-mark"><AppIcon name="check" size={14}/></span><p className="eyebrow">IMPORT COMPLETE</p><h2>Your list is ready.</h2><p>{message}</p><div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(fileAudit?.headers.length)}</strong><span>Fields preserved</span></div><div><strong>{formatNumber(summary.unique_added)}</strong><span>Added to master</span></div><div><strong>{formatNumber(summary.duplicates_linked)}</strong><span>Existing prospects linked</span></div></div><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
+  // IMPORT-06: every figure here comes from the completion response. "Fields
+  // preserved" came from the client-side preview and, after a background
+  // import, described a sample of the file rather than the import.
+  if (phase === "done" && summary) {
+    const outcome = prospectImportOutcome(summary);
+    return <div className="import-success"><span className="success-mark"><AppIcon name="check" size={14}/></span><p className="eyebrow">IMPORT COMPLETE</p><h2>Your list is ready.</h2><p>{message}</p>
+      <div className="result-grid four">
+        <div><strong>{formatNumber(outcome.processed)}</strong><span>Rows processed</span></div>
+        <div><strong>{formatNumber(outcome.added)}</strong><span>Added to master</span></div>
+        <div><strong>{formatNumber(outcome.linked)}</strong><span>Matched to existing</span></div>
+        <div><strong>{formatNumber(outcome.unlinked)}</strong><span>Kept without a People DB link</span></div>
+      </div>
+      <p className="import-rollback-note">Every row either became a new prospect, matched one already there, or was kept on the list without a People DB link. This import can be undone from Overview → Recent imports.</p>
+      <button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
+  }
 
-  if (resumeImport) return <div className="resume-import-card panel"><p className="eyebrow">RESUME PROSPECT IMPORT</p><h3>{resumeImport.fileName}</h3><p>Interrupted - resume from row {formatNumber(resumeImport.resumeFromRow)} of {formatNumber(resumeImport.totalRows)}.</p><label className="dropzone"><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={phase !== "idle"} onChange={(event) => void resumeProspectFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span><strong>Re-select the same file</strong><small>Its headers and row count will be verified before upload resumes.</small></label>{phase !== "idle" ? <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div> : null}{message && phase === "idle" ? <p className="form-error" role="alert">{message}</p> : null}<button className="secondary" disabled={phase !== "idle"} onClick={onCancelResume}>Start a new import instead</button></div>;
+  if (resumeImport) return <div className="resume-import-card panel"><p className="eyebrow">RESUME PROSPECT IMPORT</p><h3>{resumeImport.fileName}</h3><p>Interrupted - resume from row {formatNumber(resumeImport.resumeFromRow)} of {formatNumber(resumeImport.totalRows)}.</p><label className="dropzone"><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={phase !== "idle"} onChange={(event) => void resumeProspectFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span><strong>Re-select the same file</strong><small>Its headers and row count will be verified before upload resumes.</small></label>{phase !== "idle" ? <ProgressBar label={message} value={progress ? progress : undefined} total={progress ? 100 : undefined}/> : null}{message && phase === "idle" ? <StatusMessage tone="alert">{message}</StatusMessage> : null}<button className="secondary" disabled={phase !== "idle"} onClick={onCancelResume}>Start a new import instead</button></div>;
+
+  if (step === "source") return null;
 
   return <div className="import-layout">
-    <div className="import-copy"><p className="eyebrow">CSV IMPORT</p><h2>Bring every list into one clean database.</h2><p>Preview the file, confirm field mapping, choose the client, and synchronize it safely with your people database.</p><RequiredFieldList title="Required person columns" fields={requiredPersonImportFields}/><ol><li><span>1</span><div><strong>Validate before import</strong><p>Review fields, row counts and records without usable identity data.</p></div></li><li><span>2</span><div><strong>Control field mapping</strong><p>Map unusual CSV headers without losing the original source fields.</p></div></li><li><span>3</span><div><strong>Sync with rollback</strong><p>Existing prospects are linked, new records are added once, and imports can be undone.</p></div></li></ol></div>
+    <div className="import-copy">
+      <p className="eyebrow">CSV IMPORT</p>
+      {step === "upload" ? <>
+        <h2>Bring every list into one clean database.</h2>
+        <p>The file is read in the browser first, so the columns and the row count are checked before a single row reaches the database.</p>
+        <RequiredFieldList title="Required person columns" fields={requiredPersonImportFields}/>
+      </> : step === "map" ? <>
+        <h2>Control the mapping without losing the original.</h2>
+        <p>Original headers and values are preserved whether a column is mapped or auto-detected. Nothing here changes what the file contained.</p>
+        <RequiredFieldList title="Required person columns" fields={requiredPersonImportFields}/>
+      </> : <>
+        <h2>Where these people land.</h2>
+        <p>Existing prospects are linked rather than duplicated, new records are added once, and the whole import can be undone afterwards.</p>
+        <div className="import-review-summary">
+          <div><span>Source</span><strong>{dataSource || "Not set"}</strong></div>
+          <div><span>File</span><strong>{file?.name ?? "None"}</strong></div>
+          <div><span>Rows</span><strong>{formatNumber(fileAudit?.rows ?? 0)}{fileAudit?.sampled ? " sampled" : ""}</strong></div>
+          <div><span>Fields detected</span><strong>{formatNumber(fileAudit?.headers.length ?? 0)}</strong></div>
+        </div>
+      </>}
+    </div>
     <div className="import-card">
-      <div className="form-field"><label htmlFor="import-client">Client</label><select id="import-client" value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option><option value={unassignedClientId}>Unassigned (list only)</option>{clients.filter((client) => client.id !== unassignedClientId).map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><small>Choose “Unassigned” to import the list without entering a client name.</small></div>
-      {!clientId && <div className="form-field"><label htmlFor="new-client-name">New client name</label><input id="new-client-name" value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}
-      <div className="form-field"><label htmlFor="prospect-date-contacted">Date Contacted</label><input id="prospect-date-contacted" type="date" disabled={noDateContacted} required={!noDateContacted} value={dateContacted} max={localIsoDate()} onChange={(event) => setDateContacted(event.target.value)}/><label className="inline-checkbox" htmlFor="prospect-no-date-contacted"><input id="prospect-no-date-contacted" type="checkbox" checked={noDateContacted} onChange={(event) => setNoDateContacted(event.target.checked)}/> No contact date</label><small>Applied to these prospects for this client only. Choose “No contact date” to leave it blank.</small></div>
-      <label className={`dropzone ${file ? "has-file" : ""}`}><input type="file" accept=".csv,text/csv" onChange={(event) => void pickFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to review</small></> : <><strong>Choose a prospect CSV</strong><small>CSV streams safely for lists up to 500,000+ rows</small></>}</label>
-      <div className="form-field"><label htmlFor="list-name">List name</label><input id="list-name" value={listName} onChange={(event) => setListName(event.target.value)} placeholder="Auto-filled from the CSV filename" /></div>
-      {fileAudit && <><div className="file-audit"><div><span className="audit-check"><AppIcon name="check" size={14}/></span><p><strong>{formatNumber(fileAudit.headers.length)} fields detected</strong><small>{fileAudit.sampled ? `${formatNumber(fileAudit.rows)} sample rows checked · full CSV will be processed by the server` : `${formatNumber(fileAudit.rows)} rows · ${formatNumber(fileAudit.populatedCells)} populated cells`}</small></p></div><div className="audit-fields">{fileAudit.headers.slice(0, 8).map((header) => <span key={header}>{header}</span>)}{fileAudit.headers.length > 8 && <span>+{fileAudit.headers.length - 8} more</span>}</div><p>{fileAudit.invalidRows ? `${fileAudit.invalidRows} sampled rows have no email, LinkedIn, or name plus company and will be preserved without a People DB link.` : "The checked rows have enough identity data to match the People DB."}</p></div><ImportMappingPanel audit={fileAudit} fieldMap={fieldMap} onChange={(header, value) => setFieldMap((current) => ({ ...current, [header]: value }))}/><p className={missingFields.length ? "form-error" : "source-selected-note"}>{missingFields.length ? `Missing mandatory columns: ${missingFields.join(", ")}.` : "All required person columns are mapped."}</p>{missingFields.length ? <div className="cleanup-choice import-override"><input id="import-allow-missing" type="checkbox" checked={allowMissing} onChange={(event) => setAllowMissing(event.target.checked)} /><label htmlFor="import-allow-missing"><strong>Import anyway without all mandatory fields</strong><small>Rows import with whatever identity they have; those missing name/company and email/LinkedIn are preserved without a People DB link.</small></label></div> : null}</>}
-      {phase !== "idle" && <div className="progress"><div><span>{message}</span><strong>{progress}%</strong></div><i><b style={{ width: `${progress}%` }}/></i></div>}
-      {message && phase === "idle" && <p className="form-error" role="alert">{message}</p>}
-      <button className="primary import-button" disabled={!canSubmit} onClick={startImport}>{phase === "idle" ? "Start import & sync" : "Processing…"}</button><p className="privacy-note">Original rows and fields remain stored in your private database.</p>
+      {step === "upload" ? <>
+        <label className={`dropzone ${file ? "has-file" : ""}`}><input id="prospect-file" type="file" accept=".csv,text/csv" onChange={(event) => void pickFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to review</small></> : <><strong>Choose a prospect CSV</strong><small>CSV streams safely for lists up to 500,000+ rows</small></>}</label>
+        {fileAudit ? <div className="file-audit">
+          <div><span className="audit-check"><AppIcon name="check" size={14}/></span><p><strong>{formatNumber(fileAudit.headers.length)} fields detected</strong><small>{fileAudit.sampled ? `${formatNumber(fileAudit.rows)} sample rows checked · full CSV will be processed by the server` : `${formatNumber(fileAudit.rows)} rows · ${formatNumber(fileAudit.populatedCells)} populated cells`}</small></p></div>
+          <div className="audit-fields">{fileAudit.headers.slice(0, 8).map((header) => <span key={header}>{header}</span>)}{fileAudit.headers.length > 8 && <span>+{fileAudit.headers.length - 8} more</span>}</div>
+          <p>{fileAudit.invalidRows ? `${fileAudit.invalidRows} sampled rows have no email, LinkedIn, or name plus company and will be preserved without a People DB link.` : "The checked rows have enough identity data to match the People DB."}</p>
+        </div> : null}
+        {message ? <StatusMessage tone="alert">{message}</StatusMessage> : null}
+        <StepFooter backLabel="Back to source" onBack={() => onStep("source")} continueLabel="Continue to mapping" attempted={Boolean(attempted.upload)} problems={stepIssues} onContinue={() => advance("map")}/>
+      </> : null}
+
+      {step === "map" && fileAudit ? <>
+        <div id="prospect-mapping" tabIndex={-1}><ImportMappingPanel audit={fileAudit} fieldMap={fieldMap} onChange={(header, value) => setFieldMap((current) => ({ ...current, [header]: value }))}/></div>
+        {missingFields.length
+          ? <div className="cleanup-choice import-override"><input id="import-allow-missing" type="checkbox" checked={allowMissing} onChange={(event) => setAllowMissing(event.target.checked)} /><label htmlFor="import-allow-missing"><strong>Import anyway without all mandatory fields</strong><small>Rows import with whatever identity they have; those missing name/company and email/LinkedIn are preserved without a People DB link.</small></label></div>
+          : <p className="source-selected-note">All required person columns are mapped.</p>}
+        <StepFooter backLabel="Back to upload" onBack={() => onStep("upload")} continueLabel="Continue to destination" attempted={Boolean(attempted.map)} problems={stepIssues} onContinue={() => advance("review")}/>
+      </> : null}
+
+      {step === "review" ? <>
+        <div className="form-field"><label htmlFor="import-client">Client</label><select id="import-client" value={clientId} onChange={(event) => { setClientId(event.target.value); if (event.target.value) setNewClient(""); }}><option value="">Create a new client</option><option value={unassignedClientId}>Unassigned (list only)</option>{clients.filter((client) => client.id !== unassignedClientId).map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><small>Choose “Unassigned” to import the list without entering a client name.</small></div>
+        {!clientId && <div className="form-field"><label htmlFor="new-client-name">New client name</label><input id="new-client-name" value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}
+        <div className="form-field"><label htmlFor="list-name">List name</label><input id="list-name" value={listName} onChange={(event) => setListName(event.target.value)} placeholder="Auto-filled from the CSV filename" /></div>
+        <div className="form-field"><label htmlFor="prospect-date-contacted">Date Contacted</label><input id="prospect-date-contacted" type="date" disabled={noDateContacted} required={!noDateContacted} value={dateContacted} max={localIsoDate()} onChange={(event) => setDateContacted(event.target.value)}/><label className="inline-checkbox" htmlFor="prospect-no-date-contacted"><input id="prospect-no-date-contacted" type="checkbox" checked={noDateContacted} onChange={(event) => setNoDateContacted(event.target.checked)}/> No contact date</label><small>Applied to these prospects for this client only. Choose “No contact date” to leave it blank.</small></div>
+        {/* IMPORT-05: a real progressbar. The background phase has no known
+            total until the server reports one, and omitting valuenow is what
+            marks it indeterminate rather than stuck at zero. */}
+        {phase !== "idle" ? <ProgressBar label={message} value={progress ? progress : undefined} total={progress ? 100 : undefined}/> : null}
+        {message && phase === "idle" ? <StatusMessage tone="alert">{message}</StatusMessage> : null}
+        <StepFooter
+          backLabel="Back to mapping"
+          onBack={() => onStep("map")}
+          continueLabel={phase === "idle" ? "Start import & sync" : "Processing…"}
+          attempted={Boolean(attempted.review)}
+          problems={destinationIssues}
+          busy={phase !== "idle"}
+          onContinue={() => {
+            setAttempted((current) => ({ ...current, review: true }));
+            if (destinationIssues.length) { focusProblem(destinationIssues); return; }
+            if (canSubmit) void startImport();
+          }}
+        />
+        <p className="privacy-note">Original rows and fields remain stored in your private database.</p>
+      </> : null}
     </div>
   </div>;
 }
