@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { ClipboardEvent, KeyboardEvent, useEffect, useRef, useId, useState } from "react";
 import { bulkFieldKind, describeBulkMerge, describeMatchMode, exactMatchThreshold, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
 import type { ProspectFieldDefinition } from "../lib/prospect-fields";
 import type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
@@ -96,13 +96,13 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, onC
     const count = activeCount(fieldFilters);
     const isExpanded = expanded === definition.id;
     return <section className={`apollo-filter-section ${isExpanded ? "expanded" : ""}`} key={definition.id}>
-      <button type="button" className="apollo-filter-summary" aria-expanded={isExpanded} onClick={() => setExpanded(isExpanded ? "" : definition.id)}>
+      <button type="button" id={`filter-trigger-${definition.id}`} className="apollo-filter-summary" aria-expanded={isExpanded} aria-controls={`filter-panel-${definition.id}`} onClick={() => setExpanded(isExpanded ? "" : definition.id)}>
         <span className="apollo-filter-mark"><AppIcon name={definition.kind === "employee" ? "hash" : "target"} size={14}/></span>
         <strong>{definition.label}</strong>
         {count ? <span className="filter-count">{count}</span> : null}
         <span className="apollo-chevron"><AppIcon name="chevron" size={14}/></span>
       </button>
-      {isExpanded ? <div className="apollo-filter-content">
+      {isExpanded ? <div id={`filter-panel-${definition.id}`} role="region" aria-labelledby={`filter-trigger-${definition.id}`} className="apollo-filter-content">
         {definition.description ? <p className="apollo-filter-description">{definition.description}</p> : null}
         {definition.kind === "employee"
           ? <EmployeeFilter filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
@@ -231,6 +231,10 @@ export function TokenValuePicker({ field, values, clientId, placeholder, valuesE
   const [mode, setMode] = useState<"search" | "bulk">("search");
   const [bulkText, setBulkText] = useState("");
   const [bulkNote, setBulkNote] = useState("");
+  // The option the keyboard is on. -1 means "none", which is the state where
+  // Enter adds what was typed rather than picking a suggestion.
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const listId = useId();
   const pickerRef = useRef<HTMLDivElement>(null);
   useDismiss(pickerRef, () => setOpen(false), open);
   const kind = bulkFieldKind(field);
@@ -275,7 +279,30 @@ export function TokenValuePicker({ field, values, clientId, placeholder, valuesE
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (["Enter", ",", ";"].includes(event.key)) { event.preventDefault(); addMany(query); }
+    // PEOPLE-03. The list was visible and completely unreachable: no arrows, no
+    // Enter-to-take-the-suggestion, no Escape. A sighted mouse user could pick
+    // an option; nobody else could.
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (!visibleOptions.length) return;
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex((current) => {
+        const next = event.key === "ArrowDown" ? current + 1 : current - 1;
+        // Past either end returns to "none", so the typed text is reachable
+        // again rather than trapping the caret inside the suggestions.
+        if (next < 0 || next >= visibleOptions.length) return -1;
+        return next;
+      });
+      return;
+    }
+    if (event.key === "Escape" && open) { event.preventDefault(); setOpen(false); setActiveIndex(-1); return; }
+    if (["Enter", ",", ";"].includes(event.key)) {
+      event.preventDefault();
+      const chosen = activeIndex >= 0 ? visibleOptions[activeIndex] : null;
+      if (chosen) { onChange([...values, chosen.value]); setQuery(""); setActiveIndex(-1); return; }
+      addMany(query);
+      return;
+    }
     if (event.key === "Backspace" && !query && values.length) onChange(values.slice(0, -1));
   }
 
@@ -325,12 +352,29 @@ export function TokenValuePicker({ field, values, clientId, placeholder, valuesE
         {collapsed
           ? <button type="button" className="token-summary" onClick={() => openBulk(true)}>{values.length.toLocaleString("en-IN")} values · Review</button>
           : values.map((value) => <button type="button" key={value} onClick={(event) => { event.stopPropagation(); onChange(values.filter((item) => item !== value)); }}>{value}<span><AppIcon name="close" size={14}/></span></button>)}
-        <input value={query} onFocus={() => setOpen(true)} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} onBlur={() => { if (query.trim()) addMany(query); window.setTimeout(() => setOpen(false), 150); }} placeholder={values.length ? "Add another…" : placeholder}/>
+        <input value={query} role="combobox" aria-expanded={open} aria-controls={listId} aria-autocomplete="list" aria-activedescendant={activeIndex >= 0 ? `${listId}-option-${activeIndex}` : undefined} aria-label={placeholder} onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setActiveIndex(-1); }} onKeyDown={onKeyDown} onPaste={onPaste} onBlur={() => { if (query.trim()) addMany(query); window.setTimeout(() => { setOpen(false); setActiveIndex(-1); }, 150); }} placeholder={values.length ? "Add another…" : placeholder}/>
       </div>
-      {open ? <div className="token-options" role="listbox" aria-multiselectable="true">
-        {loading ? <p>Searching all prospects…</p> : null}
-        {!loading && visibleOptions.map((option) => <button type="button" role="option" aria-selected="false" key={option.value} onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange([...values, option.value]); setQuery(""); }}><span>{option.value}</span><small>{option.count.toLocaleString("en-IN")}</small></button>)}
-        {!loading && !visibleOptions.length ? <p>{query.trim() ? "Press Enter to add this value." : "Type a value, or use Paste list for a whole column."}</p> : null}
+      {open ? <div className="token-options" id={listId} role="listbox" aria-multiselectable="true" aria-label={placeholder} aria-busy={loading}>
+        {loading ? <p role="status">Searching all prospects…</p> : null}
+        {!loading && visibleOptions.map((option, index) => (
+          // The combobox keeps focus and names the active option through
+          // aria-activedescendant, which is the WAI-ARIA pattern for a listbox
+          // popup. These two rules assume the other pattern, where each option
+          // is its own tab stop - doing that here would fight the input for
+          // focus and break the arrow keys the same rules are protecting.
+          // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus
+          <div
+          key={option.value}
+          id={`${listId}-option-${index}`}
+          role="option"
+          aria-selected={index === activeIndex}
+          className={index === activeIndex ? "active" : ""}
+          onMouseDown={(event) => event.preventDefault()}
+          onMouseEnter={() => setActiveIndex(index)}
+          onClick={() => { onChange([...values, option.value]); setQuery(""); setActiveIndex(-1); }}
+        ><span>{option.value}</span><small>{option.count.toLocaleString("en-IN")}</small></div>
+        ))}
+        {!loading && !visibleOptions.length ? <p role="status">{query.trim() ? "Press Enter to add this value." : "Type a value, or use Paste list for a whole column."}</p> : null}
       </div> : null}
     </>}
   </div>;

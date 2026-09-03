@@ -699,3 +699,24 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
   cursor: pointer;
 }
 .ds-menu-checks label:hover { background: var(--surface-hover); }
+
+/* The active option in the filter combobox (PEOPLE-03).
+   Keyboard focus stays on the input - that is what aria-activedescendant is
+   for - so the option itself never receives a focus ring. Without a visible
+   active style the arrow keys would move something the user cannot see. */
+.token-options [role="option"] {
+  min-height: var(--control-dense);
+  padding: 0 var(--space-2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.token-options [role="option"] small { color: var(--text-tertiary); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
+.token-options [role="option"].active,
+.token-options [role="option"][aria-selected="true"] { background: var(--accent-soft); color: var(--accent-text); }
+.token-options [role="option"].active small { color: var(--accent-text); }

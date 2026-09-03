@@ -148,13 +148,13 @@ export default function CompanyFilterPanel({ filters, onChange }: {
     // not a per-field choice: passing undefined here made TokenValuePicker fall
     // back to the People endpoint, so company fields queried prospect_index.
     return <section className={`apollo-filter-section ${isExpanded ? "expanded" : ""}`} key={definition.id}>
-      <button type="button" className="apollo-filter-summary" aria-expanded={isExpanded} onClick={() => setExpanded(isExpanded ? "" : definition.id)}>
+      <button type="button" id={`company-filter-trigger-${definition.id}`} className="apollo-filter-summary" aria-expanded={isExpanded} aria-controls={`company-filter-panel-${definition.id}`} onClick={() => setExpanded(isExpanded ? "" : definition.id)}>
         <span className="apollo-filter-mark"><AppIcon name={definition.kind === "employee" || definition.kind === "year" ? "hash" : "target"} size={14}/></span>
         <strong>{definition.label}</strong>
         {count ? <span className="filter-count">{count}</span> : null}
         <span className="apollo-chevron"><AppIcon name="chevron" size={14}/></span>
       </button>
-      {isExpanded ? <div className="apollo-filter-content">
+      {isExpanded ? <div id={`company-filter-panel-${definition.id}`} role="region" aria-labelledby={`company-filter-trigger-${definition.id}`} className="apollo-filter-content">
         {definition.description ? <p className="apollo-filter-description">{definition.description}</p> : null}
         {definition.kind === "company_keywords"
           ? <CompanyKeywordFilter key={fieldFilters.map((filter) => filter.scopes?.join("|") ?? "default").join(";") || "default"} filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
