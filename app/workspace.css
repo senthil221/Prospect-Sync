@@ -106,7 +106,7 @@ main { min-width: 0; grid-column: 2; }
 /* Shared components */
 .primary, .secondary, .panel-head button, .empty button, .compact button { min-height: var(--control-standard); padding: var(--space-2) var(--space-3); display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); border: 1px solid var(--ph-brand); border-radius: var(--radius-lg); background: var(--ph-brand); color: var(--on-accent); box-shadow: 0 2px 4px rgba(var(--accent-rgb), .12); font-size: var(--text-sm); font-weight: var(--weight-bold); }
 .primary:hover { background: var(--ph-brand-dark); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(var(--accent-rgb), .16); }
-.primary:disabled { opacity: .48; transform: none; cursor: not-allowed; }
+.primary:disabled, .secondary:disabled, .panel-head button:disabled { opacity: .48; transform: none; cursor: not-allowed; }
 .secondary, .panel-head button, .compact button { border-color: var(--ph-border-strong); background: var(--surface); color: var(--text-primary); box-shadow: none; }
 .secondary:hover, .panel-head button:hover, .compact button:hover { border-color: var(--border-strong); background: var(--surface-sunken); }
 .panel, .metric-card, .client-card, .client-hero, .import-card { border: 1px solid var(--ph-border); background: var(--surface); box-shadow: var(--ph-shadow); }
@@ -418,25 +418,39 @@ main { min-width: 0; grid-column: 2; }
 .workspace-loading { min-height: 200px; display: grid; place-items: center; color: var(--ph-muted); font-size: var(--text-sm); }
 
 /* Operational screens */
-.coverage-workspace { display: grid; grid-template-columns: 350px minmax(0, 1fr); gap: var(--space-3); align-items: start; }
-.coverage-upload { position: sticky; top: 94px; padding: var(--space-4); }
-.dropzone { min-height: 150px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1.5px dashed var(--border-strong); border-radius: var(--radius-lg); background: var(--accent-soft); cursor: pointer; }
+/* COVERAGE-01: one centred task panel, not a sticky card beside an empty canvas. */
+.coverage-report { display: grid; gap: var(--space-3); }
+.coverage-task { max-width: 560px; margin: 0 auto; padding: var(--space-5); display: grid; gap: var(--space-3); }
+.coverage-task.wide { max-width: none; grid-template-columns: 1fr auto auto; align-items: center; }
+.coverage-task-note { margin: 0; color: var(--text-tertiary); font-size: var(--text-2xs); line-height: 1.5; text-align: center; }
+.coverage-steps { margin: 0; padding: 0; display: flex; align-items: center; gap: var(--space-2); list-style: none; counter-reset: coverage-step; }
+.coverage-steps li { display: flex; align-items: center; gap: var(--space-2); color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.coverage-steps li::before { counter-increment: coverage-step; content: counter(coverage-step); width: 18px; height: 18px; display: grid; place-items: center; border-radius: var(--radius-full); background: var(--surface-sunken); color: var(--text-tertiary); font-size: var(--text-2xs); }
+.coverage-steps li + li::after { order: -1; width: 14px; height: 1px; content: ""; background: var(--border-default); }
+.coverage-steps li[aria-current="step"] { color: var(--text-primary); }
+.coverage-steps li[aria-current="step"]::before { background: var(--ph-brand); color: var(--on-accent); }
+.coverage-file { padding: var(--space-3); display: flex; align-items: center; gap: var(--space-3); border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: var(--surface-sunken); }
+.coverage-file > div { flex: 1; min-width: 0; display: grid; }
+.coverage-file strong { overflow: hidden; font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.coverage-file small { color: var(--text-tertiary); font-size: var(--text-2xs); }
+.coverage-file-mark { width: 28px; height: 28px; display: grid; flex: none; place-items: center; border-radius: var(--radius-full); background: var(--success-soft); color: var(--success); }
+.coverage-replace { position: relative; min-height: var(--control-dense); padding: 0 var(--space-3); display: inline-flex; flex: none; align-items: center; justify-content: center; border: 1px solid var(--ph-border-strong); border-radius: var(--radius-lg); background: var(--surface); color: var(--text-primary); cursor: pointer; font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.coverage-replace:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+.coverage-replace input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.dropzone { position: relative; min-height: 150px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1.5px dashed var(--border-strong); border-radius: var(--radius-lg); background: var(--accent-soft); cursor: pointer; }
 .dropzone:hover { border-color: var(--accent); background: var(--accent-soft); }
 .dropzone.has-file { border-style: solid; border-color: var(--success); background: var(--success-soft); }
-.dropzone input { display: none; }
-.dropzone.small { min-height: 140px; }
+/* Hidden, but still focusable: display:none took the only control on the first
+   screen of this flow out of the tab order entirely. */
+.dropzone input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.dropzone:focus-within { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
 .upload-mark { width: 38px; height: 38px; margin-bottom: var(--space-2); display: grid; place-items: center; border-radius: var(--radius-lg); background: var(--ph-brand-soft); color: var(--ph-brand); font-size: var(--text-md); font-weight: var(--weight-bold); }
 .dropzone strong { font-size: var(--text-sm); }
 .dropzone small { margin-top: var(--space-1); color: var(--text-tertiary); font-size: var(--text-2xs); }
-.mapping-grid { margin: var(--space-3) 0; display: grid; gap: var(--space-3); }
+.mapping-grid { display: grid; gap: var(--space-3); }
 .mapping-grid label { color: var(--ph-muted); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
 .mapping-grid select { width: 100%; height: var(--control-standard); margin-top: var(--space-1); padding: 0 var(--space-2); border: 1px solid var(--ph-border-strong); border-radius: var(--radius-lg); background: var(--surface); color: var(--ph-text); font-size: var(--text-xs); }
-.coverage-upload > .primary { width: 100%; margin-top: var(--space-3); }
-.coverage-results { min-height: 470px; }
-.coverage-placeholder { min-height: 470px; padding: var(--space-12); display: grid; place-items: center; align-content: center; text-align: center; }
-.coverage-placeholder > span { width: 52px; height: 52px; display: grid; place-items: center; border-radius: var(--radius-xl); background: var(--ph-brand-soft); color: var(--ph-brand); font-size: var(--text-xl); }
-.coverage-placeholder h3 { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-md); }
-.coverage-placeholder p { max-width: 350px; margin: 0; color: var(--ph-muted); font-size: var(--text-xs); line-height: 1.55; }
+.coverage-check { width: 100%; }
 .coverage-table { max-height: 520px; overflow: auto; }
 .quality-metrics { margin-bottom: var(--space-3); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
 .quality-metrics.four { margin: 0; padding: var(--space-4) var(--space-4) var(--space-1); }
@@ -805,8 +819,7 @@ main { min-width: 0; grid-column: 2; }
 .filter-empty, .quick-filters { grid-column: 1 / -1; }
   .workspace-actions > label:nth-of-type(2) { display: none; }
   .clients-grid { grid-template-columns: repeat(2, 1fr); }
-  .coverage-workspace { grid-template-columns: 1fr; }
-.coverage-upload { position: static; }
+  .coverage-task.wide { grid-template-columns: 1fr; }
   .duplicate-pair { grid-template-columns: 90px 1fr; }
 .duplicate-actions { grid-column: 1; }
 .duplicate-pair .compare-card:last-child { grid-column: 2; }
@@ -988,7 +1001,7 @@ main { min-width: 0; grid-column: 2; }
 @keyframes ph-reveal { from { opacity: 0; transform: translateY(-3px); } }
 
 /* Empty & loading states - warmer, more intentional. */
-.empty > span, .coverage-placeholder > span { box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .08), 0 8px 20px -8px rgba(var(--accent-rgb), .35); }
+.empty > span { box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .08), 0 8px 20px -8px rgba(var(--accent-rgb), .35); }
 .empty { animation: ph-rise .42s var(--ph-ease-out) both; }
 .loading-bar, .loading-grid span { background-color: var(--accent-soft); }
 
