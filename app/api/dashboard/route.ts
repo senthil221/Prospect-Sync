@@ -21,8 +21,8 @@ export async function GET() {
     supabase.from("clients").select("id", { count: "exact", head: true }),
     supabase.from("lists").select("id", { count: "exact", head: true }),
     supabase.from("imports").select("processed_rows, duplicates_linked"),
-    supabase.from("imports").select("id,file_name,data_source,status,processed_rows,unique_added,duplicates_linked,created_at,client:clients(name),list:lists(name)").eq("status", "completed").order("created_at", { ascending: false }).limit(6),
-    supabase.from("company_imports").select("id,file_name,data_source,status,processed_rows,added_count,updated_count,skipped_count,created_at").eq("status", "completed").order("created_at", { ascending: false }).limit(6),
+    supabase.from("imports").select("id,file_name,data_source,status,processed_rows,unique_added,duplicates_linked,created_at,client:clients(name),list:lists(name)").eq("status", "completed").order("created_at", { ascending: false }).limit(12),
+    supabase.from("company_imports").select("id,file_name,data_source,status,processed_rows,added_count,updated_count,skipped_count,created_at").eq("status", "completed").order("created_at", { ascending: false }).limit(12),
   ]);
   const companyImportsUnavailable = recentCompanies.error?.code === "PGRST205" || recentCompanies.error?.code === "42P01";
   const failure = [prospects, companies, clients, lists, importTotals, recentProspects, ...(companyImportsUnavailable ? [] : [recentCompanies])].find((result) => result.error)?.error;
@@ -43,7 +43,7 @@ export async function GET() {
   const companyImports = (recentCompanies.data ?? []).map((item) => ({ ...item, kind: "companies" as const }));
   const recentImports = [...prospectImports, ...companyImports]
     .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))
-    .slice(0, 6);
+    .slice(0, 12);
   return Response.json({
     stats: { prospects: prospects.count ?? 0, companies: companies.count ?? 0, clients: clients.count ?? 0, lists: lists.count ?? 0, rowsImported: totals.rows, duplicatesDetected: totals.duplicates },
     recentImports,
