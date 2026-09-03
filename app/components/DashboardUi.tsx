@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useDialogFocus } from "./use-dialog";
+import Tabs from "./Tabs";
 import { api } from "../../lib/dashboard-api";
 import { formatNumber, initials, parseAllData, prospectMembershipItems } from "../../lib/dashboard-helpers";
 import type { DeleteRequest, Prospect } from "../../lib/types";
@@ -43,8 +45,81 @@ export function AppIcon({ name, size = 18 }: { name: IconName; size?: number }) 
   if (name === "monitor") return <svg {...common}><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8.5 21h7M12 17v4"/></svg>;
   return <svg {...common}><path d="M5 12h14M13 6l6 6-6 6"/></svg>;
 }
-export function LoadingState() {
-  return <div className="loading-state"><div className="loading-bar"/><div className="loading-grid"><span/><span/><span/><span/></div></div>;
+export function LoadingState({ label = "Loading" }: { label?: string }) {
+  // STATE-01: a bare skeleton is silent to a screen reader, so the surface just
+  // stops responding with no explanation. The label says which surface is
+  // loading; the bars stay decorative.
+  return <div className="loading-state" role="status" aria-live="polite" aria-busy="true">
+    <span className="sr-only">{label}</span>
+    <div className="loading-bar" aria-hidden="true"/>
+    <div className="loading-grid" aria-hidden="true"><span/><span/><span/><span/></div>
+  </div>;
+}
+
+/**
+ * The panel a tab controls.
+ *
+ * Tabs.tsx has always emitted `aria-controls="tabpanel-<id>"`, and until now no
+ * element with that id existed anywhere in the product - so every tab announced
+ * a relationship to nothing. This is the other half of that reference.
+ *
+ * tabIndex={0} because the panel is the next tab stop after the tab strip: with
+ * a roving tabindex the arrow keys move between tabs, and Tab has to land
+ * somewhere that is the content those tabs were selecting.
+ */
+export function TabPanel({ id, active, children }: { id: string; active: boolean; children: ReactNode }) {
+  return <div
+    id={`tabpanel-${id}`}
+    role="tabpanel"
+    aria-labelledby={`tab-${id}`}
+    tabIndex={0}
+    hidden={!active}
+  >{active ? children : null}</div>;
+}
+
+/**
+ * An asynchronous change, announced.
+ *
+ * `role="status"` is polite - it waits for a pause rather than interrupting -
+ * and is right for "Exported 4,000 rows". `role="alert"` is assertive and
+ * interrupts, which is right for a failure the user has to act on and wrong for
+ * anything routine: an assertive region that fires on every keystroke of a
+ * search is how people turn screen readers off.
+ */
+export function StatusMessage({ tone = "status", children }: { tone?: "status" | "alert"; children: ReactNode }) {
+  if (!children) return null;
+  return <p
+    className={tone === "alert" ? "inline-error" : "inline-notice"}
+    role={tone === "alert" ? "alert" : "status"}
+    aria-live={tone === "alert" ? "assertive" : "polite"}
+  >{children}</p>;
+}
+
+/**
+ * Progress, with the numbers a screen reader needs.
+ *
+ * A known total gets aria-valuenow/min/max; an unknown one omits valuenow,
+ * which is what tells assistive technology the bar is indeterminate rather than
+ * stuck at zero. Both carry a text label, because a bar with no text is a
+ * rectangle that means nothing.
+ */
+export function ProgressBar({ label, value, total }: { label: string; value?: number; total?: number }) {
+  const known = typeof value === "number" && typeof total === "number" && total > 0;
+  const percent = known ? Math.min(100, Math.round((value / total) * 100)) : null;
+  return <div className="ds-progress">
+    <div
+      className="ds-progress-track"
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={known ? total : undefined}
+      aria-valuenow={known ? value : undefined}
+      aria-valuetext={known ? `${formatNumber(value)} of ${formatNumber(total)}` : "Working"}
+    >
+      <i style={percent === null ? undefined : { width: `${percent}%` }} className={percent === null ? "indeterminate" : ""}/>
+    </div>
+    <span>{label}</span>
+  </div>;
 }
 
 export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
@@ -53,24 +128,30 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
   const membershipCountMatches = memberships.length === Number(prospect.list_count ?? 0);
   const [tab, setTab] = useState<"data" | "history">("data");
   const [events, setEvents] = useState<Array<{ id: string; contacted_at: string; campaign_name: string; outcome: string; client: { name?: string } | Array<{ name?: string }> }>>([]);
+  const panel = useRef<HTMLElement>(null);
+  // Escape used to be handled here on its own; the shared lifecycle brings the
+  // other three halves of the contract with it - initial focus, Tab
+  // containment, an inert background, and focus back to the row that opened it.
+  useDialogFocus(panel, { onClose });
   useEffect(() => {
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", closeOnEscape);
     void api<{ events: typeof events }>(`/api/operations?prospectId=${encodeURIComponent(prospect.id)}`).then((result) => setEvents(result.events)).catch(() => setEvents([]));
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [prospect.id, onClose]);
-  return <div className="drawer-backdrop"><button className="drawer-dismiss" aria-label="Close prospect details" onClick={onClose}/><aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="prospect-drawer-title"><button className="drawer-close" aria-label="Close prospect details" onClick={onClose}><AppIcon name="close" size={14}/></button><div className="drawer-person"><span>{initials(prospect.full_name)}</span><div><p className="eyebrow">PROSPECT DETAILS</p><h2 id="prospect-drawer-title">{prospect.full_name || "Unnamed prospect"}</h2><p>{prospect.title || "No title"} {prospect.company_name ? `at ${prospect.company_name}` : ""}</p></div></div><div className="drawer-summary"><span><b>{formatNumber(prospect.client_count)}</b>clients</span><span><b>{formatNumber(prospect.list_count)}</b>lists</span><span><b>{Object.keys(data).length}</b>data fields</span></div><div className="drawer-tabs" role="tablist"><button role="tab" aria-selected={tab === "data"} className={tab === "data" ? "active" : ""} onClick={() => setTab("data")}>Saved data</button><button role="tab" aria-selected={tab === "history"} className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>Contact history <span>{events.length}</span></button></div>{tab === "data" ? <div className="drawer-saved-data"><section className="drawer-memberships"><div><span>LIST MEMBERSHIPS</span><strong>{formatNumber(memberships.length)} linked</strong><small className={membershipCountMatches ? "verified" : "review"}>{membershipCountMatches ? "Tag count verified" : "Review membership count"}</small></div>{memberships.length ? <div className="drawer-membership-list">{memberships.map((membership) => <div key={membership.key}><span>{membership.clientName || "Client"}</span><strong>{membership.listName}</strong></div>)}</div> : <p>No master-list membership is linked to this prospect.</p>}</section><div className="field-list">{Object.entries(data).map(([field, value]) => <div key={field}><span>{field}</span><strong>{value || "-"}</strong></div>)}</div></div> : <div className="contact-timeline">{events.length ? events.map((event) => { const client = Array.isArray(event.client) ? event.client[0] : event.client; return <div key={event.id}><i/><span>{new Date(event.contacted_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span><strong>{client?.name || "Unknown client"}</strong><p>{event.campaign_name || event.outcome || "Contacted"}</p></div>; }) : <div className="drawer-empty">No contact history recorded yet.</div>}</div>}</aside></div>;
+  }, [prospect.id]);
+  return <div className="drawer-backdrop"><button className="drawer-dismiss" aria-label="Close prospect details" onClick={onClose}/><aside ref={panel} className="drawer" role="dialog" aria-modal="true" aria-labelledby="prospect-drawer-title"><button className="drawer-close" data-autofocus aria-label="Close prospect details" onClick={onClose}><AppIcon name="close" size={14}/></button><div className="drawer-person"><span>{initials(prospect.full_name)}</span><div><p className="eyebrow">PROSPECT DETAILS</p><h2 id="prospect-drawer-title">{prospect.full_name || "Unnamed prospect"}</h2><p>{prospect.title || "No title"} {prospect.company_name ? `at ${prospect.company_name}` : ""}</p></div></div><div className="drawer-summary"><span><b>{formatNumber(prospect.client_count)}</b>clients</span><span><b>{formatNumber(prospect.list_count)}</b>lists</span><span><b>{Object.keys(data).length}</b>data fields</span></div><div className="drawer-tabs"><Tabs label="Prospect details" value={tab} onChange={setTab} items={[{ id: "data" as const, label: "Saved data" }, { id: "history" as const, label: "Contact history", count: events.length }]}/></div><TabPanel id="data" active={tab === "data"}><div className="drawer-saved-data"><section className="drawer-memberships"><div><span>LIST MEMBERSHIPS</span><strong>{formatNumber(memberships.length)} linked</strong><small className={membershipCountMatches ? "verified" : "review"}>{membershipCountMatches ? "Tag count verified" : "Review membership count"}</small></div>{memberships.length ? <div className="drawer-membership-list">{memberships.map((membership) => <div key={membership.key}><span>{membership.clientName || "Client"}</span><strong>{membership.listName}</strong></div>)}</div> : <p>No master-list membership is linked to this prospect.</p>}</section><div className="field-list">{Object.entries(data).map(([field, value]) => <div key={field}><span>{field}</span><strong>{value || "-"}</strong></div>)}</div></div></TabPanel><TabPanel id="history" active={tab === "history"}><div className="contact-timeline">{events.length ? events.map((event) => { const client = Array.isArray(event.client) ? event.client[0] : event.client; return <div key={event.id}><i/><span>{new Date(event.contacted_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span><strong>{client?.name || "Unknown client"}</strong><p>{event.campaign_name || event.outcome || "Contacted"}</p></div>; }) : <div className="drawer-empty">No contact history recorded yet.</div>}</div></TabPanel></aside></div>;
 }
 
 
 export function DeleteConfirmation({ target, busy, onCancel, onConfirm }: { target: DeleteRequest; busy: boolean; onCancel: () => void; onConfirm: () => Promise<void> }) {
+  const panel = useRef<HTMLElement>(null);
+  // busy is passed through: once the delete is committed, Escape stops closing
+  // the dialog, because the operation it describes is already running.
+  useDialogFocus(panel, { onClose: onCancel, busy });
   const action = target.kind === "import" ? "Undo import" : target.kind === "list" ? "Delete list" : "Delete client";
   const explanation = target.kind === "import"
     ? "This removes the import and its client-list links. The list is also removed when nothing else uses it."
     : target.kind === "list"
       ? "This removes the list and its import history - only the links between this list and the People database."
       : "This removes the client workspace, every list under it, and its import history - only the client-side links.";
-  return <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="delete-title">{action}?</h2><p>{explanation}</p><div className="delete-target"><strong>{target.name}</strong><span>{target.context}</span></div><p className="shared-safety">Your People and Company databases are never affected by this. Every prospect and company stays in place - only this client-side data is removed.</p><div className="modal-actions"><button className="secondary" disabled={busy} onClick={onCancel}>Cancel</button><button className="danger-button solid" disabled={busy} onClick={() => void onConfirm()}>{busy ? "Working…" : action}</button></div></section></div>;
+  return <div className="modal-backdrop" role="presentation"><section ref={panel} className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-explanation"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="delete-title">{action}?</h2><p id="delete-explanation">{explanation}</p><div className="delete-target"><strong>{target.name}</strong><span>{target.context}</span></div><p className="shared-safety">Your People and Company databases are never affected by this. Every prospect and company stays in place - only this client-side data is removed.</p><div className="modal-actions"><button className="secondary" data-autofocus disabled={busy} onClick={onCancel}>Cancel</button><button className="danger-button solid" disabled={busy} onClick={() => void onConfirm()}>{busy ? "Working…" : action}</button></div></section></div>;
 }
 
 
