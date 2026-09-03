@@ -96,3 +96,24 @@ test("surface motion stays inside the 120-180ms band", async () => {
   // Reduced motion is still honoured globally rather than per component.
   assert.match(system, /@media \(prefers-reduced-motion: reduce\)/);
 });
+
+test("an action button is not shaped like a status chip", async () => {
+  // The token contract: "6px fields, 10px controls/cards, 14px hero/dialog,
+  // pill only for statuses/chips". Five action buttons wore --radius-full and
+  // were sized by padding alone, so they sat at a different height AND a
+  // different shape from every control beside them. .company-filter-import is
+  // the one that showed it worst: a <label>, so the height pass - which matched
+  // button/input/select/textarea - never saw it, and its flex parent stretched
+  // it to full width as a lozenge.
+  const styles = await read("../app/workspace.css");
+  const controls = [".company-filter-import", ".company-filter-clear", ".company-bulk-clear", ".icp-toggle", ".bulk-domain-actions button"];
+  for (const selector of controls) {
+    const rule = styles.split("\n").find((line) => line.startsWith(`${selector} {`));
+    assert.ok(rule, `${selector} should still exist`);
+    assert.doesNotMatch(rule, /border-radius: var\(--radius-full\)/, `${selector} is a control, not a chip`);
+    assert.match(rule, /min-height: var\(--control-(dense|standard)\)/, `${selector} must take a control height`);
+    // Height without centring is what makes a control look wrong rather than
+    // just tall: the label sits against the top edge.
+    assert.match(rule, /align-items: center/, `${selector} must centre its label`);
+  }
+});
