@@ -57,3 +57,8 @@ yarn-error.log*
 /deploy/.deploy.lock
 /deploy/.env.tmp
 supabase/.temp/
+
+# A saved Playwright session is a credential: it is a signed-in cookie for a
+# real account, so it must never be committed even though it holds no password.
+tests/e2e/fixtures/auth.json
+playwright-report/
