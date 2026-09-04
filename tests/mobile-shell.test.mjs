@@ -152,5 +152,5 @@ test("POLISH-01: an inert card does not wear an actionable card's elevation", as
   }
   const overview = await read("../app/components/OverviewWorkspace.tsx");
   assert.doesNotMatch(overview, /color: "(violet|blue|amber|green)"/);
-  assert.match(overview, /<article className="metric-card" key=\{card\.label\}>/);
+  assert.match(overview, /<article className="metric-card" key=\{card\.label\}/);
 });

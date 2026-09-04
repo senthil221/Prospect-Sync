@@ -54,45 +54,18 @@ test("sorting picks a static branch instead of building an ORDER BY from input",
   assert.match(sql, /case when v_sort_dir = 'asc' then ' nulls first' else ' nulls last' end/);
 });
 
-test("the three kinds of total stay distinguishable end to end", async () => {
-  const [sql, route, table, workspace, clients] = await Promise.all([
-    migration(),
-    read("../app/api/prospects/route.ts"),
-    read("../app/components/ProspectTable.tsx"),
-    read("../app/components/ProspectsWorkspace.tsx"),
-    read("../app/components/ClientsPanel.tsx"),
-  ]);
+test("what 1B built to bound the total is still in this migration", async () => {
+  const sql = await migration();
 
-  // SQL: exact, capped at 50,000 with a flag, or the planner's estimate.
+  // This file is history now: 20260902000260 took the cap off after measuring
+  // an exact People count at 0.18-1.25 s. What 1B shipped is still asserted
+  // here, because the file is what it is - the CURRENT behaviour is asserted in
+  // exact-people-counts.test.mjs, and the two together are the record of the
+  // change rather than a rewrite that pretends the cap never existed.
   assert.match(sql, /RETURNS TABLE\(result_rows jsonb, total_count bigint, scope_capped boolean, total_capped boolean\)/);
   assert.match(sql, /least\(counted\.matched_rows, %s\)/);
   assert.match(sql, /counted\.matched_rows > %s/);
   assert.match(sql, /pg_class\.reltuples::bigint/);
-
-  // API passes the flag through.
-  assert.match(route, /totalCapped: summary\.total_capped === true/);
-
-  // Both places that render a People grid carry it.
-  assert.match(workspace, /totalCapped/);
-  assert.match(clients, /setTotalCapped\(data\.totalCapped === true\)/);
-  assert.match(clients, /totalCapped=\{totalCapped\}/);
-
-  // The grid shows which kind it is, and never presents a bounded number as exact.
-  // The leading "≈" is gone: mathematical notation in a sales tool, colliding
-  // with the digit grouping right beside it. A capped total keeps its "+",
-  // because a floor genuinely reads differently from an exact number, and the
-  // estimate is explained in words on hover rather than encoded in a glyph.
-  assert.match(table, /\$\{formatNumber\(total\)\}\$\{totalCapped \? "\+" : ""\}/);
-  assert.doesNotMatch(table, /totalEstimated \? "≈"/);
-  assert.match(table, /Approximate: the whole-database total is PostgreSQL/);
-  assert.match(table, /Counting stopped at 50,000/);
-  // A selection drawn from a capped total is a floor too.
-  assert.match(table, /const selectedLabel = /);
-  assert.match(table, /totalCapped && selectionMode === "all_matching" \? "\+" : ""/);
-  // Neither a capped nor an estimated total knows the page count, so Next is
-  // driven by whether the page came back full.
-  assert.match(table, /const boundedTotal = totalEstimated \|\| totalCapped;/);
-  assert.match(table, /disabled=\{boundedTotal \? prospects\.length < 50 : page >= totalPages\}/);
 });
 
 test("the rewrite keeps its grants and its evidence", async () => {

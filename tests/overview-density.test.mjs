@@ -22,7 +22,7 @@ test("the reuse panel leads with the achievement, not the ratio", async () => {
   // 5,384 records nobody had to buy again is the fact. The same fact as a
   // share of every row ever imported is 0.74%, and putting THAT in accent blue
   // at 26px made the panel advertise its worst number.
-  assert.match(overview, /className="coverage-spotlight"><strong>\{formatNumber\(stats\.duplicatesDetected\)\}<\/strong>/);
+  assert.match(overview, /className="coverage-spotlight"><strong><CountUp value=\{stats\.duplicatesDetected\}\/><\/strong>/);
   assert.doesNotMatch(overview, /\{reuseRate\}%/);
   // The share survives as a supporting row, through the formatter that refuses
   // to round a sub-1% value up to a number that looks deliberate.
@@ -33,7 +33,9 @@ test("the reuse panel leads with the achievement, not the ratio", async () => {
 
   // The bar and its caption describe the same number. The bar used to plot
   // reuse while the caption explained something else.
-  assert.match(overview, /coverage-track"><i style=\{\{ width: `\$\{Math\.min\(100, uniqueRate\)\}%` \}\}/);
+  // The bar's width is a custom property now, so it can be animated from zero
+  // on the way in without the keyframe having to know the value. Same number.
+  assert.match(overview, /coverage-track"><i style=\{\{ "--fill": `\$\{Math\.min\(100, uniqueRate\)\}%` \} as CSSProperties\}/);
   assert.match(overview, /\{uniqueRate\}% of every row you have ever imported/);
 });
 

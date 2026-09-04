@@ -96,12 +96,23 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, onC
     const count = activeCount(fieldFilters);
     const isExpanded = expanded === definition.id;
     return <section className={`apollo-filter-section ${isExpanded ? "expanded" : ""}`} key={definition.id}>
-      <button type="button" id={`filter-trigger-${definition.id}`} className="apollo-filter-summary" aria-expanded={isExpanded} aria-controls={`filter-panel-${definition.id}`} onClick={() => setExpanded(isExpanded ? "" : definition.id)}>
-        <span className="apollo-filter-mark"><AppIcon name={definition.kind === "employee" ? "hash" : "target"} size={14}/></span>
-        <strong>{definition.label}</strong>
-        {count ? <span className="filter-count">{count}</span> : null}
-        <span className="apollo-chevron"><AppIcon name="chevron" size={14}/></span>
-      </button>
+      {/* The clear control is a sibling of the disclosure button rather than a
+          child of it: a button inside a button is invalid markup, and the
+          browser resolves it by dropping one - which is how "clear this filter"
+          would end up silently expanding the section instead. */}
+      <div className="apollo-filter-head">
+        <button type="button" id={`filter-trigger-${definition.id}`} className="apollo-filter-summary" aria-expanded={isExpanded} aria-controls={`filter-panel-${definition.id}`} onClick={() => setExpanded(isExpanded ? "" : definition.id)}>
+          <span className="apollo-filter-mark"><AppIcon name={definition.kind === "employee" ? "hash" : "target"} size={14}/></span>
+          <strong>{definition.label}</strong>
+          {count ? <span className="filter-count">{count}</span> : null}
+          <span className="apollo-chevron"><AppIcon name="chevron" size={14}/></span>
+        </button>
+        {/* Only where there is something to clear. The same action existed
+            before, but only inside the expanded body - so dropping one filter
+            out of six meant expanding it first, and there was no way to see
+            what was applied and remove it in the same gesture. */}
+        {count ? <button type="button" className="apollo-filter-clear" title={`Clear ${definition.label}`} aria-label={`Clear the ${definition.label} filter`} onClick={() => replaceField(definition.id, [])}><AppIcon name="close" size={12}/></button> : null}
+      </div>
       {isExpanded ? <div id={`filter-panel-${definition.id}`} role="region" aria-labelledby={`filter-trigger-${definition.id}`} className="apollo-filter-content">
         {definition.description ? <p className="apollo-filter-description">{definition.description}</p> : null}
         {definition.kind === "employee"
@@ -118,7 +129,7 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, onC
   const fieldsInUse = new Set(filters.map((filter) => filter.field)).size;
 
   return <aside ref={panelRef} className="panel filter-panel apollo-filter-panel">
-    <div className="filter-panel-head"><div><span className="filter-icon"><AppIcon name="filter" size={16}/></span><div><strong>Filters</strong><small>Narrow the database</small></div></div>{filters.length ? <button onClick={() => onChange([])}>Clear all</button> : null}</div>
+    <div className="filter-panel-head"><div><span className="filter-icon"><AppIcon name="filter" size={16}/></span><div><strong>Filters</strong><small>{fieldsInUse ? `${fieldsInUse} filter${fieldsInUse === 1 ? "" : "s"} applied` : "Narrow the database"}</small></div></div>{fieldsInUse ? <button title="Remove every applied filter" onClick={() => onChange([])}>Clear all {fieldsInUse}</button> : null}</div>
     <label className="filter-panel-search"><span><AppIcon name="search" size={14}/></span><input aria-label="Search filters" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search all filters…"/></label>
     <div className="apollo-filter-scroll">
       {visibleMain.length ? <div className="apollo-filter-group"><small>Main filters</small>{visibleMain.map(renderDefinition)}</div> : null}

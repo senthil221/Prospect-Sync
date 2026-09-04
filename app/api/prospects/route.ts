@@ -111,13 +111,15 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   }
   if (error) return Response.json({ error: error.message }, { status: 500 });
   const summary = workspaceSummary(workspace.data);
-  // Only the completely unscoped People DB count comes from the planner estimate;
-  // every scoped read still returns an exact count. Mirrors v12's total branch.
-  const totalEstimated = withTotal && !search && filters.length === 0 && !clientId && !companyScope;
   return Response.json({
     prospects: summary.result_rows ?? [],
     total: summary.total_count === null || summary.total_count === undefined ? null : Number(summary.total_count),
-    totalEstimated,
+    // Every People count is now an exact one, the unscoped whole-database total
+    // included: 20260902000260 replaced pg_class.reltuples with count(*) after
+    // measuring it at 175-234 ms. The field stays on the wire because the grid
+    // still branches on it, and because "this number is an estimate" is a state
+    // worth being able to express again if a future total ever has to be one.
+    totalEstimated: false,
     // True when the company scope matched more companies than its own cap, so the
     // people shown are drawn from a truncated set. The UI says so rather than
     // presenting a short list as the whole answer.

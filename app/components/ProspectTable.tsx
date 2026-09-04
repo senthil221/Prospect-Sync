@@ -14,6 +14,7 @@ import type { ClientRecord, Prospect, ProspectFilter, SavedView } from "../../li
 import { intentKey, requestIdFor, settleIntent } from "../../lib/request-intent";
 import { AppIcon, WorkspaceEmpty } from "./DashboardUi";
 import ProspectTableRow from "./ProspectTableRow";
+import CountUp from "./CountUp";
 import MenuButton from "./MenuButton";
 import Tabs from "./Tabs";
 import TitleClassifierPanel from "./TitleClassifierPanel";
@@ -154,35 +155,29 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const totalPages = Math.max(1, Math.ceil(total / 50));
   const firstRecord = total ? (page - 1) * 50 + 1 : 0;
   const lastRecord = Math.min(page * 50, total);
-  // Every count on screen says which of the three kinds it is: "674,065" exact,
-  // the planner's estimate for the whole database, or "50,000+" for a count that
-  // stopped at its cap. A bounded number must never read as an exact one.
-  // The estimate used to carry a leading "≈". It was mathematical notation in a
-  // sales tool, it collided with the Indian digit grouping beside it, and the
-  // hover text below already says the same thing in words - so the number now
-  // reads plainly and the explanation stays where it can be read.
-  // A capped count can be turned into a real one: the operations worker counts
-  // the whole match set in the background and says how many there were. Keyed
-  // on the question, so changing a filter drops the answer rather than showing
-  // last question's number against this one.
+  // Every count on this screen is now an exact one - 20260902000260 took the
+  // 50,001-row LIMIT off the counting scan and replaced the whole-database
+  // estimate with a real count(*), after measuring both on production. So the
+  // three kinds of number this used to have to distinguish between are one
+  // kind, and the "+" has nowhere left to come from.
+  //
+  // The capped branches survive on purpose rather than as leftovers. total_capped
+  // is still on the wire, still false; if a count ever has to be bounded again
+  // the honest presentation of a floor is already here rather than needing to be
+  // rediscovered. Everything below reads as a no-op while it stays false.
   const countedExactly = exactTotal && exactTotal.key === selectionKey ? exactTotal.count : null;
-  const displayedTotal = countedExactly !== null
-    ? formatNumber(countedExactly)
-    : `${formatNumber(total)}${totalCapped ? "+" : ""}`;
+  const shownTotal = countedExactly ?? total;
+  const totalSuffix = countedExactly === null && totalCapped ? "+" : "";
+  const displayedTotal = `${formatNumber(shownTotal)}${totalSuffix}`;
   // A capped total is a floor, so a selection drawn from it is a floor too: the
   // bulk action resolves its own ids server-side and will act on all of them.
   const selectedLabel = `${formatNumber(selectedCount)}${totalCapped && selectionMode === "all_matching" ? "+" : ""}`;
-  // Neither an estimate nor a capped count can say how many pages there are, so
-  // Next is driven by whether this page came back full.
+  // A bounded total cannot say how many pages there are, so Next would have to
+  // be driven by whether this page came back full. Nothing is bounded any more,
+  // so the page arithmetic is trusted again.
   const boundedTotal = totalEstimated || totalCapped;
-  // The unfiltered People DB total comes from PostgreSQL's maintained row estimate
-  // rather than a full count, so it can drift by a fraction of a percent until the
-  // next autovacuum. Anything narrower than the whole database is counted exactly
-  // and becomes exact -- say which of the two you are looking at.
   const totalHint = totalCapped
     ? "Counting stopped at 50,000 to keep this page fast. More records match than the number shown, and every action here still applies to all of them."
-    : totalEstimated
-    ? "Approximate: the whole-database total is PostgreSQL's maintained row estimate, so no full table count runs on every page load. Search or filter and the count becomes exact."
     : "Exact count of the records matching this search and these filters.";
 
   useEffect(() => {
@@ -550,14 +545,14 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
       value={tab}
       onChange={setTab}
       items={[
-        { id: "records" as const, label: "All prospects", count: displayedTotal, hint: totalHint, icon: <AppIcon name="database" size={15}/> },
-        { id: "coverage" as const, label: "Field coverage", count: formatNumber(fields.length), icon: <AppIcon name="columns" size={15}/> },
+        { id: "records" as const, label: "All prospects", count: <CountUp value={shownTotal} suffix={totalSuffix}/>, hint: totalHint, icon: <AppIcon name="database" size={15}/> },
+        { id: "coverage" as const, label: "Field coverage", count: <CountUp value={fields.length}/>, icon: <AppIcon name="columns" size={15}/> },
         // Classifier maintenance is database-wide, so it is not offered inside a
         // client workspace where the numbers would be a misleading subset.
         ...(canDeleteMaster ? [{
           id: "titles" as const,
           label: "Job titles",
-          count: classifierGaps === null ? undefined : formatNumber(classifierGaps),
+          count: classifierGaps === null ? undefined : <CountUp value={classifierGaps}/>,
           hint: "Maintain the job title classifier: see the titles it could not resolve and re-run it after editing the keyword lists.",
           icon: <AppIcon name="target" size={15}/>,
         }] : []),
@@ -565,12 +560,12 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     />
     {tab === "titles" ? <TitleClassifierPanel onGapCount={setClassifierGaps}/>
       : tab === "coverage" ? <article className="panel field-coverage">
-      <div className="coverage-summary"><span className="coverage-symbol"><AppIcon name="check" size={14}/></span><div><strong>{formatNumber(fields.length)} uploaded fields available</strong><p>Every field from your CSV is saved and ready to filter or display.</p></div></div>
+      <div className="coverage-summary"><span className="coverage-symbol"><AppIcon name="check" size={14}/></span><div><strong><CountUp value={fields.length}/> uploaded fields available</strong><p>Every field from your CSV is saved and ready to filter or display.</p></div></div>
       <div className="coverage-groups"><section><h3>Standard columns</h3><div>{standardProspectFields.map((field, index) => <span className={`field-chip tone-${index % 4}`} key={field.id}>{field.label}</span>)}</div></section><section><h3>Uploaded CSV fields</h3><div>{fields.map((field, index) => <span className={`field-chip tone-${index % 4}`} key={field}>{field}</span>)}</div></section></div>
     </article> : <div className={`people-layout ${filtersOpen ? "" : "filters-collapsed"}`}>
       <article className="panel results-panel">
         <div className="results-toolbar">
-          <div className="results-count"><strong title={totalHint}>{displayedTotal} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `All ${displayedTotal} selected` : `Select all ${displayedTotal} across pages`}</button> : null}{totalCapped && countedExactly === null ? <button className="select-all-matching-button" disabled={countingAll} title="Counts every matching record in the background instead of stopping at 50,000." onClick={() => void countAllMatching()}>{countingAll ? "Counting…" : "Count them all"}</button> : null}</div>
+          <div className="results-count"><strong title={totalHint}><CountUp value={shownTotal} suffix={totalSuffix}/> people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `All ${displayedTotal} selected` : `Select all ${displayedTotal} across pages`}</button> : null}{totalCapped && countedExactly === null ? <button className="select-all-matching-button" disabled={countingAll} title="Counts every matching record in the background instead of stopping at 50,000." onClick={() => void countAllMatching()}>{countingAll ? "Counting…" : "Count them all"}</button> : null}</div>
           <div className="workspace-actions">
             <label><span className="sr-only">Sort prospects</span><select value={`${sort}:${direction}`} onChange={(event) => { const [nextSort, nextDirection] = event.target.value.split(":"); onSortChange(nextSort, nextDirection as "asc" | "desc"); }}><option value="created_at:desc">Newest first</option><option value="name:asc">Name A to Z</option><option value="company:asc">Company A to Z</option><option value="title:asc">Title A to Z</option><option value="last_contacted:desc">Recently contacted</option></select></label>
             <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {effectiveFilters.length ? <span>{effectiveFilters.length}</span> : null}</button>
