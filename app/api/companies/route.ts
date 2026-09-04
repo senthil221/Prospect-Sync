@@ -212,6 +212,16 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
   try { peopleScope = parsePeopleScope(url.searchParams.get("peopleScope")); }
   catch (error) { return filterErrorResponse(error, "Invalid people navigation scope."); }
 
+  // Opaque to this route: handed back to the database, which compares it with
+  // the live vector and recounts if they differ. A malformed value never
+  // matches, which recounts - the safe direction.
+  let knownVersions: Record<string, number> | null = null;
+  try {
+    const raw = url.searchParams.get("knownVersions");
+    const parsed = raw ? JSON.parse(raw) as unknown : null;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) knownVersions = parsed as Record<string, number>;
+  } catch { knownVersions = null; }
+
   // A set id is not authorization: re-check ownership on every use.
   const setDenial = await authorizeFilterSets(createAdminClient(), filters, (await getAuthorizedUser())?.id ?? "", "company", clientId);
   if (setDenial) return setDenial;
@@ -253,6 +263,7 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
       p_people_scope: peopleScope,
       p_limit: pageSize,
       p_offset: from,
+      p_known_versions: knownVersions,
     }).abortSignal(signal ?? AbortSignal.timeout(40_000));
     if (isStatementTimeout(error)) {
       return statementTimeoutResponse("This filter combination", "Narrow it - fewer filters, or a search term alongside them - or export the full set instead.");
@@ -265,14 +276,18 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
     let companies;
     try { companies = await withClientIcpValidation(supabase, summary?.result_rows ?? [], clientId); }
     catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to load company validation." }, { status: 500 }); }
+    // Counting companies is exact now, not capped at 50,000, so the answer is
+    // worth reusing: null means "you already have this count and the data has
+    // not moved", and the client fills it from its own cache. Only null when the
+    // caller sent a version vector that still matches.
+    const counted = summary?.total_count !== null && summary?.total_count !== undefined;
     return Response.json({
       companies,
-      total: Number(summary?.total_count ?? 0),
-      // True when the match set was larger than the count cap, so the UI can say
-      // "50,000+" rather than present a bounded number as an exact one.
+      total: counted ? Number(summary?.total_count) : null,
       totalCapped: Boolean(summary?.total_capped),
-      covered: Number(summary?.covered_count ?? 0),
-      prospectTotal: Number(summary?.prospect_total ?? 0),
+      covered: counted ? Number(summary?.covered_count ?? 0) : null,
+      prospectTotal: counted ? Number(summary?.prospect_total ?? 0) : null,
+      versions: summary?.data_versions ?? null,
       page,
       pageSize,
     });

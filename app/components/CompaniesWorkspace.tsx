@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import CompanyFilterPanel, { BulkDomainPaste, addDomainsToWebsiteFilter } from "../CompanyFilterPanel";
 import { csvStreamError, downloadCsvStream } from "../../lib/csv-download";
@@ -19,6 +19,12 @@ export function useCompaniesWorkspaceController({ active, search, filters, peopl
   const [page, setPage] = useState(initialPage ?? 1);
   const [summary, setSummary] = useState({ total: 0, totalCapped: false, covered: 0, prospectTotal: 0, pageSize: 50 });
   const [refresh, setRefresh] = useState(0);
+  // The company count is exact rather than capped at 50,000, which costs real
+  // seconds on a filter matching hundreds of thousands of rows. A count is only
+  // meaningful alongside the dependency-version vector it was counted at, so the
+  // two are cached together and sent back as a pair; the database recounts only
+  // when companies or prospects have actually moved since.
+  const countCache = useRef(new Map<string, { total: number; covered: number; prospectTotal: number; versions: Record<string, number> | null }>());
   const deferredSearch = useDeferredValue(search);
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);
   // The question, not the array that expresses it. Bulk domains is the biggest
@@ -27,6 +33,12 @@ export function useCompaniesWorkspaceController({ active, search, filters, peopl
   // for. Depending on the encoding rather than the array also stops a parent
   // re-render from re-fetching an unchanged query.
   const encodedFilters = useMemo(() => encodeFilters(filters), [filters]);
+  // Deliberately excludes `page`: paging through a result set does not change
+  // how many rows are in it, so page 4 reuses page 1's count.
+  const countKey = useMemo(
+    () => JSON.stringify([debouncedSearch.trim(), encodedFilters, peopleScope, refresh]),
+    [debouncedSearch, encodedFilters, peopleScope, refresh],
+  );
 
   useEffect(() => {
     let current = true;
@@ -38,13 +50,26 @@ export function useCompaniesWorkspaceController({ active, search, filters, peopl
       try {
         const requestFilters = JSON.stringify(await filterPayloadWithSets(JSON.parse(encodedFilters), "company", ""));
         if (!current) return;
-        const data = await fetchCompanies<{ companies: Company[]; total: number; totalCapped?: boolean; covered: number; prospectTotal: number; pageSize: number }>({ search: debouncedSearch, page, encodedFilters: requestFilters, peopleScope }, { signal: controller.signal });
-        if (current) { setCompanies(data.companies); setSummary({ total: data.total, totalCapped: Boolean(data.totalCapped), covered: data.covered, prospectTotal: data.prospectTotal, pageSize: data.pageSize }); }
+        // A set id is a transport detail: countKey above uses the plain
+        // encoding, so the same question asked with values or with a set id
+        // hits the same cached count.
+        const cached = countCache.current.get(countKey);
+        const data = await fetchCompanies<{ companies: Company[]; total: number | null; totalCapped?: boolean; covered: number | null; prospectTotal: number | null; versions?: Record<string, number> | null; pageSize: number }>({ search: debouncedSearch, page, encodedFilters: requestFilters, peopleScope, knownVersions: cached?.versions ?? null }, { signal: controller.signal });
+        if (current) {
+          setCompanies(data.companies);
+          if (data.total !== null && data.total !== undefined) {
+            const counted = { total: data.total, covered: data.covered ?? 0, prospectTotal: data.prospectTotal ?? 0, versions: data.versions ?? null };
+            countCache.current.set(countKey, counted);
+            setSummary({ ...counted, totalCapped: Boolean(data.totalCapped), pageSize: data.pageSize });
+          } else if (cached) {
+            setSummary({ total: cached.total, covered: cached.covered, prospectTotal: cached.prospectTotal, totalCapped: false, pageSize: data.pageSize });
+          }
+        }
       } catch (caught) { if (current && !isAbortError(caught)) onError(caught instanceof Error ? caught.message : "Unable to load workspace data."); }
       finally { if (current) onLoading(false); }
     })();
     return () => { current = false; controller.abort(); };
-  }, [active, deferredSearch, debouncedSearch, page, encodedFilters, refresh, peopleScope, onError, onLoading]);
+  }, [active, deferredSearch, debouncedSearch, page, encodedFilters, refresh, peopleScope, countKey, onError, onLoading]);
 
   const refreshWorkspace = useCallback(() => setRefresh((current) => current + 1), []);
   return { companies, page, setPage, summary, deferredSearch, refreshWorkspace };
@@ -261,7 +286,7 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
 
   return <section className="companies-workspace">
     <div className="section-intro company-intro"><div><p className="eyebrow">COMPANIES</p><h2>Companies already in your database.</h2><p>Open a company to see its prospects in a separate panel.</p></div><div className="company-intro-actions">{onFilters ? <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {activeFilterCount ? <span>{activeFilterCount}</span> : null}</button> : null}<MenuButton label="Actions" icon="grid" panelLabel="Company actions" align="end">{onFilters ? <button className="ds-menu-item" aria-pressed={bulkOpen} onClick={() => setBulkOpen((open) => !open)}><AppIcon name="search" size={14}/> Bulk domains{domainFilterCount ? ` (${domainFilterCount})` : ""}</button> : null}{clientId ? <button className="ds-menu-item" aria-pressed={bulkSelectOpen} onClick={() => setBulkSelectOpen((open) => !open)}><AppIcon name="check" size={14}/> Bulk select</button> : null}{!clientId ? <label className="ds-menu-field"><span>Export scope</span><select aria-label="Company export scope" value={companyExportScope} disabled={exportingCompanies} onChange={(event) => setCompanyExportScope(event.target.value as "all" | "with_websites")}><option value="all">All companies</option><option value="with_websites">Only with websites</option></select></label> : null}{!clientId ? <button className="ds-menu-item" disabled={exportingCompanies} title="Export all matching companies across every page" onClick={() => void exportCompanies()}><AppIcon name="download" size={14}/> {exportingCompanies ? "Exporting…" : "Export CSV"}</button> : null}<button className="ds-menu-item" title="Safely scope up to 250,000 matching companies" onClick={() => onSeePeople({ search: search.trim(), filters, limit: 250000 })}><AppIcon name="arrow" size={14}/> See these people</button></MenuButton><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div></div>
-    <div className="company-summary"><div className="summary-violet"><span>Companies in database</span><strong>{totalLabel}</strong><small>{totalCapped ? "Counting stopped at 50,000 to keep this fast" : "Complete company directory"}</small></div><div className="summary-blue"><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong><small>{totalCapped ? "of the first 50,000" : total ? `${Math.round((covered / total) * 100)}% of companies` : "No companies yet"}</small></div><div className="summary-green"><span>Total linked prospects</span><strong>{formatNumber(prospectTotal)}</strong><small>Across all matching companies</small></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div>
+    <div className="company-summary"><div className="summary-violet"><span>Companies in database</span><strong>{totalLabel}</strong><small>{totalCapped ? "Counting stopped early to keep this fast" : "Complete company directory"}</small></div><div className="summary-blue"><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong><small>{total ? `${Math.round((covered / total) * 100)}% of companies` : "No companies yet"}</small></div><div className="summary-green"><span>Total linked prospects</span><strong>{formatNumber(prospectTotal)}</strong><small>Across all matching companies</small></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div>
     {peopleScope ? <div className="cross-scope-banner" role="status"><span>Showing companies represented in your previous People DB search (safety limit: {formatNumber(peopleScope.limit)} matching people).</span><button onClick={onClearPeopleScope}>Clear people scope</button></div> : null}
     {companyError ? <div className="inline-error" role="alert">{companyError}</div> : null}
     {companyNotice ? <div className="inline-notice company-export-notice" role="status">{companyNotice}<button aria-label="Dismiss export notification" onClick={() => setCompanyNotice("")}><AppIcon name="close" size={14}/></button></div> : null}

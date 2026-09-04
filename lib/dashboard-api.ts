@@ -130,12 +130,16 @@ function companyFilterParam(filters: ProspectFilter[], encodedFilters: string) {
   return encoded && encoded !== "[]" ? encoded : "";
 }
 
-export function companyApiPath({ search = "", page = 1, clientId = "", filters = [], encodedFilters = "", peopleScope = null }: { search?: string; page?: number; clientId?: string; filters?: ProspectFilter[]; encodedFilters?: string; peopleScope?: PeopleScope | null }) {
+export function companyApiPath({ search = "", page = 1, clientId = "", filters = [], encodedFilters = "", peopleScope = null, knownVersions = null }: { search?: string; page?: number; clientId?: string; filters?: ProspectFilter[]; encodedFilters?: string; peopleScope?: PeopleScope | null; knownVersions?: Record<string, number> | null }) {
   const params = new URLSearchParams({ search, page: String(page), pageSize: "50" });
   if (clientId) params.set("clientId", clientId);
   const encoded = companyFilterParam(filters, encodedFilters);
   if (encoded) params.set("filters", encoded);
   if (peopleScope) params.set("peopleScope", JSON.stringify(peopleScope));
+  // Opaque to the client: handed back to the database, which compares it with
+  // the live vector and recounts only if they differ. Counting companies is now
+  // exact rather than capped at 50,000, so it is worth not repeating.
+  if (knownVersions) params.set("knownVersions", JSON.stringify(knownVersions));
   return `/api/companies?${params.toString()}`;
 }
 
@@ -156,6 +160,7 @@ type CompanyQuery = {
   filters?: ProspectFilter[];
   encodedFilters?: string;
   peopleScope?: PeopleScope | null;
+  knownVersions?: Record<string, number> | null;
 };
 
 export async function fetchCompanies<T>(query: CompanyQuery, init?: RequestInit): Promise<T> {
@@ -177,6 +182,7 @@ export async function fetchCompanies<T>(query: CompanyQuery, init?: RequestInit)
       ...(query.clientId ? { clientId: query.clientId } : {}),
       ...(encoded ? { filters: encoded } : {}),
       ...(query.peopleScope ? { peopleScope: JSON.stringify(query.peopleScope) } : {}),
+      ...(query.knownVersions ? { knownVersions: JSON.stringify(query.knownVersions) } : {}),
     }),
   });
   return parseApiResponse<T>(response);
