@@ -39,26 +39,46 @@ export async function POST(request: Request) {
 
   const companies = (candidates.data ?? []) as CompanyCandidate[];
   const checkedAt = new Date().toISOString();
+
+  // The DNS lookups are the real cost and stay parallel. The writes that follow
+  // them used to be one UPDATE per company - 44,185 of them in production, each
+  // rewriting all 23 indexes on companies, because mx_checked_at sits in
+  // idx_companies_pending_mx_scan's predicate and cannot take the cheap path.
+  // One statement for the whole batch instead (migration 20260902000250).
   const results = await Promise.all(companies.map(async (company) => {
     const domain = company.normalized_domain || company.domain;
-    const detection = await lookupEmailProvider(domain);
-    const update = await supabase.from("companies").update({
-      esp: detection.esp,
-      email_provider_type: detection.category,
-      mx_records: detection.mxRecords,
-      mx_status: detection.status,
-      mx_checked_at: checkedAt,
-    }).eq("id", company.id);
-    return { companyId: company.id, detection, error: update.error?.message ?? "" };
+    return { companyId: company.id, detection: await lookupEmailProvider(domain) };
   }));
 
+  const applied = await supabase.rpc("apply_email_provider_scan_v1", {
+    p_rows: results.map((result) => ({
+      id: result.companyId,
+      esp: result.detection.esp,
+      email_provider_type: result.detection.category,
+      mx_records: result.detection.mxRecords,
+      mx_status: result.detection.status,
+      mx_checked_at: checkedAt,
+    })),
+  });
+  if (applied.error) {
+    const migrationMissing = applied.error.code === "PGRST202" || applied.error.code === "42883";
+    return Response.json(
+      { error: migrationMissing ? "Apply the latest database migration to enable MX scanning." : applied.error.message },
+      { status: migrationMissing ? 503 : 500 },
+    );
+  }
+
+  // The batch is one statement, so it either lands or the request already
+  // returned above. A row can still go missing if its company was deleted
+  // between the read and the write, which the returned count catches.
+  const updated = Number(applied.data ?? 0);
+  const failed = results.length - updated;
+
   // ESP fields live on companies, so refresh the flat index for their prospects.
-  const reindexed = await reindexProspectsOfCompanies(supabase, results.filter((result) => !result.error).map((result) => result.companyId));
+  const reindexed = await reindexProspectsOfCompanies(supabase, results.map((result) => result.companyId));
   const indexWarning = indexNotice(reindexed);
 
-  const updated = results.filter((result) => !result.error).length;
-  const failed = results.length - updated;
-  const segs = results.filter((result) => !result.error && result.detection.category === "SEG").length;
+  const segs = results.filter((result) => result.detection.category === "SEG").length;
   const nextCursor = companies.at(-1)?.id ?? afterId;
 
   return Response.json({

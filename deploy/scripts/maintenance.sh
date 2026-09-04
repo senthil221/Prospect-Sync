@@ -48,6 +48,30 @@ for _ in $(seq 1 40); do
 done
 
 echo
+echo "=== Retiring company import staging ==="
+# company_import_rows is the raw spreadsheet behind each company import. Nothing
+# reads it once the import lands, but it was the third-largest object in the
+# database. Three days is enough to re-run or audit an import; past that it is
+# ballast in a 2 GB shared_buffers.
+#
+# Rows belonging to an import still in 'processing' are never eligible, whatever
+# their age: staging is the resume point, so removing it would turn a stalled
+# import into an unrecoverable one. Those rows are reported rather than removed.
+purged="$(psql_run -tAq -c "select public.purge_company_import_rows_v1(3);" 2>/dev/null || echo "")"
+if [[ -z "$purged" ]]; then
+  echo "  purge function not present - skipping (apply migrations)"
+else
+  echo "  removed ${purged} staged rows from finished imports older than 3 days"
+  stuck="$(psql_run -tAq -c "select count(*) from public.company_imports where status = 'processing' and created_at < now() - interval '2 days';" 2>/dev/null || echo "0")"
+  [[ "$stuck" != "0" ]] && echo "  NOTE: ${stuck} import(s) still 'processing' after 2+ days - their staging is retained, and they are worth investigating"
+  # Almost every eligible row goes, so the trailing pages are empty and a plain
+  # VACUUM returns them to the filesystem. No exclusive lock, unlike VACUUM FULL.
+  psql_run -q -c "vacuum (analyze) public.company_import_rows;" >/dev/null 2>&1 \
+    && echo "  vacuumed - trailing empty pages returned to disk" \
+    || echo "  vacuum skipped"
+fi
+
+echo
 echo "=== Search index drift ==="
 # A denormalized index you cannot verify is one you cannot trust.
 psql_run -c "select jsonb_pretty(public.prospect_index_drift());" 2>/dev/null \
