@@ -6,12 +6,13 @@ import { formatNumber } from "../../lib/dashboard-helpers";
 /**
  * A number that arrives rather than appears.
  *
- * Every figure on these screens is the answer to a question the database took
- * real work to answer - 681,085 people counted in 276 ms, 358,001 inside a
- * company pivot. A number that snaps into place reads as a label printed on the
- * page. One that counts up reads as a measurement being taken, which is what it
- * is, and it gives the eye somewhere to land on a first paint that is otherwise
- * a wall of table.
+ * Used on the Overview only, and deliberately. Overview is the page you land on
+ * with nothing to do yet, so a figure taking a moment to arrive is the page
+ * introducing itself. Everywhere else the number is something you are working
+ * against - re-reading a total after every filter change, checking it against a
+ * selection, comparing it to an export - and a figure that has to finish moving
+ * before it can be read is an obstacle, not a flourish. The People and Company
+ * grids print theirs immediately.
  *
  * Deliberately NOT a live region, and deliberately not announced. These are
  * ordinary spans, so assistive technology reads whatever is in the DOM when it

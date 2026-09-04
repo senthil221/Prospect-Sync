@@ -1012,18 +1012,23 @@ main { min-width: 0; grid-column: 2; }
    that reading as counting rather than as flicker: tabular figures, so the
    digits hold their column instead of reflowing on every frame, and a settle on
    the card so the number arrives with its container rather than after it. */
-.count-up { font-variant-numeric: tabular-nums; }
-.ds-tab-count, .metric-card strong, .coverage-spotlight strong, .coverage-row strong, .company-summary strong, .directory-badge { font-variant-numeric: tabular-nums; }
+.count-up, .metric-card strong, .coverage-spotlight strong, .coverage-row strong { font-variant-numeric: tabular-nums; }
 
-/* Cards enter in sequence rather than in a block - left to right across the
-   metric row, down the company summary. 55ms apart is enough to read as ordered
-   and short enough that the whole row has settled inside a third of a second. */
-.metric-grid .metric-card, .company-summary > div { animation: ph-rise var(--duration-medium) var(--ph-ease-out) both; animation-delay: calc(var(--stagger, 0) * 55ms); }
+/* Cards enter in sequence rather than in a block, left to right across the row.
+   55ms apart is enough to read as ordered and short enough that the whole row
+   has settled inside a third of a second.
+
+   Gated on .counts-arriving, which OverviewWorkspace only sets on the first
+   render of a run. Navigating to People and back remounts this page, and a
+   dashboard that re-choreographs itself every time you glance at it stops being
+   an arrival and becomes a tic. */
+.metric-grid.counts-arriving .metric-card { animation: ph-rise var(--duration-medium) var(--ph-ease-out) both; animation-delay: calc(var(--stagger, 0) * 55ms); }
 
 /* The saved-ratio bar fills to its share instead of being painted already full.
    Slower than the card entrances on purpose: it is the one figure on the page
    that is a proportion, and watching it stop somewhere is the point. */
-.coverage-track i { width: var(--fill, 0%); animation: ph-fill 900ms var(--ph-ease-out) both; animation-delay: 140ms; }
+.coverage-track i { width: var(--fill, 0%); }
+.coverage.counts-arriving .coverage-track i { animation: ph-fill 900ms var(--ph-ease-out) both; animation-delay: 140ms; }
 @keyframes ph-fill { from { width: 0; } }
 
 /* Clearing one filter without expanding it first.

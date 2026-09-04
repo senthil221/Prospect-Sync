@@ -22,7 +22,7 @@ test("the reuse panel leads with the achievement, not the ratio", async () => {
   // 5,384 records nobody had to buy again is the fact. The same fact as a
   // share of every row ever imported is 0.74%, and putting THAT in accent blue
   // at 26px made the panel advertise its worst number.
-  assert.match(overview, /className="coverage-spotlight"><strong><CountUp value=\{stats\.duplicatesDetected\}\/><\/strong>/);
+  assert.match(overview, /className="coverage-spotlight"><strong><CountUp value=\{stats\.duplicatesDetected\} enabled=\{countUp\}\/><\/strong>/);
   assert.doesNotMatch(overview, /\{reuseRate\}%/);
   // The share survives as a supporting row, through the formatter that refuses
   // to round a sub-1% value up to a number that looks deliberate.

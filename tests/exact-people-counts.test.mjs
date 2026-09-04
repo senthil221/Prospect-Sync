@@ -81,11 +81,9 @@ test("no surface still describes a People total as bounded or approximate", asyn
 });
 
 test("counts arrive by counting, without being announced", async () => {
-  const [countUp, table, overview, companies] = await Promise.all([
+  const [countUp, overview] = await Promise.all([
     read("../app/components/CountUp.tsx"),
-    read("../app/components/ProspectTable.tsx"),
     read("../app/components/OverviewWorkspace.tsx"),
-    read("../app/components/CompaniesWorkspace.tsx"),
   ]);
 
   // Reduced motion is honoured by not animating at all rather than by animating
@@ -107,10 +105,49 @@ test("counts arrive by counting, without being announced", async () => {
   // two loops fighting over the same number.
   assert.match(countUp, /return \(\) => cancelAnimationFrame\(frameRef\.current\);/);
 
-  // Wired to the headline figure on each of the three surfaces that carry one.
-  assert.match(table, /<CountUp value=\{shownTotal\} suffix=\{totalSuffix\}\/> people/);
-  assert.match(overview, /<strong><CountUp value=\{card\.value\}\/><\/strong>/);
-  assert.match(companies, /<strong><CountUp value=\{total\} suffix=\{totalCapped \? "\+" : ""\}\/><\/strong>/);
+  // Wired to the Overview figures, and every one of them takes the same
+  // decision about whether this particular render is animating.
+  assert.match(overview, /<strong><CountUp value=\{card\.value\} enabled=\{countUp\}\/><\/strong>/);
+  assert.equal(overview.match(/<CountUp value=\{[^}]+\} enabled=\{countUp\}\/>/g)?.length, 5);
+});
+
+test("the Overview counts up once per run, and nowhere else counts at all", async () => {
+  const [overview, styles, table, companies, tabs] = await Promise.all([
+    read("../app/components/OverviewWorkspace.tsx"),
+    read("../app/workspace.css"),
+    read("../app/components/ProspectTable.tsx"),
+    read("../app/components/CompaniesWorkspace.tsx"),
+    read("../app/components/Tabs.tsx"),
+  ]);
+
+  // Module scope, not component state. Navigating to People and back UNMOUNTS
+  // this page, so state would be gone by the time the question is asked and
+  // every visit would re-run the animation.
+  assert.match(overview, /^let countsHavePlayed = false;$/m);
+  assert.match(overview, /const \[countUp\] = useState\(\(\) => !countsHavePlayed\);/);
+  // A screen of zeroes does not count as having played: stats arrive after the
+  // first paint, and marking it done then would spend the animation on nothing.
+  assert.match(overview, /const hasNumbers = stats\.prospects > 0 \|\| stats\.companies > 0 \|\| stats\.rowsImported > 0;/);
+  assert.match(overview, /useEffect\(\(\) => \{ if \(hasNumbers\) countsHavePlayed = true; \}, \[hasNumbers\]\);/);
+
+  // The staggered entrance and the filling bar answer to the same flag, so the
+  // page does not re-choreograph itself every time you glance at it.
+  assert.match(overview, /metric-grid\$\{countUp \? " counts-arriving" : ""\}/);
+  assert.match(overview, /panel coverage\$\{countUp \? " counts-arriving" : ""\}/);
+  assert.match(styles, /\.metric-grid\.counts-arriving \.metric-card \{ animation: ph-rise/);
+  assert.match(styles, /\.coverage\.counts-arriving \.coverage-track i \{ animation: ph-fill/);
+
+  // Overview only. Everywhere else the number is something you work against -
+  // re-read after every filter change, checked against a selection, compared to
+  // an export - and one that has to finish moving before it can be read is an
+  // obstacle rather than a flourish.
+  assert.doesNotMatch(table, /CountUp/);
+  assert.doesNotMatch(companies, /CountUp/);
+  assert.doesNotMatch(styles, /\.company-summary > div \{ animation/);
+  assert.match(table, /<strong title=\{totalHint\}>\{displayedTotal\} people<\/strong>/);
+  assert.match(companies, /<strong>\{totalLabel\}<\/strong>/);
+  // And the tab badge goes back to accepting only what it needs.
+  assert.match(tabs, /count\?: number \| string;/);
 });
 
 test("a filter can be cleared one at a time, or all at once", async () => {

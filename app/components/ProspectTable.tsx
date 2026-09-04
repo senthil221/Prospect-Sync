@@ -14,7 +14,6 @@ import type { ClientRecord, Prospect, ProspectFilter, SavedView } from "../../li
 import { intentKey, requestIdFor, settleIntent } from "../../lib/request-intent";
 import { AppIcon, WorkspaceEmpty } from "./DashboardUi";
 import ProspectTableRow from "./ProspectTableRow";
-import CountUp from "./CountUp";
 import MenuButton from "./MenuButton";
 import Tabs from "./Tabs";
 import TitleClassifierPanel from "./TitleClassifierPanel";
@@ -545,14 +544,14 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
       value={tab}
       onChange={setTab}
       items={[
-        { id: "records" as const, label: "All prospects", count: <CountUp value={shownTotal} suffix={totalSuffix}/>, hint: totalHint, icon: <AppIcon name="database" size={15}/> },
-        { id: "coverage" as const, label: "Field coverage", count: <CountUp value={fields.length}/>, icon: <AppIcon name="columns" size={15}/> },
+        { id: "records" as const, label: "All prospects", count: displayedTotal, hint: totalHint, icon: <AppIcon name="database" size={15}/> },
+        { id: "coverage" as const, label: "Field coverage", count: formatNumber(fields.length), icon: <AppIcon name="columns" size={15}/> },
         // Classifier maintenance is database-wide, so it is not offered inside a
         // client workspace where the numbers would be a misleading subset.
         ...(canDeleteMaster ? [{
           id: "titles" as const,
           label: "Job titles",
-          count: classifierGaps === null ? undefined : <CountUp value={classifierGaps}/>,
+          count: classifierGaps === null ? undefined : formatNumber(classifierGaps),
           hint: "Maintain the job title classifier: see the titles it could not resolve and re-run it after editing the keyword lists.",
           icon: <AppIcon name="target" size={15}/>,
         }] : []),
@@ -560,12 +559,12 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     />
     {tab === "titles" ? <TitleClassifierPanel onGapCount={setClassifierGaps}/>
       : tab === "coverage" ? <article className="panel field-coverage">
-      <div className="coverage-summary"><span className="coverage-symbol"><AppIcon name="check" size={14}/></span><div><strong><CountUp value={fields.length}/> uploaded fields available</strong><p>Every field from your CSV is saved and ready to filter or display.</p></div></div>
+      <div className="coverage-summary"><span className="coverage-symbol"><AppIcon name="check" size={14}/></span><div><strong>{formatNumber(fields.length)} uploaded fields available</strong><p>Every field from your CSV is saved and ready to filter or display.</p></div></div>
       <div className="coverage-groups"><section><h3>Standard columns</h3><div>{standardProspectFields.map((field, index) => <span className={`field-chip tone-${index % 4}`} key={field.id}>{field.label}</span>)}</div></section><section><h3>Uploaded CSV fields</h3><div>{fields.map((field, index) => <span className={`field-chip tone-${index % 4}`} key={field}>{field}</span>)}</div></section></div>
     </article> : <div className={`people-layout ${filtersOpen ? "" : "filters-collapsed"}`}>
       <article className="panel results-panel">
         <div className="results-toolbar">
-          <div className="results-count"><strong title={totalHint}><CountUp value={shownTotal} suffix={totalSuffix}/> people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `All ${displayedTotal} selected` : `Select all ${displayedTotal} across pages`}</button> : null}{totalCapped && countedExactly === null ? <button className="select-all-matching-button" disabled={countingAll} title="Counts every matching record in the background instead of stopping at 50,000." onClick={() => void countAllMatching()}>{countingAll ? "Counting…" : "Count them all"}</button> : null}</div>
+          <div className="results-count"><strong title={totalHint}>{displayedTotal} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `All ${displayedTotal} selected` : `Select all ${displayedTotal} across pages`}</button> : null}{totalCapped && countedExactly === null ? <button className="select-all-matching-button" disabled={countingAll} title="Counts every matching record in the background instead of stopping at 50,000." onClick={() => void countAllMatching()}>{countingAll ? "Counting…" : "Count them all"}</button> : null}</div>
           <div className="workspace-actions">
             <label><span className="sr-only">Sort prospects</span><select value={`${sort}:${direction}`} onChange={(event) => { const [nextSort, nextDirection] = event.target.value.split(":"); onSortChange(nextSort, nextDirection as "asc" | "desc"); }}><option value="created_at:desc">Newest first</option><option value="name:asc">Name A to Z</option><option value="company:asc">Company A to Z</option><option value="title:asc">Title A to Z</option><option value="last_contacted:desc">Recently contacted</option></select></label>
             <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {effectiveFilters.length ? <span>{effectiveFilters.length}</span> : null}</button>

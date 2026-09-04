@@ -5,9 +5,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 export type TabItem<T extends string> = {
   id: T;
   label: string;
-  /** Optional trailing count. Rendered as a badge, muted until the tab is active.
-   *  A node rather than a number so a tab can carry an animated <CountUp/>. */
-  count?: ReactNode;
+  /** Optional trailing count. Rendered as a badge, muted until the tab is active. */
+  count?: number | string;
   /** Optional leading icon - pass an <AppIcon/>, not a unicode glyph. */
   icon?: ReactNode;
   /** Optional hover explanation, for a label or count that needs one word more. */
