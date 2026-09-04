@@ -148,12 +148,38 @@ export function matchesExactly(valueCount: number) {
   return valueCount > exactMatchThreshold;
 }
 
+// Fields where a longer list never means "these exact strings", so the threshold
+// above does not apply.
+//
+// The switch exists for pasted IDENTIFIERS - domains, emails, exact company
+// names - where substring matching invents matches (acme.com inside
+// notacme.com.au) and equality is the indexable test. Company keywords is not
+// that: it is a keyword search, and "IT services" is a phrase to look for
+// INSIDE a name or a description, never a whole value to equal.
+//
+// Applying it there silently broke the description scope. A description is a
+// paragraph, so `short_description = 'IT services'` is true for 13 companies out
+// of 419,214 - the checkbox became a no-op above 25 keywords. Reported as "only
+// 3 prospects got added"; measured on a real 51-keyword IT-services list, exact
+// mode found 27,480 companies / 54,423 prospects where contains finds 38,448 /
+// 73,094. A third of the answer, silently missing.
+//
+// Precision is not lost by exempting it: the keywords scope matches tags with
+// `c.keywords && ARRAY[...]`, which is already true exact matching, and it is
+// the scope where exactness is meaningful.
+const keywordSearchFields = new Set(["__company_keywords"]);
+
+export function switchesToExactMatch(field: string, valueCount: number) {
+  return !keywordSearchFields.has(field) && matchesExactly(valueCount);
+}
+
 // The operator switch changes which rows come back, so the count on screen moves
 // when a list crosses the threshold. Say which mode is in force instead of
-// letting that look like a bug.
-export function describeMatchMode(valueCount: number, noun = "value") {
+// letting that look like a bug. Field-aware, so it cannot announce a switch that
+// does not happen.
+export function describeMatchMode(valueCount: number, noun = "value", field = "") {
   if (!valueCount) return "";
-  return matchesExactly(valueCount)
+  return switchesToExactMatch(field, valueCount)
     ? `Matching these ${valueCount.toLocaleString("en-IN")} ${noun}s exactly.`
     : `Matching any ${noun} that contains what you entered.`;
 }

@@ -64,8 +64,11 @@ test("both paste surfaces state whether matching is exact or substring", async (
 
   assert.match(bulkValues, /export function describeMatchMode/);
   assert.match(bulkValues, /Matching these \$\{valueCount\.toLocaleString\("en-IN"\)\} \$\{noun\}s exactly\./);
-  assert.match(people, /describeMatchMode\(result\.values\.length\)/);
+  // The note is field-aware, so it cannot announce a switch that does not
+  // happen: a keyword search stays a substring search at any list size.
+  assert.match(people, /describeMatchMode\(result\.values\.length, "value", field\)/);
   assert.match(company, /describeMatchMode\(result\.values\.length, "domain"\)/);
+  assert.match(bulkValues, /return switchesToExactMatch\(field, valueCount\)/);
 });
 
 test("the new SECURITY DEFINER functions revoke EXECUTE in the same file", async () => {

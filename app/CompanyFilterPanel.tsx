@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, useRef, useState } from "react";
-import { describeBulkMerge, describeMatchMode, exactMatchThreshold, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
+import { describeBulkMerge, describeMatchMode, exactMatchThreshold, mergeBulkValues, splitPastedValues, switchesToExactMatch } from "../lib/bulk-values";
 import { isXlsxFile, readXlsxRows } from "../lib/spreadsheet";
 import { filterId, IncludeExcludeFilter, TextBooleanFilter, type ProspectFilter, type ProspectFilterOperator } from "./ApolloFilterPanel";
 import type { CompanyKeywordScope } from "../lib/types";
@@ -119,8 +119,9 @@ export default function CompanyFilterPanel({ filters, onChange }: {
       merged.push(value);
     }
     // An uploaded column of names or websites is the same case as a paste, and
-    // reaches the same unindexable predicate at the same size.
-    const operator: ProspectFilterOperator = merged.length > exactMatchThreshold ? "equals" : "contains";
+    // reaches the same unindexable predicate at the same size. Company keywords
+    // is exempt: its values are phrases to find inside a name or description.
+    const operator: ProspectFilterOperator = switchesToExactMatch(field, merged.length) ? "equals" : "contains";
     replaceField(field, [...others, { id: include?.id ?? filterId(field, operator), field, operator, values: merged }]);
   }
 

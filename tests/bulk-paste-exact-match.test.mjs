@@ -21,17 +21,24 @@ test("both bulk paste paths switch to exact matching above the threshold", async
 
   assert.match(bulkValues, /export const exactMatchThreshold/);
 
-  // Both panels must import the threshold, not re-declare a number of their own.
-  assert.match(peoplePanel, /import \{[^}]*exactMatchThreshold[^}]*\} from "\.\.\/lib\/bulk-values"/);
-  assert.match(companyPanel, /import \{[^}]*exactMatchThreshold[^}]*\} from "\.\.\/lib\/bulk-values"/);
+  // Both panels must take the decision from lib/bulk-values, not re-declare a
+  // number of their own. It is switchesToExactMatch rather than the bare
+  // threshold now, because the rule is field-aware: a keyword search never
+  // switches (tests/keyword-search-never-exact.test.mjs). The point of this
+  // assertion is unchanged -- the decision lives in one place.
+  assert.match(peoplePanel, /import \{[^}]*switchesToExactMatch[^}]*\} from "\.\.\/lib\/bulk-values"/);
+  assert.match(companyPanel, /import \{[^}]*switchesToExactMatch[^}]*\} from "\.\.\/lib\/bulk-values"/);
 
   // People panel: include and exclude both flip, so the two sides stay symmetric.
-  assert.match(peoplePanel, /values\.length > exactMatchThreshold/);
+  assert.match(peoplePanel, /const exact = switchesToExactMatch\(field, values\.length\);/);
   assert.match(peoplePanel, /exact \? "equals" : "contains"/);
   assert.match(peoplePanel, /exact \? "not_equals" : "not_contains"/);
 
-  // Company DB bulk domain box.
+  // Company DB bulk domain box. __website is a list of exact domains and has no
+  // field variable in scope, so it keeps the size-only rule.
   assert.match(companyPanel, /merged\.length > exactMatchThreshold \? "equals" : "contains"/);
+  // The CSV/xlsx import path does have a field, and must respect the exemption.
+  assert.match(companyPanel, /switchesToExactMatch\(field, merged\.length\) \? "equals" : "contains"/);
 
   // The operator must reach the filter object, not just be computed and dropped.
   assert.doesNotMatch(companyPanel, /field, operator: "contains", values: merged/);

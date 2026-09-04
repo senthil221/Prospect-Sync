@@ -1,7 +1,7 @@
 "use client";
 
 import { ClipboardEvent, KeyboardEvent, useEffect, useRef, useId, useState } from "react";
-import { bulkFieldKind, describeBulkMerge, describeMatchMode, exactMatchThreshold, mergeBulkValues, splitPastedValues } from "../lib/bulk-values";
+import { bulkFieldKind, describeBulkMerge, describeMatchMode, mergeBulkValues, splitPastedValues, switchesToExactMatch } from "../lib/bulk-values";
 import type { ProspectFieldDefinition } from "../lib/prospect-fields";
 import type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
@@ -195,7 +195,9 @@ export function IncludeExcludeFilter({ field, filters, clientId, valuesEndpoint,
     // EXISTS that no index can serve, which measured 83s on 418k companies.
     //
     // Both sides switch on their own length, so include and exclude stay symmetric.
-    const exact = values.length > exactMatchThreshold;
+    // Field-aware: a keyword search never switches, because its values are
+    // phrases to find inside a name or description, not values to equal.
+    const exact = switchesToExactMatch(field, values.length);
     const operator: ProspectFilterOperator = side === "include"
       ? (exact ? "equals" : "contains")
       : (exact ? "not_equals" : "not_contains");
@@ -249,9 +251,10 @@ export function TokenValuePicker({ field, values, clientId, placeholder, valuesE
   function applyBulk(replace: boolean) {
     const result = mergeBulkValues(replace ? [] : values, bulkText, kind);
     onChange(result.values);
-    // Crossing exactMatchThreshold switches the operator, which changes how many
-    // rows come back. Say so, so the count moving does not read as a bug.
-    setBulkNote(`${describeBulkMerge(result)} ${describeMatchMode(result.values.length)}`.trim());
+    // Crossing the threshold switches the operator, which changes how many rows
+    // come back. Say so, so the count moving does not read as a bug -- and pass
+    // the field, so a keyword search (which never switches) is not told it did.
+    setBulkNote(`${describeBulkMerge(result)} ${describeMatchMode(result.values.length, "value", field)}`.trim());
     if (!replace) setBulkText("");
   }
 
