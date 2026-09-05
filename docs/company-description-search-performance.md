@@ -47,7 +47,7 @@ All experiments were rolled back. The study scripts are investigation artifacts,
 
 ## Verification and rollout
 
-- Production build, lint and 403 automated tests passed before release.
+- Production build, lint and 405 automated tests passed before release (including preparation/retry rendering and table-state preservation).
 - `scripts/verify-prepared-company-search.sql` checks membership equivalence, page/count contracts, duplicate-job reuse, owner/content/version checks and worker privileges. It also includes a 51-term combined People-filter/client-scope comparison and the existing scope limit.
 - Apply the migration through the normal migration runner exactly once. It preserves the old company resolver and regular worker builder as private fallback functions. The old app remains compatible during blue/green rollout.
 - Verify the new image's `X-App-Version`, health, migration history and actual worker claim/build/ready behavior after deployment. A PostgreSQL transaction test alone does not prove HTTP polling or browser behavior.

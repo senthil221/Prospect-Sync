@@ -14,10 +14,12 @@ import CompanyTableRow from "./CompanyTableRow";
 import MenuButton from "./MenuButton";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { needsCompanyPreparation, type PreparationProgress } from "../../lib/prepared-search";
+import SearchPreparation from './SearchPreparation';
 
 export function useCompaniesWorkspaceController({ active, search, filters, peopleScope, initialPage, onLoading, onError }: { active: boolean; search: string; filters: ProspectFilter[]; peopleScope: PeopleScope | null; initialPage?: number; onLoading: (loading: boolean) => void; onError: (error: string) => void }) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [preparation, setPreparation] = useState<PreparationProgress | null>(null);
+  const [preparationError, setPreparationError] = useState('');
   const [page, setPage] = useState(initialPage ?? 1);
   const [summary, setSummary] = useState({ total: 0, totalCapped: false, covered: 0, prospectTotal: 0, pageSize: 50 });
   const [refresh, setRefresh] = useState(0);
@@ -49,6 +51,7 @@ export function useCompaniesWorkspaceController({ active, search, filters, peopl
     if (deferredSearch !== debouncedSearch) return () => { current = false; controller.abort(); };
     void (async () => {
       onLoading(true); onError("");
+      setPreparationError('');
       setPreparation(!peopleScope && needsCompanyPreparation({ search: debouncedSearch, filters: JSON.parse(encodedFilters), limit: 250000 })
         ? { status: 'checking', message: 'Checking the matching companies…', matchedCompanies: 0 } : null);
       try {
@@ -69,20 +72,24 @@ export function useCompaniesWorkspaceController({ active, search, filters, peopl
             setSummary({ total: cached.total, covered: cached.covered, prospectTotal: cached.prospectTotal, totalCapped: false, pageSize: data.pageSize });
           }
         }
-      } catch (caught) { if (current && !isAbortError(caught)) onError(caught instanceof Error ? caught.message : "Unable to load workspace data."); }
+      } catch (caught) { if (current && !isAbortError(caught)) {
+        const message = caught instanceof Error ? caught.message : "Unable to load workspace data.";
+        onError(message);
+        if (!peopleScope && needsCompanyPreparation({ search: debouncedSearch, filters: JSON.parse(encodedFilters), limit: 250000 })) setPreparationError(message);
+      } }
       finally { if (current) { onLoading(false); setPreparation(null); } }
     })();
     return () => { current = false; controller.abort(); };
   }, [active, deferredSearch, debouncedSearch, page, encodedFilters, refresh, peopleScope, countKey, onError, onLoading]);
 
   const refreshWorkspace = useCallback(() => setRefresh((current) => current + 1), []);
-  return { companies, page, setPage, summary, deferredSearch, refreshWorkspace, preparation };
+  return { companies, page, setPage, summary, deferredSearch, refreshWorkspace, preparation, preparationError };
 }
 
 export default function CompaniesWorkspace({ controller, clients, filters, peopleScope, onClearPeopleScope, onClearSearch, onSeePeople, onFilters, onImport }: { controller: ReturnType<typeof useCompaniesWorkspaceController>; clients: ClientRecord[]; filters: ProspectFilter[]; peopleScope: PeopleScope | null; onClearPeopleScope: () => void; onClearSearch: () => void; onSeePeople: (scope: CompanyScope) => void; onFilters: (filters: ProspectFilter[]) => void; onImport: () => void }) {
   const handleFilters = useCallback((next: ProspectFilter[]) => { onFilters(next); controller.setPage(1); }, [controller, onFilters]);
-  if (controller.preparation) return <div className="panel" role="status" style={{ padding: 'var(--space-6)' }}><h3>Preparing your company search</h3><p>{controller.preparation.message}</p><button className="secondary" onClick={() => handleFilters([])}>Clear company filters</button></div>;
-  return <CompanyTable companies={controller.companies} clients={clients} total={controller.summary.total} totalCapped={controller.summary.totalCapped} covered={controller.summary.covered} prospectTotal={controller.summary.prospectTotal} page={controller.page} pageSize={controller.summary.pageSize} search={controller.deferredSearch} filters={filters} peopleScope={peopleScope} onClearPeopleScope={onClearPeopleScope} onClearSearch={onClearSearch} onSeePeople={onSeePeople} onFilters={handleFilters} onPageChange={controller.setPage} onImport={onImport} onRefresh={controller.refreshWorkspace}/>;
+  return <><SearchPreparation progress={controller.preparation} error={controller.preparationError} onRetry={controller.refreshWorkspace} onClear={() => handleFilters([])} clearLabel="Clear company filters"/>
+    <div hidden={Boolean(controller.preparation || controller.preparationError)}><CompanyTable companies={controller.companies} clients={clients} total={controller.summary.total} totalCapped={controller.summary.totalCapped} covered={controller.summary.covered} prospectTotal={controller.summary.prospectTotal} page={controller.page} pageSize={controller.summary.pageSize} search={controller.deferredSearch} filters={filters} peopleScope={peopleScope} onClearPeopleScope={onClearPeopleScope} onClearSearch={onClearSearch} onSeePeople={onSeePeople} onFilters={handleFilters} onPageChange={controller.setPage} onImport={onImport} onRefresh={controller.refreshWorkspace}/></div></>;
 }
 
 export function CompanyTable({ companies, clients = [], total, totalCapped = false, covered, prospectTotal, page, pageSize, clientId = "", search = "", filters = [], peopleScope = null, onClearPeopleScope, onClearSearch, onSeePeople, onFilters, onPageChange, onImport, onRefresh }: { companies: Company[]; clients?: ClientRecord[]; total: number; totalCapped?: boolean; covered: number; prospectTotal: number; page: number; pageSize: number; clientId?: string; search?: string; filters?: ProspectFilter[]; peopleScope?: PeopleScope | null; onClearPeopleScope?: () => void; onClearSearch?: () => void; onSeePeople: (scope: CompanyScope) => void; onFilters?: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onImport: () => void; onRefresh?: () => void }) {

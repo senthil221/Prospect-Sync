@@ -14,6 +14,7 @@ import ProspectTable from "./ProspectTable";
 import Tabs from "./Tabs";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { needsCompanyPreparation, type PreparationProgress } from "../../lib/prepared-search";
+import SearchPreparation from './SearchPreparation';
 
 export default function ClientsPanel({ clients, selectedClient, selectedList, lists, onOpenClient, onCloseClient, onOpenList, onCloseList, onSelectProspect, onImport, onDeleteClient, onDeleteList, onRefreshClients }: { clients: ClientRecord[]; selectedClient: ClientRecord | null; selectedList: ListRecord | null; lists: ListRecord[]; onOpenClient: (client: ClientRecord) => void; onCloseClient: () => void; onOpenList: (list: ListRecord) => void; onCloseList: () => void; onSelectProspect: (prospect: Prospect) => void; onImport: () => void; onDeleteClient: (client: ClientRecord) => void; onDeleteList: (list: ListRecord) => void; onRefreshClients: () => void }) {
   if (!selectedClient) return <ClientsView clients={clients} onOpen={onOpenClient} onImport={onImport} onRefresh={onRefreshClients}/>;
@@ -87,6 +88,7 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
 function ClientMasterDatabase({ client, clients, active, companyScope, onClearCompanyScope, onSeeCompanies, onSelect, onImport }: { client: ClientRecord; clients: ClientRecord[]; active: boolean; companyScope: CompanyScope | null; onClearCompanyScope: () => void; onSeeCompanies: (scope: PeopleScope) => void; onSelect: (prospect: Prospect) => void; onImport: () => void }) {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [preparation, setPreparation] = useState<PreparationProgress | null>(null);
+  const [preparationError, setPreparationError] = useState('');
   const [total, setTotal] = useState(client.prospect_count);
   const [totalCapped, setTotalCapped] = useState(false);
   const [fields, setFields] = useState<string[]>([]);
@@ -110,11 +112,13 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
   useEffect(() => {
     let current = true;
     const controller = new AbortController();
+    if (!active) return () => { current = false; controller.abort(); };
     if (deferredSearch !== debouncedSearch) return () => { current = false; controller.abort(); };
     void (async () => {
       setRefreshing(true);
       try {
         const cached = totalCache.current.get(countKey);
+        setPreparationError('');
         setPreparation(needsCompanyPreparation(companyScope) ? { status: 'checking', message: 'Checking the matching companies…', matchedCompanies: 0 } : null);
         const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; versions?: Record<string, number> | null; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, clientId: client.id, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !cached, knownVersions: cached?.versions ?? null }, { signal: controller.signal }, progress => { if (current) setPreparation(progress); });
         if (current) {
@@ -128,11 +132,15 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
           if (data.fields?.length) { fieldsLoaded.current = true; setFields(data.fields); }
           setError("");
         }
-      } catch (caught) { if (current && !isAbortError(caught)) setError(caught instanceof Error ? caught.message : "Unable to load the client people database."); }
+      } catch (caught) { if (current && !isAbortError(caught)) {
+        const message = caught instanceof Error ? caught.message : "Unable to load the client people database.";
+        setError(message);
+        if (needsCompanyPreparation(companyScope)) setPreparationError(message);
+      } }
       finally { if (current) { setLoading(false); setRefreshing(false); setPreparation(null); } }
     })();
     return () => { current = false; controller.abort(); };
-  }, [client.id, client.prospect_count, deferredSearch, debouncedSearch, page, sort, direction, encodedFilters, refresh, companyScope, countKey]);
+  }, [active, client.id, client.prospect_count, deferredSearch, debouncedSearch, page, sort, direction, encodedFilters, refresh, companyScope, countKey]);
   // Asking is a render, not a blocking call: window.confirm freezes the tab,
   // cannot carry the scope sentence that makes this safe to say yes to, and has
   // none of the focus contract every other dialog here keeps.
@@ -150,8 +158,7 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to remove this prospect from the client."); }
     finally { setRemoving(false); }
   }, [client.id, pendingRemoval]);
-  if (preparation) return <div className="panel" role="status" style={{ padding: 'var(--space-6)' }}><h3>Preparing your company search</h3><p>{preparation.message}</p><button className="secondary" onClick={onClearCompanyScope}>Clear company scope</button></div>;
-  return <section className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT MASTER DB</p><h3>{client.name} prospects</h3><p>Every master prospect connected to this client, across all uploaded lists.</p></div><button className="secondary" title="Safely scope up to 250,000 matching people" onClick={() => onSeeCompanies({ search: deferredSearch.trim(), filters: filterPayload(filters), limit: 250000 })}>See Companies <AppIcon name="arrow" size={14}/></button><label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label={`Search ${client.name} prospects`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this client database…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client prospects…</div> : null}{loading ? <div className="workspace-loading">Preparing client database…</div> : <ProspectTable prospects={prospects} total={total} totalCapped={totalCapped} fields={fields} filters={filters} page={page} clients={clients} search={deferredSearch} sort={sort} direction={direction} clientId={client.id} companyScope={companyScope} onClearCompanyScope={onClearCompanyScope} onSeeCompanies={onSeeCompanies} onRemoveFromClient={removeFromClient} onSortChange={(nextSort, nextDirection) => { setSort(nextSort); setDirection(nextDirection); setPage(1); }} onFiltersChange={(next) => { setFilters(next); setPage(1); }} onPageChange={setPage} onSelect={onSelect} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} active={active}/>}{pendingRemoval ? <ConfirmDialog title={`Remove ${pendingRemoval.full_name || "this prospect"} from ${client.name}?`} body="This removes the link between this prospect and this client, along with its list membership for this client." scopeNote="The People database record is preserved. Every other client keeps its own link to this person." confirmLabel="Remove from client" busy={removing} onCancel={() => setPendingRemoval(null)} onConfirm={() => void confirmRemoval()} /> : null}</section>;
+  return <><SearchPreparation progress={preparation} error={preparationError} onRetry={() => setRefresh(value => value + 1)} onClear={onClearCompanyScope} clearLabel="Clear company scope"/><section hidden={Boolean(preparation || preparationError)} className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT MASTER DB</p><h3>{client.name} prospects</h3><p>Every master prospect connected to this client, across all uploaded lists.</p></div><button className="secondary" title="Safely scope up to 250,000 matching people" onClick={() => onSeeCompanies({ search: deferredSearch.trim(), filters: filterPayload(filters), limit: 250000 })}>See Companies <AppIcon name="arrow" size={14}/></button><label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label={`Search ${client.name} prospects`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this client database…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client prospects…</div> : null}{loading ? <div className="workspace-loading">Preparing client database…</div> : <ProspectTable prospects={prospects} total={total} totalCapped={totalCapped} fields={fields} filters={filters} page={page} clients={clients} search={deferredSearch} sort={sort} direction={direction} clientId={client.id} companyScope={companyScope} onClearCompanyScope={onClearCompanyScope} onSeeCompanies={onSeeCompanies} onRemoveFromClient={removeFromClient} onSortChange={(nextSort, nextDirection) => { setSort(nextSort); setDirection(nextDirection); setPage(1); }} onFiltersChange={(next) => { setFilters(next); setPage(1); }} onPageChange={setPage} onSelect={onSelect} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} active={active}/>}{pendingRemoval ? <ConfirmDialog title={`Remove ${pendingRemoval.full_name || "this prospect"} from ${client.name}?`} body="This removes the link between this prospect and this client, along with its list membership for this client." scopeNote="The People database record is preserved. Every other client keeps its own link to this person." confirmLabel="Remove from client" busy={removing} onCancel={() => setPendingRemoval(null)} onConfirm={() => void confirmRemoval()} /> : null}</section></>;
 }
 
 function ClientCompanyDatabase({ client, peopleScope, onClearPeopleScope, onSeePeople, onImport }: { client: ClientRecord; peopleScope: PeopleScope | null; onClearPeopleScope: () => void; onSeePeople: (scope: CompanyScope) => void; onImport: () => void }) {
