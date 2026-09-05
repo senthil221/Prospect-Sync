@@ -49,7 +49,7 @@ test("it reuses the import worker's queue primitives rather than inventing new o
   assert.doesNotMatch(worker, /await failSet/);
 
   // Retention actually runs; a TTL nothing enforces is not a TTL.
-  assert.match(worker, /expire_sets_v1/);
+  assert.match(worker, /runMaintenanceUnit/);
   assert.match(worker, /runRetention/);
   // And a failing retention pass must not stop the worker doing its real job.
   assert.match(worker, /Retention pass failed/);

@@ -234,7 +234,7 @@ test("the worker runs operations without being able to decide what they are", as
   const code = codeOnly(worker);
 
   assert.match(code, /prospect_operations\.run_queue_unit_v1\(\$1,\$2,\$3\)/);
-  assert.match(code, /prospect_operations\.expire_jobs_v1\(\)/);
+  assert.match(code, /runMaintenanceUnit\(client, kind\)/);
   // It cannot enqueue or freeze - that belongs to a signed-in request.
   assert.doesNotMatch(code, /enqueue_v1|freeze_from/);
   // Still no PostgREST client: everything goes down its own connection.

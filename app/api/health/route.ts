@@ -3,6 +3,7 @@ import { getAuthorizedUser } from "../../../lib/auth";
 import { observabilitySnapshot } from "../../../lib/observability";
 import { operationsHealth } from "../../../lib/operations-health";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { backgroundAlerts } from '../../../lib/background-health';
 
 const timeoutMs = 5_000;
 const noStoreHeaders = { "Cache-Control": "no-store, max-age=0" };
@@ -69,7 +70,15 @@ export async function GET() {
   // limit, which is the number of slow requests needed to fill the guard.
   // Readiness itself stays public and unchanged.
   const authorized = await getAuthorizedUser().catch(() => null);
-  const load = authorized ? { admission: admissionState(), ...observabilitySnapshot() } : undefined;
+  let background: unknown;
+  if (authorized) {
+    try {
+      const sample = await createAdminClient().rpc('background_health_v1').abortSignal(AbortSignal.timeout(timeoutMs));
+      background = sample.error ? null : sample.data;
+    } catch { background = null; } // Telemetry loss must not hide core readiness.
+  }
+  const load = authorized ? { admission: admissionState(), ...observabilitySnapshot(),
+    background, alerts: backgroundAlerts(background) } : undefined;
   if (!failed.length) return Response.json({ status: "ok", checks: checkStatus, load, features }, { headers: noStoreHeaders });
   console.error("Readiness check failed", { failed });
   return Response.json({ status: "unhealthy", checks: checkStatus, load, features }, { status: 503, headers: noStoreHeaders });

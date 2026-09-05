@@ -25,7 +25,7 @@
 // only place a 503 or a 504 that a user absorbed silently shows up.
 
 import { chromium } from "@playwright/test";
-import { expectedStatus, runReadJourney, validateLoadTarget } from './load-journey.mjs';
+import { expectedStatus, runReadJourney, validateLoadTarget, readJourneyRequest } from './load-journey.mjs';
 
 const baseURL = process.env.E2E_BASE_URL || "http://127.0.0.1:3000";
 const email = process.env.E2E_USER_EMAIL || "";
@@ -119,7 +119,10 @@ async function drive(request, until) {
     const startedAt = Date.now();
     try {
       const path = scenario.path(); // Every poll must ask the SAME question.
-      const result = await runReadJourney(timeout => request.get(path, { headers: { "cache-control": "no-store" }, timeout }));
+      const transport = readJourneyRequest(path);
+      const result = await runReadJourney(timeout => transport.method === 'POST'
+        ? request.post(transport.path, { data: transport.data, headers: { 'cache-control': 'no-store' }, timeout })
+        : request.get(transport.path, { headers: { 'cache-control': 'no-store' }, timeout }));
       record(scenario.name, Math.round(result.durationMs), result.status, scenario.expect, result.pendingResponses);
     } catch {
       record(scenario.name, Date.now() - startedAt, 0, scenario.expect);

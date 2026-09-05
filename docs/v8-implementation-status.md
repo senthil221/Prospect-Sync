@@ -136,7 +136,9 @@ the large-filter People pivot retained 81,477 matches and page two (51–100).
 
 ### Follow-up — fail-closed filter restoration and Boolean source preservation
 
-Implemented locally; release verification pending at this entry.
+Released as `7bb99f6`; exact-version public health and the authenticated browser
+were verified. A malformed link showed the recovery screen; restoring the valid
+People pivot again returned 81,477 matches and page two (51–100).
 
 - Malformed filter objects, field identities/operators, stored-set references,
   mixed inline/set inputs, multiple Boolean expressions, invalid numeric ranges
@@ -155,6 +157,41 @@ Implemented locally; release verification pending at this entry.
 - The durable-filter client cache now has entry/byte budgets and generation
   protection against invalidated in-flight writes, matching the other caches.
 - Local lint/build/type checking pass; 455 tests pass with one Linux-only skip.
+
+## Package 3 — bounded lifecycle and durable background measurements
+
+Implemented; gated release verification pending at this entry.
+
+- `20260905230936_bounded_background_lifecycle.sql` replaces whole-parent cascade
+  expiry with one locked parent / at most 5,000 child items per unit (two export
+  parts). Metadata is removed only after its children are gone. Cleanup shares
+  the operations-worker advisory permit and skips locked work.
+- Queued/building exports pin their result-set input. Export creation locks and
+  checks that input before attaching it, closing the cleanup race. Unfinished
+  acknowledged mutations are never removed merely because their TTL passed.
+- Partly reclaimed filter sets restore all supplied values under a parent lock
+  before their TTL is renewed. Pending/building result references protect them.
+- Worker maintenance rotates through classes; each unit runs in a transaction
+  with a 3-second statement deadline and 250-ms lock deadline, then restores the
+  normal connection settings. This is bounded reclamation, not a physical quota
+  or a full graph of renewable reader pins.
+- Terminal background-job counts and end-to-end duration buckets persist in a
+  private RLS-enabled table with 30-day incremental retention. Authenticated
+  health adds queue age, physical derived-table sizes and bounded alert codes.
+  Public health reveals none of those details. These are background-job metrics,
+  not persistent HTTP journey histograms or configured external notifications.
+- The load harness uses the app's read-only POST transport for large filters,
+  so an over-cap test reaches API validation rather than a proxy URL limit.
+- Candidate migration and real function checks passed in a rolled-back live
+  transaction with synthetic private rows only. CI now runs the same lifecycle
+  assertions on a disposable PostgreSQL database using actual base definitions.
+- Local lint/build/type checking pass; 460 tests pass, one Linux-only skip.
+  Supabase advisors remain unavailable locally (connection refused on 54322).
+
+The user has now explicitly authorized on-VPS load/failure testing while the
+application is unused. Start bounded, monitor resource thresholds, isolate test
+records, and confirm no active customer job before any worker restart. This
+does not authorize changing backup configuration or moving production data.
 
 ## Remaining programme — not completed by these packages
 

@@ -7,6 +7,7 @@ import pg from "pg";
 import { createServer } from "node:http";
 import { pgInterval } from "./pg-interval.mjs";
 import { createFairScheduler, integerSetting } from "./fair-scheduler.mjs";
+import { runMaintenanceUnit } from './maintenance-unit.mjs';
 
 const workerId = `${process.env.HOSTNAME ?? "operations-worker"}:${process.pid}`;
 const setting = (name, fallback, min, max) => integerSetting(process.env[name], fallback, min, max, name);
@@ -14,7 +15,7 @@ const batchSize = setting('OPERATIONS_BATCH_SIZE', 25000, 1000, 100000);
 const applyBatchSize = setting('OPERATIONS_APPLY_BATCH', 500, 50, 5000);
 const exportBatchSize = setting('OPERATIONS_EXPORT_BATCH', 5000, 500, 25000);
 const idleDelayMs = setting('OPERATIONS_IDLE_MS', 3000, 1000, 30000);
-const retentionIntervalMs = setting('OPERATIONS_RETENTION_MS', 900000, 60000, 86400000);
+const retentionIntervalMs = setting('OPERATIONS_RETENTION_MS', 5000, 1000, 86400000);
 const statementTimeout = pgInterval(process.env.OPERATIONS_STATEMENT_TIMEOUT, "120s", "OPERATIONS_STATEMENT_TIMEOUT");
 const timeoutParts = /^(\d+)(ms|s|min|h)$/.exec(statementTimeout);
 const timeoutMs = Number(timeoutParts[1]) * ({ ms: 1, s: 1000, min: 60000, h: 3600000 }[timeoutParts[2]]);
@@ -23,6 +24,8 @@ if (timeoutMs < 1000 || timeoutMs > 120000) throw new Error('OPERATIONS_STATEMEN
 let stopping = false, connected = false;
 let lastProgressAt = Date.now(), lastRetentionAt = 0;
 let activeWork = '';
+const maintenanceClasses = ['search', 'filter', 'operation', 'export', 'metrics'];
+let nextMaintenance = 0;
 process.on('SIGTERM', () => { stopping = true; });
 process.on('SIGINT', () => { stopping = true; });
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -55,15 +58,15 @@ async function runUnit(kind) {
 async function runRetention() {
   if (Date.now() - lastRetentionAt < retentionIntervalMs) return;
   lastRetentionAt = Date.now();
+  const kind = maintenanceClasses[nextMaintenance];
+  nextMaintenance = (nextMaintenance + 1) % maintenanceClasses.length;
+  activeWork = `cleanup:${kind}`;
   try {
-    // Existing retention is separately bounded by the session deadline.
-    // Incremental reclamation is a separate lifecycle migration.
-    await client.query('select prospect_results.expire_sets_v1()');
-    await client.query('select prospect_filters.expire_sets_v1()');
-    await client.query('select prospect_operations.expire_jobs_v1()');
-    await client.query('select prospect_exports.expire_jobs_v1()');
+    const result = await runMaintenanceUnit(client, kind);
+    if (result.items_removed || result.parents_removed) console.log(JSON.stringify({event: 'background_cleanup', kind, ...result}));
     markProgress();
   } catch (error) { console.error('Retention pass failed', { code: error.code ?? 'unknown' }); }
+  finally { activeWork = ''; }
 }
 
 async function main() {
@@ -72,6 +75,7 @@ async function main() {
   await client.query("set lock_timeout = '5s'");
   // Fail readiness before serving health if the compatible schema is absent.
   await client.query("select 'prospect_operations.run_queue_unit_v1(text,text,integer)'::regprocedure");
+  await client.query("select 'prospect_operations.reclaim_unit_v1(text,integer)'::regprocedure");
   connected = true;
   console.log(JSON.stringify({ event: 'worker_started', scheduler: 'atomic-round-v1', statementTimeout, batchSize, applyBatchSize, exportBatchSize }));
   const round = createFairScheduler({ classes: ['search', 'operation', 'export'], runUnit,

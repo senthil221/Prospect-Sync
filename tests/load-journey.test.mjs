@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { expectedStatus, runReadJourney, validateLoadTarget } from '../scripts/load-journey.mjs';
+import { expectedStatus, runReadJourney, validateLoadTarget, readJourneyRequest } from '../scripts/load-journey.mjs';
 test('202 polling measures the whole journey until real results', async () => {
   let clock = 0, calls = 0;
   const result = await runReadJourney(async timeout => {
@@ -20,4 +20,15 @@ test('503 fails normal-load gates, is allowed only in explicit overload tests', 
   assert.equal(expectedStatus(202), false); assert.equal(expectedStatus(413, 413), true);
   assert.throws(() => validateLoadTarget('https://production.example.com', false), /LOAD_ALLOW_REMOTE/);
   validateLoadTarget('http://127.0.0.1:3000', false);
+});
+
+test('large filter load tests exercise the real POST query contract without dropping values', () => {
+  const values=Array.from({length:5001},(_,i)=>`value-${i}`);
+  const filters=[{field:'__title',operator:'equals',values}];
+  const transport=readJourneyRequest('/api/prospects?withTotal=1&filters='+encodeURIComponent(JSON.stringify(filters)));
+  assert.equal(transport.method,'POST'); assert.equal(transport.path,'/api/prospects');
+  assert.deepEqual(JSON.parse(transport.data.filters),filters);
+  assert.equal(transport.data.withTotal,'1');
+  assert.deepEqual(readJourneyRequest('/api/companies?page=2'),{method:'GET',path:'/api/companies?page=2'});
+  assert.throws(()=>readJourneyRequest('https://example.test/api/prospects'));
 });

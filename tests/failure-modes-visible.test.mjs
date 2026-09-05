@@ -93,7 +93,8 @@ test("the counters are not readable by an anonymous caller", async () => {
   // exactly the number of slow requests needed to fill the guard, so the
   // counters go only to a signed-in caller. Readiness itself stays public.
   assert.match(health, /const authorized = await getAuthorizedUser\(\)/);
-  assert.match(health, /authorized \? \{ admission: admissionState\(\), \.\.\.observabilitySnapshot\(\) \} : undefined/);
+  assert.match(health, /authorized \? \{ admission: admissionState\(\), \.\.\.observabilitySnapshot\(\),\s*background, alerts: backgroundAlerts\(background\) \} : undefined/);
+  assert.match(health, /if \(authorized\) \{\s*try \{\s*const sample = await createAdminClient\(\)\.rpc\('background_health_v1'\)/);
   // Resolving the user must never take readiness down with it.
   assert.match(health, /getAuthorizedUser\(\)\.catch\(\(\) => null\)/);
 });

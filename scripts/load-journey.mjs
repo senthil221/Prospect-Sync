@@ -1,4 +1,16 @@
 // Measure the user's wait through every 202, not the enqueue response latency.
+// Match the application's read-only POST transport for large query payloads.
+// Otherwise the over-cap test measures a proxy's 431, not the API's 413.
+export function readJourneyRequest(path) {
+  if (!path.startsWith('/api/')) throw new Error('A load journey must use a relative API path');
+  const url = new URL(path, 'https://load.invalid');
+  if (url.origin !== 'https://load.invalid') throw new Error('Invalid load path');
+  if (path.length > 6000 && ['/api/prospects', '/api/companies'].includes(url.pathname)) {
+    return {method:'POST',path:url.pathname,data:Object.fromEntries(url.searchParams)};
+  }
+  return {method:'GET',path};
+}
+
 export async function runReadJourney(send, { deadlineMs = 150000, pause = ms => new Promise(r => setTimeout(r, ms)), now = () => performance.now() } = {}) {
   const started = now();
   let pendingResponses = 0;
