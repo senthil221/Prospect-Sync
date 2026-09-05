@@ -90,7 +90,7 @@ test("the version vector travels end to end", async () => {
 test("the client caches the count per question, not per page", async () => {
   const source = await workspace();
 
-  assert.match(source, /const countCache = useRef\(new Map</);
+  assert.match(source, /const countCache = useRef\(new BoundedCache</);
   assert.match(source, /knownVersions: cached\?\.versions \?\? null/);
   // Paging does not change how many rows match, so page 4 reuses page 1's count.
   const key = source.slice(source.indexOf("const countKey = useMemo("), source.indexOf("useEffect(() => {"));

@@ -25,7 +25,9 @@ export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const user = await getAuthorizedUser();
-  const payload = await request.json().catch(() => null) as { companyIds?: unknown } | null;
+  const decoded = await readBoundedJson(request);
+  if (decoded.response) return decoded.response;
+  const payload = decoded.value as { companyIds?: unknown } | null;
   const companyIds = Array.isArray(payload?.companyIds)
     ? [...new Set(payload.companyIds.map((value) => String(value ?? "").trim()).filter(Boolean))].slice(0, 50000)
     : null;
@@ -37,3 +39,4 @@ export async function POST(request: Request) {
   if (error) return failure(error);
   return Response.json({ result: data });
 }
+import { readBoundedJson } from '../../../lib/bounded-json';

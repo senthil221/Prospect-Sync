@@ -109,6 +109,7 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   // box turns the Back button into a way to retype what you just typed.
   const lastSection = useRef(section);
   const restoring = useRef(false);
+  const lastRestoredLocation = useRef('');
   useEffect(() => {
     if (restoring.current) { restoring.current = false; return; }
     const next = writeWorkspaceUrl(urlState);
@@ -117,6 +118,7 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
     if (target === current) return;
     if (urlState.section !== lastSection.current) window.history.pushState(null, "", target);
     else window.history.replaceState(null, "", target);
+    lastRestoredLocation.current = window.location.href;
     lastSection.current = urlState.section;
   }, [urlState]);
 
@@ -124,6 +126,8 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   // the entry the browser just moved to, which would strand the user on it.
   useEffect(() => {
     const onPopState = () => {
+      if (lastRestoredLocation.current === window.location.href) return;
+      lastRestoredLocation.current = window.location.href;
       const restored = readWorkspaceUrl(new URLSearchParams(window.location.search), window.location.hash);
       restoring.current = true;
       lastSection.current = restored.section;
@@ -141,7 +145,11 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
       if (!restored.listId) setSelectedList(null);
     };
     window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
+    window.addEventListener("hashchange", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("hashchange", onPopState);
+    };
   }, [clients, setProspectPage, setCompanyPage]);
 
   const encodedProspectFilters = useMemo(() => encodeFilters(prospectFilters), [prospectFilters]);
@@ -258,7 +266,12 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   const title = navItems.find((item) => item.id === section)?.label ?? "Overview";
 
   return <div className="app-shell">
-    <a className="skip-link" href="#main-content">Skip to main content</a>
+    <a className="skip-link" href="#main-content" onClick={(event) => {
+      // A focus jump must not overwrite the fragment carrying large filters.
+      event.preventDefault();
+      const main = document.getElementById('main-content');
+      if (main) { main.tabIndex = -1; main.focus(); main.scrollIntoView({ block: 'start' }); }
+    }}>Skip to main content</a>
     <aside className="sidebar"><div className="brand"><span className="brand-mark"><AppIcon name="database" size={17}/></span><span>Prospect <span>Sync</span></span></div><div className="workspace"><span className="workspace-avatar">PA</span><div><strong>Prospect Agency</strong><small>Internal workspace</small></div><span className="chevron"><AppIcon name="chevron" size={14}/></span></div><nav aria-label="Primary navigation">{navGroups.map((group) => <div className="nav-group" key={group.label}><span className="nav-group-label">{group.label}</span>{group.items.map((item) => <button key={item.id} aria-current={section === item.id ? "page" : undefined} className={section === item.id ? "active" : ""} onMouseEnter={() => prefetchSection(item.id)} onFocus={() => prefetchSection(item.id)} onClick={() => navigate(item.id)}><span aria-hidden="true"><AppIcon name={item.mark} size={17}/></span>{item.label}</button>)}</div>)}</nav><ThemeToggle/><a className="profile" href="/auth/signout"><span className="profile-avatar">{initials(currentUserEmail)}</span><div><strong>{currentUserEmail}</strong><small>Sign out</small></div></a></aside>
     <MobileNav section={section} items={navItems} onNavigate={(id) => navigate(id as Section)} currentUserEmail={currentUserEmail}/>
     <main id="main-content"><header className="topbar"><div><p className="eyebrow">DATABASE WORKSPACE</p><h1>{selectedClient ? selectedClient.name : title}</h1></div><div className="top-actions">{(section === "prospects" || section === "companies") && <label className="search"><span><AppIcon name="search" size={16}/></span><input aria-label="Search" value={search} onChange={(event) => { setSearch(event.target.value); if (section === "prospects") setProspectPage(1); if (section === "companies") setCompanyPage(1); }} placeholder={`Search ${section}...`}/></label>}<button className="primary" onClick={() => navigate("imports")}><AppIcon name="plus" size={15}/> Import list</button></div></header>

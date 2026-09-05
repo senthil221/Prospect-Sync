@@ -72,7 +72,9 @@ with core checks and prepared-search/background-operation feature checks healthy
 
 ## Package 2 — request transport and atomic background rounds
 
-Implementation in progress; not deployed at this entry.
+Released as `6219fda`. CI, including the isolated PostgreSQL contract, and the
+production deployment succeeded. Public health reports this exact version with
+core and background-feature checks healthy.
 
 - Large filters and both pivot scopes use a versioned browser fragment when
   they exceed the small HTTP query budget. Refresh and Back/Forward restore
@@ -97,8 +99,38 @@ Implementation in progress; not deployed at this entry.
   use synthetic builders to exercise checkpoint/resume/failure semantics, not
   production data or a replacement for real-builder integration/load tests.
 - Migration creation and grants passed a rolled-back live catalogue check; no
-  customer job was run during that check. Local unit tests currently pass; SQL
-  CI and final release/browser checks are pending.
+  customer job was run during that check. Local lint/build passed, with 443 tests
+  passing and one Linux-only skip. SQL CI passed all three class checkpoint,
+  resume, completion and failed-effect-rollback assertions.
+- Authenticated browser restored the supplied 51 company keywords from the
+  fragment, showing 41,057 matching companies and 81,477 linked prospects.
+- A fresh real-worker 51-term build completed in 9.160 seconds by the monotonic
+  worker clock (9.158 seconds in corrected database timestamps). The complete
+  sorted-ID digest matched the prior 41,057-company set. Different cache/load
+  conditions mean this is not a controlled speedup comparison or percentile.
+- "See these people" returned 81,477 prospects on the deployed release.
+
+### Follow-up — bounded browser caches and explicit request refusals
+
+In progress; not deployed at this entry.
+
+- Count caches have 40-entry/1-MiB serialized-key-and-value budgets; general API
+  responses have 64-entry/8-MiB budgets. These are admission estimates, not exact
+  heap measurements. Over-budget responses are served without being cached.
+- Cache invalidation advances a generation. Older in-flight reads cannot
+  repopulate an invalidated cache or remove a newer request's deduplication entry.
+- Aborting a backpressure wait clears its timer and prevents the retry.
+- Fragment-only navigation is observed; duplicate popstate/hashchange events
+  are deduplicated. Skip-to-content focuses the main landmark without replacing
+  the fragment containing the active filters.
+- Oversized explicit selections/exclusions return 413 before legacy adapters
+  can slice them. The legacy tag/contact action explicitly enforces its 5,000-ID
+  limit. Import-chunk handling is unchanged.
+- New result-set/export POST requests fail closed when the operations worker
+  is unavailable. Existing job status/download GET paths remain independent.
+  A POST retry to look up a completed job can also be refused during the outage;
+  callers should use its existing job ID to read status/download.
+- Local lint, build/type checking and 448 tests pass, with one Linux-only skip.
 
 ## Remaining programme — not completed by these packages
 

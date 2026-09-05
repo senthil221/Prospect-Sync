@@ -1,4 +1,5 @@
 import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
+import { readBoundedJson } from '../../../lib/bounded-json';
 import { indexNotice, reindexProspects } from "../../../lib/reindex.ts";
 import { ownerIdentity } from "../../../lib/result-sets.ts";
 import { createAdminClient } from "../../../lib/supabase/admin";
@@ -57,8 +58,12 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const payload = await request.json() as { action?: string; prospectIds?: string[]; tagName?: string; clientId?: string; contactedAt?: string; campaignName?: string };
-  const prospectIds = [...new Set((payload.prospectIds ?? []).map(String))].slice(0, 5000);
+  const decoded = await readBoundedJson(request);
+  if (decoded.response) return decoded.response;
+  const payload = decoded.value as { action?: string; prospectIds?: string[]; tagName?: string; clientId?: string; contactedAt?: string; campaignName?: string } | null;
+  if (!payload || !Array.isArray(payload.prospectIds)) return Response.json({ error: 'Select at least one prospect.' }, { status: 400 });
+  if (payload.prospectIds.length > 5000) return Response.json({ code: 'selection_too_large', error: 'This action supports up to 5,000 selected prospects per request.' }, { status: 413 });
+  const prospectIds = [...new Set(payload.prospectIds.map(String))];
   if (!prospectIds.length) return Response.json({ error: "Select at least one prospect." }, { status: 400 });
   const supabase = createAdminClient();
   if (payload.action === "tag") {

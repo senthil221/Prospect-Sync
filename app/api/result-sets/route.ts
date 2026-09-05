@@ -1,4 +1,5 @@
 import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
+import { backgroundAdmissionResponse } from '../../../lib/operations-health';
 import { authorizeFilterSets } from "../../../lib/filter-sets";
 import { filterErrorResponse, parseFilters } from "../../../lib/prospect-filters";
 import { ownerIdentity, resultSetContentHash } from "../../../lib/result-sets";
@@ -70,6 +71,8 @@ export async function POST(request: Request) {
   const setDenial = await authorizeFilterSets(supabase, filters, (await getAuthorizedUser())?.id ?? "", entityType as "prospect" | "company", clientScope,
     scopePayload ? [{ entityType: 'company', clientScope, filters: scopePayload.filters }] : []);
   if (setDenial) return setDenial;
+  const unavailable = await backgroundAdmissionResponse();
+  if (unavailable) return unavailable;
 
   const { data, error } = await supabase.rpc("request_result_set_v1", {
     p_owner_id: owner,

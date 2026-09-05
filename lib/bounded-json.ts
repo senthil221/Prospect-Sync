@@ -46,7 +46,18 @@ export async function readBoundedJson(request: Request, limits = queryBodyLimits
         if (++depth > limits.depth) return reject(413, 'request_too_deep', 'This request has too many nested conditions.');
       } else if (char === '}' || char === ']') depth--;
     }
-    return { value: JSON.parse(text) };
+    const value = JSON.parse(text);
+    // Existing query/mutation adapters cap these lists. Reject before those
+    // adapters can silently slice an explicit selection or its exclusions.
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      for (const key of ['ids', 'prospectIds', 'companyIds', 'excludedIds']) {
+        if (Array.isArray(value[key]) && value[key].length > 50000) {
+          return reject(413, 'selection_too_large', 'This selection exceeds 50,000 explicit IDs. Use a frozen all-matching result set instead.');
+        }
+      }
+      if (Array.isArray(value.fields) && value.fields.length > 600) return reject(413, 'fields_too_large', 'Choose at most 600 export fields.');
+    }
+    return { value };
   } catch (error) {
     if (error instanceof Error && (error.message === 'deadline' || error.message === 'aborted')) {
       return reject(408, 'request_interrupted', 'The request body was interrupted or took too long.');

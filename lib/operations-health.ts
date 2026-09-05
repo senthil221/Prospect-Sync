@@ -31,3 +31,10 @@ export function createOperationsHealthProbe(fetcher: typeof fetch = fetch, ttlMs
 
 const probe = createOperationsHealthProbe();
 export const operationsHealth = () => probe(process.env.OPERATIONS_WORKER_HEALTH_URL);
+
+export async function backgroundAdmissionResponse(check = operationsHealth): Promise<Response | null> {
+  if ((await check()).status === 'ok') return null;
+  return Response.json({ code: 'worker_unavailable', retryable: true,
+    error: 'Background processing is temporarily unavailable. Existing results remain accessible; please retry new jobs shortly.',
+  }, { status: 503, headers: { 'Retry-After': '5', 'Cache-Control': 'no-store' } });
+}

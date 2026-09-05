@@ -97,7 +97,7 @@ test("the client backs off with jitter on reads and never retries a mutation", a
   assert.match(api, /0\.5 \+ Math\.random\(\)/);
   assert.match(api, /Retry-After/);
   // An overload response says nothing about the data and must not be cached.
-  assert.match(api, /if \(cacheable && !isOverloaded\(response\)\)/);
+  assert.match(api, /if \(cacheable && generation === apiCacheGeneration && !isOverloaded\(response\)\)/);
 });
 
 test("the import worker has its own login role, bounded and unprivileged", async () => {

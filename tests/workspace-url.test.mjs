@@ -116,6 +116,8 @@ test("the app reads the URL once and writes it with the documented history API",
   // Back and Forward feed the URL back into state.
   assert.match(app, /addEventListener\("popstate", onPopState\)/);
   assert.match(app, /removeEventListener\("popstate", onPopState\)/);
+  assert.match(app, /addEventListener\("hashchange", onPopState\)/);
+  assert.match(app, /event\.preventDefault\(\);\s*const main = document\.getElementById\('main-content'\)/);
   // And the writer must not immediately overwrite the entry the browser just
   // restored, which would strand the user on it.
   assert.match(app, /if \(restoring\.current\) \{ restoring\.current = false; return; \}/);

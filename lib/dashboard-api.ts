@@ -1,9 +1,11 @@
 import type { ProspectFilter } from "./types.ts";
+import { BoundedCache } from './bounded-cache.ts';
 import type { CompanyScope, PeopleScope } from "./workspace-scopes.ts";
 import { awaitPreparedSearch, needsCompanyPreparation, type PreparationProgress } from "./prepared-search.ts";
 
-const apiResponseCache = new Map<string, { data: unknown; expiresAt: number }>();
+const apiResponseCache = new BoundedCache<{ data: unknown; expiresAt: number }>(64, 8 * 1024 * 1024);
 const apiRequests = new Map<string, Promise<unknown>>();
+let apiCacheGeneration = 0;
 
 function failedRequestMessage(response: Response, body: string, parsed: unknown) {
   if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
@@ -34,7 +36,9 @@ async function parseApiResponse<T>(response: Response): Promise<T> {
 }
 
 export function clearApiCache() {
+  apiCacheGeneration++;
   apiResponseCache.clear();
+  apiRequests.clear();
 }
 
 // The server refuses rather than queues when the interactive pool is under
@@ -63,14 +67,20 @@ async function fetchWithBackpressure(path: string, options: RequestInit | undefi
   if (!idempotent) return response;
   for (let attempt = 0; attempt < overloadRetries && isOverloaded(response); attempt += 1) {
     const wait = retryDelayMs(response, attempt);
-    await new Promise((resolve) => setTimeout(resolve, wait));
-    if (options?.signal?.aborted) return response;
+    await new Promise<void>((resolve, reject) => {
+      const signal = options?.signal;
+      const aborted = () => { clearTimeout(timer); reject(signal?.reason ?? new DOMException('Aborted', 'AbortError')); };
+      const timer = setTimeout(() => { signal?.removeEventListener('abort', aborted); resolve(); }, wait);
+      if (signal?.aborted) aborted();
+      else signal?.addEventListener('abort', aborted, { once: true });
+    });
     response = await fetch(path, options);
   }
   return response;
 }
 
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  const generation = apiCacheGeneration;
   const method = String(options?.method ?? "GET").toUpperCase();
   // Polling callers opt out with `cache: "no-store"`. Without this guard the
   // in-memory cache can keep returning the first import status for five minutes.
@@ -78,6 +88,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   if (cacheable) {
     const cached = apiResponseCache.get(path);
     if (cached && cached.expiresAt > Date.now()) return cached.data as T;
+    if (cached) apiResponseCache.delete(path);
     const pending = apiRequests.get(path);
     if (pending) return pending as Promise<T>;
   }
@@ -87,13 +98,13 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     // caching it would keep answering "busy" for five minutes after the load
     // had passed.
     const data = await parseApiResponse<T>(response);
-    if (cacheable && !isOverloaded(response)) apiResponseCache.set(path, { data, expiresAt: Date.now() + 5 * 60_000 });
+    if (cacheable && generation === apiCacheGeneration && !isOverloaded(response)) apiResponseCache.set(path, { data, expiresAt: Date.now() + 5 * 60_000 });
     else if (method !== "GET") clearApiCache();
     return data;
   })();
   if (cacheable) apiRequests.set(path, request);
   try { return await request; }
-  finally { if (cacheable) apiRequests.delete(path); }
+  finally { if (cacheable && apiRequests.get(path) === request) apiRequests.delete(path); }
 }
 
 export function prefetchApi(path: string) {

@@ -1,4 +1,5 @@
 "use client";
+import { BoundedCache } from '../../lib/bounded-cache';
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { encodeFilters, fetchProspects, isAbortError } from "../../lib/dashboard-api";
@@ -27,7 +28,7 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
   const fieldsLoaded = useRef(false);
   // A cached total is only meaningful alongside the dependency-version vector it
   // was counted at, so the two are stored together and sent back as a pair.
-  const totalCache = useRef(new Map<string, { total: number; estimated: boolean; capped: boolean; versions: Record<string, number> | null }>());
+  const totalCache = useRef(new BoundedCache<{ total: number; estimated: boolean; capped: boolean; versions: Record<string, number> | null }>());
   const deferredSearch = useDeferredValue(search);
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);
   const encodedFilters = useMemo(() => encodeFilters(filters), [filters]);

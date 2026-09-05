@@ -45,3 +45,11 @@ test('stalled streams and aborted callers have bounded outcomes', async () => {
   const req = new Request('https://example.test', { method: 'POST', body: new ReadableStream({}), duplex: 'half', signal: controller.signal });
   assert.equal((await readBoundedJson(req, limits)).response.status, 408);
 });
+
+test('oversized selections and exclusions fail before legacy adapters can truncate them', async () => {
+  for (const key of ['ids','companyIds','prospectIds','excludedIds']) {
+    const result = await readBoundedJson(request(JSON.stringify({ [key]: Array(50001).fill('id') })));
+    assert.equal(result.response.status, 413);
+    assert.equal((await result.response.json()).code, 'selection_too_large');
+  }
+});

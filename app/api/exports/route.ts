@@ -1,4 +1,5 @@
 import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
+import { backgroundAdmissionResponse } from '../../../lib/operations-health';
 import { authorizeFilterSets } from "../../../lib/filter-sets";
 import { filterErrorResponse, parseFilters } from "../../../lib/prospect-filters";
 import { companyExportKeys } from "../../../lib/company-export";
@@ -87,6 +88,8 @@ export async function POST(request: Request) {
   const setDenial = await authorizeFilterSets(supabase, filters, user?.id ?? "", entityType as "prospect" | "company", clientScope,
     scopePayload ? [{ entityType: 'company', clientScope, filters: scopePayload.filters }] : []);
   if (setDenial) return setDenial;
+  const unavailable = await backgroundAdmissionResponse();
+  if (unavailable) return unavailable;
 
   let fields: string[] = [];
   let keys: string[] = [];

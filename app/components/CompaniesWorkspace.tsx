@@ -1,4 +1,5 @@
 "use client";
+import { BoundedCache } from '../../lib/bounded-cache';
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
@@ -28,7 +29,7 @@ export function useCompaniesWorkspaceController({ active, search, filters, peopl
   // meaningful alongside the dependency-version vector it was counted at, so the
   // two are cached together and sent back as a pair; the database recounts only
   // when companies or prospects have actually moved since.
-  const countCache = useRef(new Map<string, { total: number; covered: number; prospectTotal: number; versions: Record<string, number> | null }>());
+  const countCache = useRef(new BoundedCache<{ total: number; covered: number; prospectTotal: number; versions: Record<string, number> | null }>());
   const deferredSearch = useDeferredValue(search);
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);
   // The question, not the array that expresses it. Bulk domains is the biggest
