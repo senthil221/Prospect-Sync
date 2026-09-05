@@ -12,7 +12,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (unauthorized) return unauthorized;
 
   const { id: clientId } = await context.params;
-  const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const decoded = await readBoundedJson(request);
+  if (decoded.response) return decoded.response;
+  const payload = decoded.value as Record<string, unknown> | null;
   if (!payload) return Response.json({ error: "Invalid request." }, { status: 400 });
 
   const action = String(payload.action ?? "");
@@ -102,3 +104,4 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   return Response.json({ result: data });
 }
+import { readBoundedJson } from "../../../../../lib/bounded-json";

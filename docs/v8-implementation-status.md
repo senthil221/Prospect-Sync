@@ -6,7 +6,9 @@ does not certify the database's capacity.
 
 ## Package 1 — admission, outage handling and query-scope checks
 
-Candidate release; production rollout pending at the time of this entry.
+Released to production as `48eee2d`, followed by backup pipeline fix `bb090e4`.
+Both CI and deployment workflows succeeded. Public health reports `bb090e4`
+with core checks and prepared-search/background-operation feature checks healthy.
 
 - Bounded interactive queue: 8 running/32 waiting per app process by default,
   2-second wait; validated configuration and abort/timer/listener cleanup.
@@ -50,13 +52,55 @@ Candidate release; production rollout pending at the time of this entry.
   definition. Only synthetic private cache rows were written, then rolled back.
 - Supabase CLI advisors **not run successfully**: local database connection
   refused on port 54322. Targeted live catalogue checks do not replace advisors.
-- Authenticated Codex browser access is now available; Overview loads and shows
-  681,085 prospects/419,214 companies. New-release journey check still pending.
+- Authenticated browser regression passed for the supplied 51 company keywords
+  with name, keywords and description enabled: 41,057 matching companies,
+  19,804 covered companies and 81,477 linked prospects. "See these people"
+  returned the same 81,477 prospects; page two showed records 51–100 with the
+  count and company scope retained. This is one real journey, not a concurrency
+  or 100–150-keyword capacity certificate.
+- The newly built company set completed in 25.329 seconds according to the
+  corrected database timestamps. Historical millisecond durations remain invalid
+  measurements and must not be used for before/after performance claims.
+- Migration `20260905172042` was verified applied in production.
+- The Companies URL dropped the long inline `cf` parameter while retaining the
+  active in-memory filters. Long-filter reload/share persistence remains a
+  separate QuerySpec/URL-state regression to address; the People pivot retained
+  its scope in the URL during the tested journey.
 - Production preflight: prior commit `417f67c`, healthy containers, 56 GiB free.
   No stress tests, worker restarts, customer-record mutations or restore drills
   have been performed against production.
 
-## Remaining programme — not completed by Package 1
+## Package 2 — request transport and atomic background rounds
+
+Implementation in progress; not deployed at this entry.
+
+- Large filters and both pivot scopes use a versioned browser fragment when
+  they exceed the small HTTP query budget. Refresh and Back/Forward restore
+  the complete narrowing. Controllers mount after fragment hydration so no
+  unfiltered first request runs. Small existing URLs remain compatible.
+- Eight query/filter-set/export/client-mutation route files use a streamed
+  body reader: 4 MiB actual UTF-8 bytes, 64 levels and a 5-second read deadline.
+  Missing/false Content-Length cannot bypass the byte limit; overflow returns
+  413 instead of parsing a partial payload. Import chunk budgets are unchanged.
+- Interactive and operations-worker numeric configuration now fails startup
+  on invalid settings instead of quietly choosing a different policy.
+- Search, mutation and export receive one resumable unit each per round.
+  `run_queue_unit_v1` claims, performs one batch, checkpoints and releases inside
+  one SQL transaction. Row locks cover the whole unit; no job ID is retained
+  for a later client-side failure write. Failed units roll back their effects
+  before recording failure, retaining prior committed checkpoints.
+- A transaction-scoped permit limits new operations-worker processes to one
+  heavy unit. This does not include the import worker or legacy rollback worker.
+  The description build remains atomic and can occupy its full bounded deadline;
+  the proposed 1–3-second quanta and fairness latency SLO are not yet certified.
+- Added isolated PostgreSQL CI contract fixtures for all three classes. These
+  use synthetic builders to exercise checkpoint/resume/failure semantics, not
+  production data or a replacement for real-builder integration/load tests.
+- Migration creation and grants passed a rolled-back live catalogue check; no
+  customer job was run during that check. Local unit tests currently pass; SQL
+  CI and final release/browser checks are pending.
+
+## Remaining programme — not completed by these packages
 
 ### Backup failure discovered during the recovery audit
 
@@ -68,8 +112,19 @@ at manifest verification, before reaching the offsite step. The early-exiting
 Follow-up fix keeps stdin open, drains the remaining archive, and preserves both
 the manifest-reader exit status and zstd's full-stream integrity errors. The
 1 MiB synthetic pipeline test reproduces the old failure, passes the new path,
-and verifies that reader/producer failures still propagate. Actual post-fix
-backup/offsite success and a separate restore drill remain unverified until run.
+and verifies that reader/producer failures still propagate. The fix is deployed
+as `bb090e4`; its CI passed. A read-only check of the latest existing archive
+(`20260905T031731Z`) passed manifest reading and complete compressed-stream
+verification. No restore, new backup, upload or pruning was performed.
+
+**Recovery blocker:** a read-only restic snapshot-list attempt failed because
+the configured `gdrive` rclone remote has an empty OAuth token. The existing
+Google Drive connection needs user-authorized reconnection; no destination or
+permissions were changed. A readable local archive does not prove offsite
+protection or restorability. Actual post-fix backup/offsite success and an
+isolated restore drill remain unverified. On 2026-09-06 the user explicitly
+deferred backup work and requested that other application work continue.
+Backup authentication, destinations and permissions are left unchanged.
 
 | Package | Remaining work |
 | --- | --- |
@@ -79,7 +134,7 @@ backup/offsite success and a separate restore drill remain unverified until run.
 | V8-04 | Unified execution across both pivots, all scoped views, exports and frozen selection; complete over-cap membership path. |
 | V8-05 | Dependency-version consistency, immutable snapshot inputs, resumable search evaluation and measured term-cache experiment. |
 | V8-06 | Deferred exact counts, measured pagination/suggestion improvements, drift checks and safe online-index tooling. |
-| V8-07 | Tier A/B mixed-load, restart/fencing tests, authenticated browser regression, isolated restore and rollback drills. |
+| V8-07 | Tier A/B mixed-load, restart/fencing tests, broader authenticated browser regression, isolated restore and rollback drills. The original 51-keyword desktop journey passed. |
 
 No staging database is running locally and no separate staging destination is
 confirmed. Synthetic load generation can be implemented locally, but intrusive

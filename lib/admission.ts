@@ -1,4 +1,4 @@
-import { boundedInteger, createAdmissionQueue } from './bounded-admission.ts';
+import { configuredInteger, createAdmissionQueue } from './bounded-admission.ts';
 import { recordRequest, routeOf } from './observability.ts';
 
 // PostgREST's pool is 24. Two app slots can overlap during blue/green releases.
@@ -7,9 +7,9 @@ import { recordRequest, routeOf } from './observability.ts';
 // abandoning an HTTP request does not reliably cancel its database statement.
 // Production measurement: an export abandoned at 2.1s held its backend for 7.9 s.
 const queue = createAdmissionQueue(
-  boundedInteger(process.env.INTERACTIVE_CONCURRENCY, 8, 1, 8),
-  boundedInteger(process.env.INTERACTIVE_MAX_WAITING, 32, 0, 128),
-  boundedInteger(process.env.INTERACTIVE_ADMISSION_WAIT_MS, 2000, 0, 5000),
+  configuredInteger('INTERACTIVE_CONCURRENCY', process.env.INTERACTIVE_CONCURRENCY, 8, 1, 8),
+  configuredInteger('INTERACTIVE_MAX_WAITING', process.env.INTERACTIVE_MAX_WAITING, 32, 0, 128),
+  configuredInteger('INTERACTIVE_ADMISSION_WAIT_MS', process.env.INTERACTIVE_ADMISSION_WAIT_MS, 2000, 0, 5000),
 );
 
 export function overloadedResponse(): Response {

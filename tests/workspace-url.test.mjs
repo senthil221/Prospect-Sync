@@ -22,7 +22,10 @@ const base = {
   companyPeopleScope: { search: "hdfc", filters: [], limit: 250000 },
 };
 
-const roundTrip = (state) => readWorkspaceUrl(new URLSearchParams(writeWorkspaceUrl(state).replace(/^\?/, "")));
+const roundTrip = (state) => {
+  const url = new URL(writeWorkspaceUrl(state), 'https://example.test/');
+  return readWorkspaceUrl(url.searchParams, url.hash);
+};
 
 test("the whole workspace survives a round trip through the URL", () => {
   const back = roundTrip(base);
@@ -62,7 +65,7 @@ test("a hand-edited or truncated URL cannot break the workspace", () => {
   assert.equal(junk.companyPeopleScope, null);
 });
 
-test("filters that cannot fit are dropped whole, never truncated", () => {
+test("large filters survive in the fragment without expanding the HTTP request", () => {
   // 400 pasted domains is a 12.9 KB request line and works; 600 is 19.3 KB and
   // Node answers 431 before any handler runs. So a big list stays out of the
   // URL - and it leaves whole, because half a filter list is a different
@@ -75,7 +78,9 @@ test("filters that cannot fit are dropped whole, never truncated", () => {
     }],
   };
   const url = writeWorkspaceUrl(many);
-  assert.ok(!url.includes("pf="), "an oversized filter list must not be written");
+  assert.ok(!new URL(url, 'https://example.test').searchParams.has('pf'));
+  assert.ok(url.includes('#workspace-v1?pf='));
+  assert.deepEqual(roundTrip(many).prospectFilters[0].values, many.prospectFilters[0].values);
   assert.ok(url.includes("s=prospects"), "everything else still restores");
   assert.ok(url.includes("pp=3"));
   assert.equal(filtersFitInUrl(many.prospectFilters), false);
@@ -84,6 +89,15 @@ test("filters that cannot fit are dropped whole, never truncated", () => {
   // The boundary is honoured rather than approximate.
   const justUnder = [{ id: "c", field: "__title", operator: "contains", values: ["x".repeat(maxFilterUrlChars - 80)] }];
   assert.equal(filtersFitInUrl(justUnder), true);
+});
+
+test('large nested pivots and Unicode survive reload with a bounded HTTP query', () => {
+  const filters = [{ id: 'large', field: '__company_keywords', operator: 'contains', values: Array.from({length: 150}, (_, i) => `技術 consulting ${i}`), scopes: ['name', 'description'] }];
+  const state = { ...base, companyFilters: filters, companyPeopleScope: { search: '', filters, limit: 250000 } };
+  const url = new URL(writeWorkspaceUrl(state), 'https://example.test');
+  assert.ok(url.search.length < 6001);
+  assert.deepEqual(roundTrip(state).companyFilters[0].values, filters[0].values);
+  assert.deepEqual(roundTrip(state).companyPeopleScope.filters[0].values, filters[0].values);
 });
 
 test("the app reads the URL once and writes it with the documented history API", async () => {

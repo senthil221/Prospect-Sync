@@ -155,7 +155,9 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
 export async function DELETE(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const payload = await request.json().catch(() => null) as {
+  const decoded = await readBoundedJson(request);
+  if (decoded.response) return decoded.response;
+  const payload = decoded.value as {
     ids?: unknown;
     allMatching?: unknown;
     search?: unknown;
@@ -221,7 +223,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const decoded = await readBoundedJson(request);
+  if (decoded.response) return decoded.response;
+  const body = decoded.value as Record<string, unknown> | null;
   if (!body || typeof body !== "object") {
     return Response.json({ error: "Invalid prospect query." }, { status: 400 });
   }
@@ -232,3 +236,4 @@ export async function POST(request: Request) {
   }
   return withInteractiveSlot(request, () => respondToProspectQuery(params, request.signal));
 }
+import { readBoundedJson } from "../../../lib/bounded-json";

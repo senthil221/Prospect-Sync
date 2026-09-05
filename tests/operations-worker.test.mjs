@@ -21,17 +21,19 @@ test("the worker never touches the interactive pool", async () => {
 });
 
 test("it reuses the import worker's queue primitives rather than inventing new ones", async () => {
-  const [worker, migration] = await Promise.all([
+  const [worker, migration, unit] = await Promise.all([
     read("../worker/operations-worker.mjs"),
     read("../supabase/migrations/20260902000120_durable_result_sets.sql"),
+    read("../supabase/migrations/20260905220328_fair_atomic_background_units.sql"),
   ]);
 
   // Claim, lease, expired-lease recovery - the shape section 9.1 asks for.
   assert.match(migration, /for update skip locked/);
   assert.match(migration, /lease_expires_at/);
-  assert.match(worker, /claim_next_v1/);
-  assert.match(worker, /build_batch_v1/);
-  assert.match(worker, /fail_set_v1/);
+  assert.match(worker, /run_queue_unit_v1/);
+  assert.match(unit, /claim_next_v1/);
+  assert.match(unit, /build_batch_v1/);
+  assert.match(unit, /fail_set_v1/);
 
   // Bounded transactions: a build is many short batches against a keyset
   // cursor, not one long transaction holding a snapshot open.
@@ -40,10 +42,11 @@ test("it reuses the import worker's queue primitives rather than inventing new o
   assert.match(migration, /cursor_id/);
 
   // A permanent failure is recorded rather than left to be reclaimed forever.
-  assert.match(worker, /await failSet\(job\.set_id, error\)/);
+  assert.match(unit, /EXCEPTION WHEN OTHERS OR query_canceled/);
   // Stopping mid-build hands the work back through the lease instead of
   // marking a half-built set finished.
-  assert.match(worker, /its lease will expire and another worker will resume/);
+  assert.match(unit, /ELSE 'pending'/);
+  assert.doesNotMatch(worker, /await failSet/);
 
   // Retention actually runs; a TTL nothing enforces is not a TTL.
   assert.match(worker, /expire_sets_v1/);

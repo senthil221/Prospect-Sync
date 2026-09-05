@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, companyApiPath, encodeFilters, prefetchApi, prospectApiPath } from "../lib/dashboard-api";
 import { initials } from "../lib/dashboard-helpers";
@@ -40,11 +40,22 @@ const navGroups: Array<{ label: string; items: Array<{ id: Section; label: strin
 
 const navItems = navGroups.flatMap((group) => group.items);
 
-export default function DashboardApp({ currentUserEmail }: { currentUserEmail: string }) {
+const subscribeHydration = () => () => {};
+const clientSnapshot = () => true;
+const serverSnapshot = () => false;
+
+export default function DashboardApp(props: { currentUserEmail: string }) {
+  // Fragments are unavailable to SSR. Mount controllers only once the browser
+  // can restore the complete scope; never issue an unfiltered hydration query.
+  const hydrated = useSyncExternalStore(subscribeHydration, clientSnapshot, serverSnapshot);
+  return hydrated ? <DashboardWorkspace {...props}/> : <div role="status">Restoring workspace…</div>;
+}
+
+function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) {
   const searchParams = useSearchParams();
   // Read once. After mount the URL is written FROM state, and popstate is what
   // feeds it back in - re-reading on every render would fight the writer.
-  const initial = useMemo(() => readWorkspaceUrl(new URLSearchParams(searchParams.toString())), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const initial = useMemo(() => readWorkspaceUrl(new URLSearchParams(searchParams.toString()), window.location.hash), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [section, setSection] = useState<Section>(initial.section);
   const [stats, setStats] = useState(emptyStats);
   const [recentImports, setRecentImports] = useState<ImportRecord[]>([]);
@@ -101,7 +112,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   useEffect(() => {
     if (restoring.current) { restoring.current = false; return; }
     const next = writeWorkspaceUrl(urlState);
-    const current = `${window.location.pathname}${window.location.search}`;
+    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     const target = next.startsWith("?") ? `${window.location.pathname}${next}` : next;
     if (target === current) return;
     if (urlState.section !== lastSection.current) window.history.pushState(null, "", target);
@@ -113,7 +124,7 @@ export default function DashboardApp({ currentUserEmail }: { currentUserEmail: s
   // the entry the browser just moved to, which would strand the user on it.
   useEffect(() => {
     const onPopState = () => {
-      const restored = readWorkspaceUrl(new URLSearchParams(window.location.search));
+      const restored = readWorkspaceUrl(new URLSearchParams(window.location.search), window.location.hash);
       restoring.current = true;
       lastSection.current = restored.section;
       setSection(restored.section);

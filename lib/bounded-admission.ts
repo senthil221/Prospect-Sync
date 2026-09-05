@@ -4,6 +4,15 @@ export function boundedInteger(value: string | undefined, fallback: number, min:
   return Number.isSafeInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
+export function configuredInteger(name: string, value: string | undefined, fallback: number, min: number, max: number) {
+  if (value === undefined || value.trim() === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    throw new RangeError(`${name} must be an integer from ${min} to ${max}.`);
+  }
+  return parsed;
+}
+
 export function createAdmissionQueue(limit: number, maxWaiting: number, waitMs: number) {
   if (![limit, maxWaiting, waitMs].every(Number.isSafeInteger) || limit < 1 || maxWaiting < 0 || waitMs < 0) {
     throw new RangeError('Invalid admission limits');

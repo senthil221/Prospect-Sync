@@ -191,11 +191,12 @@ test("the export worker may build a file and may not read one", async () => {
   assert.match(build, /returns table\(appended integer, total_rows bigint, total_parts integer, done boolean\)/);
 
   const worker = await read("../worker/operations-worker.mjs");
-  assert.match(worker, /prospect_exports\.claim_next_v1/);
-  assert.match(worker, /prospect_exports\.build_batch_v1/);
+  const unit = await read("../supabase/migrations/20260905220328_fair_atomic_background_units.sql");
+  assert.match(unit, /prospect_exports\.claim_next_v1/);
+  assert.match(unit, /prospect_exports\.build_batch_v1/);
   assert.match(worker, /prospect_exports\.expire_jobs_v1/);
-  // Three queues, each drained to empty before the next is checked.
-  assert.equal(codeOnly(worker).match(/^\s+continue;$/gm)?.length >= 3, true);
+  // Exactly one unit per class, not a full-queue drain.
+  assert.match(codeOnly(worker), /await round\(\)/);
 });
 
 test("a background export carries the pivot rather than refusing it", async () => {

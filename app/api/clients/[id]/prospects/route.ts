@@ -36,7 +36,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   // The same identity a result set is owned by, so a job can freeze from one.
   const actor = ownerIdentity(user);
 
-  const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const decoded = await readBoundedJson(request);
+  if (decoded.response) return decoded.response;
+  const payload = decoded.value as Record<string, unknown> | null;
   if (!payload) return Response.json({ error: "Invalid request." }, { status: 400 });
   const action = String(payload.action ?? "push");
 
@@ -181,3 +183,4 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   return Response.json({ error: "Unsupported client action." }, { status: 400 });
 }
+import { readBoundedJson } from "../../../../../lib/bounded-json";

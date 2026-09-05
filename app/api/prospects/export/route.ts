@@ -55,7 +55,9 @@ async function runExport(request: Request) {
     return response;
   };
 
-  const payload = await request.json().catch(() => null) as {
+  const decoded = await readBoundedJson(request);
+  if (decoded.response) return decoded.response;
+  const payload = decoded.value as {
     search?: unknown;
     filters?: unknown;
     clientId?: unknown;
@@ -195,3 +197,4 @@ async function runExport(request: Request) {
     },
   });
 }
+import { readBoundedJson } from "../../../../lib/bounded-json";

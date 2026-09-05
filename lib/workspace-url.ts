@@ -10,14 +10,15 @@ import type { ProspectFilter, ProspectFilterOperator, Section } from "./types.ts
 // is narrowing 681,000 rows down to the ones you want, losing the narrowing is
 // losing the work.
 //
-// WHY FILTERS ARE CAPPED HERE AND NOTHING ELSE IS. A URL is not a database, and
+// WHY LARGE FILTERS USE THE FRAGMENT. A URL is not a database, and
 // this product already learned where that wall is: 400 pasted domains is a
 // 12.9 KB request line and is accepted, 600 is 19.3 KB and Node answers 431
 // before any handler runs (see app/api/companies/route.ts). Filters are the one
 // piece of workspace state that can carry thousands of values, so they go in
-// only while they are small. Past the cap the rest of the state still restores -
-// section, search, sort, page, client, scope - and the filters do not, which is
-// a smaller loss than a link that cannot be opened at all.
+// only while they are small. Larger filters AND pivots go into a versioned
+// fragment, which browsers do not send in the HTTP request line. Never silently
+// discard a valid narrowing on refresh. The fragment is still user input and
+// passes through the same parser; it confers no authorization.
 //
 // A durable filter set (20260902000100) shrinks the big ones back to a uuid, so
 // a 5,000-domain paste that has been saved as a set restores from the URL like
@@ -83,7 +84,14 @@ function filters(raw: string | null): ProspectFilter[] {
   } catch { return []; }
 }
 
-export function readWorkspaceUrl(params: URLSearchParams): WorkspaceUrlState {
+export function readWorkspaceUrl(params: URLSearchParams, hash = ""): WorkspaceUrlState {
+  params = new URLSearchParams(params);
+  if (hash.startsWith("#workspace-v1?")) {
+    const overflow = new URLSearchParams(hash.slice("#workspace-v1?".length));
+    for (const key of ["pf", "cf", "cscope", "pscope"]) {
+      if (overflow.has(key)) params.set(key, overflow.get(key)!);
+    }
+  }
   const rawSection = params.get("s") ?? "";
   let companyPeopleScope: CompanyScope | null = null;
   let peopleCompanyScope: PeopleScope | null = null;
@@ -126,17 +134,28 @@ export function writeWorkspaceUrl(state: WorkspaceUrlState): string {
   for (const [key, value] of [["pf", state.prospectFilters], ["cf", state.companyFilters]] as const) {
     if (!value.length) continue;
     const encoded = JSON.stringify(value);
-    // Silently dropped rather than truncated: half a filter list is a different
-    // question, and restoring the wrong narrowing is worse than restoring none.
-    if (encoded.length <= maxFilterUrlChars) params.set(key, encoded);
+    params.set(key, encoded);
   }
 
+  const overflow = new URLSearchParams();
+  const stateKeys = ["pf", "cf", "cscope", "pscope"];
+  // Bound the *encoded total*, not just each raw JSON string (Unicode and
+  // multiple scopes can expand much more than a single ASCII value).
+  const moveAll = params.toString().length > 6000;
+  for (const key of stateKeys) {
+    const value = params.get(key);
+    if (value && (moveAll || value.length > maxFilterUrlChars)) {
+      overflow.set(key, value);
+      params.delete(key);
+    }
+  }
   const query = params.toString();
-  return query ? `?${query}` : window.location.pathname;
+  const fragment = overflow.size ? `#workspace-v1?${overflow}` : "";
+  return (query ? `?${query}` : window.location.pathname) + fragment;
 }
 
-// True when the filters are too large to survive a link, so the UI can say so
-// instead of letting someone share a URL that quietly loses their work.
+// Whether filters fit in the HTTP query portion. Larger values survive in the
+// fragment; durable filter sets remain preferable for very large shared lists.
 export function filtersFitInUrl(value: ProspectFilter[]) {
   return !value.length || JSON.stringify(value).length <= maxFilterUrlChars;
 }

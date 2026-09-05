@@ -233,13 +233,12 @@ test("the worker runs operations without being able to decide what they are", as
   const worker = await read("../worker/operations-worker.mjs");
   const code = codeOnly(worker);
 
-  assert.match(code, /prospect_operations\.claim_next_v1\(\$1, \$2\)/);
-  assert.match(code, /prospect_operations\.apply_batch_v1\(\$1, \$2, \$3\)/);
+  assert.match(code, /prospect_operations\.run_queue_unit_v1\(\$1,\$2,\$3\)/);
   assert.match(code, /prospect_operations\.expire_jobs_v1\(\)/);
   // It cannot enqueue or freeze - that belongs to a signed-in request.
   assert.doesNotMatch(code, /enqueue_v1|freeze_from/);
   // Still no PostgREST client: everything goes down its own connection.
   assert.doesNotMatch(code, /createClient|supabase/i);
   // Neither queue may starve the other.
-  assert.match(code, /await runOperation\(operation\);\s*\n\s*continue;/);
+  assert.match(code, /createFairScheduler\(\{ classes: \['search', 'operation', 'export'\]/);
 });

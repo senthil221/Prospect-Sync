@@ -43,7 +43,9 @@ export async function POST(request: Request) {
   const owner = ownerIdentity(user);
   if (!owner) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-  const payload = await request.json().catch(() => null) as Record<string, unknown> | null;
+  const decoded = await readBoundedJson(request);
+  if (decoded.response) return decoded.response;
+  const payload = decoded.value as Record<string, unknown> | null;
   if (!payload) return Response.json({ error: "Invalid export request." }, { status: 400 });
 
   const entityType = String(payload.entityType ?? "prospect").trim();
@@ -192,3 +194,4 @@ export async function GET(request: Request) {
     error: row.error ?? null,
   });
 }
+import { readBoundedJson } from "../../../lib/bounded-json";

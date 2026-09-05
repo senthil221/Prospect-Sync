@@ -25,7 +25,9 @@ export async function POST(request: Request) {
   const user = await getAuthorizedUser();
   if (!user?.id) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-  const payload = await request.json().catch(() => null) as {
+  const decoded = await readBoundedJson(request);
+  if (decoded.response) return decoded.response;
+  const payload = decoded.value as {
     entityType?: unknown;
     field?: unknown;
     clientScope?: unknown;
@@ -89,3 +91,4 @@ export async function POST(request: Request) {
     reused: row.reused === true,
   });
 }
+import { readBoundedJson } from "../../../lib/bounded-json";
