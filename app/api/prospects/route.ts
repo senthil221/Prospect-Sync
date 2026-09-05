@@ -5,6 +5,9 @@ import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { filterErrorResponse, parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { parseCompanyScope, type CompanyScope } from "../../../lib/workspace-scopes";
+import { needsCompanyPreparation } from "../../../lib/prepared-search";
+import { ownerIdentity } from "../../../lib/result-sets";
+import { prepareCompanyScope, preparationResponse } from "../../../lib/prepare-company-scope";
 
 type WorkspaceQuery = {
   search: string;
@@ -14,7 +17,7 @@ type WorkspaceQuery = {
   limit: number;
   offset: number;
   clientId: string | null;
-  companyScope: CompanyScope | null;
+  companyScope: (CompanyScope & { _prepared_set_id?: string; _prepared_owner?: string }) | null;
   withTotal: boolean;
   knownVersions: Record<string, number> | null;
   signal: AbortSignal | undefined;
@@ -82,8 +85,21 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
 
   // A set id is not authorization: re-check ownership on every use, before the
   // query that would read the set runs (section 4.1).
-  const setDenial = await authorizeFilterSets(supabase, filters, (await getAuthorizedUser())?.id ?? "", "prospect", clientId ?? "");
+  const user = await getAuthorizedUser();
+  const setDenial = await authorizeFilterSets(supabase, filters, user?.id ?? "", "prospect", clientId ?? "");
   if (setDenial) return setDenial;
+
+  let resolvedScope: WorkspaceQuery['companyScope'] = companyScope;
+  if (companyScope) {
+    const scopeDenial = await authorizeFilterSets(supabase, companyScope.filters, user?.id ?? "", "company", clientId ?? "");
+    if (scopeDenial) return scopeDenial;
+  }
+  if (companyScope && needsCompanyPreparation(companyScope)) {
+    const owner = ownerIdentity(user);
+    const prepared = await prepareCompanyScope(supabase, owner, companyScope, signal);
+    if (prepared.response) return prepared.response;
+    resolvedScope = prepared.scope ?? companyScope;
+  }
 
   const workspaceRequest = runProspectWorkspace(supabase, {
     search,
@@ -93,7 +109,7 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
     limit,
     offset: (page - 1) * limit,
     clientId,
-    companyScope,
+    companyScope: resolvedScope,
     withTotal,
     knownVersions,
     signal,
@@ -106,6 +122,9 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
     return Response.json({ error: "Apply the latest database migration to enable the new prospect filters." }, { status: 503 });
   }
   const error = workspace.error ?? fields.error;
+  if (resolvedScope?._prepared_set_id && (error?.code === '40001' || error?.code === 'P0002')) {
+    return preparationResponse('refreshing', 0);
+  }
   if (isStatementTimeout(error)) {
     return statementTimeoutResponse("This filter combination", "Narrow it - fewer filters, or a search term alongside them - or export the full set instead.");
   }

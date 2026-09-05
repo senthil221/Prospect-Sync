@@ -7,9 +7,11 @@ import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import type { ClientRecord, Prospect, ProspectFilter } from "../../lib/types";
 import ProspectTable from "./ProspectTable";
 import { useDebouncedValue } from "./useDebouncedValue";
+import { needsCompanyPreparation, type PreparationProgress } from "../../lib/prepared-search";
 
 export function useProspectsWorkspaceController({ active, search, filters, sort, direction, companyScope, statsProspects, initialPage, onLoading, onError }: { active: boolean; search: string; filters: ProspectFilter[]; sort: string; direction: "asc" | "desc"; companyScope: CompanyScope | null; statsProspects: number; initialPage?: number; onLoading: (loading: boolean) => void; onError: (error: string) => void }) {
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [preparation, setPreparation] = useState<PreparationProgress | null>(null);
   const [total, setTotal] = useState(0);
   const [totalEstimated, setTotalEstimated] = useState(false);
   // The count stopped at its cap, so the total on screen is a floor.
@@ -36,6 +38,7 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
     if (deferredSearch !== debouncedSearch) return () => { current = false; controller.abort(); };
     void (async () => {
       onLoading(true); onError("");
+      setPreparation(needsCompanyPreparation(companyScope) ? { status: 'checking', message: 'Checking the matching companies…', matchedCompanies: 0 } : null);
       try {
         const cached = totalCache.current.get(countKey);
         // A big pasted list is stored once and sent as an id from then on. Note
@@ -44,7 +47,7 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
         // identity (section 4.1) - the same question asked with values or with
         // a set id is the same question, and must hit the same cached count.
         const requestFilters = JSON.stringify(await filterPayloadWithSets(JSON.parse(encodedFilters), "prospect", ""));
-        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; scopeCapped?: boolean; versions?: Record<string, number> | null; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: requestFilters, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !cached, knownVersions: cached?.versions ?? null }, { signal: controller.signal });
+        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; scopeCapped?: boolean; versions?: Record<string, number> | null; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: requestFilters, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !cached, knownVersions: cached?.versions ?? null }, { signal: controller.signal }, progress => { if (current) setPreparation(progress); });
         if (current) {
           setProspects(data.prospects);
           setScopeCapped(data.scopeCapped === true);
@@ -59,17 +62,18 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
           if (data.fields?.length) { fieldsLoaded.current = true; setFields(data.fields); }
         }
       } catch (caught) { if (current && !isAbortError(caught)) onError(caught instanceof Error ? caught.message : "Unable to load workspace data."); }
-      finally { if (current) onLoading(false); }
+      finally { if (current) { onLoading(false); setPreparation(null); } }
     })();
     return () => { current = false; controller.abort(); };
   }, [active, deferredSearch, debouncedSearch, statsProspects, page, encodedFilters, sort, direction, refresh, companyScope, countKey, onError, onLoading]);
 
   const refreshWorkspace = useCallback(() => setRefresh((current) => current + 1), []);
-  return { prospects, total, totalEstimated, totalCapped, scopeCapped, fields, page, setPage, deferredSearch, fieldsLoaded: fields.length > 0, refreshWorkspace };
+  return { prospects, total, totalEstimated, totalCapped, scopeCapped, fields, page, setPage, deferredSearch, fieldsLoaded: fields.length > 0, refreshWorkspace, preparation };
 }
 
 export default function ProspectsWorkspace({ controller, filters, sort, direction, clients, companyScope, onClearCompanyScope, onClearSearch, onSeeCompanies, onFiltersChange, onSortChange, onSelect, onImport }: { controller: ReturnType<typeof useProspectsWorkspaceController>; filters: ProspectFilter[]; sort: string; direction: "asc" | "desc"; clients: ClientRecord[]; companyScope: CompanyScope | null; onClearCompanyScope: () => void; onClearSearch: () => void; onSeeCompanies: (scope: PeopleScope) => void; onFiltersChange: (filters: ProspectFilter[]) => void; onSortChange: (sort: string, direction: "asc" | "desc") => void; onSelect: (prospect: Prospect) => void; onImport: () => void }) {
   const handleSortChange = useCallback((nextSort: string, nextDirection: "asc" | "desc") => { onSortChange(nextSort, nextDirection); controller.setPage(1); }, [controller, onSortChange]);
   const handleFiltersChange = useCallback((next: ProspectFilter[]) => { onFiltersChange(next); controller.setPage(1); }, [controller, onFiltersChange]);
+  if (controller.preparation) return <div className="panel" role="status" style={{ padding: 'var(--space-6)' }}><h3>Preparing your company search</h3><p>{controller.preparation.message}</p><button className="secondary" onClick={onClearCompanyScope}>Clear company scope</button></div>;
   return <ProspectTable prospects={controller.prospects} total={controller.total} totalEstimated={controller.totalEstimated} totalCapped={controller.totalCapped} scopeCapped={controller.scopeCapped} fields={controller.fields} filters={filters} page={controller.page} clients={clients} search={controller.deferredSearch} sort={sort} direction={direction} companyScope={companyScope} onClearCompanyScope={onClearCompanyScope} onClearSearch={onClearSearch} onSeeCompanies={onSeeCompanies} onSortChange={handleSortChange} onFiltersChange={handleFiltersChange} onPageChange={controller.setPage} onSelect={onSelect} onImport={onImport} onRefresh={controller.refreshWorkspace}/>;
 }

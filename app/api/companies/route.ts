@@ -7,6 +7,9 @@ import { csvHeaderLine, csvRowsBody, type ProspectRow } from "../../../lib/prosp
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { filterErrorResponse, parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
 import { parsePeopleScope, type PeopleScope } from "../../../lib/workspace-scopes";
+import { needsCompanyPreparation } from "../../../lib/prepared-search";
+import { prepareCompanyScope, preparationResponse } from "../../../lib/prepare-company-scope";
+import { ownerIdentity } from "../../../lib/result-sets";
 
 // One keyset page. It was 1,000 when each page was a fresh OFFSET scan and
 // making them larger made the quadratic worse; a keyset page costs the same
@@ -256,7 +259,18 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
   // filtered client-company view goes here too, while the unfiltered client view
   // keeps its dedicated RPC.
   if (filters.length || peopleScope) {
-    const { data, error } = await supabase.rpc("filter_companies_v4", {
+    let preparedSetId: string | null = null;
+    const owner = ownerIdentity(await getAuthorizedUser());
+    const scope = { search, filters, limit: 250000 };
+    if (!peopleScope && needsCompanyPreparation(scope)) {
+      const prepared = await prepareCompanyScope(supabase, owner, scope, signal);
+      if (prepared.response) return prepared.response;
+      preparedSetId = prepared.scope?._prepared_set_id ?? null;
+    }
+    const listing = preparedSetId ? supabase.rpc('prepared_company_listing_v1', {
+      p_owner_id: owner, p_set_id: preparedSetId, p_search: search, p_filters: filters,
+      p_limit: pageSize, p_offset: from, p_known_versions: knownVersions,
+    }) : supabase.rpc("filter_companies_v4", {
       p_search: search,
       p_filters: filters,
       p_client_id: clientId || null,
@@ -264,7 +278,9 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
       p_limit: pageSize,
       p_offset: from,
       p_known_versions: knownVersions,
-    }).abortSignal(signal ?? AbortSignal.timeout(40_000));
+    });
+    const { data, error } = await listing.abortSignal(signal ?? AbortSignal.timeout(40_000));
+    if (preparedSetId && (error?.code === '40001' || error?.code === 'P0002')) return preparationResponse('refreshing');
     if (isStatementTimeout(error)) {
       return statementTimeoutResponse("This filter combination", "Narrow it - fewer filters, or a search term alongside them - or export the full set instead.");
     }

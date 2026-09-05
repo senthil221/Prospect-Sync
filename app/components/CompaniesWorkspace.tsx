@@ -13,9 +13,11 @@ import { AppIcon, WorkspaceEmpty } from "./DashboardUi";
 import CompanyTableRow from "./CompanyTableRow";
 import MenuButton from "./MenuButton";
 import { useDebouncedValue } from "./useDebouncedValue";
+import { needsCompanyPreparation, type PreparationProgress } from "../../lib/prepared-search";
 
 export function useCompaniesWorkspaceController({ active, search, filters, peopleScope, initialPage, onLoading, onError }: { active: boolean; search: string; filters: ProspectFilter[]; peopleScope: PeopleScope | null; initialPage?: number; onLoading: (loading: boolean) => void; onError: (error: string) => void }) {
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [preparation, setPreparation] = useState<PreparationProgress | null>(null);
   const [page, setPage] = useState(initialPage ?? 1);
   const [summary, setSummary] = useState({ total: 0, totalCapped: false, covered: 0, prospectTotal: 0, pageSize: 50 });
   const [refresh, setRefresh] = useState(0);
@@ -47,6 +49,8 @@ export function useCompaniesWorkspaceController({ active, search, filters, peopl
     if (deferredSearch !== debouncedSearch) return () => { current = false; controller.abort(); };
     void (async () => {
       onLoading(true); onError("");
+      setPreparation(!peopleScope && needsCompanyPreparation({ search: debouncedSearch, filters: JSON.parse(encodedFilters), limit: 250000 })
+        ? { status: 'checking', message: 'Checking the matching companies…', matchedCompanies: 0 } : null);
       try {
         const requestFilters = JSON.stringify(await filterPayloadWithSets(JSON.parse(encodedFilters), "company", ""));
         if (!current) return;
@@ -54,7 +58,7 @@ export function useCompaniesWorkspaceController({ active, search, filters, peopl
         // encoding, so the same question asked with values or with a set id
         // hits the same cached count.
         const cached = countCache.current.get(countKey);
-        const data = await fetchCompanies<{ companies: Company[]; total: number | null; totalCapped?: boolean; covered: number | null; prospectTotal: number | null; versions?: Record<string, number> | null; pageSize: number }>({ search: debouncedSearch, page, encodedFilters: requestFilters, peopleScope, knownVersions: cached?.versions ?? null }, { signal: controller.signal });
+        const data = await fetchCompanies<{ companies: Company[]; total: number | null; totalCapped?: boolean; covered: number | null; prospectTotal: number | null; versions?: Record<string, number> | null; pageSize: number }>({ search: debouncedSearch, page, encodedFilters: requestFilters, peopleScope, knownVersions: cached?.versions ?? null }, { signal: controller.signal }, progress => { if (current) setPreparation(progress); });
         if (current) {
           setCompanies(data.companies);
           if (data.total !== null && data.total !== undefined) {
@@ -66,17 +70,18 @@ export function useCompaniesWorkspaceController({ active, search, filters, peopl
           }
         }
       } catch (caught) { if (current && !isAbortError(caught)) onError(caught instanceof Error ? caught.message : "Unable to load workspace data."); }
-      finally { if (current) onLoading(false); }
+      finally { if (current) { onLoading(false); setPreparation(null); } }
     })();
     return () => { current = false; controller.abort(); };
   }, [active, deferredSearch, debouncedSearch, page, encodedFilters, refresh, peopleScope, countKey, onError, onLoading]);
 
   const refreshWorkspace = useCallback(() => setRefresh((current) => current + 1), []);
-  return { companies, page, setPage, summary, deferredSearch, refreshWorkspace };
+  return { companies, page, setPage, summary, deferredSearch, refreshWorkspace, preparation };
 }
 
 export default function CompaniesWorkspace({ controller, clients, filters, peopleScope, onClearPeopleScope, onClearSearch, onSeePeople, onFilters, onImport }: { controller: ReturnType<typeof useCompaniesWorkspaceController>; clients: ClientRecord[]; filters: ProspectFilter[]; peopleScope: PeopleScope | null; onClearPeopleScope: () => void; onClearSearch: () => void; onSeePeople: (scope: CompanyScope) => void; onFilters: (filters: ProspectFilter[]) => void; onImport: () => void }) {
   const handleFilters = useCallback((next: ProspectFilter[]) => { onFilters(next); controller.setPage(1); }, [controller, onFilters]);
+  if (controller.preparation) return <div className="panel" role="status" style={{ padding: 'var(--space-6)' }}><h3>Preparing your company search</h3><p>{controller.preparation.message}</p><button className="secondary" onClick={() => handleFilters([])}>Clear company filters</button></div>;
   return <CompanyTable companies={controller.companies} clients={clients} total={controller.summary.total} totalCapped={controller.summary.totalCapped} covered={controller.summary.covered} prospectTotal={controller.summary.prospectTotal} page={controller.page} pageSize={controller.summary.pageSize} search={controller.deferredSearch} filters={filters} peopleScope={peopleScope} onClearPeopleScope={onClearPeopleScope} onClearSearch={onClearSearch} onSeePeople={onSeePeople} onFilters={handleFilters} onPageChange={controller.setPage} onImport={onImport} onRefresh={controller.refreshWorkspace}/>;
 }
 

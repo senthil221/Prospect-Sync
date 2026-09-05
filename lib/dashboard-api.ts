@@ -1,5 +1,6 @@
 import type { ProspectFilter } from "./types.ts";
 import type { CompanyScope, PeopleScope } from "./workspace-scopes.ts";
+import { awaitPreparedSearch, needsCompanyPreparation, type PreparationProgress } from "./prepared-search.ts";
 
 const apiResponseCache = new Map<string, { data: unknown; expiresAt: number }>();
 const apiRequests = new Map<string, Promise<unknown>>();
@@ -163,16 +164,21 @@ type CompanyQuery = {
   knownVersions?: Record<string, number> | null;
 };
 
-export async function fetchCompanies<T>(query: CompanyQuery, init?: RequestInit): Promise<T> {
+export async function fetchCompanies<T>(query: CompanyQuery, init?: RequestInit, onPreparation?: (progress: PreparationProgress | null) => void): Promise<T> {
   const path = companyApiPath(query);
-  if (path.length <= maxCompanyQueryUrlBytes) return api<T>(path, init);
+  const filters = query.encodedFilters ? JSON.parse(query.encodedFilters) as ProspectFilter[] : query.filters ?? [];
+  const prepared = !query.clientId && !query.peopleScope && needsCompanyPreparation({ search: query.search ?? '', filters, limit: 250000 });
+  if (path.length <= maxCompanyQueryUrlBytes && !prepared) return api<T>(path, init);
 
   // Deliberately not routed through api(): it keys its cache on the path, and
   // treats every non-GET as a mutation that clears the whole cache. Neither is
   // right for a read that simply outgrew the URL.
   const encoded = companyFilterParam(query.filters ?? [], query.encodedFilters ?? "");
-  const response = await fetch("/api/companies", {
+  const read = () => path.length <= maxCompanyQueryUrlBytes
+    ? fetchWithBackpressure(path, { ...init, cache: 'no-store' }, true)
+    : fetchWithBackpressure("/api/companies", {
     ...init,
+    cache: 'no-store',
     method: "POST",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     body: JSON.stringify({
@@ -184,7 +190,8 @@ export async function fetchCompanies<T>(query: CompanyQuery, init?: RequestInit)
       ...(query.peopleScope ? { peopleScope: JSON.stringify(query.peopleScope) } : {}),
       ...(query.knownVersions ? { knownVersions: JSON.stringify(query.knownVersions) } : {}),
     }),
-  });
+  }, true);
+  const response = prepared ? await awaitPreparedSearch(read, { signal: init?.signal, onProgress: onPreparation }) : await read();
   return parseApiResponse<T>(response);
 }
 
@@ -192,11 +199,15 @@ type ProspectQuery = Parameters<typeof prospectApiPath>[0];
 
 // The People filters have the same 1000-value ceiling and the same query-string
 // transport, so they hit the same 431 wall. Same remedy.
-export async function fetchProspects<T>(query: ProspectQuery, init?: RequestInit): Promise<T> {
+export async function fetchProspects<T>(query: ProspectQuery, init?: RequestInit, onPreparation?: (progress: PreparationProgress | null) => void): Promise<T> {
   const path = prospectApiPath(query);
-  if (path.length <= maxCompanyQueryUrlBytes) return api<T>(path, init);
-  const response = await fetch("/api/prospects", {
+  const prepared = needsCompanyPreparation(query.companyScope);
+  if (path.length <= maxCompanyQueryUrlBytes && !prepared) return api<T>(path, init);
+  const read = () => path.length <= maxCompanyQueryUrlBytes
+    ? fetchWithBackpressure(path, { ...init, cache: 'no-store' }, true)
+    : fetchWithBackpressure("/api/prospects", {
     ...init,
+    cache: 'no-store',
     method: "POST",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     body: JSON.stringify({
@@ -209,8 +220,10 @@ export async function fetchProspects<T>(query: ProspectQuery, init?: RequestInit
       withTotal: (query.withTotal ?? (query.page ?? 1) === 1) ? "1" : "0",
       ...(query.clientId ? { clientId: query.clientId } : {}),
       ...(query.companyScope ? { companyScope: JSON.stringify(query.companyScope) } : {}),
+      ...(query.knownVersions ? { knownVersions: JSON.stringify(query.knownVersions) } : {}),
     }),
-  });
+  }, true);
+  const response = prepared ? await awaitPreparedSearch(read, { signal: init?.signal, onProgress: onPreparation }) : await read();
   return parseApiResponse<T>(response);
 }
 

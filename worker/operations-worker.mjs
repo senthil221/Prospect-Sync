@@ -30,6 +30,9 @@
 // A build of a million ids is many short transactions against a keyset cursor
 // rather than one long one, so nothing holds a snapshot open while it runs and
 // a restart resumes instead of starting again.
+// Prepared company pivots are the bounded exception: their expensive text
+// predicate runs once, atomically, within the same 120-second session limit.
+// An interrupted preparation rolls back and restarts; ordinary sets still resume.
 //
 // THE TIMEOUT COMES FROM HERE, NOT FROM THE FUNCTIONS. build_batch_v1 and
 // apply_batch_v1 both declare `SET statement_timeout = '120s'`, and neither
