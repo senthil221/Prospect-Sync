@@ -86,7 +86,8 @@ async function runExport(request: Request) {
   const supabase = createAdminClient();
 
   // An export reads the same sets the grid did, and re-checks them the same way.
-  const setDenial = await authorizeFilterSets(supabase, filters, (await getAuthorizedUser())?.id ?? "", "prospect", clientId ?? "");
+  const setDenial = await authorizeFilterSets(supabase, filters, (await getAuthorizedUser())?.id ?? "", "prospect", clientId ?? "",
+    companyScope ? [{ entityType: 'company', clientScope: clientId ?? '', filters: companyScope.filters }] : []);
   if (setDenial) return answer(setDenial);
 
   const fieldRows = await supabase.from("prospect_fields").select("field_name").order("field_name").limit(500);
@@ -194,4 +195,3 @@ async function runExport(request: Request) {
     },
   });
 }
-

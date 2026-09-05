@@ -22,6 +22,25 @@ test('browser input cannot supply a prepared set or its owner', () => {
   assert.equal(parsed.filters[0].values.length,51);
 });
 
+test('preparation classification totals terms across filters and inside Boolean expressions', () => {
+  const split = scope(4); split.filters.push(...scope(4).filters);
+  assert.equal(needsCompanyPreparation(split), true);
+  for (const expression of ['cloud OR hosting OR software OR MSP OR security OR data OR consulting OR migration',
+    "('cloud' | 'hosting' | 'software' | 'MSP' | 'security' | 'data' | 'consulting' | 'migration')"]) {
+    const boolean = scope(1); boolean.filters[0].operator = 'boolean'; boolean.filters[0].values = [expression];
+    assert.equal(needsCompanyPreparation(boolean), true);
+  }
+});
+
+test('continuous invalidation stops instead of rebuilding forever', async () => {
+  let calls = 0;
+  await assert.rejects(awaitPreparedSearch(async () => {
+    calls++;
+    return Response.json({ preparation: { status: 'refreshing' } }, { status: 202 });
+  }, { delayMs: 1 }), /Company data is changing/);
+  assert.equal(calls, 2);
+});
+
 test('queued searches publish progress then return the actual result response', async () => {
   let calls=0; const progress=[];
   const result=await awaitPreparedSearch(async()=> ++calls===1

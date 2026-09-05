@@ -168,6 +168,8 @@ export async function DELETE(request: Request) {
     search?: unknown;
     filters?: unknown;
     excludedIds?: unknown;
+    peopleScope?: unknown;
+    clientId?: unknown;
   } | null;
   if (!payload) return Response.json({ error: "Invalid delete request." }, { status: 400 });
   const supabase = createAdminClient();
@@ -182,10 +184,13 @@ export async function DELETE(request: Request) {
   }
 
   if (payload.allMatching === true) {
+    if (payload.peopleScope || payload.clientId) return Response.json({ error: 'Delete selected IDs for a scoped view. Global all-matching deletion cannot discard a pivot or client scope.' }, { status: 400 });
     const search = String(payload.search ?? "").trim().replace(/[,()]/g, " ");
     let filters: ProspectFilter[];
     try { filters = parseFilters(JSON.stringify(payload.filters ?? [])); }
     catch (error) { return filterErrorResponse(error, "Invalid company filters."); }
+    const setDenial = await authorizeFilterSets(supabase, filters, (await getAuthorizedUser())?.id ?? '', 'company', '');
+    if (setDenial) return setDenial;
     const excludedIds = Array.isArray(payload.excludedIds) ? [...new Set(payload.excludedIds.map((id) => String(id).trim()).filter(Boolean))].slice(0, 50000) : [];
     const { data, error } = await supabase.rpc("delete_companies_matching_v1", { p_search: search, p_filters: filters, p_excluded_ids: excludedIds });
     if (error) return Response.json({ error: missing(error) ? "Apply the latest database migration to enable company delete." : error.message }, { status: missing(error) ? 503 : 500 });
@@ -226,7 +231,8 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
   } catch { knownVersions = null; }
 
   // A set id is not authorization: re-check ownership on every use.
-  const setDenial = await authorizeFilterSets(createAdminClient(), filters, (await getAuthorizedUser())?.id ?? "", "company", clientId);
+  const setDenial = await authorizeFilterSets(createAdminClient(), filters, (await getAuthorizedUser())?.id ?? "", "company", clientId,
+    peopleScope ? [{ entityType: 'prospect', clientScope: clientId, filters: peopleScope.filters }] : []);
   if (setDenial) return setDenial;
 
   if (exportCsv) {

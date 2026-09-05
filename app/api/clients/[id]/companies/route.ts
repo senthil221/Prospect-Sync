@@ -1,4 +1,5 @@
 import { authorizeApi, getAuthorizedUser } from "../../../../../lib/auth.ts";
+import { authorizeFilterSets } from "../../../../../lib/filter-sets.ts";
 import { MAX_BULK_COMPANY_MATCHES, parseCompanyBulkSelection } from "../../../../../lib/company-bulk-selection.ts";
 import { filterErrorResponse, parseFilters } from "../../../../../lib/prospect-filters.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
@@ -71,6 +72,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     : [];
   const user = await getAuthorizedUser();
   const supabase = createAdminClient();
+  if (allMatching && !explicitIds.length) {
+    const sourceScope = action === 'push' ? '' : clientId;
+    const setDenial = await authorizeFilterSets(supabase, filters, user?.id ?? '', 'company', sourceScope,
+      peopleScope ? [{ entityType: 'prospect', clientScope: sourceScope, filters: peopleScope.filters }] : []);
+    if (setDenial) return setDenial;
+  }
   const rpcName = action === "push" ? "push_companies_to_client_v1" : "set_company_icp_verified_v2";
   const rpcArgs = {
     p_client_id: clientId,

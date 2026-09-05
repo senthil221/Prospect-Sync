@@ -78,12 +78,15 @@ psql_run -c "select jsonb_pretty(public.prospect_index_drift());" 2>/dev/null \
   || echo "  drift check not present - apply migrations"
 
 echo
-echo "=== Reindexing prospect_index ==="
-# This table is fully rewritten by reindex_all and every import. Its GIN/btree
-# indexes bloat faster than autovacuum reclaims. REINDEX takes an ACCESS
-# EXCLUSIVE lock, which is why this runs at 04:30 on a Sunday.
-psql_run -c "reindex table concurrently public.prospect_index;" \
-  || psql_run -c "reindex table public.prospect_index;"
+echo "=== Optional concurrent index maintenance ==="
+# Rebuilding every index weekly is not routine vacuuming. Require an explicit
+# decision after bloat/disk review. Never retry with a blocking table reindex.
+if [[ "${MAINTENANCE_REINDEX:-0}" == "1" ]]; then
+  psql_run -c "set lock_timeout = '5s';" -c "reindex table concurrently public.prospect_index;" \
+    || { echo "Concurrent reindex failed; inspect invalid indexes before retrying." >&2; exit 1; }
+else
+  echo "  skipped; set MAINTENANCE_REINDEX=1 only after reviewing bloat and free disk"
+fi
 
 echo
 echo "=== Refreshing planner statistics ==="
@@ -100,7 +103,7 @@ end $$;
 SQL
 
 echo
-echo "=== Slowest statements this week ==="
+echo "=== Slowest statements since statistics reset ==="
 psql_run -c "
   select
     round(mean_exec_time::numeric, 1) as avg_ms,
@@ -111,7 +114,7 @@ psql_run -c "
   where calls > 5 and mean_exec_time > 250
   order by total_exec_time desc
   limit 10;" 2>/dev/null || echo "(pg_stat_statements not available)"
-psql_run -q -c "select pg_stat_statements_reset();" >/dev/null 2>&1 || true
+# Keep cumulative counters for before/after deltas and incident investigation.
 
 echo
 echo "=== Company filter suggestions ==="

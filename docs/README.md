@@ -1,20 +1,22 @@
 # Plans
 
-The two documents the recent work is written against, plus the drafts they
-superseded. Neither is a specification the code must match forever; both are
-records of what was decided and why, and both have been corrected by
+The current implementation plans, plus the drafts they
+superseded. None is a specification the code must match forever; they are
+records of what was decided and why, and have been corrected by
 measurement more than once.
 
 ## Current
 
-**`prospect-sync-scalability-plan-v7-final.md`** — the scalability and
-resilience blueprint. Drove migrations `20260902000040` through
-`20260902000180` and the two background workers. Its numbered releases, not its
-phases, are the unit of work. Releases 1A, 1B, 1C and all of Release 2 are
-complete; Release 3 is next.
+**[Scalability and reliability v8](prospect-sync-scalability-plan-v8-systemwide.md)** —
+the current forward implementation plan, based on repository `417f67c` and
+the measured description-search release. Covers all query consumers, fair
+background work, cache/storage budgets, snapshot correctness and capacity
+certification. Implementation is in progress; see the
+[verification ledger](v8-implementation-status.md) for implemented work and gaps.
+Mobile validation remains last. A plan is not production-change authorization.
 
-It "does not authorize implementation by itself", in its own words, so each
-release needs a decision before it starts.
+**[Company-description performance report](company-description-search-performance.md)** —
+the measured targeted fix preceding v8. It is not whole-system capacity proof.
 
 **`prospect-sync-ui-audit-redesign-plan.md`** — the UI audit and redesign.
 Section H is the roadmap; the IDs it defines (`PEOPLE-01`, `CLIENT-03`,
@@ -28,12 +30,16 @@ seen rendered: the app is behind a login the implementing session could not
 reach, so the evidence is source assertions and computed contrast, not pixels.
 `tests/mobile-shell.test.mjs` says which of the two it is standing in for.
 
-A third document now sits alongside them: **`prospect-sync-color-redesign-prompt.md`**,
+Also current: **`prospect-sync-color-redesign-prompt.md`**,
 the colour and background brief. Its palette is implemented in
 `app/design-system.css` and gated by `tests/color-contrast.test.mjs`;
 `color-contrast-matrix.md` is the generated evidence.
 
 ## Superseded
+
+`prospect-sync-scalability-plan-v7-final.md` remains the historical rationale
+for earlier migrations and workers. Its release-status and capacity statements
+must not be read as fresh certification; v8 supersedes its forward roadmap.
 
 `prospect-sync-scalability-plan.md`, `-v3`, and `-final-fixed` are earlier
 drafts. They are kept because the v7 document argues against several of their

@@ -56,8 +56,12 @@ export const maxFilters = 60;
 // which rows match, so both are refusals rather than clamps.
 export const maxValueLength = 160;
 export const maxBooleanValueLength = 1000;
+// Per-filter ceilings do not bound a whole query: 60 × 5,000 is 300,000
+// predicates. These budgets cover the complete inline query, including pivots.
+export const maxQueryInlineValues = 20_000;
+export const maxQueryFilterBytes = 1_048_576;
 
-export type FilterLimitKind = "filters" | "values" | "value_length";
+export type FilterLimitKind = "filters" | "values" | "value_length" | "total_values" | "request_bytes";
 
 // Thrown instead of trimming. Carries everything an API route needs to answer
 // 413 with actionable numbers: what arrived, what is allowed, which filter, and
@@ -72,6 +76,8 @@ export class FilterLimitError extends Error {
   constructor(kind: FilterLimitKind, received: number, allowed: number, field: string | null, alternative: string) {
     const subject = kind === "filters" ? "filters"
       : kind === "values" ? "filter values"
+      : kind === "total_values" ? "inline values across the query"
+      : kind === "request_bytes" ? "bytes of filter data"
       : "characters in a filter value";
     super(`This request carries ${received} ${subject}; at most ${allowed} are allowed.`);
     this.name = "FilterLimitError";
@@ -110,13 +116,16 @@ export function filterErrorResponse(error: unknown, fallback: string): Response 
 // function cannot honour exactly is refused, never narrowed.
 export function parseFilters(value: string | null): ProspectFilter[] {
   if (!value) return [];
+  const inputBytes = new TextEncoder().encode(value).byteLength;
+  if (inputBytes > maxQueryFilterBytes) throw new FilterLimitError('request_bytes', inputBytes, maxQueryFilterBytes, null,
+    'Reduce the inline filter data, or use saved value lists for exact matching. No values were dropped.');
   const parsed = JSON.parse(value) as unknown;
   if (!Array.isArray(parsed)) return [];
   if (parsed.length > maxFilters) {
     throw new FilterLimitError("filters", parsed.length, maxFilters, null,
       `Remove filters until at most ${maxFilters} remain, or save the narrow ones as a view and apply them in two passes.`);
   }
-  return parsed.flatMap((item): ProspectFilter[] => {
+  const filters = parsed.flatMap((item): ProspectFilter[] => {
     if (!item || typeof item !== "object") return [];
     const candidate = item as Record<string, unknown>;
     const field = String(candidate.field ?? "").trim().slice(0, 160);
@@ -161,4 +170,20 @@ export function parseFilters(value: string | null): ProspectFilter[] {
     return [{ field, operator: operator as ProspectFilterOperator, values,
       ...(field === "__company_keywords" ? { scopes: scopes.length ? scopes : defaultCompanyKeywordScopes } : {}) }];
   });
+  assertQueryFilterBudget([filters]);
+  return filters;
+}
+
+export function assertQueryFilterBudget(groups: ProspectFilter[][]) {
+  let values = 0;
+  let bytes = 0;
+  const encoder = new TextEncoder();
+  for (const filters of groups) {
+    values += filters.reduce((sum, filter) => sum + filter.values.length, 0);
+    bytes += encoder.encode(JSON.stringify(filters)).byteLength;
+  }
+  if (values > maxQueryInlineValues) throw new FilterLimitError('total_values', values, maxQueryInlineValues, null,
+    'Reduce inline values across the main filters and pivots, or use saved value lists for exact matching. No values were dropped.');
+  if (bytes > maxQueryFilterBytes) throw new FilterLimitError('request_bytes', bytes, maxQueryFilterBytes, null,
+    'Reduce the combined filter data across the main query and pivots. No values were dropped.');
 }

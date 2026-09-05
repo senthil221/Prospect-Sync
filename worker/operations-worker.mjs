@@ -104,10 +104,13 @@ async function claimNext() {
 
 // One batch, one statement. Returns whether the set is finished.
 async function buildBatch(setId) {
+  const started = performance.now();
   const { rows } = await client.query(
     "select inserted, total, done from prospect_results.build_batch_v1($1, $2)",
     [setId, batchSize],
   );
+  console.log(JSON.stringify({ event: 'result_batch_completed', setId,
+    durationMs: Math.round(performance.now() - started), total: Number(rows[0]?.total ?? 0), done: rows[0]?.done ?? false }));
   return rows[0] ?? { inserted: 0, total: 0, done: true };
 }
 

@@ -49,13 +49,14 @@ test("a caller that has already gone away does not take a slot", async () => {
   assert.equal(admissionState().inFlight, 0);
 });
 
-test("an overload is a 503 with Retry-After, and says nothing is half-done", async () => {
+test("an overload is a non-cacheable 503 with Retry-After and a stable capacity code", async () => {
   const response = overloadedResponse();
   assert.equal(response.status, 503);
   assert.equal(response.headers.get("Retry-After"), "2");
   const body = await response.json();
   assert.equal(body.retryable, true);
-  assert.match(body.error, /refused rather than queued/);
+  assert.equal(body.code, 'capacity_limited');
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
 });
 
 test("every interactive route is admitted through the guard and carries an abort signal", async () => {

@@ -1,6 +1,7 @@
 import { admissionState } from "../../../lib/admission";
 import { getAuthorizedUser } from "../../../lib/auth";
 import { observabilitySnapshot } from "../../../lib/observability";
+import { operationsHealth } from "../../../lib/operations-health";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
 const timeoutMs = 5_000;
@@ -48,7 +49,12 @@ async function checkImportWorker() {
 
 export async function GET() {
   const checks = { auth: checkAuth, dataApi: checkDataApi, storage: checkStorage, importWorker: checkImportWorker };
-  const results = await Promise.allSettled(Object.values(checks).map((check) => check()));
+  const [results, operations] = await Promise.all([
+    Promise.allSettled(Object.values(checks).map((check) => check())), operationsHealth(),
+  ]);
+  // Feature readiness is separate from core health: a stopped search worker
+  // must not take ordinary browsing out of the load balancer.
+  const features = { preparedSearch: operations.status, backgroundOperations: operations.status };
   const entries = Object.keys(checks).map((name, index) => [name, results[index].status === "fulfilled" ? "ok" : "failed"]);
   const checkStatus = Object.fromEntries(entries);
   const failed = entries.filter(([, status]) => status === "failed").map(([name]) => name);
@@ -64,7 +70,7 @@ export async function GET() {
   // Readiness itself stays public and unchanged.
   const authorized = await getAuthorizedUser().catch(() => null);
   const load = authorized ? { admission: admissionState(), ...observabilitySnapshot() } : undefined;
-  if (!failed.length) return Response.json({ status: "ok", checks: checkStatus, load }, { headers: noStoreHeaders });
+  if (!failed.length) return Response.json({ status: "ok", checks: checkStatus, load, features }, { headers: noStoreHeaders });
   console.error("Readiness check failed", { failed });
-  return Response.json({ status: "unhealthy", checks: checkStatus, load }, { status: 503, headers: noStoreHeaders });
+  return Response.json({ status: "unhealthy", checks: checkStatus, load, features }, { status: 503, headers: noStoreHeaders });
 }

@@ -1,4 +1,5 @@
 import { authorizeApi, getAuthorizedUser } from "../../../../../lib/auth.ts";
+import { authorizeFilterSets } from "../../../../../lib/filter-sets.ts";
 import { isEmptySelection, parseBulkSelection, selectionArgs } from "../../../../../lib/client-operations.ts";
 import { beginOperation, freezeFromResultSet, freezeSelection, parseRequestId, recordOperationResult, selectionContentHash } from "../../../../../lib/operation-jobs.ts";
 import { filterErrorResponse } from "../../../../../lib/prospect-filters.ts";
@@ -68,6 +69,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   const supabase = createAdminClient();
+  // A result set/explicit ID selection is already fixed. A live filter-based
+  // action must not discard an unsupported pivot or consume someone else's set.
+  if (!resultSetId && !selection.prospectIds?.length) {
+    if (payload.companyScope || payload.peopleScope) return Response.json({ error: 'Build a frozen result set before applying this action to a pivoted view.' }, { status: 400 });
+    const sourceScope = action === 'push' ? selection.sourceClientId ?? '' : id;
+    const setDenial = await authorizeFilterSets(supabase, selection.filters, user?.id ?? '', 'prospect', sourceScope);
+    if (setDenial) return setDenial;
+  }
 
   // Section 9.2: a retry of the same request is the same operation, keyed on the
   // client-generated request id rather than on the content - two identical

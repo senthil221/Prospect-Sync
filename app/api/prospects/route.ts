@@ -86,14 +86,11 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   // A set id is not authorization: re-check ownership on every use, before the
   // query that would read the set runs (section 4.1).
   const user = await getAuthorizedUser();
-  const setDenial = await authorizeFilterSets(supabase, filters, user?.id ?? "", "prospect", clientId ?? "");
+  const setDenial = await authorizeFilterSets(supabase, filters, user?.id ?? "", "prospect", clientId ?? "",
+    companyScope ? [{ entityType: 'company', clientScope: clientId ?? '', filters: companyScope.filters }] : []);
   if (setDenial) return setDenial;
 
   let resolvedScope: WorkspaceQuery['companyScope'] = companyScope;
-  if (companyScope) {
-    const scopeDenial = await authorizeFilterSets(supabase, companyScope.filters, user?.id ?? "", "company", clientId ?? "");
-    if (scopeDenial) return scopeDenial;
-  }
   if (companyScope && needsCompanyPreparation(companyScope)) {
     const owner = ownerIdentity(user);
     const prepared = await prepareCompanyScope(supabase, owner, companyScope, signal);
@@ -164,6 +161,8 @@ export async function DELETE(request: Request) {
     search?: unknown;
     filters?: unknown;
     excludedIds?: unknown;
+    companyScope?: unknown;
+    clientId?: unknown;
   } | null;
   if (!payload) return Response.json({ error: "Invalid delete request." }, { status: 400 });
   const supabase = createAdminClient();
@@ -184,10 +183,13 @@ export async function DELETE(request: Request) {
 
   // Everything matching the current search/filters across all pages.
   if (payload.allMatching === true) {
+    if (payload.companyScope || payload.clientId) return Response.json({ error: 'Delete selected IDs for a scoped view. Global all-matching deletion cannot discard a pivot or client scope.' }, { status: 400 });
     const search = String(payload.search ?? "").trim().slice(0, 300);
     let filters: ProspectFilter[];
     try { filters = parseFilters(JSON.stringify(payload.filters ?? [])); }
     catch (error) { return filterErrorResponse(error, "Invalid filter."); }
+    const setDenial = await authorizeFilterSets(supabase, filters, (await getAuthorizedUser())?.id ?? '', 'prospect', '');
+    if (setDenial) return setDenial;
     const excludedIds = Array.isArray(payload.excludedIds) ? [...new Set(payload.excludedIds.map((id) => String(id).trim()).filter(Boolean))].slice(0, 50000) : [];
     const { data, error } = await supabase.rpc("delete_prospects_matching_v1", {
       p_search: search,

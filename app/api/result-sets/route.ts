@@ -65,7 +65,8 @@ export async function POST(request: Request) {
 
   const supabase = createAdminClient();
   // A set id is not authorization, and neither is a filter-set id inside it.
-  const setDenial = await authorizeFilterSets(supabase, filters, (await getAuthorizedUser())?.id ?? "", entityType as "prospect" | "company", clientScope);
+  const setDenial = await authorizeFilterSets(supabase, filters, (await getAuthorizedUser())?.id ?? "", entityType as "prospect" | "company", clientScope,
+    scopePayload ? [{ entityType: 'company', clientScope, filters: scopePayload.filters }] : []);
   if (setDenial) return setDenial;
 
   const { data, error } = await supabase.rpc("request_result_set_v1", {

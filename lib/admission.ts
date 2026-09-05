@@ -1,139 +1,43 @@
-// Admission control for the interactive database path.
-//
-// Measured on production (PostgREST 12.2.12): when the browser gives up on a
-// request, PostgREST does NOT cancel the statement it started. An export
-// abandoned after 2.1 s kept its backend busy for the full 7.9 s, holding a pool
-// connection nobody was waiting for. Reloading a slow page therefore adds a
-// connection rather than replacing one, which is how 24 slots disappear.
-//
-// So the interactive pool has to be protected on the way in, before the request
-// reaches a connection it might not give back promptly:
-//
-//   1. this guard, per application slot, failing fast and legibly
-//   2. each function's statement_timeout, which is the real upper bound on how
-//      long an abandoned query can hold its slot
-//   3. per-role CONNECTION LIMIT in the database, which is the authority
-//
-// This is only the first. It lives in one process, and blue/green runs two
-// slots at once during a deploy, so it can never be more than a fast-fail
-// guard - which is why the limit below is sized for two slots running together.
-// The database-side limits are what actually bound the system.
+import { boundedInteger, createAdmissionQueue } from './bounded-admission.ts';
+import { recordRequest, routeOf } from './observability.ts';
 
-// PGRST_DB_POOL is 24. Two application slots overlap during a deploy, and auth,
-// storage, meta and the import worker's REST calls also draw from that pool, so
-// each slot gets 8: sixteen at the worst moment, with eight slots of headroom.
-const maxConcurrentInteractive = Number(process.env.INTERACTIVE_CONCURRENCY ?? 8);
+// PostgREST's pool is 24. Two app slots can overlap during blue/green releases.
+// This leaves headroom for other REST callers; Auth and Storage have their own
+// database pools. Role connection limits and statement deadlines remain essential:
+// abandoning an HTTP request does not reliably cancel its database statement.
+// Production measurement: an export abandoned at 2.1s held its backend for 7.9 s.
+const queue = createAdmissionQueue(
+  boundedInteger(process.env.INTERACTIVE_CONCURRENCY, 8, 1, 8),
+  boundedInteger(process.env.INTERACTIVE_MAX_WAITING, 32, 0, 128),
+  boundedInteger(process.env.INTERACTIVE_ADMISSION_WAIT_MS, 2000, 0, 5000),
+);
 
-// A burst is not an overload. Waiting briefly absorbs the ordinary case where
-// several panels load at once; past this the answer is a refusal, not a queue
-// that grows until every request has timed out anyway.
-const admissionWaitMs = Number(process.env.INTERACTIVE_ADMISSION_WAIT_MS ?? 2000);
-
-import { recordRequest, routeOf } from "./observability.ts";
-
-type Waiter = { resolve: (admitted: boolean) => void; timer: ReturnType<typeof setTimeout> };
-
-let inFlight = 0;
-const waiting: Waiter[] = [];
-
-function release() {
-  const next = waiting.shift();
-  if (!next) {
-    inFlight -= 1;
-    return;
-  }
-  // The slot passes straight to the next waiter; inFlight does not dip.
-  clearTimeout(next.timer);
-  next.resolve(true);
-}
-
-function acquire(signal?: AbortSignal): Promise<boolean> {
-  if (signal?.aborted) return Promise.resolve(false);
-  if (inFlight < maxConcurrentInteractive) {
-    inFlight += 1;
-    return Promise.resolve(true);
-  }
-  return new Promise<boolean>((resolve) => {
-    const waiter: Waiter = {
-      resolve,
-      timer: setTimeout(() => {
-        const index = waiting.indexOf(waiter);
-        if (index >= 0) waiting.splice(index, 1);
-        resolve(false);
-      }, admissionWaitMs),
-    };
-    waiting.push(waiter);
-    // A caller that has already gone away should not hold a place in the queue.
-    signal?.addEventListener("abort", () => {
-      const index = waiting.indexOf(waiter);
-      if (index >= 0) {
-        waiting.splice(index, 1);
-        clearTimeout(waiter.timer);
-        resolve(false);
-      }
-    }, { once: true });
-  });
-}
-
-// 503 rather than 429: nothing about this request was excessive, the server is
-// simply full. Retry-After is short and the client jitters around it, so a
-// refused burst does not come back as a synchronised second burst.
 export function overloadedResponse(): Response {
   return Response.json({
-    error: "The database is busy right now. This request was refused rather than queued, so nothing is half-done - try again in a moment.",
-    retryable: true,
-  }, { status: 503, headers: { "Retry-After": "2" } });
+    error: 'The database is busy right now. Please try again in a moment.',
+    code: 'capacity_limited', retryable: true,
+  }, { status: 503, headers: { 'Retry-After': '2', 'Cache-Control': 'no-store' } });
 }
 
-// Run `work` with an interactive slot held, or answer 503 without touching the
-// database. The slot is always given back, including when `work` throws.
-export async function withInteractiveSlot(
-  request: Request,
-  work: () => Promise<Response>,
-): Promise<Response> {
+export async function withInteractiveSlot(request: Request, work: () => Promise<Response>): Promise<Response> {
   const route = routeOf(request.url);
-  const startedAt = Date.now();
-  const admitted = await acquire(request.signal);
-  if (!admitted) {
-    const refused = overloadedResponse();
-    recordRequest(route, refused.status, Date.now() - startedAt);
-    return refused;
-  }
+  const requestId = crypto.randomUUID();
+  const startedAt = performance.now();
+  const release = await queue.acquire(request.signal);
+  const admissionMs = performance.now() - startedAt;
   try {
-    const response = await work();
-    recordRequest(route, response.status, Date.now() - startedAt);
-    return response;
+    const response = release ? await work() : overloadedResponse();
+    recordRequest(route, response.status, performance.now() - startedAt, { requestId, admissionMs });
+    // Preserve streaming bodies, status and cookies; don't buffer an export.
+    const headers = new Headers(response.headers);
+    headers.set('X-Request-Id', requestId);
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   } catch (error) {
-    // A throw becomes a 500 upstream; count it as one rather than losing it.
-    recordRequest(route, 500, Date.now() - startedAt);
+    recordRequest(route, 500, performance.now() - startedAt, { requestId, admissionMs });
     throw error;
-  } finally {
-    release();
-  }
+  } finally { release?.(); }
 }
 
-// For tests and for the health endpoint: how loaded this slot is right now.
-export function admissionState() {
-  return { inFlight, waiting: waiting.length, limit: maxConcurrentInteractive };
-}
-
-// One slot, held for exactly as long as one database call.
-//
-// withInteractiveSlot wraps a whole request, which is right when the request is
-// one query. A streaming export is not: it is a few dozen bounded queries with
-// CSV being written to the client in between, and holding a slot for the whole
-// download would take an interactive slot out of circulation for minutes while
-// most of that time is spent on the network rather than on the database.
-//
-// Returns null when the guard is full, in which case the caller has not taken a
-// slot and must not call the database.
-export async function acquireSlot(signal?: AbortSignal): Promise<(() => void) | null> {
-  const admitted = await acquire(signal);
-  if (!admitted) return null;
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    release();
-  };
-}
+export const admissionState = queue.state;
+// Streaming exports acquire one slot per database call, not per slow download.
+export const acquireSlot = queue.acquire;

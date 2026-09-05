@@ -6,9 +6,9 @@
 // the PostgREST pool, and never tells you whether a browser would have got an
 // answer. Everything here goes through /api, authenticated the way a user is.
 //
-// Read-only by construction: every scenario is a GET listing, a count or a
-// filter-value lookup. Nothing writes. It is safe to point at production, but it
-// WILL make the app slow for real users while it runs, so pick a quiet moment.
+// Listing requests may create disposable prepared-search jobs. No customer
+// records are mutated. Remote targets require an explicit opt-in: this workload
+// can impair a live service and must not run against production by accident.
 //
 //   E2E_BASE_URL=https://app.example.com \
 //   E2E_USER_EMAIL=... E2E_USER_PASSWORD=... \
@@ -25,6 +25,7 @@
 // only place a 503 or a 504 that a user absorbed silently shows up.
 
 import { chromium } from "@playwright/test";
+import { expectedStatus, runReadJourney, validateLoadTarget } from './load-journey.mjs';
 
 const baseURL = process.env.E2E_BASE_URL || "http://127.0.0.1:3000";
 const email = process.env.E2E_USER_EMAIL || "";
@@ -33,6 +34,11 @@ const smoke = process.env.LOAD_PROFILE === "smoke";
 const users = Number(process.env.LOAD_USERS ?? (smoke ? 5 : 20));
 const seconds = Number(process.env.LOAD_SECONDS ?? (smoke ? 60 : 900));
 const spikeUsers = Number(process.env.LOAD_SPIKE ?? (smoke ? 0 : 40));
+const overloadTest = process.env.LOAD_EXPECT_OVERLOAD === '1';
+validateLoadTarget(baseURL, process.env.LOAD_ALLOW_REMOTE === '1');
+for (const [name, value, min, max] of [['LOAD_USERS', users, 1, 100], ['LOAD_SECONDS', seconds, 1, 7200], ['LOAD_SPIKE', spikeUsers, 0, 100]]) {
+  if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be an integer from ${min} to ${max}`);
+}
 
 if (!email || !password) {
   console.error("Set E2E_USER_EMAIL and E2E_USER_PASSWORD (an allow-listed login).");
@@ -72,18 +78,29 @@ const scenarios = [
     ])}` },
 ];
 
+// Supply the exact keyword fixture for this run, without putting prospect data
+// into logs. Repeated requests measure reuse; distinct cold-search bursts need
+// separate scenarios and explicit arrival rates, not random query cache-busting.
+if (process.env.LOAD_COMPANY_KEYWORDS) {
+  const terms = JSON.parse(process.env.LOAD_COMPANY_KEYWORDS);
+  if (!Array.isArray(terms) || !terms.length || terms.length > 150 || terms.some(t => typeof t !== 'string' || t.length > 160)) {
+    throw new Error('LOAD_COMPANY_KEYWORDS must be a JSON array of 1–150 short strings');
+  }
+  scenarios.push({ name: 'description → People', weight: 5, slo: 60000,
+    path: () => `/api/prospects?page=1&withTotal=1&companyScope=${encode({ search: '', limit: 250000,
+      filters: [{ field: '__company_keywords', operator: 'contains', scopes: ['name', 'keywords', 'description'], values: terms }] })}` });
+}
+
 const pool = scenarios.flatMap((scenario) => Array(scenario.weight).fill(scenario));
 const pick = () => pool[Math.floor(Math.random() * pool.length)];
 
 const results = new Map();
-function record(name, ms, status, expected) {
-  const bucket = results.get(name) ?? { ms: [], statuses: new Map(), unexpected: 0 };
+function record(name, ms, status, expected, pendingResponses = 0) {
+  const bucket = results.get(name) ?? { ms: [], statuses: new Map(), unexpected: 0, pendingResponses: 0 };
+  bucket.pendingResponses += pendingResponses;
   bucket.ms.push(ms);
   bucket.statuses.set(status, (bucket.statuses.get(status) ?? 0) + 1);
-  const ok = expected ? status === expected : status === 200;
-  // 503 is a correct answer under load, not a failure: it is backpressure
-  // working. It is reported separately rather than counted as a break.
-  if (!ok && status !== 503) bucket.unexpected += 1;
+  if (!expectedStatus(status, expected, overloadTest)) bucket.unexpected += 1;
   results.set(name, bucket);
 }
 
@@ -101,8 +118,9 @@ async function drive(request, until) {
     const scenario = pick();
     const startedAt = Date.now();
     try {
-      const response = await request.get(scenario.path(), { headers: { "cache-control": "no-store" }, timeout: 60_000 });
-      record(scenario.name, Date.now() - startedAt, response.status(), scenario.expect);
+      const path = scenario.path(); // Every poll must ask the SAME question.
+      const result = await runReadJourney(timeout => request.get(path, { headers: { "cache-control": "no-store" }, timeout }));
+      record(scenario.name, Math.round(result.durationMs), result.status, scenario.expect, result.pendingResponses);
     } catch {
       record(scenario.name, Date.now() - startedAt, 0, scenario.expect);
     }
@@ -149,7 +167,7 @@ function report(before, after) {
     );
   }
 
-  console.log("\n=== status codes (503 is backpressure working, not a break) ===");
+  console.log(`\n=== status codes (503 ${overloadTest ? 'allowed in explicit overload test' : 'FAILS the certified-load gate'}) ===`);
   const totals = new Map();
   for (const bucket of results.values()) {
     for (const [status, count] of bucket.statuses) totals.set(status, (totals.get(status) ?? 0) + count);
@@ -172,6 +190,8 @@ function report(before, after) {
   }
 
   console.log("\n=== verdict ===");
+  console.log('  This run alone is NOT capacity certification: require the workload matrix, cold-cache runs, sufficient samples and recovery checks.');
+  console.log(`  pending HTTP responses excluded from success .... ${[...results.values()].reduce((sum, b) => sum + b.pendingResponses, 0)}`);
   console.log(`  unhandled 5xx (must be 0) .............. ${serverErrors}`);
   console.log(`  journeys over their SLO ................ ${failures}`);
   console.log(`  overall ................................ ${serverErrors === 0 && failures === 0 ? "PASS" : "NEEDS ATTENTION"}`);

@@ -44,6 +44,7 @@ x-app: &app
     SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
     SUPABASE_STORAGE_URL: http://storage:5000
     IMPORT_WORKER_HEALTH_URL: http://import-worker:9090/health
+    OPERATIONS_WORKER_HEALTH_URL: http://operations-worker:9091/health
     ALLOWED_USER_EMAILS: ${ALLOWED_USER_EMAILS}
     # Node heap ceiling so a runaway CSV import cannot OOM the whole box.
     NODE_OPTIONS: "--max-old-space-size=1024"

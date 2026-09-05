@@ -333,6 +333,17 @@ if ! wait_for_container "$CANDIDATE_CONTAINER" 30; then
 fi
 verify_candidate_version "$CANDIDATE_CONTAINER" "$EXPECTED_VERSION"
 
+# Feature failure does not remove a running app from service, but a new release
+# must demonstrate that its prepared-search dependency is reachable.
+docker exec -e ALLOW_LEGACY_HEALTH="$(if [[ "${1:-}" == "--rollback" ]]; then echo 1; else echo 0; fi)" "$CANDIDATE_CONTAINER" node -e '
+  fetch("http://127.0.0.1:3000/api/health", { signal: AbortSignal.timeout(10000) })
+    .then(async response => {
+      const body = await response.json();
+      const legacyRollback = process.env.ALLOW_LEGACY_HEALTH === "1" && !body.features;
+      if (!response.ok || (!legacyRollback && body.features?.preparedSearch !== "ok")) process.exit(1);
+    }).catch(() => process.exit(1));
+'
+
 echo "==> Atomically switching new traffic to ${CANDIDATE_SLOT}"
 # Arm rollback before the first reload. If the router reload succeeds but the
 # following edge-proxy validation fails, traffic has already moved and must be

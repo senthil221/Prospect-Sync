@@ -10,6 +10,7 @@ import { observabilitySnapshot, outcomeFor, recordRequest, resetObservability, r
 
 test("each new refusal is classified as its own outcome", () => {
   assert.equal(outcomeFor(200), "ok");
+  assert.equal(outcomeFor(202), "pending");
   assert.equal(outcomeFor(413), "over_cap");     // filter set past the cap
   assert.equal(outcomeFor(503), "overloaded");   // interactive guard full
   assert.equal(outcomeFor(429), "overloaded");
@@ -23,6 +24,21 @@ test("the route is recorded without its query string", () => {
   // path identifies the query family.
   assert.equal(routeOf("https://example.test/api/prospects?filters=%5B%5D&search=secret"), "/api/prospects");
   assert.equal(routeOf("not a url"), "unknown");
+  assert.equal(routeOf('https://example.test/api/clients/private-client-id/lists'), '/api/clients');
+  assert.equal(routeOf('https://example.test/api/private-arbitrary-path'), 'unknown');
+});
+
+test('pending latency never counts as completed results and route labels stay bounded', () => {
+  resetObservability();
+  recordRequest('/api/prospects', 202, 50);
+  recordRequest('/api/prospects', 200, 1500);
+  for (let i = 0; i < 50; i++) recordRequest(`/api/clients/private-${i}`, 200, 1);
+  const snapshot = observabilitySnapshot();
+  assert.equal(snapshot.outcomes.pending, 1);
+  assert.equal(Object.keys(snapshot.routes).length, 2);
+  assert.equal(snapshot.latency.buckets['/api/prospects:pending'][0], 1);
+  assert.equal(snapshot.latency.buckets['/api/prospects:ok'][4], 1);
+  resetObservability();
 });
 
 test("counts are kept per outcome and per route", () => {
