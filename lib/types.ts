@@ -22,7 +22,7 @@ export type BackgroundImport = { id: string; fileName: string; status: string; c
 export type ImportResumeDetail = { id: string; kind: "prospects" | "companies"; listId: string | null; fileName: string; dataSource: string; status: string; ingestionMode?: string; committedRowOffset: number; totalRows: number | null; processedRows?: number; uniqueAdded?: number; duplicatesLinked?: number; processedBytes?: number; fileSizeBytes?: number | null; lastError?: string; headers: string[]; fieldMap: Record<string, string>; headerSignature: string; dateContacted?: string | null; mergeMode: CompanyMergeMode | null };
 // needsReview is attached by the API, never stored: it marks a view whose filter
 // set is larger than a request may now carry. The view is left exactly as saved.
-export type SavedViewReview = { reason: string; limit: "filters" | "values" | "value_length"; received: number; allowed: number; field: string | null; alternative: string };
+export type SavedViewReview = { reason: string; limit: "filters" | "values" | "value_length" | "total_values" | "request_bytes" | "invalid_filter"; received: number; allowed: number; field: string | null; alternative: string };
 export type SavedView = { id: string; name: string; definition: { filters: ProspectFilter[]; columns: string[]; sort: string; direction: "asc" | "desc" }; needsReview?: SavedViewReview };
 export type CoverageRow = { row: number; name: string; domain: string; status: "known" | "new"; matchedBy: string; matchedCompany: string; prospectCount: number; clientCount: number };
 export type QualitySummary = { total: number; missingEmail: number; missingTitle: number; missingLinkedin: number; missingCompany: number; missingDomain: number; staleRecords: number; potentialDuplicateGroups: number };

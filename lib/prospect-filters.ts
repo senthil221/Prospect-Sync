@@ -114,37 +114,44 @@ export function filterErrorResponse(error: unknown, fallback: string): Response 
 // Throws FilterLimitError when the request exceeds a cap, or a compile error when a
 // Boolean expression is malformed. Nothing is silently trimmed: a filter this
 // function cannot honour exactly is refused, never narrowed.
-export function parseFilters(value: string | null): ProspectFilter[] {
+export function parseFilters(value: string | null, options: { compileBoolean?: boolean } = {}): ProspectFilter[] {
   if (!value) return [];
   const inputBytes = new TextEncoder().encode(value).byteLength;
   if (inputBytes > maxQueryFilterBytes) throw new FilterLimitError('request_bytes', inputBytes, maxQueryFilterBytes, null,
     'Reduce the inline filter data, or use saved value lists for exact matching. No values were dropped.');
   const parsed = JSON.parse(value) as unknown;
-  if (!Array.isArray(parsed)) return [];
+  if (!Array.isArray(parsed)) throw new Error('Filters must be an array. No filters were applied.');
   if (parsed.length > maxFilters) {
     throw new FilterLimitError("filters", parsed.length, maxFilters, null,
       `Remove filters until at most ${maxFilters} remain, or save the narrow ones as a view and apply them in two passes.`);
   }
   const filters = parsed.flatMap((item): ProspectFilter[] => {
-    if (!item || typeof item !== "object") return [];
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error('Each filter must be an object.');
     const candidate = item as Record<string, unknown>;
-    const field = String(candidate.field ?? "").trim().slice(0, 160);
-    const operator = String(candidate.operator ?? "contains");
-    // Unknown fields and operators are dropped rather than refused: they carry no
-    // rows either way, and the field catalogue check belongs with the versioned
-    // AST. The caps below only ever fire on a filter that would have been used.
-    if (!field || !allowedOperators.has(operator)) return [];
+    const field = typeof candidate.field === 'string' ? candidate.field.trim() : '';
+    const operator = candidate.operator ?? 'contains';
+    // Dropping a malformed predicate can broaden a read or filtered mutation.
+    // Field-catalogue validation remains the compiler's responsibility.
+    if (!field || field.length > 160) throw new Error('A filter field must contain 1–160 characters.');
+    if (typeof operator !== 'string' || !allowedOperators.has(operator)) throw new Error('Unsupported filter operator.');
 
     // Set-backed: the values live in the database, so none of the size caps
     // below apply - nothing is being carried. Only equality is expressible
     // against a set, matching what the compilers emit.
     const rawSetId = typeof candidate.setId === "string" ? candidate.setId.trim() : "";
-    if (rawSetId) {
-      if (!uuidPattern.test(rawSetId) || operator !== "equals") return [];
+    if (candidate.setId !== undefined) {
+      if (!uuidPattern.test(rawSetId) || operator !== "equals") throw new Error('Stored filter references require a valid ID and equality matching.');
+      if (candidate.value !== undefined || (candidate.values !== undefined && (!Array.isArray(candidate.values) || candidate.values.length > 0))) {
+        throw new Error('Use either inline filter values or a stored filter reference, not both.');
+      }
       return [{ field, operator: operator as ProspectFilterOperator, values: [], setId: rawSetId }];
     }
 
+    if (candidate.values !== undefined && !Array.isArray(candidate.values)) throw new Error('Filter values must be an array.');
     const rawValues = Array.isArray(candidate.values) ? candidate.values : [candidate.value];
+    if (rawValues.some(entry => entry != null && typeof entry !== 'string' && typeof entry !== 'number' && typeof entry !== 'boolean')) {
+      throw new Error('Filter values must be text, numbers or booleans.');
+    }
     if (rawValues.length > maxFilterValues) {
       throw new FilterLimitError("values", rawValues.length, maxFilterValues, field,
         `Split this list into batches of ${maxFilterValues} values or fewer and run them one at a time.`);
@@ -160,10 +167,24 @@ export function parseFilters(value: string | null): ProspectFilter[] {
     }
     let values = trimmed.filter(Boolean);
     if (!["empty", "not_empty"].includes(operator) && !values.length) return [];
-    if (operator === "boolean") values = [compileBooleanSearch(values[0])];
-    if (operator === "number_ranges") values = values.filter((range) => range === "unknown" || /^[0-9]+:[0-9]*$/.test(range));
-    if (operator === "number_ranges" && !values.length) return [];
+    if (operator === "boolean") {
+      if (values.length !== 1) throw new Error('A Boolean filter must contain exactly one expression.');
+      const compiled = compileBooleanSearch(values[0]);
+      // URL/UI restoration validates the expression but must retain its source.
+      // Compiling it there would cause the API to compile PostgreSQL syntax twice.
+      if (options.compileBoolean !== false) values = [compiled];
+    }
+    if (operator === "number_ranges" && values.some(range => {
+      if (range === 'unknown') return false;
+      if (!/^[0-9]+:[0-9]*$/.test(range)) return true;
+      const [lower, upper] = range.split(':');
+      return !Number.isSafeInteger(Number(lower)) || (upper !== '' && (!Number.isSafeInteger(Number(upper)) || Number(upper) < Number(lower)));
+    })) throw new Error('Each numeric range must have valid bounds, with the upper bound at least the lower bound.');
     const requestedScopes = Array.isArray(candidate.scopes) ? candidate.scopes : [];
+    if (field === '__company_keywords' && candidate.scopes !== undefined &&
+      (!Array.isArray(candidate.scopes) || requestedScopes.some(scope => typeof scope !== 'string' || !companyKeywordScopes.has(scope)))) {
+      throw new Error('Unsupported company keyword search scope.');
+    }
     const scopes = field === "__company_keywords"
       ? [...new Set(requestedScopes.map((scope) => String(scope)).filter((scope) => companyKeywordScopes.has(scope)))].slice(0, 3)
       : [];

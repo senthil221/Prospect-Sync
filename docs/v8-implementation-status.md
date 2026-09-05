@@ -112,7 +112,9 @@ core and background-feature checks healthy.
 
 ### Follow-up — bounded browser caches and explicit request refusals
 
-In progress; not deployed at this entry.
+Released as `800548d`. CI and production deployment succeeded. Public health
+verified the exact full SHA with all core/background checks healthy. Reloading
+the large-filter People pivot retained 81,477 matches and page two (51–100).
 
 - Count caches have 40-entry/1-MiB serialized-key-and-value budgets; general API
   responses have 64-entry/8-MiB budgets. These are admission estimates, not exact
@@ -131,6 +133,28 @@ In progress; not deployed at this entry.
   A POST retry to look up a completed job can also be refused during the outage;
   callers should use its existing job ID to read status/download.
 - Local lint, build/type checking and 448 tests pass, with one Linux-only skip.
+
+### Follow-up — fail-closed filter restoration and Boolean source preservation
+
+Implemented locally; release verification pending at this entry.
+
+- Malformed filter objects, field identities/operators, stored-set references,
+  mixed inline/set inputs, multiple Boolean expressions, invalid numeric ranges
+  and unsupported company keyword scopes now reject the whole request (400).
+  A malformed predicate must not be silently dropped from a read or mutation.
+  Valid empty draft rows remain no-ops; custom-field catalogue validation and
+  full versioned QuerySpec semantics are still separate work.
+- Invalid filter/scope URLs block query controllers, prefetch and URL rewriting.
+  The original link remains intact and a deliberate reset link is offered.
+  Direct set-ID editable-filter links are explicitly unsupported rather than
+  losing their restriction. Normal UI links continue carrying inline values.
+- URL restoration validates Boolean expressions but retains their source syntax,
+  including both pivot scopes, instead of compiling SQL syntax a second time at
+  the API. Tests cover three repeated round trips and server compile equivalence.
+- Malformed saved views are annotated for review, not modified or deleted.
+- The durable-filter client cache now has entry/byte budgets and generation
+  protection against invalidated in-flight writes, matching the other caches.
+- Local lint/build/type checking pass; 455 tests pass with one Linux-only skip.
 
 ## Remaining programme — not completed by these packages
 
@@ -161,8 +185,8 @@ Backup authentication, destinations and permissions are left unchanged.
 | Package | Remaining work |
 | --- | --- |
 | V8-01 | Persistent journey/job telemetry, queue age/capacity/schema readiness, real peak arrival measurements and alerts. |
-| V8-02 | Full versioned QuerySpec/canonical identity, transport/body budgets, typed result/count adapters and complete route inventory. Recursive ownership and cumulative inline-filter budgets are implemented, not the entire package. |
-| V8-03 | Storage reservations/quotas/pins, attempt fencing and cancellation, fair batch scheduling, bounded cleanup and shared heavy-work budget. |
+| V8-02 | Full versioned QuerySpec/canonical identity, complete transport/route coverage and typed result/count adapters. Recursive ownership, cumulative inline budgets and bounded bodies on the main query/job routes are implemented. |
+| V8-03 | Storage reservations/quotas/pins, generic attempt fencing/cancellation, bounded cleanup and a shared budget including imports. Atomic round scheduling is implemented; full fairness latency SLOs are not certified. |
 | V8-04 | Unified execution across both pivots, all scoped views, exports and frozen selection; complete over-cap membership path. |
 | V8-05 | Dependency-version consistency, immutable snapshot inputs, resumable search evaluation and measured term-cache experiment. |
 | V8-06 | Deferred exact counts, measured pagination/suggestion improvements, drift checks and safe online-index tooling. |

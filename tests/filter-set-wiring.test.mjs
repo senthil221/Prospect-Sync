@@ -24,15 +24,15 @@ test("a set-backed filter parses without carrying values", () => {
   assert.equal(parseFilters(JSON.stringify([{ field: "__website", operator: "equals", setId: uuid }])).length, 1);
 });
 
-test("a malformed or misused set id is dropped rather than trusted", () => {
+test("a malformed or misused set id is refused without dropping its restriction", () => {
   // Not a uuid: never reaches SQL, where it would be cast and raise.
-  assert.deepEqual(parseFilters(JSON.stringify([
+  assert.throws(() => parseFilters(JSON.stringify([
     { field: "__company_domain", operator: "equals", setId: "not-a-uuid' or 1=1--" },
-  ])), []);
+  ])), /valid ID/);
   // A set expresses equality only, matching what the compilers emit.
-  assert.deepEqual(parseFilters(JSON.stringify([
+  assert.throws(() => parseFilters(JSON.stringify([
     { field: "__company_domain", operator: "contains", setId: uuid },
-  ])), []);
+  ])), /equality/);
   // And an ordinary filter still parses normally alongside.
   const parsed = parseFilters(JSON.stringify([
     { field: "__title", operator: "contains", values: ["vp"] },

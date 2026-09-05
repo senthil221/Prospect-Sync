@@ -1,4 +1,5 @@
 import { api } from "./dashboard-api.ts";
+import { BoundedCache } from './bounded-cache.ts';
 
 // Turn a big pasted value list into a durable set, once, and then send its id.
 //
@@ -17,7 +18,8 @@ const setThreshold = 500;
 // Content-keyed, so the same pasted list is stored once per session however
 // many times the grid re-fetches. The server is idempotent on the same
 // identity too, so a miss here costs a request, never a duplicate set.
-const knownSets = new Map<string, string>();
+const knownSets = new BoundedCache<string>(40, 1024 * 1024);
+let setCacheGeneration = 0;
 
 function cacheKey(entityType: string, clientScope: string, field: string, values: string[]) {
   return JSON.stringify([entityType, clientScope, field, [...values].sort()]);
@@ -53,6 +55,7 @@ export async function filterPayloadWithSets(
     const filter = entry;
 
     const key = cacheKey(entityType, clientScope, filter.field, filter.values);
+    const generation = setCacheGeneration;
     const known = knownSets.get(key);
     if (known) return { field: filter.field, operator: filter.operator, setId: known };
 
@@ -63,7 +66,7 @@ export async function filterPayloadWithSets(
         body: JSON.stringify({ entityType, field: filter.field, clientScope, values: filter.values }),
       });
       if (!created?.setId) return entry;
-      knownSets.set(key, created.setId);
+      if (generation === setCacheGeneration) knownSets.set(key, created.setId);
       return { field: filter.field, operator: filter.operator, setId: created.setId };
     } catch {
       // Sending the values inline still works. Slower, never wrong.
@@ -76,6 +79,7 @@ export async function filterPayloadWithSets(
 // server answers 403 for one it cannot resolve, and the caller drops it so the
 // next request rebuilds from the values it still holds locally.
 export function forgetFilterSets() {
+  setCacheGeneration++;
   knownSets.clear();
 }
 

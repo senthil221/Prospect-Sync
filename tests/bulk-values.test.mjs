@@ -107,7 +107,7 @@ test("company keyword scopes are defaulted, whitelisted, and preserved", () => {
   assert.deepEqual(defaults.scopes, ["name", "keywords"]);
 
   const [scoped] = parseFilters(JSON.stringify([
-    { field: "__company_keywords", operator: "contains", values: ["deliverability"], scopes: ["description", "keywords", "private_column", "description"] },
+    { field: "__company_keywords", operator: "contains", values: ["deliverability"], scopes: ["description", "keywords", "description"] },
   ]));
   assert.deepEqual(scoped.scopes, ["description", "keywords"]);
 

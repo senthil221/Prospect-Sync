@@ -57,6 +57,7 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   // feeds it back in - re-reading on every render would fight the writer.
   const initial = useMemo(() => readWorkspaceUrl(new URLSearchParams(searchParams.toString()), window.location.hash), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [section, setSection] = useState<Section>(initial.section);
+  const [restoreError, setRestoreError] = useState(initial.restoreError ?? '');
   const [stats, setStats] = useState(emptyStats);
   const [recentImports, setRecentImports] = useState<ImportRecord[]>([]);
   const [clients, setClients] = useState<ClientRecord[]>([]);
@@ -77,8 +78,8 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const prospectsController = useProspectsWorkspaceController({ active: section === "prospects", search, filters: prospectFilters, sort: prospectSort, direction: prospectDirection, companyScope: companyPeopleScope, statsProspects: stats.prospects, initialPage: initial.prospectPage, onLoading: setWorkspaceLoading, onError: setError });
-  const companiesController = useCompaniesWorkspaceController({ active: section === "companies", search, filters: companyFilters, peopleScope: peopleCompanyScope, initialPage: initial.companyPage, onLoading: setWorkspaceLoading, onError: setError });
+  const prospectsController = useProspectsWorkspaceController({ active: !restoreError && section === "prospects", search, filters: prospectFilters, sort: prospectSort, direction: prospectDirection, companyScope: companyPeopleScope, statsProspects: stats.prospects, initialPage: initial.prospectPage, onLoading: setWorkspaceLoading, onError: setError });
+  const companiesController = useCompaniesWorkspaceController({ active: !restoreError && section === "companies", search, filters: companyFilters, peopleScope: peopleCompanyScope, initialPage: initial.companyPage, onLoading: setWorkspaceLoading, onError: setError });
   const { setPage: setProspectPage } = prospectsController;
   const { setPage: setCompanyPage } = companiesController;
 
@@ -111,6 +112,7 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   const restoring = useRef(false);
   const lastRestoredLocation = useRef('');
   useEffect(() => {
+    if (restoreError) return; // Preserve the original damaged link for recovery.
     if (restoring.current) { restoring.current = false; return; }
     const next = writeWorkspaceUrl(urlState);
     const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -120,7 +122,7 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
     else window.history.replaceState(null, "", target);
     lastRestoredLocation.current = window.location.href;
     lastSection.current = urlState.section;
-  }, [urlState]);
+  }, [urlState, restoreError]);
 
   // Back and Forward. `restoring` stops the writer from immediately rewriting
   // the entry the browser just moved to, which would strand the user on it.
@@ -129,6 +131,8 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
       if (lastRestoredLocation.current === window.location.href) return;
       lastRestoredLocation.current = window.location.href;
       const restored = readWorkspaceUrl(new URLSearchParams(window.location.search), window.location.hash);
+      setRestoreError(restored.restoreError ?? '');
+      if (restored.restoreError) return;
       restoring.current = true;
       lastSection.current = restored.section;
       setSection(restored.section);
@@ -155,9 +159,10 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   const encodedProspectFilters = useMemo(() => encodeFilters(prospectFilters), [prospectFilters]);
 
   const prefetchSection = useCallback((next: Section) => {
+    if (restoreError) return;
     if (next === "prospects") prefetchApi(prospectApiPath({ filters: encodedProspectFilters, sort: prospectSort, direction: prospectDirection, includeFields: !prospectsController.fieldsLoaded }));
     if (next === "companies") prefetchApi(companyApiPath({}));
-  }, [encodedProspectFilters, prospectDirection, prospectSort, prospectsController.fieldsLoaded]);
+  }, [encodedProspectFilters, prospectDirection, prospectSort, prospectsController.fieldsLoaded, restoreError]);
 
   const refreshDashboard = useCallback(async () => {
     try {
@@ -174,9 +179,10 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   }, []);
 
   useEffect(() => {
+    if (restoreError) return;
     const timer = window.setTimeout(() => { void refreshDashboard().finally(() => setLoading(false)); }, 0);
     return () => window.clearTimeout(timer);
-  }, [refreshDashboard]);
+  }, [refreshDashboard, restoreError]);
 
   useEffect(() => {
     if (loading) return;
@@ -196,12 +202,12 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   // loaded, which is why this cannot happen in the initial state above.
   const restoredClient = useRef(false);
   useEffect(() => {
-    if (restoredClient.current || !initial.clientId || !clients.length) return;
+    if (restoreError || restoredClient.current || !initial.clientId || !clients.length) return;
     restoredClient.current = true;
     const match = clients.find((client) => client.id === initial.clientId);
     if (match) void Promise.resolve().then(() => openClient(match));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clients]);
+  }, [clients, restoreError]);
 
   const navigate = useCallback((next: Section) => {
     setSection(next); setSearch(""); setError(""); setWorkspaceLoading(false); setProspectPage(1); setCompanyPage(1); setSelectedList(null);
@@ -264,6 +270,12 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   }, [deleteRequest, refreshDashboard, selectedClient]);
 
   const title = navItems.find((item) => item.id === section)?.label ?? "Overview";
+
+  if (restoreError) return <main className="panel" aria-labelledby="restore-error-title">
+    <h1 id="restore-error-title">This search link needs attention</h1>
+    <p role="alert">{restoreError}</p>
+    <a className="button" href={window.location.pathname}>Clear this link and start a new search</a>
+  </main>;
 
   return <div className="app-shell">
     <a className="skip-link" href="#main-content" onClick={(event) => {

@@ -103,10 +103,9 @@ test("an over-cap request is refused, not trimmed to fit", () => {
     (error) => error instanceof FilterLimitError && error.allowed === maxBooleanValueLength,
   );
 
-  // Unknown fields and operators are still dropped rather than refused: they
-  // select nothing either way, so a stale saved view is not a hard failure.
-  assert.deepEqual(parseFilters(JSON.stringify([{ field: "", operator: "contains", values: ["x"] }])), []);
-  assert.deepEqual(parseFilters(JSON.stringify([{ field: "__title", operator: "drop table", values: ["x"] }])), []);
+  // Dropping a malformed restriction would broaden the query.
+  assert.throws(() => parseFilters(JSON.stringify([{ field: "", operator: "contains", values: ["x"] }])), /filter field/);
+  assert.throws(() => parseFilters(JSON.stringify([{ field: "__title", operator: "drop table", values: ["x"] }])), /operator/);
 });
 
 test("a refused request answers 413 with the numbers needed to fix it", async () => {

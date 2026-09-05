@@ -57,7 +57,7 @@ test("a big pasted list becomes a set, a small one does not", async () => {
   assert.match(client, /entry\.operator !== "equals" \|\| !\("values" in entry\) \|\| entry\.values\.length < setThreshold\) return entry;/);
   assert.match(client, /"\/api\/filter-sets"/);
   // Content-keyed, so re-fetching the grid does not re-upload the same list.
-  assert.match(client, /const knownSets = new Map<string, string>\(\);/);
+  assert.match(client, /const knownSets = new BoundedCache<string>\(40, 1024 \* 1024\);/);
   // Any failure falls back to inline values: slower, never wrong.
   assert.match(client, /\} catch \{\s*\n\s*\/\/ Sending the values inline still works\./);
 });

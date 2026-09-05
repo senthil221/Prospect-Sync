@@ -20,9 +20,9 @@ import type { ProspectFilter, ProspectFilterOperator, Section } from "./types.ts
 // discard a valid narrowing on refresh. The fragment is still user input and
 // passes through the same parser; it confers no authorization.
 //
-// A durable filter set (20260902000100) shrinks the big ones back to a uuid, so
-// a 5,000-domain paste that has been saved as a set restores from the URL like
-// anything else. That is the intended path for large lists.
+// The UI retains inline values even when requests use durable server sets.
+// Main-filter URLs containing only set IDs cannot hydrate editable values yet;
+// refuse those links instead of dropping their membership restriction.
 
 export const maxFilterUrlChars = 1200;
 
@@ -39,6 +39,7 @@ export type WorkspaceUrlState = {
   companyFilters: ProspectFilter[];
   companyPeopleScope: CompanyScope | null;
   peopleCompanyScope: PeopleScope | null;
+  restoreError?: string;
 };
 
 const sections = new Set<Section>(["overview", "prospects", "companies", "clients", "coverage", "quality", "imports"]);
@@ -63,25 +64,20 @@ function page(value: string | null) {
   return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= 100_000 ? parsed : 1;
 }
 
-// Everything here is defensive. A URL is user input - hand-edited, truncated by
-// a chat client, or simply from an older version of the app - and none of that
-// may throw on the way into a render. Anything unreadable falls back to its
-// default rather than taking the workspace down with it.
-// Validated by the same parser the API uses - it enforces the 60-filter and
-// 5,000-value caps and drops unknown fields and operators - then given the
-// client-side row id the filter builder keys its rows on. Validating with the
-// wire parser rather than trusting the URL is the point: a link is user input.
+// An unreadable narrowing blocks restoration instead of becoming an unfiltered
+// query. The caller renders recovery before enabling controllers.
 function filters(raw: string | null): ProspectFilter[] {
   if (!raw) return [];
-  try {
-    return parseFilters(raw).map((filter, index) => ({
+  return parseFilters(raw, { compileBoolean: false }).map((filter, index) => {
+    if (filter.setId) throw new Error('This link needs inline values to restore editable filters.');
+    return {
       id: `url-${index}-${filter.field}`,
       field: filter.field,
       operator: filter.operator as ProspectFilterOperator,
       values: filter.values,
       ...(filter.scopes ? { scopes: filter.scopes as ProspectFilter["scopes"] } : {}),
-    }));
-  } catch { return []; }
+    };
+  });
 }
 
 export function readWorkspaceUrl(params: URLSearchParams, hash = ""): WorkspaceUrlState {
@@ -95,8 +91,18 @@ export function readWorkspaceUrl(params: URLSearchParams, hash = ""): WorkspaceU
   const rawSection = params.get("s") ?? "";
   let companyPeopleScope: CompanyScope | null = null;
   let peopleCompanyScope: PeopleScope | null = null;
-  try { companyPeopleScope = parseCompanyScope(params.get("cscope")); } catch { companyPeopleScope = null; }
-  try { peopleCompanyScope = parsePeopleScope(params.get("pscope")); } catch { peopleCompanyScope = null; }
+  let prospectFilters: ProspectFilter[] = [], companyFilters: ProspectFilter[] = [];
+  let restoreError = '';
+  try {
+    companyPeopleScope = parseCompanyScope(params.get('cscope'), { compileBoolean: false });
+    peopleCompanyScope = parsePeopleScope(params.get('pscope'), { compileBoolean: false });
+    prospectFilters = filters(params.get('pf'));
+    companyFilters = filters(params.get('cf'));
+    if ((params.get('q') ?? '').length > 300) throw new Error('Search is too long.');
+    if (hash.startsWith('#workspace-') && !hash.startsWith('#workspace-v1?')) throw new Error('Unsupported workspace link version.');
+  } catch {
+    restoreError = 'This link’s filters or scope cannot be restored safely. Reopen the original workspace and share it again, or deliberately start a new search. No results have been loaded from this link.';
+  }
 
   return {
     section: sections.has(rawSection as Section) ? rawSection as Section : "overview",
@@ -107,10 +113,11 @@ export function readWorkspaceUrl(params: URLSearchParams, hash = ""): WorkspaceU
     companyPage: page(params.get("cp")),
     sort: (params.get("sort") ?? "created_at").slice(0, 60),
     direction: params.get("dir") === "asc" ? "asc" : "desc",
-    prospectFilters: filters(params.get("pf")),
-    companyFilters: filters(params.get("cf")),
+    prospectFilters,
+    companyFilters,
     companyPeopleScope,
     peopleCompanyScope,
+    ...(restoreError ? { restoreError } : {}),
   };
 }
 

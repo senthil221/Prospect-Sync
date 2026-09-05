@@ -63,6 +63,7 @@ test("a hand-edited or truncated URL cannot break the workspace", () => {
   assert.deepEqual(junk.prospectFilters, []);
   assert.deepEqual(junk.companyFilters, []);
   assert.equal(junk.companyPeopleScope, null);
+  assert.match(junk.restoreError, /cannot be restored safely/);
 });
 
 test("large filters survive in the fragment without expanding the HTTP request", () => {

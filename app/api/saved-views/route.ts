@@ -15,7 +15,11 @@ function reviewFlag(view: ViewRow) {
     parseFilters(JSON.stringify(filters ?? []));
     return null;
   } catch (error) {
-    if (!(error instanceof FilterLimitError)) return null;
+    if (!(error instanceof FilterLimitError)) return {
+      reason: 'This saved view contains a malformed or unsupported filter.',
+      limit: 'invalid_filter', received: 0, allowed: 0, field: null,
+      alternative: 'Review the original filter definition before applying it. The saved view has not been changed.',
+    };
     return {
       reason: error.message,
       limit: error.kind,
