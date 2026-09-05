@@ -47,7 +47,17 @@ pg pg_dump -U postgres -h 127.0.0.1 -d "$POSTGRES_DB" -Fc -Z0 \
 
 log "Verifying the dump is readable"
 # Catches truncation and a half-written file now, rather than during an outage.
-zstd -dc "${DEST}/database.dump.zst" | pg pg_restore --list > "${DEST}/manifest.txt"
+zstd -dc "${DEST}/database.dump.zst" | {
+  # pg_restore --list only needs the archive header and exits early. Keep the
+  # pipe open and drain the remaining stream, otherwise zstd gets SIGPIPE and
+  # pipefail aborts every successful backup BEFORE its offsite copy/pruning.
+  # Preserve pg_restore's error, and consume the entire zstd stream so checksum
+  # or truncation errors still fail the outer pipeline. This is not a restore drill.
+  manifest_status=0
+  pg pg_restore --list > "${DEST}/manifest.txt" || manifest_status=$?
+  cat >/dev/null
+  exit "$manifest_status"
+}
 objects="$(wc -l < "${DEST}/manifest.txt")"
 (( objects > 50 )) || { log "FAILED: dump manifest has only ${objects} entries"; exit 1; }
 

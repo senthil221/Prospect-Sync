@@ -42,7 +42,7 @@ Candidate release; production rollout pending at the time of this entry.
 
 - 429 unit/source/render tests pass (405 before this programme).
 - Lint passes. Production build/type checking rerun after cumulative budgets;
-  see release verification below for final outcome.
+  completed successfully. Commit `48eee2d` pushed through the gated deployment.
 - Candidate Compose passes the server's `docker compose ... config --quiet`.
 - New migration plus `scripts/check-v8-preparation.sql` passed in a short
   **rolled-back** transaction: worker-down no-enqueue, pending reuse, ready reuse,
@@ -57,6 +57,19 @@ Candidate release; production rollout pending at the time of this entry.
   have been performed against production.
 
 ## Remaining programme — not completed by Package 1
+
+### Backup failure discovered during the recovery audit
+
+The nightly timer is installed and offsite storage is configured, but the last
+backup service failed with exit 70. Recent logs repeatedly show zstd "Broken pipe"
+at manifest verification, before reaching the offsite step. The early-exiting
+`pg_restore --list` consumer causes this under `pipefail`.
+
+Follow-up fix keeps stdin open, drains the remaining archive, and preserves both
+the manifest-reader exit status and zstd's full-stream integrity errors. The
+1 MiB synthetic pipeline test reproduces the old failure, passes the new path,
+and verifies that reader/producer failures still propagate. Actual post-fix
+backup/offsite success and a separate restore drill remain unverified until run.
 
 | Package | Remaining work |
 | --- | --- |
