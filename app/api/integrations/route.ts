@@ -25,7 +25,9 @@ export async function POST(request: Request) {
     const user = await getAuthorizedUser();
     if (!user) return reply({ error: 'Unauthorized' }, 401);
     if (!integrationAdmin(user.email, process.env.INTEGRATION_ADMIN_EMAILS)) return reply({ error: 'An integration administrator is required.' }, 403);
-    if (!integrationWriteAllowed(request)) return reply({ error: 'Same-origin JSON requests are required.' }, 403);
+    const publicUrl = process.env.APP_PUBLIC_URL
+      || (process.env.NODE_ENV !== 'production' ? new URL(request.url).origin : undefined);
+    if (!integrationWriteAllowed(request, publicUrl)) return reply({ error: 'Same-origin JSON requests are required.' }, 403);
     const decoded = await readBoundedJson(request, { bytes: 8192, depth: 4, timeoutMs: 5000 });
     if (decoded.response) return decoded.response;
     const payload = decoded.value as Record<string, unknown> | null;

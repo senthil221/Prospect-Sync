@@ -46,6 +46,7 @@ x-app: &app
     IMPORT_WORKER_HEALTH_URL: http://import-worker:9090/health
     OPERATIONS_WORKER_HEALTH_URL: http://operations-worker:9091/health
     ALLOWED_USER_EMAILS: ${ALLOWED_USER_EMAILS}
+    APP_PUBLIC_URL: ${APP_PUBLIC_URL}
     INTEGRATION_ADMIN_EMAILS: ${INTEGRATION_ADMIN_EMAILS:-}
     INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:-}
     # Node heap ceiling so a runaway CSV import cannot OOM the whole box.

@@ -33,8 +33,15 @@ export function integrationAdmin(email: string | undefined, configured: string |
   return !!email && (configured ?? '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean).includes(email.toLowerCase());
 }
 
-export function integrationWriteAllowed(request: Request) {
-  // Same-origin JSON writes only. Never trust a caller-supplied provider URL.
-  return request.headers.get('origin') === new URL(request.url).origin
-    && request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() === 'application/json';
+export function integrationWriteAllowed(request: Request, publicUrl: string | undefined) {
+  // TLS terminates at the proxy, so Request.url can contain the internal origin.
+  // Trust deployment configuration, never Host or forwarded headers supplied by callers.
+  if (!publicUrl) return false;
+  try {
+    const expected = new URL(publicUrl);
+    if (!['http:', 'https:'].includes(expected.protocol) || expected.username || expected.password
+      || expected.pathname !== '/' || expected.search || expected.hash) return false;
+    return request.headers.get('origin') === expected.origin
+      && request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() === 'application/json';
+  } catch { return false; }
 }
