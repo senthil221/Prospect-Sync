@@ -15,3 +15,10 @@ body {
 button {
   cursor: pointer;
 }
+
+.integrations-workspace { display: grid; gap: 24px; }
+.integration-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 20px; }
+.integration-card { padding: 24px; display: grid; gap: 12px; align-content: start; }
+.integration-card form { display: grid; gap: 10px; }
+.integration-card input { width: 100%; min-height: 40px; }
+.integration-actions { display: flex; gap: 12px; flex-wrap: wrap; }

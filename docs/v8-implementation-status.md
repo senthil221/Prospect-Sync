@@ -160,7 +160,9 @@ People pivot again returned 81,477 matches and page two (51–100).
 
 ## Package 3 — bounded lifecycle and durable background measurements
 
-Implemented; gated release verification pending at this entry.
+Released as `94b3a2bd2024ea816078c392551279fc8ef914b7`. Public health
+returned HTTP 200 with that exact X-App-Version after blue/green deployment;
+core services and prepared-search/background-operation features reported healthy.
 
 - `20260905230936_bounded_background_lifecycle.sql` replaces whole-parent cascade
   expiry with one locked parent / at most 5,000 child items per unit (two export
@@ -193,6 +195,18 @@ application is unused. Start bounded, monitor resource thresholds, isolate test
 records, and confirm no active customer job before any worker restart. This
 does not authorize changing backup configuration or moving production data.
 
+### Controlled idle-worker recovery check
+
+On 2026-09-05 at approximately 23:23 UTC, all three background queues were empty,
+the importer reported no active import, and the operations worker reported no
+active work. Restarted only `prospect-operations-worker` with a 30-second graceful
+stop allowance. The first subsequent health probe reported the atomic scheduler
+healthy and idle; public application/core/feature health also passed. No database,
+app, or import-worker restart was performed for this drill. This verifies idle
+restart readiness, **not** mid-job crash recovery, duplicate prevention under
+failure, or sustained-load capacity. Search storage measured 90,472,448 bytes
+before the drill, with zero queued search/operation/export jobs.
+
 ## Remaining programme — not completed by these packages
 
 ### Backup failure discovered during the recovery audit
@@ -223,17 +237,18 @@ Backup authentication, destinations and permissions are left unchanged.
 | --- | --- |
 | V8-01 | Persistent journey/job telemetry, queue age/capacity/schema readiness, real peak arrival measurements and alerts. |
 | V8-02 | Full versioned QuerySpec/canonical identity, complete transport/route coverage and typed result/count adapters. Recursive ownership, cumulative inline budgets and bounded bodies on the main query/job routes are implemented. |
-| V8-03 | Storage reservations/quotas/pins, generic attempt fencing/cancellation, bounded cleanup and a shared budget including imports. Atomic round scheduling is implemented; full fairness latency SLOs are not certified. |
+| V8-03 | Storage reservations/quotas/full reader pins, generic attempt fencing/cancellation and a shared budget including imports. Bounded cleanup and atomic round scheduling are implemented; full fairness latency SLOs are not certified. |
 | V8-04 | Unified execution across both pivots, all scoped views, exports and frozen selection; complete over-cap membership path. |
 | V8-05 | Dependency-version consistency, immutable snapshot inputs, resumable search evaluation and measured term-cache experiment. |
 | V8-06 | Deferred exact counts, measured pagination/suggestion improvements, drift checks and safe online-index tooling. |
 | V8-07 | Tier A/B mixed-load, restart/fencing tests, broader authenticated browser regression, isolated restore and rollback drills. The original 51-keyword desktop journey passed. |
 
 No staging database is running locally and no separate staging destination is
-confirmed. Synthetic load generation can be implemented locally, but intrusive
-capacity/failure/restore experiments need a confirmed isolated target. No
-production data is to be copied to an unapproved destination. Business RPO/RTO
-and any required infrastructure spending remain user choices.
+confirmed. The user authorized bounded capacity/failure tests on this VPS while
+unused; this does not certify load capacity or authorize customer-record mutation
+fixtures. Backups and restore tests remain deferred. No production data is to be
+copied to an unapproved destination. Business RPO/RTO and any required
+infrastructure spending remain user choices.
 
 ## Release and rollback
 

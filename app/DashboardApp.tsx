@@ -13,6 +13,7 @@ import CoveragePanel from "./components/CoveragePanel";
 import DataQualityPanel from "./components/DataQualityPanel";
 import { AppIcon, DeleteConfirmation, LoadingState, ProspectDrawer, type IconName } from "./components/DashboardUi";
 import ImportsPanel from "./components/ImportsPanel";
+import IntegrationsPanel from "./components/IntegrationsPanel";
 import ThemeToggle from "./components/ThemeToggle";
 import MobileNav from "./components/MobileNav";
 import OverviewWorkspace from "./components/OverviewWorkspace";
@@ -34,6 +35,7 @@ const navGroups: Array<{ label: string; items: Array<{ id: Section; label: strin
       { id: "coverage", label: "Coverage checker", mark: "coverage" },
       { id: "quality", label: "Data quality", mark: "quality" },
       { id: "imports", label: "Import CSV", mark: "upload" },
+      { id: "integrations", label: "Integrations", mark: "grid" },
     ],
   },
 ];
@@ -289,6 +291,7 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
     <main id="main-content"><header className="topbar"><div><p className="eyebrow">DATABASE WORKSPACE</p><h1>{selectedClient ? selectedClient.name : title}</h1></div><div className="top-actions">{(section === "prospects" || section === "companies") && <label className="search"><span><AppIcon name="search" size={16}/></span><input aria-label="Search" value={search} onChange={(event) => { setSearch(event.target.value); if (section === "prospects") setProspectPage(1); if (section === "companies") setCompanyPage(1); }} placeholder={`Search ${section}...`}/></label>}<button className="primary" onClick={() => navigate("imports")}><AppIcon name="plus" size={15}/> Import list</button></div></header>
       {error && <div className="alert"><span>!</span><p>{error}</p>{canResetQuery ? <button className="alert-reset" onClick={resetQuery}>Clear filters and start over</button> : null}<button aria-label="Dismiss" onClick={() => setError("")}><AppIcon name="close" size={14}/></button></div>}
       <section className="content" aria-busy={loading || workspaceLoading}>
+        {!loading && section === "integrations" && <IntegrationsPanel/>}
         {loading ? <LoadingState/> : null}
         {!loading && workspaceLoading ? <div className="workspace-progress" role="status"><span/>Updating {title.toLowerCase()}…</div> : null}
         {!loading && section === "overview" && <OverviewWorkspace stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name ?? "Unassigned"} · ${item.list_name ?? "Unassigned"}` })}/>}
