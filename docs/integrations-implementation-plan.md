@@ -2,14 +2,29 @@
 
 Status: implementation in progress; external lead delivery remains disabled.
 
-Implementation update: the Integrations navigation/panel, encrypted server-side
-connection storage, explicit administrator gate, same-origin write checks,
-cross-instance read cooldown and read-only campaign discovery are implemented
-locally. The candidate database privilege/cooldown/fencing test passed inside a
-rolled-back VPS transaction. Prospect Sync lint/build passed; 470 tests passed
-with one skip. No integration release is deployed yet. A capabilities-only
-service-auth endpoint is prepared in the isolated verifier checkout; submissions
-remain explicitly disabled. The full delivery workflow below remains unfinished.
+Implementation update (6 September): secure connections are live in `33f7a70`;
+the user confirmed Smartlead connection and campaign discovery work. The proxy
+origin fix uses the configured public URL and retains same-origin enforcement.
+
+Next release candidate: client campaign mapping, credential-generation binding,
+server-side explicit selection (1–400 IDs), column mapping, suppression/exclusion
+counts, deterministic email deduplication, frozen draft payloads, a 10-row sample,
+actor-scoped draft history and cancellation. These are local snapshots only, not
+lead uploads. All-matching selection, dispatch workers, draft campaign creation
+and verifier submission remain unfinished. Verifier capabilities code is local,
+not deployed; its dependency audit also needs remediation before release.
+
+The user deferred live provider/test-address validation. No provider writes,
+campaign launches or paid verification tests were performed. Lint/build and 483
+tests passed (one platform skip); both new migrations and synthetic ownership,
+suppression, generation and snapshot checks passed in a rolled-back VPS transaction.
+
+Release uses additive migrations; existing credentials and prospect records are
+preserved. After release, use “Check and load campaigns” once to populate the new
+bounded catalog, then map a client destination. Replacing a connection invalidates
+old destination approvals. Refresh the catalog within 15 minutes before mapping.
+Cancelled drafts stop consuming the active-draft limit; physical retention cleanup
+is still pending and the existing global storage/admission caps remain enforced.
 
 ## Existing Campaign Launcher reuse review
 
@@ -40,7 +55,7 @@ Do not reuse its execution/security layer unchanged:
   readiness must remain unknown, not eligible by default.
 
 Use the launcher as a workflow/payload reference; do not mount its unrestricted
-proxy or auto-activation pipeline inside Prospect Sync. No launcher changes made.
+proxy or auto-activation pipeline inside Prospect Sync. The initial review was read-only.
 
 Follow-up implementation: the isolated launcher checkout now contains a shared
 hashed-token access gate on all three API handlers, a tab-memory-only access form,
@@ -64,7 +79,8 @@ BullMQ optional-module warnings. Its API currently supports capabilities only.
 
 User-approved integration administrator: `senthil@b2bdrive.net`.
 User-designated test campaign: `3909297`; draft/paused state and controlled test
-addresses still require verification before any upload. No credentials received.
+addresses have not been verified; live validation is deferred by the user. Smartlead
+credentials were entered by the user in the application, never in chat.
 
 ## Confirmed scope
 

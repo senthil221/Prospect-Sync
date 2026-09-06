@@ -21,4 +21,8 @@ button {
 .integration-card { padding: 24px; display: grid; gap: 12px; align-content: start; }
 .integration-card form { display: grid; gap: 10px; }
 .integration-card input { width: 100%; min-height: 40px; }
+.integration-preview { width: min(900px, 95vw); max-height: 90vh; overflow: auto; display: grid; gap: 12px; }
+.integration-mapping-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto; gap: 8px; }
+.integration-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .integration-mapping-row { grid-template-columns: 1fr; } }
 .integration-actions { display: flex; gap: 12px; flex-wrap: wrap; }

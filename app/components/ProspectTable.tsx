@@ -17,6 +17,7 @@ import ProspectTableRow from "./ProspectTableRow";
 import MenuButton from "./MenuButton";
 import Tabs from "./Tabs";
 import TitleClassifierPanel from "./TitleClassifierPanel";
+import IntegrationPreview from './IntegrationPreview';
 
 const DENSITIES = ["compact", "default", "comfortable"] as const;
 type Density = (typeof DENSITIES)[number];
@@ -38,6 +39,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const topScrollRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [selectedRows, setSelectedRows] = useState<Map<string, Prospect>>(new Map());
+  const [integrationSelection,setIntegrationSelection]=useState<string[]|null>(null);
   const selectedIds = useMemo(() => new Set(selectedRows.keys()), [selectedRows]);
   const [selectionMode, setSelectionMode] = useState<"explicit" | "all_matching">("explicit");
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
@@ -532,6 +534,9 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   }
 
   return <section className="people-workspace">
+    {integrationSelection && <IntegrationPreview ids={integrationSelection} clientId={clientId} fields={fields} onClose={()=>setIntegrationSelection(null)}/>}
+    {selectedCount>0 && <div className="bulk-bar"><button disabled={selectionMode!=='explicit' || selectedCount>400} onClick={()=>setIntegrationSelection([...selectedIds])}>Preview Smartlead delivery</button>
+      <span>Preview supports 1–400 checked prospects across pages. All-matching delivery is not enabled yet.</span></div>}
     <div className="people-heading">
       <div><p className="eyebrow">PROSPECTS</p><h2>Find people</h2><p>Search and filter every prospect saved in your people database.</p></div>
       <div className="entity-pivot-actions"><button className="secondary" title="Safely scope up to 250,000 matching people" onClick={() => onSeeCompanies({ search: search.trim(), filters: filterPayload(effectiveFilters), limit: 250000 })}>See Companies <AppIcon name="arrow" size={14}/></button><button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import prospects</button></div>

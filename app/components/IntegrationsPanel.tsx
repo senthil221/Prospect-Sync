@@ -5,7 +5,10 @@ import type { Campaign } from '../../lib/integrations/provider-api';
 import type { Provider } from '../../lib/integrations/credentials';
 
 type Connection = { provider: Provider; connected: boolean; checked_at: string | null };
-type Status = { connections: Connection[]; canManage: boolean; encryptionReady: boolean };
+type Destination = { client_id: string; campaign_id: number; campaign_name: string; connection_current: boolean };
+type Status = { connections: Connection[]; canManage: boolean; encryptionReady: boolean;
+  campaigns?: Campaign[]; clients?: {id:string;name:string}[]; destinations?: Destination[];
+  jobs?: {id:string;client_id:string;campaign_id:number;status:string;total:number;created_at:string}[] };
 
 async function readStatus(signal?: AbortSignal): Promise<Status> {
   const response = await fetch('/api/integrations', { cache: 'no-store', signal });
@@ -19,8 +22,9 @@ export default function IntegrationsPanel() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState<Provider | null>(null);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [filter, setFilter] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [campaignId, setCampaignId] = useState('');
 
   async function refresh(signal?: AbortSignal) {
     setStatus(await readStatus(signal));
@@ -31,19 +35,24 @@ export default function IntegrationsPanel() {
     return () => controller.abort();
   }, []);
 
-  async function act(provider: Provider, action: string, secret?: string) {
+  async function act(provider: Provider, action: string, secret?: string, destination?: {clientId?:string;campaignId?:number;jobId?:string}) {
     setBusy(provider); setError(''); setNotice('');
     try {
-      const response = await fetch('/api/integrations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, action, ...(secret ? { secret } : {}) }), signal: AbortSignal.timeout(25000) });
+      const response = await fetch('/api/integrations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, action, ...destination, ...(secret ? { secret } : {}) }), signal: AbortSignal.timeout(25000) });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? 'Connection check failed.');
-      if (provider === 'smartlead') setCampaigns(body.campaigns ?? []);
-      setNotice(action === 'disconnect' ? 'Credential removed. No campaign or verifier data was deleted.' : 'Connection checked successfully. No leads were sent.');
+      setNotice(action === 'disconnect' ? 'Credential removed. No campaign or verifier data was deleted.'
+        : action === 'map' ? 'Client destination saved. No leads were sent.'
+        : action === 'unmap' ? 'Client destination removed. No campaign or leads were deleted.'
+        : action === 'cancel' ? 'Draft cancelled. No leads were sent.'
+        : 'Connection checked successfully. No leads were sent.');
       await refresh();
     } catch (e) { setError(e instanceof Error ? e.message : 'Connection check failed.'); }
     finally { setBusy(null); }
   }
-  const visible = campaigns.filter(c => c.name.toLowerCase().includes(filter.toLowerCase())).slice(0, 100);
+  const campaigns = status?.campaigns ?? [];
+  const filtered = campaigns.filter(c => `${c.name} ${c.id}`.toLowerCase().includes(filter.toLowerCase()));
+  const visible = filtered.slice(0, 100);
   return <div className="integrations-workspace">
     <header className="section-heading"><div><p className="eyebrow">CONNECTED WORKFLOW</p><h2>Integrations</h2><p>One agency connection. Explicit client destinations. No spreadsheet handoffs.</p></div></header>
     {error && <p role="alert">{error} <button onClick={() => { setError(''); void refresh().catch(e => setError(e.message)); }}>Reload connections</button></p>}
@@ -81,6 +90,34 @@ export default function IntegrationsPanel() {
       <p>Showing {visible.length} of {campaigns.length} campaigns. This screen cannot start campaigns or upload leads.</p>
       <ul>{visible.map(c => <li key={c.id}>{c.name} — {c.status} · Campaign {c.id}{c.clientId ? ` · Smartlead client ${c.clientId}` : ''}</li>)}</ul>
     </section>}
-    <section className="panel integration-card"><h3>Lead delivery is not enabled yet</h3><p>Client mapping, selection preview, verification and resumable delivery are the next build stage. Connecting an account here does not send leads or spend verification credits.</p></section>
+    {status?.canManage && <section className="panel integration-card"><h3>Client campaign destinations</h3>
+      <p>A campaign belongs to one Prospect Sync client. Each client can have multiple campaigns. Replacing the agency key requires re-approving destinations.</p>
+      <form onSubmit={event => { event.preventDefault(); void act('smartlead','map',undefined,{clientId,campaignId:Number(campaignId)}); }}>
+        <label htmlFor="destination-client">Prospect Sync client</label>
+        <select id="destination-client" value={clientId} onChange={e=>setClientId(e.target.value)} required disabled={!!busy}>
+          <option value="">Choose client</option>{status.clients?.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <label htmlFor="destination-campaign">Smartlead campaign</label>
+        <select id="destination-campaign" value={campaignId} onChange={e=>setCampaignId(e.target.value)} required disabled={!!busy}>
+          <option value="">Choose campaign</option>{visible.map(c=><option key={c.id} value={c.id}>{c.name} · {c.status} · {c.id}</option>)}
+        </select>
+        <p>Use “Find a campaign” above to narrow the choices. Refresh with “Check and load campaigns” if the last check was over 15 minutes ago.</p>
+        <button className="primary" disabled={!!busy || !clientId || !campaignId}>Save destination</button>
+      </form>
+      {!status.destinations?.length && <p>No destinations mapped yet.</p>}
+      <ul>{status.destinations?.map(d=><li key={d.campaign_id}>
+        {status.clients?.find(c=>c.id===d.client_id)?.name ?? d.client_id} → {d.campaign_name} · {d.campaign_id}
+        {!d.connection_current && <strong> · Re-approval required after connection change</strong>}{' '}
+        <button disabled={!!busy} onClick={()=>void act('smartlead','unmap',undefined,{clientId:d.client_id,campaignId:d.campaign_id})}>Remove destination</button>
+      </li>)}</ul>
+    </section>}
+    {status?.canManage && <section className="panel integration-card"><h3>Your recent delivery drafts</h3>
+      <p>Choose up to 400 checked people, then “Preview Smartlead delivery” to map fields and freeze a draft.</p>
+      {!status.jobs?.length && <p>No drafts yet.</p>}
+      <ul>{status.jobs?.map(j=><li key={j.id}>{status.clients?.find(c=>c.id===j.client_id)?.name ?? j.client_id} · Campaign {j.campaign_id} · {j.total} leads · {j.status}{' '}
+        {j.status==='draft' && <button disabled={!!busy} onClick={()=>void act('smartlead','cancel',undefined,{jobId:j.id})}>Cancel draft</button>}
+      </li>)}</ul>
+    </section>}
+    <section className="panel integration-card"><h3>Lead delivery is not enabled yet</h3><p>Verification and resumable delivery are the next build stage. Connecting an account, mapping a destination or preparing a preview does not send leads or spend verification credits.</p></section>
   </div>;
 }

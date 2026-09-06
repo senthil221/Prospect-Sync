@@ -14,9 +14,22 @@ export async function GET() {
     const user = await getAuthorizedUser();
     if (!user) return reply({ error: 'Unauthorized' }, 401);
     const canManage = integrationAdmin(user.email, process.env.INTEGRATION_ADMIN_EMAILS);
-    const { data, error } = await createAdminClient().from('integration_connections').select('provider,connected,checked_at').order('provider').abortSignal(AbortSignal.timeout(5000));
+    const db = createAdminClient();
+    const { data, error } = await db.from('integration_connections').select('provider,connected,checked_at').order('provider').abortSignal(AbortSignal.timeout(5000));
     if (error) return storageError();
-    return reply({ connections: data, canManage, encryptionReady: /^[a-fA-F0-9]{64}$/.test(process.env.INTEGRATION_ENCRYPTION_KEY ?? ''), dispatchEnabled: false });
+    let management = {};
+    if (canManage) {
+      const [catalog, clients, destinations, jobs] = await Promise.all([
+        db.from('integration_connections').select('campaigns').eq('provider','smartlead').abortSignal(AbortSignal.timeout(5000)).single(),
+        db.from('clients').select('id,name').order('name').limit(1001).abortSignal(AbortSignal.timeout(5000)),
+        db.rpc('integration_destinations_v1').abortSignal(AbortSignal.timeout(5000)),
+        db.rpc('integration_job_status_v1',{p_actor:user.id}).abortSignal(AbortSignal.timeout(5000)),
+      ]);
+      if (catalog.error || clients.error || destinations.error || jobs.error) return storageError();
+      if ((clients.data?.length ?? 0)>1000) return reply({ error: 'Integration client selector exceeds 1,000 clients. A paginated selector is required.' },503);
+      management = { campaigns: catalog.data.campaigns, clients: clients.data, destinations: destinations.data, jobs:jobs.data };
+    }
+    return reply({ connections: data, canManage, ...management, encryptionReady: /^[a-fA-F0-9]{64}$/.test(process.env.INTEGRATION_ENCRYPTION_KEY ?? ''), dispatchEnabled: false });
   } catch { return storageError(); }
 }
 
@@ -32,11 +45,25 @@ export async function POST(request: Request) {
     if (decoded.response) return decoded.response;
     const payload = decoded.value as Record<string, unknown> | null;
     if (!payload || Array.isArray(payload) || !isProvider(payload.provider)
-      || !['connect', 'check', 'disconnect'].includes(String(payload.action))) return reply({ error: 'Invalid connection request.' }, 400);
+      || !['connect', 'check', 'disconnect', 'map', 'unmap', 'cancel'].includes(String(payload.action))) return reply({ error: 'Invalid connection request.' }, 400);
     const { provider, action } = payload;
     const db = createAdminClient();
+    if (action==='cancel') {
+      if (typeof payload.jobId!=='string' || !/^[0-9a-f-]{36}$/i.test(payload.jobId)) return reply({error:'Invalid draft ID.'},400);
+      const {data,error}=await db.rpc('cancel_integration_job_v1',{p_actor:user.id,p_job:payload.jobId}).abortSignal(AbortSignal.timeout(5000));
+      return !error && data ? reply({cancelled:true}) : reply({error:'Draft is unavailable or already finished.'},409);
+    }
+    if (action === 'map' || action === 'unmap') {
+      if (provider !== 'smartlead' || typeof payload.clientId !== 'string' || !payload.clientId || payload.clientId.length>200
+        || typeof payload.campaignId !== 'number' || !Number.isSafeInteger(payload.campaignId) || payload.campaignId<1) return reply({error:'Choose a client and campaign.'},400);
+      const {data,error} = await db.rpc('set_integration_destination_v1', {
+        p_actor:user.id,p_client:payload.clientId,p_campaign:payload.campaignId,p_enabled:action==='map',
+      }).abortSignal(AbortSignal.timeout(5000));
+      if (error) return reply({error: error.code==='22023' ? 'Refresh campaigns and choose an unassigned campaign from this account. Remove another client’s mapping before reassigning.' : 'Unable to save the campaign destination.'}, error.code==='22023'?409:503);
+      return data ? reply({saved:true}) : reply({error:'Destination changed. Reload connections.'},409);
+    }
     if (action === 'disconnect') {
-      const { error } = await db.from('integration_connections').update({ credential_ciphertext: null, connected: false, checked_at: null, updated_by: user.id, attempt_token: randomUUID() }).eq('provider', provider).abortSignal(AbortSignal.timeout(5000));
+      const { error } = await db.from('integration_connections').update({ credential_ciphertext: null, connected: false, checked_at: null, campaigns: [], generation: randomUUID(), updated_by: user.id, attempt_token: randomUUID() }).eq('provider', provider).abortSignal(AbortSignal.timeout(5000));
       return error ? storageError() : reply({ disconnected: true });
     }
     const key = process.env.INTEGRATION_ENCRYPTION_KEY ?? '';
@@ -58,7 +85,8 @@ export async function POST(request: Request) {
     try {
       const result = await checkProvider(provider, secret);
       const update = { connected: true, checked_at: new Date().toISOString(), updated_by: user.id,
-        ...(action === 'connect' ? { credential_ciphertext: sealCredential(provider, secret, key) } : {}) };
+        campaigns: result.campaigns,
+        ...(action === 'connect' ? { credential_ciphertext: sealCredential(provider, secret, key), generation: randomUUID() } : {}) };
       const { data, error } = await db.from('integration_connections').update(update).eq('provider', provider).eq('attempt_token', token).select('provider').abortSignal(AbortSignal.timeout(5000));
       if (error) return storageError();
       if (!data?.length) return reply({ error: 'The connection changed during this check. Reload its status.' }, 409);
