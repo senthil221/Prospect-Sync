@@ -141,6 +141,20 @@ psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
 	end
 	\$\$;
 
+	-- Outbound integration worker: only narrow queue functions, no table reads.
+	do \$\$
+	begin
+	  if not exists(select 1 from pg_roles where rolname='prospect_integrator') then create role prospect_integrator nologin noinherit; end if;
+	  if not exists(select 1 from pg_roles where rolname='prospect_integration_worker') then create role prospect_integration_worker login; end if;
+	end
+	\$\$;
+	alter role prospect_integration_worker with login password '${POSTGRES_PASSWORD}' nosuperuser nocreatedb nocreaterole nobypassrls connection limit 2;
+	grant prospect_integrator to prospect_integration_worker;
+	revoke service_role from prospect_integration_worker;
+	alter role prospect_integration_worker set statement_timeout='10s';
+	alter role prospect_integration_worker set lock_timeout='3s';
+	alter role prospect_integration_worker set idle_in_transaction_session_timeout='15s';
+
 	-- JWT settings PostgREST and legacy helpers read from the database ------
 	alter database "${DB}" set "app.settings.jwt_secret" to '${JWT_SECRET}';
 	alter database "${DB}" set "app.settings.jwt_exp" to '${JWT_EXP:-3600}';

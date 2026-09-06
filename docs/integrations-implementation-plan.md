@@ -1,6 +1,9 @@
 # Prospect Sync integrations — implementation contract
 
-Status: implementation in progress; external lead delivery remains disabled.
+Status: Smartlead direct-delivery release candidate implemented; verifier delivery
+remains disabled. See [current delivery guide](smartlead-delivery.md) for the
+implemented workflow, limits and recovery behavior. Historical stages below
+describe the earlier foundation releases, not the current candidate.
 
 Implementation update (6 September): secure connections are live in `33f7a70`;
 the user confirmed Smartlead connection and campaign discovery work. The proxy

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useDialogFocus } from './use-dialog';
 type Mapping={source:string;target:string};
 type Dest={client_id:string;campaign_id:number;campaign_name:string;connection_current:boolean};
-type Options={canManage:boolean;clients:{id:string;name:string}[];destinations:Dest[]};
+type Options={canManage:boolean;dispatchEnabled:boolean;clients:{id:string;name:string}[];destinations:Dest[]};
 type Preview={jobId:string|null;counts:{selected:number;eligible:number;suppressed:number;invalid:number;duplicates:number};sample:Record<string,unknown>[]};
 const canonical=['first_name','last_name','work_email','personal_email','company_name','website','phone_number','location','linkedin_profile','title'];
 export default function IntegrationPreview({ids,clientId,fields,onClose}:{ids:string[];clientId:string;fields:string[];onClose:()=>void}) {
@@ -17,6 +17,9 @@ export default function IntegrationPreview({ids,clientId,fields,onClose}:{ids:st
   const [preview,setPreview]=useState<Preview|null>(null);
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
+  const [confirmed,setConfirmed]=useState(false);
+  const [allowActive,setAllowActive]=useState(false);
+  const [queued,setQueued]=useState(false);
   useDialogFocus(dialog,{onClose,busy});
   useEffect(()=>{
     const controller=new AbortController();
@@ -25,7 +28,15 @@ export default function IntegrationPreview({ids,clientId,fields,onClose}:{ids:st
     }).then(setOptions).catch(e=>{if(!controller.signal.aborted)setError(e.message);});
     return ()=>controller.abort();
   },[]);
-  function changed() {requestId.current=null;setPreview(null);setError('');}
+  function changed() {requestId.current=null;setPreview(null);setError('');setConfirmed(false);setAllowActive(false);}
+  async function push() {
+    if(!preview?.jobId || !confirmed)return;
+    setBusy(true);setError('');
+    try {
+      const r=await fetch('/api/integrations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'smartlead',action:'enqueue',jobId:preview.jobId,confirm:true,allowActive}),signal:AbortSignal.timeout(10000)});
+      const body=await r.json();if(!r.ok)throw new Error(body.error);setQueued(true);
+    }catch(e){setError(e instanceof Error?e.message:'Check delivery history before retrying.');}finally{setBusy(false);}
+  }
   async function prepare() {
     setBusy(true);setError('');requestId.current ??= crypto.randomUUID();
     try {
@@ -42,7 +53,8 @@ export default function IntegrationPreview({ids,clientId,fields,onClose}:{ids:st
     {error && <p role="alert">{error}</p>}
     {!options && !error && <p role="status">Loading destinations…</p>}
     {options && !options.canManage && <p>An integration administrator must prepare deliveries in this release.</p>}
-    {options?.canManage && <>
+    {queued && <p role="status">Delivery queued. It will continue after closing this window. Follow progress in Integrations. No campaign start command is issued.</p>}
+    {options?.canManage && !queued && <>
       <label htmlFor="preview-client">Destination client</label><select id="preview-client" value={client} disabled={busy} onChange={e=>{changed();setClient(e.target.value);setCampaign('');}}>
         <option value="">Choose client</option>{options.clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
       </select>
@@ -61,12 +73,18 @@ export default function IntegrationPreview({ids,clientId,fields,onClose}:{ids:st
       <button disabled={busy || mapping.length>=209} onClick={()=>{changed();setMapping([...mapping,{source:'title',target:`custom:field_${mapping.length+1}`}]);}}>Add field</button>
       {preview && <div role="status"><h3>Draft {preview.jobId?'saved':'not created'}</h3><p>
         Selected: {preview.counts.selected} · Eligible: {preview.counts.eligible} · Suppressed: {preview.counts.suppressed} · Missing/invalid email: {preview.counts.invalid} · Duplicate email: {preview.counts.duplicates}
-      </p><p>Preview only. Delivery is not enabled. Cancel unused drafts in Integrations.</p>
+      </p><p>Only the frozen values shown here will be submitted. Local suppressions are checked again before upload.</p>
         {preview.sample.length>0 && <details><summary>Inspect outbound sample ({preview.sample.length} leads)</summary><pre>{JSON.stringify(preview.sample,null,2)}</pre></details>}
       </div>}
+      {preview?.jobId && <>
+        <label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)} disabled={busy}/> I confirm transferring these {preview.counts.eligible} leads to the selected Smartlead campaign.</label>
+        <label><input type="checkbox" checked={allowActive} onChange={e=>setAllowActive(e.target.checked)} disabled={busy}/> Also allow upload if this campaign is active. I understand this may trigger outreach immediately.</label>
+        <button className="primary" disabled={busy || !confirmed || !options.dispatchEnabled} onClick={()=>void push()}>Push leads to Smartlead</button>
+        {!options.dispatchEnabled && <p>Delivery worker unavailable. You can keep this draft and retry from Integrations.</p>}
+      </>}
     </>}
     <div className="modal-actions"><button data-autofocus disabled={busy} onClick={onClose}>Close</button>
-      {options?.canManage && <button className="primary" disabled={busy || !client || !campaign} onClick={()=>void prepare()}>{busy?'Preparing…':'Freeze and preview selection'}</button>}
+      {options?.canManage && !queued && <button className="primary" disabled={busy || !client || !campaign} onClick={()=>void prepare()}>{busy?'Working…':'Freeze and preview selection'}</button>}
     </div>
   </section></div>;
 }

@@ -8,6 +8,10 @@ import { checkProvider, ProviderError } from '../../../lib/integrations/provider
 export const runtime = 'nodejs';
 const reply = (body: unknown, status = 200, extra: Record<string, string> = {}) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...extra } });
 const storageError = () => reply({ error: 'Integration storage is unavailable. Check the migration and server configuration.' }, 503);
+async function deliveryReady() {
+  if(process.env.SMARTLEAD_DELIVERY_ENABLED!=='true' || !process.env.INTEGRATION_WORKER_HEALTH_URL)return false;
+  try {return (await fetch(process.env.INTEGRATION_WORKER_HEALTH_URL,{cache:'no-store',signal:AbortSignal.timeout(2000)})).ok;} catch{return false;}
+}
 
 export async function GET() {
   try {
@@ -19,17 +23,18 @@ export async function GET() {
     if (error) return storageError();
     let management = {};
     if (canManage) {
-      const [catalog, clients, destinations, jobs] = await Promise.all([
+      const [catalog, clients, destinations, jobs, progress] = await Promise.all([
         db.from('integration_connections').select('campaigns').eq('provider','smartlead').abortSignal(AbortSignal.timeout(5000)).single(),
         db.from('clients').select('id,name').order('name').limit(1001).abortSignal(AbortSignal.timeout(5000)),
         db.rpc('integration_destinations_v1').abortSignal(AbortSignal.timeout(5000)),
         db.rpc('integration_job_status_v1',{p_actor:user.id}).abortSignal(AbortSignal.timeout(5000)),
+        db.rpc('smartlead_progress_v1',{p_actor:user.id}).abortSignal(AbortSignal.timeout(5000)),
       ]);
-      if (catalog.error || clients.error || destinations.error || jobs.error) return storageError();
+      if (catalog.error || clients.error || destinations.error || jobs.error || progress.error) return storageError();
       if ((clients.data?.length ?? 0)>1000) return reply({ error: 'Integration client selector exceeds 1,000 clients. A paginated selector is required.' },503);
-      management = { campaigns: catalog.data.campaigns, clients: clients.data, destinations: destinations.data, jobs:jobs.data };
+      management = { campaigns: catalog.data.campaigns, clients: clients.data, destinations: destinations.data, jobs:jobs.data, progress:progress.data };
     }
-    return reply({ connections: data, canManage, ...management, encryptionReady: /^[a-fA-F0-9]{64}$/.test(process.env.INTEGRATION_ENCRYPTION_KEY ?? ''), dispatchEnabled: false });
+    return reply({ connections: data, canManage, ...management, encryptionReady: /^[a-fA-F0-9]{64}$/.test(process.env.INTEGRATION_ENCRYPTION_KEY ?? ''), dispatchEnabled: canManage && await deliveryReady() });
   } catch { return storageError(); }
 }
 
@@ -45,9 +50,23 @@ export async function POST(request: Request) {
     if (decoded.response) return decoded.response;
     const payload = decoded.value as Record<string, unknown> | null;
     if (!payload || Array.isArray(payload) || !isProvider(payload.provider)
-      || !['connect', 'check', 'disconnect', 'map', 'unmap', 'cancel'].includes(String(payload.action))) return reply({ error: 'Invalid connection request.' }, 400);
+      || !['connect', 'check', 'disconnect', 'map', 'unmap', 'cancel', 'enqueue', 'create_campaign'].includes(String(payload.action))) return reply({ error: 'Invalid connection request.' }, 400);
     const { provider, action } = payload;
     const db = createAdminClient();
+    if(action==='enqueue' || action==='create_campaign') {
+      if(provider!=='smartlead' || payload.confirm!==true)return reply({error:'Explicit Smartlead confirmation is required.'},400);
+      if(!await deliveryReady())return reply({error:'The delivery worker is unavailable. Please retry later.'},503);
+      if(action==='enqueue') {
+        if(typeof payload.jobId!=='string' || !/^[0-9a-f-]{36}$/i.test(payload.jobId) || typeof payload.allowActive!=='boolean')return reply({error:'Invalid delivery confirmation.'},400);
+        const {data,error}=await db.rpc('enqueue_integration_job_v1',{p_actor:user.id,p_job:payload.jobId,p_allow_active:payload.allowActive}).abortSignal(AbortSignal.timeout(5000));
+        return !error && data ? reply({queued:true}) : reply({error:'Cannot enqueue this draft. Check its destination and expiration, then prepare a new preview.'},409);
+      }
+      if(typeof payload.requestId!=='string' || !/^[0-9a-f-]{36}$/i.test(payload.requestId)
+        || typeof payload.clientId!=='string' || !payload.clientId || payload.clientId.length>200
+        || typeof payload.name!=='string' || !payload.name.trim() || payload.name.length>160)return reply({error:'Choose a client and a campaign name (1–160 characters).'},400);
+      const {data,error}=await db.rpc('request_smartlead_campaign_v1',{p_actor:user.id,p_request:payload.requestId,p_client:payload.clientId,p_name:payload.name.trim()}).abortSignal(AbortSignal.timeout(5000));
+      return !error ? reply({queued:true,creationId:data}) : reply({error:'Unable to queue campaign creation. Check the connection and existing requests before retrying.'},409);
+    }
     if (action==='cancel') {
       if (typeof payload.jobId!=='string' || !/^[0-9a-f-]{36}$/i.test(payload.jobId)) return reply({error:'Invalid draft ID.'},400);
       const {data,error}=await db.rpc('cancel_integration_job_v1',{p_actor:user.id,p_job:payload.jobId}).abortSignal(AbortSignal.timeout(5000));
@@ -98,5 +117,5 @@ export async function POST(request: Request) {
       }
       throw error;
     }
-  } catch { return reply({ error: 'Unable to update the integration. No leads were sent.' }, 503); }
+  } catch { return reply({ error: 'Unable to confirm this action. Check job history before retrying.' }, 503); }
 }

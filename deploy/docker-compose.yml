@@ -49,6 +49,8 @@ x-app: &app
     APP_PUBLIC_URL: ${APP_PUBLIC_URL}
     INTEGRATION_ADMIN_EMAILS: ${INTEGRATION_ADMIN_EMAILS:-}
     INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:-}
+    INTEGRATION_WORKER_HEALTH_URL: http://integration-worker:9092/health
+    SMARTLEAD_DELIVERY_ENABLED: "true"
     # Node heap ceiling so a runaway CSV import cannot OOM the whole box.
     NODE_OPTIONS: "--max-old-space-size=1024"
   healthcheck:
@@ -416,6 +418,34 @@ services:
     mem_limit: 320m
     cpus: "0.5"
     stop_grace_period: 30s
+    networks: [internal]
+
+  integration-worker:
+    image: ${APP_IMAGE}
+    container_name: prospect-integration-worker
+    <<: [*default-restart]
+    logging: *default-logging
+    command: ["node", "worker/integration-worker.mjs"]
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: prospect_integration_worker
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:-}
+      NODE_OPTIONS: "--max-old-space-size=128"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9092/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    mem_limit: 192m
+    cpus: "0.25"
+    stop_grace_period: 55s
     networks: [internal]
 
   # Stable internal proxy between the public Caddy listener and the two app

@@ -21,8 +21,10 @@ const input = ['BEGIN; SET LOCAL statement_timeout=\'5s\';', fixture,
   await read('../supabase/migrations/20260906002853_integration_delivery_ledger.sql'),
   await read('../supabase/migrations/20260906005421_integration_client_campaigns.sql'),
   await read('../supabase/migrations/20260906005651_integration_selection_preview.sql'),
+  await read('../supabase/migrations/20260906012316_smartlead_durable_dispatch.sql'),
   await read('./check-integration-connections.sql'), await read('./check-integration-ledger.sql'),
-  await read('./check-integration-destinations.sql'), await read('./check-integration-preview.sql'), 'ROLLBACK;'].join('\n');
+  await read('./check-integration-destinations.sql'), await read('./check-integration-preview.sql'),
+  await read('./check-smartlead-dispatch.sql'), 'ROLLBACK;'].join('\n');
 const result = spawnSync('psql', ['-X','-v','ON_ERROR_STOP=1'], { input, encoding:'utf8', timeout:30000,
   env: { ...process.env, PGHOST:url.hostname, PGPORT:url.port || '5432', PGUSER:decodeURIComponent(url.username), PGPASSWORD:decodeURIComponent(url.password), PGDATABASE:url.pathname.slice(1) } });
 if (result.error) throw result.error;
