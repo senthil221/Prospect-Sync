@@ -10,6 +10,17 @@ export type ListRecord = { id: string; name: string; data_source: string; source
 export type ProspectMembership = { listId: string; listName: string; clientId: string; clientName: string };
 export type Prospect = Record<string, unknown> & { id: string; full_name: string; first_name?: string; last_name?: string; work_email: string; personal_email?: string; title: string; keywords?: string[]; company_name: string; company_domain: string; city?: string; state?: string; country?: string; location?: string; company_location?: string; company_city?: string; company_state?: string; company_country?: string; employee_count_min?: number; employee_count_max?: number; seniority?: string; department?: string; esp?: string; email_provider_type?: string; mx_records?: string[]; mx_status?: string; mx_checked_at?: string; client_count: number; list_count: number; list_names?: string[]; client_names?: string[]; list_memberships?: ProspectMembership[]; all_data: string | Record<string, string>; last_contacted_at?: string; next_eligible_at?: string; eligible?: boolean; client_date_contacted?: string | null; tags?: Array<{ id: string; name: string; color: string; clientId?: string | null }>; icp_verified_client_ids?: string[]; blocked_client_ids?: string[] };
 export type Company = { id: string; name: string; domain: string; prospect_count: number; client_count: number; created_at: string; icp_validated?: boolean };
+// Everything stored about one company, fetched only when its drawer opens - the
+// listing deliberately carries none of it, because a page of fifty rows has no
+// use for fifty descriptions.
+export type CompanyDetail = Company & {
+  industry?: string; keywords?: string[]; short_description?: string; founded_year?: number | null;
+  technologies?: string[]; total_funding?: string;
+  employee_count_min?: number | null; employee_count_max?: number | null;
+  location?: string; city?: string; state?: string; country?: string;
+  esp?: string; email_provider_type?: string; mx_records?: string[]; mx_status?: string; mx_checked_at?: string | null;
+  updated_at?: string; all_data?: Record<string, unknown> | string;
+};
 type ImportRecordBase = { id: string; file_name: string; data_source: string; processed_rows: number; status: string; created_at: string };
 export type ProspectImportRecord = ImportRecordBase & { kind: "prospects"; client_name: string | null; list_name: string | null; unique_added: number; duplicates_linked: number };
 export type CompanyImportRecord = ImportRecordBase & { kind: "companies"; added_count: number; updated_count: number; skipped_count: number };

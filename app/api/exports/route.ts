@@ -2,7 +2,7 @@ import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { backgroundAdmissionResponse } from '../../../lib/operations-health';
 import { authorizeFilterSets } from "../../../lib/filter-sets";
 import { filterErrorResponse, parseFilters } from "../../../lib/prospect-filters";
-import { companyExportKeys } from "../../../lib/company-export";
+import { availableCompanyExportFieldIds, companyExportKeys, companyExportRowKeys } from "../../../lib/company-export";
 import { availableExportFieldIds, exportRowKeys } from "../../../lib/prospect-export";
 import { ownerIdentity, resultSetContentHash } from "../../../lib/result-sets";
 import { createAdminClient } from "../../../lib/supabase/admin";
@@ -103,10 +103,22 @@ export async function POST(request: Request) {
     if (!fields.length) return Response.json({ error: "None of the selected fields are available." }, { status: 400 });
     keys = exportRowKeys(customFieldNames, fields);
   } else {
-    // The company file is Name and Website and always has been; there is no
-    // field picker for it, so the columns come from lib/company-export.ts at
-    // both ends and only the keys need recording.
-    keys = [...companyExportKeys];
+    // A company export chooses its columns too now. Nothing is required: a
+    // caller that names no field gets the default set, which is what every
+    // company job recorded before the picker existed already meant.
+    let customFieldNames: string[] = [];
+    if (requestedFields.some((field) => field.startsWith("custom:"))) {
+      const discovered = await supabase.rpc("company_export_field_names_v1", { p_limit: 200 });
+      if (!discovered.error) {
+        customFieldNames = (discovered.data ?? []).map((row: { field_name?: unknown }) => String(row.field_name ?? "")).filter(Boolean);
+      }
+    }
+    const available = availableCompanyExportFieldIds(customFieldNames);
+    fields = requestedFields.filter((field) => available.has(field));
+    if (requestedFields.length && !fields.length) {
+      return Response.json({ error: "None of the selected fields are available." }, { status: 400 });
+    }
+    keys = fields.length ? companyExportRowKeys(customFieldNames, fields) : [...companyExportKeys];
   }
 
   const set = await supabase.rpc("request_result_set_v1", {

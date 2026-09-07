@@ -2,7 +2,7 @@ import { acquireSlot, withInteractiveSlot } from "../../../lib/admission";
 import { authorizeFilterSets } from "../../../lib/filter-sets";
 import { isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
 import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
-import { companyExportColumns } from "../../../lib/company-export";
+import { availableCompanyExportFieldIds, buildCompanyExportColumns, companyExportRowKeys } from "../../../lib/company-export";
 import { csvHeaderLine, csvRowsBody, type ProspectRow } from "../../../lib/prospect-export";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { filterErrorResponse, parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
@@ -59,16 +59,41 @@ async function withClientIcpValidation(
 // indexed, and stable while companies are being inserted underneath it. Pages
 // are rendered and dropped as they arrive, so nothing here grows with the size
 // of the export.
+//
+// WHICH COLUMNS. The file used to be Name and Website, decided here. It is now
+// whatever the picker asked for, and the only thing this route decides is that
+// nothing outside lib/company-export.ts gets to name a header: the requested
+// ids are validated against that catalogue, the columns are built from it, and
+// the row keys handed to the database are derived by running those same columns
+// - so a page never carries a description that no column is going to write.
 async function streamCompanyExport(
   search: string,
   websitesOnly: boolean,
   filters: ProspectFilter[],
   peopleScope: PeopleScope | null,
+  requestedFields: string[],
   signal?: AbortSignal,
 ) {
   const supabase = createAdminClient();
-  type Row = { id?: string; name?: string | null; domain?: string | null; sort_name?: string | null };
+  type Row = Record<string, unknown> & { id?: string; sort_name?: string | null };
   type Cursor = { name: string; id: string } | null;
+
+  // Only asked for when an uploaded column was chosen: it is a sampling scan,
+  // and an export of typed columns has no use for it.
+  let customFieldNames: string[] = [];
+  if (requestedFields.some((field) => field.startsWith("custom:"))) {
+    const discovered = await supabase.rpc("company_export_field_names_v1", { p_limit: 200 });
+    if (!discovered.error) {
+      customFieldNames = (discovered.data ?? []).map((row: { field_name?: unknown }) => String(row.field_name ?? "")).filter(Boolean);
+    }
+  }
+  const available = availableCompanyExportFieldIds(customFieldNames);
+  const fields = requestedFields.filter((field) => available.has(field));
+  if (requestedFields.length && !fields.length) {
+    return { response: Response.json({ error: "None of the selected fields are available." }, { status: 400 }) };
+  }
+  const columns = buildCompanyExportColumns(customFieldNames, fields);
+  const keys = companyExportRowKeys(customFieldNames, fields);
 
   async function readPage(cursor: Cursor) {
     // One admission slot per page rather than one for the whole download: the
@@ -81,7 +106,7 @@ async function streamCompanyExport(
     }
     if (!release) throw new Error("The database stayed busy for too long, so this export stopped rather than queueing behind it.");
     try {
-      return await supabase.rpc("search_company_export_v1", {
+      return await supabase.rpc("search_company_export_v2", {
         p_search: search,
         p_filters: filters,
         p_people_scope: peopleScope,
@@ -89,6 +114,7 @@ async function streamCompanyExport(
         p_after_name: cursor?.name ?? null,
         p_after_id: cursor?.id ?? null,
         p_limit: exportBatchSize,
+        p_keys: keys,
       }).abortSignal(signal ?? AbortSignal.timeout(120_000));
     } finally {
       release();
@@ -140,8 +166,8 @@ async function streamCompanyExport(
       }
       const rows = pending;
       pending = null;
-      const head = written === 0 ? BOM + csvHeaderLine(companyExportColumns) + CRLF : "";
-      const body = rows.length ? (written === 0 ? "" : CRLF) + csvRowsBody(rows as ProspectRow[], companyExportColumns) : "";
+      const head = written === 0 ? BOM + csvHeaderLine(columns) + CRLF : "";
+      const body = rows.length ? (written === 0 ? "" : CRLF) + csvRowsBody(rows as ProspectRow[], columns) : "";
       written += rows.length;
       if (head || body) controller.enqueue(encoder.encode(head + body));
       if (exhausted) controller.close();
@@ -202,6 +228,19 @@ export async function DELETE(request: Request) {
   return Response.json({ error: "Nothing selected to delete." }, { status: 400 });
 }
 
+// The chosen export columns, whichever way the request arrived: a JSON array
+// through POST, where the body carries structured values, or a comma-separated
+// list through GET, where it has to survive a query string. Empty means the
+// caller said nothing and gets the default set.
+function parseExportFields(raw: string | null) {
+  const value = (raw ?? "").trim();
+  if (!value) return [];
+  let parsed: unknown = null;
+  if (value.startsWith("[")) { try { parsed = JSON.parse(value); } catch { parsed = null; } }
+  const list = Array.isArray(parsed) ? parsed : value.split(",");
+  return [...new Set(list.map((field) => String(field).trim()).filter(Boolean))].slice(0, 600);
+}
+
 // Shared by GET and POST. The query is identical either way; only how it arrives
 // differs, because a filter set can be far too large to survive a request line.
 async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSignal) {
@@ -239,7 +278,7 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
 
   if (exportCsv) {
     if (clientId) return Response.json({ error: "Client-scoped company export is not available." }, { status: 400 });
-    const { response } = await streamCompanyExport(search, websitesOnly, filters, peopleScope, signal);
+    const { response } = await streamCompanyExport(search, websitesOnly, filters, peopleScope, parseExportFields(url.searchParams.get("fields")), signal);
     return response;
   }
 

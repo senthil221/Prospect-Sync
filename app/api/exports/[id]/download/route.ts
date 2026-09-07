@@ -1,5 +1,5 @@
 import { authorizeApi, getAuthorizedUser } from "../../../../../lib/auth";
-import { companyExportColumns } from "../../../../../lib/company-export";
+import { buildCompanyExportColumns } from "../../../../../lib/company-export";
 import { buildExportColumns, csvHeaderLine, csvRowsBody, type ExportColumn, type ProspectRow } from "../../../../../lib/prospect-export";
 import { ownerIdentity } from "../../../../../lib/result-sets";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
@@ -76,7 +76,20 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   let columns: ExportColumn[];
   if (job.entity_type === "company") {
-    columns = companyExportColumns;
+    // The job recorded the field ids it was asked for; an older one recorded
+    // none and means the default set, which is exactly what an empty list asks
+    // buildCompanyExportColumns for. The uploaded field names come back only
+    // when the job actually chose one - the discovery scan is not worth running
+    // to render columns that are all typed.
+    const fields = Array.isArray(job.fields) ? job.fields.map((field) => String(field)) : [];
+    let customFieldNames: string[] = [];
+    if (fields.some((field) => field.startsWith("custom:"))) {
+      const discovered = await supabase.rpc("company_export_field_names_v1", { p_limit: 200 });
+      if (!discovered.error) {
+        customFieldNames = (discovered.data ?? []).map((row: { field_name?: unknown }) => String(row.field_name ?? "")).filter(Boolean);
+      }
+    }
+    columns = buildCompanyExportColumns(customFieldNames, fields);
   } else {
     const fieldRows = await supabase.from("prospect_fields").select("field_name").order("field_name").limit(500);
     if (fieldRows.error) return Response.json({ error: fieldRows.error.message }, { status: 500 });

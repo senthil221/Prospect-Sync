@@ -2,7 +2,7 @@ import { csvStreamError, readCsvStream } from "./csv-download.ts";
 import { planExport, type ExportPlan } from "./export-plan.ts";
 import { buildExportColumns, csvHeaderLine, csvRowsBody, type ProspectRow } from "./prospect-export.ts";
 import type { ProspectFilter } from "./prospect-filters.ts";
-import type { CompanyScope } from "./workspace-scopes.ts";
+import type { CompanyScope, PeopleScope } from "./workspace-scopes.ts";
 
 const BOM = "﻿";
 const CRLF = "\r\n";
@@ -108,7 +108,12 @@ type Sink = {
   close(): Promise<{ files: number }>;
 };
 
-async function createSink(options: ExportOptions, canFs: boolean): Promise<Sink> {
+// Only the three fields that decide where bytes go. Narrowed from ExportOptions
+// so the company export can use the same sink without inventing a search term
+// and a custom field list it does not have.
+type SinkOptions = { format: ExportFormat; rowsPerFile: number; fileBaseName: string };
+
+async function createSink(options: SinkOptions, canFs: boolean): Promise<Sink> {
   const single = options.format === "single";
   const rowsPerFile = Math.max(1000, options.rowsPerFile || 25000);
   let header = "";
@@ -221,6 +226,64 @@ async function runDirectExport(options: ExportOptions, plan: ExportPlan): Promis
   const { files } = await sink.close();
   if (options.signal?.aborted) return { exported, files, canceled: true, plan };
   return { exported, files, canceled: false, plan };
+}
+
+export type CompanyExportOptions = {
+  search: string;
+  filters: ProspectFilter[];
+  peopleScope: PeopleScope | null;
+  websitesOnly: boolean;
+  fields: string[];
+  format: ExportFormat;
+  rowsPerFile: number;
+  fileBaseName: string;
+  totalRows?: number | null;
+  signal?: AbortSignal;
+  onProgress?: (progress: ExportProgress) => void;
+};
+
+// The company export, written the way the prospect one is.
+//
+// It used to collect the whole response into an array of strings and hand it to
+// Blob(), which lib/csv-download.ts is explicit about being safe only "where
+// the file is known to be small - two narrow columns". That stopped being true
+// the moment Description became a checkbox: it averages about a kilobyte, so
+// 400,000 companies is on the order of 400 MB, and the browser was being asked
+// to hold all of it before writing a byte. The sink writes straight to disk
+// wherever the File System Access API exists, and the Blob is only the fallback
+// - the same trade the prospect export already makes.
+//
+// It POSTs rather than builds a query string because a bulk-domain filter can
+// carry thousands of values, which is more than a request line survives; the
+// companies route accepts the identical query either way.
+export async function runCompanyExport(options: CompanyExportOptions): Promise<ExportResult> {
+  const sink = await createSink(options, fileSystemAccessSupported());
+  const response = await fetch("/api/companies", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: options.signal,
+    body: JSON.stringify({
+      export: "csv",
+      search: options.search,
+      filters: options.filters,
+      peopleScope: options.peopleScope,
+      website: options.websitesOnly ? "required" : "",
+      fields: options.fields,
+    }),
+  });
+  if (!response.ok) throw await csvStreamError(response, "Unable to export companies.");
+
+  let exported = 0;
+  await readCsvStream(response, {
+    onHeader: (header) => sink.setHeader(header),
+    onRows: async (text, rows) => {
+      await sink.add(text, rows);
+      exported += rows;
+      options.onProgress?.({ exported, total: options.totalRows ?? undefined, files: 0, phase: "downloading" });
+    },
+  });
+  const { files } = await sink.close();
+  return { exported, files, canceled: Boolean(options.signal?.aborted) };
 }
 
 type ExportJobStatus = {

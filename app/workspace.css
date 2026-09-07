@@ -817,6 +817,25 @@ main { min-width: 0; grid-column: 2; }
 .company-drawer-body { min-height: 0; padding: var(--space-5) var(--space-6) var(--space-6); overflow: auto; overscroll-behavior: contain; }
 .company-drawer-body .company-prospect-list { overflow-x: auto; }
 .company-drawer-body .inline-error { margin: var(--space-3) 0; }
+/* The company profile, above the linked people in the drawer. A card rather
+   than a bare list because the drawer already stacks three things and the
+   details are the one with no heading of its own inside it. */
+.company-profile { margin-bottom: var(--space-5); padding: var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--accent-soft); }
+.company-profile-head { margin-bottom: var(--space-3); display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.company-profile-head strong { color: var(--ph-text); font-size: var(--text-sm); }
+.company-profile-head small, .company-profile-empty { color: var(--ph-muted); font-size: var(--text-2xs); }
+.company-profile-empty { margin: 0; }
+.company-description { margin-bottom: var(--space-4); }
+.company-description p { margin: 0; color: var(--text-secondary); font-size: var(--text-xs); line-height: 1.55; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.company-description.expanded p { -webkit-line-clamp: unset; overflow: visible; }
+.company-description button { margin-top: var(--space-1); padding: 0; border: 0; background: transparent; color: var(--accent-text); font-size: var(--text-2xs); font-weight: var(--weight-semibold); text-decoration: underline; }
+.company-facts { display: grid; grid-template-columns: minmax(120px, 150px) minmax(0, 1fr); gap: var(--space-2) var(--space-4); align-items: baseline; }
+.company-fact { display: contents; }
+.company-fact-label { color: var(--ph-muted); font-size: var(--text-2xs); overflow-wrap: anywhere; }
+.company-fact-value { color: var(--text-primary); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.company-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.company-chip { max-width: 100%; padding: var(--space-1) var(--space-2); border-radius: var(--radius-full); background: var(--surface); color: var(--text-secondary); font-size: var(--text-2xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.company-chip-more { padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-full); background: transparent; color: var(--accent-text); font-size: var(--text-2xs); font-weight: var(--weight-semibold); text-decoration: underline; }
 .load-more-prospects { width: 100%; min-height: var(--control-standard); margin-top: var(--space-3); border: 1px solid var(--border-control); border-radius: var(--radius-lg); background: var(--surface); color: var(--accent-text); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
 .load-more-prospects:hover:not(:disabled) { border-color: var(--accent); box-shadow: 0 4px 12px rgba(var(--accent-rgb), .1); }
 .load-more-prospects:disabled { opacity: .6; cursor: wait; }
@@ -908,6 +927,10 @@ main { min-width: 0; grid-column: 2; }
 .company-drawer-header { padding: var(--space-6) var(--space-5) 0; }
 .company-drawer-body { padding: var(--space-4) var(--space-5) var(--space-6); }
 .company-drawer .drawer-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+/* Label above value rather than beside it: a 150px label column against a
+   phone's width leaves the values in a gutter. */
+.company-facts { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+.company-fact { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-2); }
   .clients-grid { grid-template-columns: 1fr; }
 .client-hero { align-items: flex-start; flex-wrap: wrap; }
 .cooldown-setting, .client-actions { width: 100%; margin-left: 0; }

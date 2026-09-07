@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { directByteLimit, directRowLimit, estimatedBytesPerRow, planExport } from "../lib/export-plan.ts";
 import { exportRowKeys, buildExportColumns, csvHeaderLine, csvRowsBody } from "../lib/prospect-export.ts";
-import { companyExportColumns } from "../lib/company-export.ts";
+import { availableCompanyExportFieldIds, buildCompanyCustomFields, buildCompanyExportColumns, companyExportColumns, companyExportRowKeys, estimatedCompanyBytesPerRow } from "../lib/company-export.ts";
 import { readCsvStream } from "../lib/csv-download.ts";
 
 // Release 2 item 6, section 9.4: direct streaming versus background chosen by
@@ -108,15 +108,21 @@ test("the stream reader cuts on record boundaries, not on chunk boundaries", asy
   }
 });
 
-test("the company CSV has one definition, used by both paths", async () => {
-  assert.deepEqual(companyExportColumns.map((column) => column.header), ["Company Name", "Website"]);
+test("the company CSV has one definition, used by every path", async () => {
+  // The default set is what a caller who chose nothing gets, on all three paths.
+  assert.deepEqual(companyExportColumns.map((column) => column.header),
+    ["Company Name", "Website", "Industry", "# Employees", "Company Location"]);
+  assert.deepEqual(buildCompanyExportColumns([], []).map((column) => column.header),
+    companyExportColumns.map((column) => column.header));
+
   // A bare domain becomes a URL, a full one is left alone, and a company with
   // neither name nor domain still gets a cell.
+  const identity = buildCompanyExportColumns([], ["__company_name", "__website"]);
   const rendered = csvRowsBody([
     { name: "Acme", domain: "acme.com" },
     { name: "", domain: "https://beta.example" },
     { name: "", domain: "" },
-  ], companyExportColumns).split("\r\n");
+  ], identity).split("\r\n");
   assert.equal(rendered[0], '"Acme","https://acme.com"');
   // A domain that already carries a scheme is left exactly as it is, in both cells.
   assert.equal(rendered[1], String.raw`"https://beta.example","https://beta.example"`);
@@ -127,11 +133,68 @@ test("the company CSV has one definition, used by both paths", async () => {
     read("../app/api/exports/[id]/download/route.ts"),
   ]);
   for (const source of [route, download]) {
-    assert.match(source, /companyExportColumns/, "both company export paths must render through the shared columns");
+    assert.match(source, /buildCompanyExportColumns/, "both company export paths must render through the shared columns");
   }
-  // Neither may keep a private copy of the two headers.
+  // Neither may keep a private copy of any header.
   assert.doesNotMatch(codeOnly(route), /"Company Name"/);
   assert.doesNotMatch(codeOnly(download), /"Company Name"/);
+});
+
+test("a company export fetches the columns it is going to write, and no others", () => {
+  // The keys are derived by running the renderer, so they follow the choice
+  // rather than a second hand-maintained map of ids to columns.
+  const identity = companyExportRowKeys([], ["__company_name", "__website"]);
+  assert.deepEqual(identity, ["domain", "id", "name"]);
+  // Description is a kilobyte a row and TOASTed. It must not be read unless it
+  // was asked for - which is the whole reason v2 takes a key list.
+  assert.ok(!identity.includes("short_description"));
+  assert.ok(companyExportRowKeys([], ["__short_description"]).includes("short_description"));
+  // An uploaded column reads all_data, and nothing else does.
+  assert.ok(!identity.includes("all_data"));
+  assert.ok(companyExportRowKeys(["Company Phone"], ["custom:companyphone"]).includes("all_data"));
+
+  // Uploaded keys that duplicate a typed column are not offered twice, and the
+  // product's own bookkeeping is not offered at all - the fill-from-company
+  // enrichment stamps _enriched_from and _enriched_at onto every row it touches,
+  // which is not a fact about the company.
+  const offered = buildCompanyCustomFields([
+    "Company Phone", "Industry", "# Employees", "Annual Revenue", "_enriched_at", "_enriched_from",
+  ]);
+  assert.deepEqual(offered.map((field) => field.label), ["Annual Revenue", "Company Phone"]);
+
+  // Company Name for Emails is the name with the legal suffix removed, and the
+  // most populated uploaded key in the database. It is a column, not a repeat.
+  assert.deepEqual(buildCompanyCustomFields(["Company Name for Emails"]).map((field) => field.label), ["Company Name For Emails"]);
+
+  // An id nothing defines is not a column, however it arrives.
+  const available = availableCompanyExportFieldIds(["Company Phone"]);
+  assert.ok(available.has("__industry") && available.has("custom:companyphone"));
+  assert.ok(!available.has("__nonsense"));
+  assert.deepEqual(buildCompanyExportColumns([], ["__industry", "__nonsense"]).map((column) => column.header), ["Industry"]);
+
+  // Description costs about forty ordinary columns, which is what makes the
+  // estimate worth showing next to the checkbox.
+  assert.ok(estimatedCompanyBytesPerRow([], ["__short_description"]) > 20 * estimatedCompanyBytesPerRow([], ["__industry"]));
+});
+
+test("the company export names its columns in the select list rather than projecting a whole row", async () => {
+  const migration = await read("../supabase/migrations/20260907090000_company_exports_choose_their_columns.sql");
+  const code = codeOnly(migration);
+
+  // to_jsonb(c) would detoast short_description and all_data on every row of
+  // every page before the projection discarded them, which is exactly what the
+  // key list exists to avoid.
+  assert.doesNotMatch(code, /jsonb_project_v1\(to_jsonb\(c\)/);
+  assert.match(code, /format\('c\.%I', columns\.column_name\)/);
+  // A key that is not a column of public.companies cannot reach the statement.
+  assert.match(code, /join information_schema\.columns columns/);
+  assert.match(code, /columns\.table_name = 'companies'/);
+  // The cursor still travels with the row: lower-casing the name again in Node
+  // would be a different function under a different collation.
+  assert.match(code, /lower\(c\.name\) as sort_name/);
+  assert.match(code, /order by lower\(c\.name\), c\.id/);
+  // The discovery scan is bounded whatever the table grows to.
+  assert.match(code, /limit 20000/);
 });
 
 test("nothing accumulates the whole file", async () => {

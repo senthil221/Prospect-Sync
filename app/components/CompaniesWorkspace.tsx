@@ -4,12 +4,14 @@ import { BoundedCache } from '../../lib/bounded-cache';
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import CompanyFilterPanel, { BulkDomainPaste, addDomainsToWebsiteFilter } from "../CompanyFilterPanel";
-import { csvStreamError, downloadCsvStream } from "../../lib/csv-download";
+import { buildCompanyCustomFields, companyAllData, companyExportFields, defaultCompanyExportFields, estimatedCompanyBytesPerRow } from "../../lib/company-export";
+import { fileSystemAccessSupported, runCompanyExport, type ExportProgress } from "../../lib/export-runner";
+import { megabytes } from "../../lib/export-plan";
 import { api, encodeFilters, fetchCompanies, isAbortError } from "../../lib/dashboard-api";
 import { filterPayloadWithSets } from "../../lib/filter-set-client";
 import { emptyWorkspaceState } from "../../lib/workspace-states";
 import { colorTone, formatNumber, initials } from "../../lib/dashboard-helpers";
-import type { ClientRecord, Company, Prospect, ProspectFilter } from "../../lib/types";
+import type { ClientRecord, Company, CompanyDetail, Prospect, ProspectFilter } from "../../lib/types";
 import { AppIcon, WorkspaceEmpty } from "./DashboardUi";
 import CompanyTableRow from "./CompanyTableRow";
 import MenuButton from "./MenuButton";
@@ -100,8 +102,32 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   const [loadingCompany, setLoadingCompany] = useState("");
   const [companyError, setCompanyError] = useState("");
   const [companyNotice, setCompanyNotice] = useState("");
+  const [detailsByCompany, setDetailsByCompany] = useState<Record<string, CompanyDetail>>({});
+  const [loadingDetail, setLoadingDetail] = useState("");
   const [exportingCompanies, setExportingCompanies] = useState(false);
   const [companyExportScope, setCompanyExportScope] = useState<"all" | "with_websites">("all");
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportFields, setExportFields] = useState<string[]>(defaultCompanyExportFields);
+  const [exportFormat, setExportFormat] = useState<"single" | "parts">("single");
+  const [exportRowsPerFile, setExportRowsPerFile] = useState(25000);
+  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
+  // Uploaded companies.all_data keys, found by a sampling scan on the server.
+  // Fetched once, when the dialog first opens, and never on a page load: the
+  // typed fields are what the picker is for and these are the extras.
+  const [customFieldNames, setCustomFieldNames] = useState<string[] | null>(null);
+  const exportAbortRef = useRef<AbortController | null>(null);
+  const exportFieldCatalog = useMemo(
+    () => [...companyExportFields.map((field) => ({ id: field.id, label: field.label })), ...buildCompanyCustomFields(customFieldNames ?? [])],
+    [customFieldNames],
+  );
+  // Roughly how large the file will be. Worth showing because the columns are
+  // not comparable: Description alone is about a kilobyte a row, so ticking it
+  // over 400,000 companies is the difference between a 20 MB file and a 400 MB
+  // one, and nothing else on the picker hints at that.
+  const exportBytes = useMemo(
+    () => totalCapped ? null : total * estimatedCompanyBytesPerRow(customFieldNames ?? [], exportFields),
+    [customFieldNames, exportFields, total, totalCapped],
+  );
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkSelectOpen, setBulkSelectOpen] = useState(false);
@@ -247,9 +273,24 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
     finally { setBulkSelecting(false); }
   }
 
+  // The profile and the linked people are two independent reads, and the drawer
+  // shows both. Kicked off together rather than in sequence so the details are
+  // not waiting behind a page of prospects that renders below them.
+  const loadCompanyDetail = useCallback(async (company: Company) => {
+    if (detailsByCompany[company.id]) return;
+    setLoadingDetail(company.id);
+    try {
+      const data = await api<{ company: CompanyDetail }>(`/api/companies/${encodeURIComponent(company.id)}`);
+      setDetailsByCompany((current) => ({ ...current, [company.id]: { ...company, ...data.company } }));
+    } catch (caught) {
+      if (!isAbortError(caught)) setCompanyError(caught instanceof Error ? caught.message : "Unable to load company details.");
+    } finally { setLoadingDetail((current) => current === company.id ? "" : current); }
+  }, [detailsByCompany]);
+
   const openCompany = useCallback(async (company: Company) => {
     setSelectedCompany(company);
     setCompanyError("");
+    void loadCompanyDetail(company);
     if (prospectsByCompany[company.id] || !company.prospect_count) return;
     setLoadingCompany(company.id);
     try {
@@ -258,7 +299,7 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
       setProspectTotalsByCompany((current) => ({ ...current, [company.id]: data.total }));
     } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to load company prospects."); }
     finally { setLoadingCompany(""); }
-  }, [clientId, prospectsByCompany]);
+  }, [clientId, loadCompanyDetail, prospectsByCompany]);
 
   async function loadMoreProspects(company: Company) {
     const existing = prospectsByCompany[company.id] ?? [];
@@ -275,30 +316,59 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
     finally { setLoadingCompany(""); }
   }
 
-  async function exportCompanies() {
-    setExportingCompanies(true); setCompanyError(""); setCompanyNotice("");
+  async function openExportDialog() {
+    setExportDialogOpen(true);
+    if (customFieldNames !== null) return;
     try {
-      const params = new URLSearchParams({ export: "csv" });
-      if (search.trim()) params.set("search", search.trim());
-      if (companyExportScope === "with_websites") params.set("website", "required");
-      if (filters.length) params.set("filters", encodeFilters(filters));
-      if (peopleScope) params.set("peopleScope", JSON.stringify(peopleScope));
-      const response = await fetch(`/api/companies?${params.toString()}`);
-      if (!response.ok) throw await csvStreamError(response, "Unable to export companies.");
-      // The endpoint streams now, so there is no X-Exported-Rows header to read:
-      // the count is not known when the headers are sent. It is counted here
-      // instead, from the records as they arrive.
-      const exported = await downloadCsvStream(
-        response,
-        `prospect-sync-companies-${companyExportScope === "with_websites" ? "with-websites" : "all"}-${new Date().toISOString().slice(0, 10)}.csv`,
-      );
-      setCompanyNotice(`Exported ${formatNumber(exported)} ${search.trim() || filters.length || peopleScope ? "matching " : ""}companies${companyExportScope === "with_websites" ? " with websites" : ""}.`);
-    } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to export companies."); }
-    finally { setExportingCompanies(false); }
+      const data = await api<{ fields: string[] }>("/api/companies/export-fields");
+      setCustomFieldNames(data.fields ?? []);
+    } catch {
+      // The typed fields are the picker; the uploaded ones are extra. Failing to
+      // find them is not a reason to refuse to export.
+      setCustomFieldNames([]);
+    }
+  }
+
+  function toggleExportField(id: string) {
+    setExportFields((current) => current.includes(id) ? current.filter((field) => field !== id) : [...current, id]);
+  }
+
+  async function exportCompanies() {
+    if (!exportFields.length) { setCompanyError("Choose at least one field to export."); return; }
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+    setExportingCompanies(true); setCompanyError(""); setCompanyNotice("");
+    setExportProgress({ exported: 0, files: 0, phase: "downloading" });
+    try {
+      // The count is not known when the response headers are sent - the endpoint
+      // streams - so the rows are counted from the records as they arrive, and
+      // `total` here is only what the grid already believes for the progress bar.
+      const result = await runCompanyExport({
+        search: search.trim(),
+        filters,
+        peopleScope,
+        websitesOnly: companyExportScope === "with_websites",
+        fields: exportFields,
+        format: exportFormat,
+        rowsPerFile: exportRowsPerFile,
+        fileBaseName: `prospect-sync-companies-${companyExportScope === "with_websites" ? "with-websites" : "all"}-${new Date().toISOString().slice(0, 10)}`,
+        totalRows: totalCapped ? null : total,
+        signal: controller.signal,
+        onProgress: setExportProgress,
+      });
+      if (result.canceled) { setCompanyNotice("Export canceled."); return; }
+      setExportDialogOpen(false);
+      setCompanyNotice(`Exported ${formatNumber(result.exported)} ${search.trim() || filters.length || peopleScope ? "matching " : ""}companies${companyExportScope === "with_websites" ? " with websites" : ""}${result.files > 1 ? ` across ${formatNumber(result.files)} files` : ""} with ${formatNumber(exportFields.length)} selected fields.`);
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") setCompanyNotice("Export canceled.");
+      else setCompanyError(caught instanceof Error ? caught.message : "Unable to export companies.");
+    } finally {
+      setExportingCompanies(false); setExportProgress(null); exportAbortRef.current = null;
+    }
   }
 
   return <section className="companies-workspace">
-    <div className="section-intro company-intro"><div><p className="eyebrow">COMPANIES</p><h2>Companies already in your database.</h2><p>Open a company to see its prospects in a separate panel.</p></div><div className="company-intro-actions">{onFilters ? <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {activeFilterCount ? <span>{activeFilterCount}</span> : null}</button> : null}<MenuButton label="Actions" icon="grid" panelLabel="Company actions" align="end">{onFilters ? <button className="ds-menu-item" aria-pressed={bulkOpen} onClick={() => setBulkOpen((open) => !open)}><AppIcon name="search" size={14}/> Bulk domains{domainFilterCount ? ` (${domainFilterCount})` : ""}</button> : null}{clientId ? <button className="ds-menu-item" aria-pressed={bulkSelectOpen} onClick={() => setBulkSelectOpen((open) => !open)}><AppIcon name="check" size={14}/> Bulk select</button> : null}{!clientId ? <label className="ds-menu-field"><span>Export scope</span><select aria-label="Company export scope" value={companyExportScope} disabled={exportingCompanies} onChange={(event) => setCompanyExportScope(event.target.value as "all" | "with_websites")}><option value="all">All companies</option><option value="with_websites">Only with websites</option></select></label> : null}{!clientId ? <button className="ds-menu-item" disabled={exportingCompanies} title="Export all matching companies across every page" onClick={() => void exportCompanies()}><AppIcon name="download" size={14}/> {exportingCompanies ? "Exporting…" : "Export CSV"}</button> : null}<button className="ds-menu-item" title="Safely scope up to 250,000 matching companies" onClick={() => onSeePeople({ search: search.trim(), filters, limit: 250000 })}><AppIcon name="arrow" size={14}/> See these people</button></MenuButton><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div></div>
+    <div className="section-intro company-intro"><div><p className="eyebrow">COMPANIES</p><h2>Companies already in your database.</h2><p>Open a company to see its prospects in a separate panel.</p></div><div className="company-intro-actions">{onFilters ? <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {activeFilterCount ? <span>{activeFilterCount}</span> : null}</button> : null}<MenuButton label="Actions" icon="grid" panelLabel="Company actions" align="end">{onFilters ? <button className="ds-menu-item" aria-pressed={bulkOpen} onClick={() => setBulkOpen((open) => !open)}><AppIcon name="search" size={14}/> Bulk domains{domainFilterCount ? ` (${domainFilterCount})` : ""}</button> : null}{clientId ? <button className="ds-menu-item" aria-pressed={bulkSelectOpen} onClick={() => setBulkSelectOpen((open) => !open)}><AppIcon name="check" size={14}/> Bulk select</button> : null}{!clientId ? <button className="ds-menu-item" disabled={exportingCompanies} title="Choose the company columns to export across every page" onClick={() => void openExportDialog()}><AppIcon name="download" size={14}/> {exportingCompanies ? "Exporting…" : "Export CSV"}</button> : null}<button className="ds-menu-item" title="Safely scope up to 250,000 matching companies" onClick={() => onSeePeople({ search: search.trim(), filters, limit: 250000 })}><AppIcon name="arrow" size={14}/> See these people</button></MenuButton><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div></div>
     <div className="company-summary"><div className="summary-violet"><span>Companies in database</span><strong>{totalLabel}</strong><small>{totalCapped ? "Counting stopped early to keep this fast" : "Complete company directory"}</small></div><div className="summary-blue"><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong><small>{total ? `${Math.round((covered / total) * 100)}% of companies` : "No companies yet"}</small></div><div className="summary-green"><span>Total linked prospects</span><strong>{formatNumber(prospectTotal)}</strong><small>Across all matching companies</small></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div>
     {peopleScope ? <div className="cross-scope-banner" role="status"><span>Showing companies represented in your previous People DB search (safety limit: {formatNumber(peopleScope.limit)} matching people).</span><button onClick={onClearPeopleScope}>Clear people scope</button></div> : null}
     {companyError ? <div className="inline-error" role="alert">{companyError}</div> : null}
@@ -326,12 +396,124 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
     </article>
     {onFilters && filtersOpen ? <CompanyFilterPanel filters={filters} onChange={onFilters} /> : null}
     </div>
-    {selectedCompany ? <CompanyDrawer company={selectedCompany} prospects={prospectsByCompany[selectedCompany.id] ?? []} total={prospectTotalsByCompany[selectedCompany.id] ?? selectedCompany.prospect_count} loading={loadingCompany === selectedCompany.id} error={companyError} onLoadMore={() => void loadMoreProspects(selectedCompany)} onClose={() => { setSelectedCompany(null); setCompanyError(""); }} /> : null}
+    {selectedCompany ? <CompanyDrawer company={selectedCompany} detail={detailsByCompany[selectedCompany.id] ?? null} loadingDetail={loadingDetail === selectedCompany.id} prospects={prospectsByCompany[selectedCompany.id] ?? []} total={prospectTotalsByCompany[selectedCompany.id] ?? selectedCompany.prospect_count} loading={loadingCompany === selectedCompany.id} error={companyError} onLoadMore={() => void loadMoreProspects(selectedCompany)} onClose={() => { setSelectedCompany(null); setCompanyError(""); }} /> : null}
+    {exportDialogOpen ? <div className="modal-backdrop" role="presentation"><section className="export-modal" role="dialog" aria-modal="true" aria-labelledby="company-export-title">
+      <div className="export-modal-head"><div><p className="eyebrow">CSV EXPORT</p><h2 id="company-export-title">Choose companies and fields</h2><p>Only the fields checked below will be included in the download.</p></div><button aria-label="Close export dialog" disabled={exportingCompanies} onClick={() => setExportDialogOpen(false)}><AppIcon name="close" size={14}/></button></div>
+      <fieldset className="export-scope"><legend>Companies to export</legend>
+        <label htmlFor="company-export-all"><span className="sr-only">All matching companies</span><input id="company-export-all" type="radio" name="company-export-scope" disabled={exportingCompanies} checked={companyExportScope === "all"} onChange={() => setCompanyExportScope("all")}/><span><strong>All {search.trim() || activeFilterCount || peopleScope ? "matching " : ""}companies</strong><small>{totalLabel} records across every page</small></span></label>
+        <label htmlFor="company-export-websites"><span className="sr-only">Only companies with a website</span><input id="company-export-websites" type="radio" name="company-export-scope" disabled={exportingCompanies} checked={companyExportScope === "with_websites"} onChange={() => setCompanyExportScope("with_websites")}/><span><strong>Only with websites</strong><small>Skips companies with no domain saved</small></span></label>
+      </fieldset>
+      <div className="export-fields-head"><div><strong>Fields to include</strong><span>{formatNumber(exportFields.length)} selected{exportBytes === null ? "" : ` · roughly ${megabytes(exportBytes)} MB`}</span></div><div><button disabled={exportingCompanies} onClick={() => setExportFields(exportFieldCatalog.map((field) => field.id))}>Select all</button><button disabled={exportingCompanies} onClick={() => setExportFields(defaultCompanyExportFields)}>Recommended</button><button disabled={exportingCompanies} onClick={() => setExportFields([])}>Clear</button></div></div>
+      <div className="export-field-grid">{exportFieldCatalog.map((field) => <label key={field.id}><input type="checkbox" disabled={exportingCompanies} checked={exportFields.includes(field.id)} onChange={() => toggleExportField(field.id)}/><span>{field.label}</span></label>)}</div>
+      <fieldset className="export-scope export-format"><legend>Output</legend>
+        <label htmlFor="company-export-single"><span className="sr-only">Single CSV file</span><input id="company-export-single" type="radio" name="company-export-format" checked={exportFormat === "single"} disabled={exportingCompanies} onChange={() => setExportFormat("single")}/><span><strong>One CSV file</strong><small>Everything in a single download, any size</small></span></label>
+        <label htmlFor="company-export-parts"><span className="sr-only">Split into multiple files</span><input id="company-export-parts" type="radio" name="company-export-format" checked={exportFormat === "parts"} disabled={exportingCompanies} onChange={() => setExportFormat("parts")}/><span><strong>Split into parts</strong><small>Multiple CSVs of <select aria-label="Rows per file" disabled={exportingCompanies || exportFormat !== "parts"} value={exportRowsPerFile} onClick={(event) => event.stopPropagation()} onChange={(event) => setExportRowsPerFile(Number(event.target.value))}>{[10000, 25000, 50000, 100000].map((size) => <option key={size} value={size}>{formatNumber(size)}</option>)}</select> rows each</small></span></label>
+      </fieldset>
+      {/* The Blob fallback holds the whole file before it writes a byte, so a
+          browser without the File System Access API is the one place where the
+          size estimate is a warning rather than a note. */}
+      {!fileSystemAccessSupported() ? <p className="export-hint">Your browser will download the file{exportFormat === "parts" ? "s" : ""} when the export finishes{exportBytes !== null && exportBytes > 25 * 1024 * 1024 ? `, holding roughly ${megabytes(exportBytes)} MB in memory first - a Chromium browser writes straight to disk instead` : ""}.</p> : null}
+      {exportProgress ? <div className="export-progress" role="status"><span className="export-progress-bar"><i style={{ width: `${exportProgress.total ? Math.min(100, Math.round((exportProgress.exported / Math.max(1, exportProgress.total)) * 100)) : 100}%` }}/></span><span>Exported {formatNumber(exportProgress.exported)}{exportProgress.total ? ` of ${formatNumber(exportProgress.total)}` : ""} companies</span></div> : null}
+      <div className="modal-actions">{exportingCompanies ? <button className="secondary" onClick={() => exportAbortRef.current?.abort()}>Cancel export</button> : <button className="secondary" onClick={() => setExportDialogOpen(false)}>Close</button>}<button className="primary" disabled={exportingCompanies || !exportFields.length} onClick={() => void exportCompanies()}>{exportingCompanies ? "Exporting…" : `Export ${totalLabel} companies`}</button></div>
+    </section></div> : null}
     {deleteRequest ? <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="company-delete-title"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="company-delete-title">Delete {formatNumber(deleteRequest.count)} {deleteRequest.count === 1 ? "company" : "companies"}?</h2><p>This permanently removes {deleteRequest.count === 1 ? "this company" : "these companies"} from the Company database. Any linked people stay in the People database - they just lose the company link. This cannot be undone.</p>{deleteRequest.mode === "all_matching" && !search.trim() && !filters.length && !excludedIds.size ? <p className="form-error" role="alert"><AppIcon name="warning" size={14}/> No search or filters are applied - this will empty your entire Company database.</p> : null}<div className="modal-actions"><button className="secondary" disabled={deleting} onClick={() => setDeleteRequest(null)}>Cancel</button><button className="danger-button solid" disabled={deleting} onClick={() => void deleteCompanies()}>{deleting ? "Deleting…" : `Delete ${formatNumber(deleteRequest.count)}`}</button></div></section></div> : null}
   </section>;
 }
 
-function CompanyDrawer({ company, prospects, total, loading, error, onLoadMore, onClose }: { company: Company; prospects: Prospect[]; total: number; loading: boolean; error: string; onLoadMore: () => void; onClose: () => void }) {
+// A list of values that is usually short and occasionally enormous - one
+// company in the database carries twenty-four keywords and twenty-nine
+// technologies. Showing all of them pushes the linked people off the screen and
+// showing six with no way to see the rest hides data the import paid for, so it
+// shows six and says how many are behind the button.
+function ChipList({ label, values, id }: { label: string; values: string[]; id: string }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!values.length) return null;
+  const shown = expanded ? values : values.slice(0, 6);
+  return <div className="company-fact">
+    <span className="company-fact-label">{label}</span>
+    <div className="company-chips">
+      {shown.map((value, index) => <span key={`${id}-${index}`} className="company-chip" title={value}>{value}</span>)}
+      {values.length > 6 ? <button type="button" className="company-chip-more" aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>{expanded ? "Show less" : `Show all ${formatNumber(values.length)}`}</button> : null}
+    </div>
+  </div>;
+}
+
+function Fact({ label, value }: { label: string; value: string }) {
+  if (!value.trim()) return null;
+  return <div className="company-fact"><span className="company-fact-label">{label}</span><span className="company-fact-value">{value}</span></div>;
+}
+
+function employeeRangeText(detail: CompanyDetail) {
+  const minimum = detail.employee_count_min ?? null;
+  const maximum = detail.employee_count_max ?? null;
+  if (minimum == null && maximum == null) return "";
+  if (minimum != null && maximum == null) return `${formatNumber(minimum)}+ employees`;
+  if (minimum === maximum) return `${formatNumber(maximum ?? 0)} employees`;
+  return `${formatNumber(minimum ?? 0)}–${formatNumber(maximum ?? 0)} employees`;
+}
+
+// Uploaded keys worth showing under the typed facts.
+//
+// companies.all_data is the company-scoped half of the row the import read, and
+// most of it is the same data as the columns above under a different spelling.
+// Repeating "Industry: accounting" directly under "Industry: accounting" is
+// noise, so anything whose value already appears above is dropped and only what
+// is genuinely extra survives.
+function extraUploadedFacts(detail: CompanyDetail) {
+  const data = companyAllData(detail.all_data);
+  const shown = new Set([
+    detail.name, detail.domain, detail.industry, detail.short_description, detail.total_funding,
+    detail.location, detail.city, detail.state, detail.country,
+    detail.founded_year == null ? "" : String(detail.founded_year),
+    ...(detail.keywords ?? []), ...(detail.technologies ?? []),
+  ].map((value) => String(value ?? "").trim().toLocaleLowerCase()).filter(Boolean));
+  return Object.entries(data)
+    .map(([key, value]) => [key.trim(), String(value ?? "").trim()] as const)
+    // A leading underscore is the product's own bookkeeping - _enriched_from and
+    // _enriched_at, stamped by the fill-from-company enrichment - not something
+    // anyone uploaded, and not a fact about the company.
+    .filter(([key, value]) => key && value && !key.startsWith("_") && !shown.has(value.toLocaleLowerCase()))
+    .slice(0, 12);
+}
+
+function CompanyProfile({ detail, loading }: { detail: CompanyDetail | null; loading: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  if (loading && !detail) return <div className="company-profile"><div className="company-prospect-loading">Loading company details…</div></div>;
+  if (!detail) return null;
+
+  const description = String(detail.short_description ?? "").trim();
+  const extras = extraUploadedFacts(detail);
+  const facts = [
+    { label: "Industry", value: String(detail.industry ?? "") },
+    { label: "Number of employees", value: employeeRangeText(detail) },
+    { label: "Founding year", value: detail.founded_year == null ? "" : String(detail.founded_year) },
+    { label: "Location", value: String(detail.location ?? "") || [detail.city, detail.state, detail.country].filter(Boolean).join(", ") },
+    { label: "Total funding", value: String(detail.total_funding ?? "") },
+    { label: "Email provider", value: String(detail.esp ?? "") },
+    { label: "Provider type", value: String(detail.email_provider_type ?? "").replace(/^Unknown$/, "") },
+  ];
+  const keywords = (detail.keywords ?? []).map((value) => String(value ?? "").trim()).filter(Boolean);
+  const technologies = (detail.technologies ?? []).map((value) => String(value ?? "").trim()).filter(Boolean);
+  const empty = !description && !keywords.length && !technologies.length && !extras.length && facts.every((fact) => !fact.value.trim());
+
+  return <section className="company-profile" aria-label="Company details">
+    <div className="company-profile-head"><strong>Company details</strong><small>Everything stored about this company</small></div>
+    {empty ? <p className="company-profile-empty">Nothing beyond the name and website was uploaded for this company.</p> : <>
+      {description ? <div className={`company-description ${expanded ? "expanded" : ""}`}>
+        <p>{description}</p>
+        {description.length > 260 ? <button type="button" aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>{expanded ? "Show less" : "Show more"}</button> : null}
+      </div> : null}
+      <div className="company-facts">
+        {facts.map((fact) => <Fact key={fact.label} label={fact.label} value={fact.value}/>)}
+        <ChipList id="keyword" label="Keywords" values={keywords}/>
+        <ChipList id="tech" label="Technologies" values={technologies}/>
+        {extras.map(([key, value]) => <Fact key={`extra-${key}`} label={key} value={value}/>)}
+      </div>
+    </>}
+  </section>;
+}
+
+function CompanyDrawer({ company, detail, loadingDetail, prospects, total, loading, error, onLoadMore, onClose }: { company: Company; detail: CompanyDetail | null; loadingDetail: boolean; prospects: Prospect[]; total: number; loading: boolean; error: string; onLoadMore: () => void; onClose: () => void }) {
   useEffect(() => {
     function closeOnEscape(event: globalThis.KeyboardEvent) { if (event.key === "Escape") onClose(); }
     window.addEventListener("keydown", closeOnEscape);
@@ -345,9 +527,10 @@ function CompanyDrawer({ company, prospects, total, loading, error, onLoadMore, 
         <button className="drawer-close" aria-label="Close company details" onClick={onClose}><AppIcon name="close" size={14}/></button>
         <div className="drawer-person company-drawer-identity"><span className={`tone-${colorTone(company.id)}`}>{initials(company.name)}</span><div><p className="eyebrow">COMPANY DETAILS</p><h2 id="company-drawer-title">{company.name || company.domain || "Unnamed company"}</h2>{company.domain ? <a href={`https://${company.domain}`} target="_blank" rel="noreferrer">{company.domain}</a> : <p>No website saved</p>}</div></div>
         <div className="drawer-summary"><span><b>{formatNumber(company.prospect_count)}</b>prospects</span><span><b>{formatNumber(company.client_count)}</b>clients</span><span><b>{new Date(company.created_at).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}</b>added</span></div>
-        <div className="company-drawer-title"><div><strong>Linked prospects</strong><small>People connected to this company</small></div><span>{formatNumber(prospects.length)} of {formatNumber(total)}</span></div>
       </div>
       <div className="company-drawer-body">
+        <CompanyProfile detail={detail} loading={loadingDetail}/>
+        <div className="company-drawer-title"><div><strong>Linked prospects</strong><small>People connected to this company</small></div><span>{formatNumber(prospects.length)} of {formatNumber(total)}</span></div>
         {loading && !prospects.length ? <div className="company-prospect-loading">Loading prospects…</div> : prospects.length ? <><div className="company-prospect-list"><table><thead><tr><th>Name</th><th>Title</th><th>Email</th><th>Seniority</th><th>Location</th></tr></thead><tbody>{prospects.map((prospect) => <tr key={prospect.id}><td><div className="compact-person"><span className={`tone-${colorTone(prospect.id)}`}>{initials(prospect.full_name)}</span><strong>{prospect.full_name || "Unnamed prospect"}</strong></div></td><td>{prospect.title || "-"}</td><td>{prospect.work_email || prospect.personal_email || "-"}</td><td>{String(prospect.seniority || "-")}</td><td>{[prospect.city, prospect.country].filter(Boolean).join(", ") || "-"}</td></tr>)}</tbody></table></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{prospects.length < total ? <button className="load-more-prospects" disabled={loading} onClick={onLoadMore}>{loading ? "Loading…" : `Load ${Math.min(50, total - prospects.length)} more prospects (${formatNumber(total - prospects.length)} remaining)`}</button> : <div className="all-prospects-loaded"><AppIcon name="check" size={14}/> All {formatNumber(total)} prospects loaded</div>}</> : error ? <div className="inline-error" role="alert">{error}</div> : <div className="drawer-empty">No linked prospects found.</div>}
       </div>
     </aside>
