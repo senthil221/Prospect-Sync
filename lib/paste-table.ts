@@ -62,7 +62,9 @@ function inferHeaders(rows: string[][], width: number) {
 }
 
 export function parsePastedCompanyTable(text: string): { headers: string[]; rows: string[][]; inferredHeaders: boolean } {
-  const lines = text.split(/\r\n|\r|\n/).map((line) => line.trim()).filter(Boolean);
+  // Preserve edge tabs: they represent optional blank cells, not whitespace.
+  // Individual cell values are trimmed only after splitting the row.
+  const lines = text.split(/\r\n|\r|\n/).filter((line) => line.trim());
   if (!lines.length) throw new Error("Paste at least one company row.");
 
   const delimiter = detectDelimiter(lines);
@@ -112,7 +114,7 @@ function inferPeopleHeaders(rows: string[][], width: number) {
  * and LinkedIn-only inputs. The caller can hand the result to the shared fixed
  * mapping and chunk pipeline without a second normalization path. */
 export function parsePastedPeopleTable(text: string): { headers: string[]; rows: string[][]; inferredHeaders: boolean } {
-  const lines = text.split(/\r\n|\r|\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = text.split(/\r\n|\r|\n/).filter((line) => line.trim());
   if (!lines.length) throw new Error("Paste at least one person row.");
   const delimiter = detectDelimiter(lines);
   const cells = lines.map((line) => splitRow(line, delimiter)).filter((row) => row.some(Boolean));

@@ -8,7 +8,7 @@ import {
   companyImportFields, fixedImportColumns, personImportFields,
   suggestedCompanyImportField, suggestedPersonImportField,
 } from "../lib/import-schema.ts";
-import { parsePastedPeopleTable } from "../lib/paste-table.ts";
+import { parsePastedCompanyTable, parsePastedPeopleTable } from "../lib/paste-table.ts";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
@@ -47,6 +47,23 @@ test("People paste accepts email-only and LinkedIn-only identities", () => {
   const withUnsupportedHeader = parsePastedPeopleTable("Email\tFavorite color\nana@example.com\tgreen");
   assert.equal(withUnsupportedHeader.inferredHeaders, false);
   assert.deepEqual(withUnsupportedHeader.rows, [["ana@example.com", "green"]]);
+});
+
+test("pasted optional edge cells preserve column alignment", () => {
+  const people = parsePastedPeopleTable("Email\tPersonal LinkedIn URL\tCity\nana@example.com\t\tDiscard\n\thttps://linkedin.com/in/bea\tDiscard\n\t\t");
+  assert.deepEqual(people.rows, [
+    ["ana@example.com", "", "Discard"],
+    ["", "https://linkedin.com/in/bea", "Discard"],
+  ]);
+  const columns = fixedImportColumns(people.headers, {}, suggestedPersonImportField, personImportFields);
+  const mapped = mapProspect(columns.map(({ field }) => field), columns.map(({ column }) => people.rows[1][column]));
+  assert.equal(mapped.identifiers[0].type, "linkedin");
+  assert.equal(mapped.identifiers.some(({ type }) => type === "work_email"), false);
+  const companies = parsePastedCompanyTable("Company Name\tWebsite\n\t example.com \nAcme\t");
+  assert.deepEqual(companies.rows, [["", "example.com"], ["Acme", ""]]);
+  const headerless = parsePastedPeopleTable("ana@example.com\t\n\thttps://linkedin.com/in/bea");
+  assert.deepEqual(headerless.headers, ["Email", "Personal LinkedIn URL"]);
+  assert.deepEqual(headerless.rows, [["ana@example.com", ""], ["", "https://linkedin.com/in/bea"]]);
 });
 
 test("import APIs sanitize raw payloads and report rows with no identity", async () => {
