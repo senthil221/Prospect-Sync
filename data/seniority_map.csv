@@ -87,7 +87,7 @@ group president,c_suite,
 country head,director,
 country manager,director,Must beat the bare manager row
 country director,director,
-director general,director,GCC / public sector
+director general,c_suite,Heads an agency or (in Spanish/French usage) the company; not a director-tier role
 regional director,director,
 managing partner,owner,
 senior partner,owner,
@@ -154,7 +154,7 @@ associate director,manager,Demotion below director
 general secretary,director,
 senior manager,manager,
 group manager,manager,
-national manager,manager,
+national manager,director,Country-manager equivalent per spec tier 4
 regional manager,manager,
 zonal manager,manager,
 area manager,manager,
@@ -195,8 +195,8 @@ fellow,senior_ic,
 lead,senior_ic,
 principal,senior_ic,
 architect,senior_ic,
-consultant,senior_ic,
-specialist,senior_ic,
+consultant,entry,Spec reserves senior_ic for lead/principal/architect; principal and senior consultant keep their own rows
+specialist,entry,Spec reserves senior_ic for lead/principal/architect
 senior associate,entry,
 senior executive,entry,India: executive is a junior marker
 senior officer,entry,
@@ -327,3 +327,28 @@ titolare,owner,Italian owner
 proprietario,owner,Portuguese proprietor
 wlasciciel,owner,Polish owner after accent folding
 zalozyciel,owner,Polish founder after accent folding
+
+# --- added 2026-09-09 from seniority_map.csv review -------------------------
+general counsel,c_suite,Top legal officer
+treasurer,c_suite,
+trustee,c_suite,
+undersecretary,c_suite,Public sector
+chair,c_suite,Board chair
+co chair,c_suite,
+chariman,c_suite,Misspelling of chairman
+presedent,c_suite,Misspelling of president
+proprieter,owner,Misspelling of proprietor
+propritor,owner,Misspelling of proprietor
+sr director,director,Abbreviated senior director
+co head,director,
+comptroller,director,
+tl,senior_ic,Team lead abbreviation
+steward,entry,
+hr business partner,entry,Must beat the partner row
+hrbp,entry,
+dsi,director,French IT director
+drh,director,French HR director
+daf,director,French finance director
+chief of operations,c_suite,COO written out
+editor in chief,director,Heads the desk; must beat any chief row
+chief editor,director,

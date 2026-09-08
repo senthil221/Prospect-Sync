@@ -104,7 +104,7 @@ growth hacking,Marketing,Growth,
 lifecycle marketing,Marketing,Growth,
 crm marketing,Marketing,Growth,
 marketing,Marketing,,Generic
-digital marketing,Marketing,,
+digital marketing,Marketing,Demand Gen & Performance,
 market research,Marketing,,
 marketing communications,Marketing,Brand & Comms,
 # --- Engineering ---------------------------------------------------------
@@ -250,7 +250,7 @@ gst,Finance,Tax,
 transfer pricing,Finance,Tax,
 treasury,Finance,Treasury,
 cash management,Finance,Treasury,
-investor relations,Finance,Treasury,
+investor relations,Finance,,IR is not treasury
 fpna,Finance,FP&A,Normalizer turns fp&a into fpna
 financial planning,Finance,FP&A,
 financial analysis,Finance,FP&A,
@@ -264,7 +264,7 @@ collections,Finance,Credit & Collections,
 credit risk,Finance,Credit & Collections,
 receivables,Finance,Credit & Collections,
 finance,Finance,,Generic
-accounts,Finance,,Generic
+accounts,Finance,Accounting,
 financial,Finance,,
 finanz,Finance,,German stem
 # --- Legal ---------------------------------------------------------------
@@ -277,7 +277,7 @@ contracts,Legal,,
 paralegal,Legal,,
 litigation,Legal,,
 intellectual property,Legal,,
-regulatory affairs,Legal,,
+regulatory affairs,Quality,,Pharma/manufacturing RA sits with Quality per spec
 advocate,Legal,,
 # --- Operations ----------------------------------------------------------
 operations,Operations,,
@@ -288,7 +288,7 @@ process excellence,Operations,,
 continuous improvement,Operations,,
 lean,Operations,,
 six sigma,Operations,,
-facilities,Operations,,
+facilities,Admin,,Workplace/facilities sits with Admin
 program management office,Operations,,
 pmo,Operations,,
 project management,Operations,,
@@ -341,14 +341,14 @@ inspection,Quality,,
 # --- Support -------------------------------------------------------------
 customer success,Support,Customer Success,
 client success,Support,Customer Success,
-account management,Support,Customer Success,
-customer experience,Support,Customer Success,
+account management,Sales,,Matches the account manager row
+customer experience,Support,,CX is broader than CS
 renewals,Support,Customer Success,
 onboarding specialist,Support,Customer Success,
 customer support,Support,Customer Support,
 customer service,Support,Customer Support,
 technical support,Support,Customer Support,
-client servicing,Support,Customer Support,
+client servicing,Support,Customer Success,Agency term for account/CS work
 call center,Support,Customer Support,
 call centre,Support,Customer Support,
 contact center,Support,Customer Support,
@@ -508,3 +508,21 @@ operaciones,Operations,,Spanish operations
 calidad,Quality,,Spanish quality
 juridique,Legal,,French legal
 juridico,Legal,,Spanish legal
+
+# --- added 2026-09-09 from department_map.csv review ------------------------
+project engineer,Engineering,,Must beat the project row so engineers stay Engineering
+project,Operations,,
+program,Operations,,
+process,Operations,,
+platform,Engineering,Backend & Platform,
+technical,Engineering,,technical support keeps its own longer row
+administrator,Admin,,system/database/network administrator keep their longer rows
+people,HR,,
+risk,Finance,,
+mergers,Strategy,,
+import,Supply Chain,Procurement & Sourcing,
+cmo,Marketing,,
+cpo,Product,,
+media,Marketing,,social media keeps its own longer row
+digital,Marketing,,digital marketing keeps its own longer row
+account,Sales,,accounts (plural) stays Finance
