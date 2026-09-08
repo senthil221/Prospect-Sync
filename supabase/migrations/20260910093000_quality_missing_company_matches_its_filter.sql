@@ -31,7 +31,13 @@ do $patch$
 declare
   v_def text;
   v_marker constant text := '''missingCompany'', count(*) filter (where p.company_id is null)';
-  v_replacement constant text := '''missingCompany'', count(*) filter (where btrim(coalesce(c.name, '''''''')) = '''''''')';
+  -- Four quotes, not eight. The body is dollar-quoted, so the empty string it
+  -- has to end up containing is '' - which in this literal is ''''. Escaping it
+  -- twice produced coalesce(c.name, '''') instead, a string holding one quote
+  -- character, and that compares equal only where c.name IS NULL - so the
+  -- "fixed" function reproduced the original 42 exactly. The assertion below is
+  -- what caught it.
+  v_replacement constant text := '''missingCompany'', count(*) filter (where btrim(coalesce(c.name, '''')) = '''')';
 begin
   select pg_get_functiondef(p.oid) into v_def
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
