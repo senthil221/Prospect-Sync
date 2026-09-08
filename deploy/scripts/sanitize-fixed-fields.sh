@@ -15,8 +15,9 @@ for entity in company prospect list_row catalog; do
   total=0
   [[ ! -f "$checkpoint" ]] || read -r cursor total < "$checkpoint"
   [[ "$cursor" != 'DONE' ]] || continue
+  failures=0
   while :; do
-    result="$(docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" db \
+    if result="$(docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" db \
       psql -X -v ON_ERROR_STOP=1 -U postgres -d "$POSTGRES_DB" -h 127.0.0.1 -tAq -F '|' \
       -v entity="$entity" -v cursor="$cursor" <<'SQL'
 set statement_timeout='120s';
@@ -24,7 +25,15 @@ set lock_timeout='5s';
 select scanned,updated,replace(encode(convert_to(coalesce(next_after_id,''),'UTF8'),'base64'),E'\n',''),remaining
 from public.sanitize_import_payloads_v1(:'entity',nullif(convert_from(decode(:'cursor','base64'),'UTF8'),''),500,true);
 SQL
-    )"
+    )"; then
+      failures=0
+    else
+      failures=$((failures + 1))
+      (( failures < 5 )) || { echo 'Cleanup failed five consecutive attempts.' >&2; exit 1; }
+      echo 'Batch rolled back; retrying the same checkpoint.'
+      sleep 5
+      continue
+    fi
     IFS='|' read -r scanned updated cursor remaining <<< "$result"
     total=$((total + updated))
     printf '%s entity=%s scanned=%s updated=%s total=%s remaining=%s\n' "$(date -u +%FT%TZ)" "$entity" "$scanned" "$updated" "$total" "$remaining"

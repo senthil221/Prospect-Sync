@@ -39,4 +39,21 @@ begin
   end loop;
 end;
 $icp$;
+do $export$
+declare v_rows jsonb; v_name text; v_id text; v_seen text[]:='{}'; v_count integer:=0; v_start timestamptz:=clock_timestamp();
+begin
+  for batch in 1..10 loop
+    select result_rows into v_rows from public.search_company_export_v2(
+      p_limit=>500,p_after_name=>v_name,p_after_id=>v_id,
+      p_keys=>array['name','domain','industry','keywords','short_description','founded_year',
+        'employee_count_min','employee_count_max','city','state','country','technologies','total_funding']);
+    if jsonb_array_length(v_rows)<>500 then raise exception 'Export returned an incomplete test page'; end if;
+    if exists(select 1 from jsonb_array_elements(v_rows) r where r->>'id'=any(v_seen)) then raise exception 'Export repeated rows'; end if;
+    select v_seen||array_agg(r->>'id') into v_seen from jsonb_array_elements(v_rows) r;
+    v_name:=v_rows->499->>'sort_name'; v_id:=v_rows->499->>'id';
+    v_count:=v_count+jsonb_array_length(v_rows);
+  end loop;
+  raise notice 'Export verified: % distinct companies in %',v_count,clock_timestamp()-v_start;
+end;
+$export$;
 rollback;
