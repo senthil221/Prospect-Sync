@@ -94,6 +94,20 @@ test("People and Company pivots retain a reversible workspace snapshot", async (
   assert.match(dashboard, /companiesBeforePivot/);
   assert.match(dashboard, /setProspectSort\(previous\.sort\)/);
   assert.match(dashboard, /setCompanyFilters\(previous\.filters\)/);
+
+  // Switching has to survive being done repeatedly, which is what makes
+  // pivotOrigin a state machine rather than a flag. Each direction restores only
+  // when it is the one that pivoted, and clears the origin on the way out - so
+  // the next pivot takes a fresh snapshot instead of restoring a stale one, and
+  // People -> Companies -> People -> Companies keeps working.
+  assert.match(dashboard, /pivotOrigin\.current === "prospects" && peopleBeforePivot\.current/);
+  assert.match(dashboard, /pivotOrigin\.current === "companies" && companiesBeforePivot\.current/);
+  const restores = dashboard.match(/pivotOrigin\.current = null;/g) ?? [];
+  assert.ok(restores.length >= 3, `both pivots and navigate must clear the origin, found ${restores.length}`);
+  // Leaving by the nav menu ends the pivot outright. Without this a stale origin
+  // makes the next "See People" restore an old workspace instead of pivoting to
+  // the company query actually on screen.
+  assert.match(dashboard, /const navigate = useCallback[\s\S]{0,220}pivotOrigin\.current = null;[\s\S]{0,120}companiesBeforePivot\.current = null;/);
   assert.doesNotMatch(clients, /key=\{`people:[^`]*companyPeopleScope/);
   assert.doesNotMatch(clients, /key=\{`companies:[^`]*peopleCompanyScope/);
 });
@@ -102,7 +116,13 @@ test("company export pages safely at 600, 5k and above 5k, then hands large work
   const [route, runner] = await Promise.all([
     read("../app/api/companies/route.ts"), read("../lib/export-runner.ts"),
   ]);
-  assert.match(route, /const exportBatchSize = 500/);
+  // Not 500. A page that small was sized against a statement-budget cliff that
+  // measurement says is not there: on production the heaviest possible 5,000-row
+  // page runs in 1.0s against the function's own 60s, and service_role carries no
+  // statement_timeout at all. What a small page does cost is round trips - 839 of
+  // them for a full export, each taking a PostgREST connection from a pool of 24
+  // with a 10s acquisition timeout.
+  assert.match(route, /const exportBatchSize = 2000/);
   assert.match(route, /invalid first page; no file was created/);
   assert.match(route, /AbortSignal\.timeout\(120_000\)/);
   assert.match(runner, /let writable: WritableLike \| null = null/);

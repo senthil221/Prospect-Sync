@@ -27,6 +27,33 @@ test("prospect idle age is derived from the client-specific Date Contacted", () 
   assert.equal(clientIdleAge("2026-08-28", Number.NaN, now)?.daysRemaining, 90);
 });
 
+// The boundary is the only part of a cooldown anyone actually notices: a row is
+// held right up to the last day and released on the day itself. These are the
+// live numbers - a client on a 120-day cooldown whose oldest contact is
+// 2026-05-18, which the database agrees first becomes eligible on 2026-09-15.
+test("a cooldown releases on its eligible date, not before or after", () => {
+  const contacted = "2026-05-18";
+  const cooldown = 120;
+  const dayBefore = clientIdleAge(contacted, cooldown, new Date("2026-09-14T23:59:59Z"));
+  assert.equal(dayBefore?.eligible, false);
+  assert.equal(dayBefore?.daysRemaining, 1);
+  assert.equal(dayBefore?.label, "Eligible in 1 day");
+  assert.equal(dayBefore?.nextEligibleDate, "2026-09-15");
+
+  const onTheDay = clientIdleAge(contacted, cooldown, new Date("2026-09-15T00:00:00Z"));
+  assert.equal(onTheDay?.eligible, true);
+  assert.equal(onTheDay?.daysRemaining, 0);
+  assert.equal(onTheDay?.label, "Eligible now");
+
+  assert.equal(clientIdleAge(contacted, cooldown, new Date("2026-09-16T00:00:00Z"))?.eligible, true);
+  // Mid-window, against the server's own date: 8,768 Krishify rows sit here.
+  const midWindow = clientIdleAge(contacted, cooldown, new Date("2026-09-08T00:00:00Z"));
+  assert.equal(midWindow?.eligible, false);
+  assert.equal(midWindow?.daysRemaining, 7);
+  // The newest contact in that client, which has nearly the whole window left.
+  assert.equal(clientIdleAge("2026-08-20", cooldown, new Date("2026-09-08T00:00:00Z"))?.nextEligibleDate, "2026-12-18");
+});
+
 test("company ICP verification is isolated by client and supports selected segments", async () => {
   const [migration, membershipMigration, route, companyRoute, companyTable, companyRow, prospectTable, prospectRow, dashboard] = await Promise.all([
     readFile(new URL("../supabase/migrations/20260828204110_client_company_icp_validation.sql", import.meta.url), "utf8"),

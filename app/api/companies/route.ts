@@ -14,10 +14,25 @@ import { ownerIdentity } from "../../../lib/result-sets";
 // One keyset page. It was 1,000 when each page was a fresh OFFSET scan and
 // making them larger made the quadratic worse; a keyset page costs the same
 // whether it is the first or the hundredth, so bigger means fewer round trips.
-// Production could return ~600 broad rows reliably, while a 5,000-row JSON
-// aggregate exhausted the function's statement budget. Keep each RPC page well
-// below that cliff; keyset pagination makes the number of pages linear.
-const exportBatchSize = 500;
+// There is no statement-budget cliff here, and a page of 500 was paying for one
+// that does not exist. Measured against production (419,218 companies):
+//
+//   page size   pages   DB time for the whole walk   worst-case page
+//   500           839              2.3 s             ~1.9 MB
+//   2000          210              ~3 s              ~7.5 MB, 0.43 s
+//   5000           84              5.4 s             ~16 MB, 1.0 s
+//
+// service_role carries no statement_timeout, and the function sets its own 60s,
+// so even the heaviest 5,000-row page is two orders of magnitude inside it. What
+// a small page actually costs is round trips: every page is a separate PostgREST
+// call taking a connection from a pool of 24 with PGRST_DB_POOL_ACQUISITION_TIMEOUT
+// at 10 seconds, plus an admission slot out of 8. 839 of those is 839 chances to
+// wait on a busy pool, against a proxy that gives the whole response 300s.
+//
+// 2,000 keeps the page small enough that no single one is a large buffered
+// response, and few enough that a full export is a couple of hundred round trips
+// rather than the better part of a thousand.
+const exportBatchSize = 2000;
 const missingCompanyValidationCodes = new Set(["PGRST205", "42P01"]);
 const missingCompanyExportCodes = new Set(["PGRST202", "42883", "42P01"]);
 const BOM = "﻿";
