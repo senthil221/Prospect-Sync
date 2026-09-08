@@ -84,12 +84,18 @@ export function megabytes(bytes: number) {
 // `rows` is the count the grid already has. Null means it does not have one -
 // either nothing counted it, or the count came back capped, in which case the
 // honest answer is that the size is unknown rather than that it is the cap.
+// `bytesPerRow` is for callers that resolve their own field ids. Companies have
+// a separate catalogue (lib/company-export.ts), so estimatedBytesPerRow below -
+// which looks every id up in the prospect one - would price a company export at
+// zero and send a gigabyte down the direct path. The thresholds and the wording
+// stay here either way, because the decision is the same decision.
 export function planExport(input: {
-  customFieldNames: string[];
+  customFieldNames?: string[];
   requestedFields?: string[];
   rows: number | null;
+  bytesPerRow?: number;
 }): ExportPlan {
-  const bytesPerRow = estimatedBytesPerRow(input.customFieldNames, input.requestedFields);
+  const bytesPerRow = input.bytesPerRow ?? estimatedBytesPerRow(input.customFieldNames ?? [], input.requestedFields);
   const rows = input.rows == null || !Number.isFinite(input.rows) ? null : Math.max(0, Math.round(input.rows));
   if (rows == null) {
     return {

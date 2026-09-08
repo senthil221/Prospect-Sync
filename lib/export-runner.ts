@@ -1,4 +1,5 @@
 import { csvStreamError, readCsvStream } from "./csv-download.ts";
+import { estimatedCompanyBytesPerRow } from "./company-export.ts";
 import { planExport, type ExportPlan } from "./export-plan.ts";
 import { buildExportColumns, csvHeaderLine, csvRowsBody, type ProspectRow } from "./prospect-export.ts";
 import type { ProspectFilter } from "./prospect-filters.ts";
@@ -79,14 +80,23 @@ export type ExportResult = {
   plan?: ExportPlan;
 };
 
-async function writeToHandle(handle: FileHandleLike, text: string) {
+async function writeToHandle(handle: FileHandleLike, pieces: string[]) {
   const writable = await handle.createWritable();
-  await writable.write(text);
+  for (const piece of pieces) await writable.write(piece);
   await writable.close();
 }
 
-function downloadBlob(name: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+// The pieces are handed to Blob() as an array rather than concatenated first.
+//
+// That is not a micro-optimisation, it is the difference between working and
+// throwing: a JavaScript string cannot exceed about 512 MB in V8, so building
+// the document as one string puts a hard ceiling on the export that has nothing
+// to do with how much memory the machine has. lib/csv-download.ts always knew
+// this - it kept an array and said so - and the ceiling arrived here when the
+// company export moved onto this sink and the company CSV stopped being two
+// narrow columns.
+function downloadBlob(name: string, pieces: string[]) {
+  const url = URL.createObjectURL(new Blob(pieces, { type: "text/csv;charset=utf-8" }));
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = name;
@@ -125,11 +135,11 @@ async function createSink(options: SinkOptions, canFs: boolean): Promise<Sink> {
     const writable = canFs
       ? await (await fsApi().showSaveFilePicker!({ suggestedName: `${options.fileBaseName}.csv`, types: csvPickerTypes })).createWritable()
       : null;
-    let buffered = "";
+    const buffered: string[] = [];
     let started = false;
     const emit = async (text: string) => {
       if (writable) await writable.write(text);
-      else buffered += text;
+      else buffered.push(text);
     };
     return {
       setHeader(value) { header = value; },
@@ -153,9 +163,9 @@ async function createSink(options: SinkOptions, canFs: boolean): Promise<Sink> {
   const flush = async () => {
     if (!bucketRows) return;
     files += 1;
-    const text = header + CRLF + bucket.join(CRLF);
-    if (directory) await writeToHandle(await directory.getFileHandle(partName(options.fileBaseName, files), { create: true }), text);
-    else downloadBlob(partName(options.fileBaseName, files), text);
+    const pieces = [header, CRLF, bucket.join(CRLF)];
+    if (directory) await writeToHandle(await directory.getFileHandle(partName(options.fileBaseName, files), { create: true }), pieces);
+    else downloadBlob(partName(options.fileBaseName, files), pieces);
     bucket = [];
     bucketRows = 0;
   };
@@ -171,8 +181,8 @@ async function createSink(options: SinkOptions, canFs: boolean): Promise<Sink> {
       if (!files) {
         // An empty result is still a file, and an empty folder is confusing.
         files = 1;
-        if (directory) await writeToHandle(await directory.getFileHandle(partName(options.fileBaseName, 1), { create: true }), header + CRLF);
-        else downloadBlob(partName(options.fileBaseName, 1), header + CRLF);
+        if (directory) await writeToHandle(await directory.getFileHandle(partName(options.fileBaseName, 1), { create: true }), [header, CRLF]);
+        else downloadBlob(partName(options.fileBaseName, 1), [header, CRLF]);
       }
       return { files };
     },
@@ -234,13 +244,34 @@ export type CompanyExportOptions = {
   peopleScope: PeopleScope | null;
   websitesOnly: boolean;
   fields: string[];
+  customFieldNames: string[];
   format: ExportFormat;
   rowsPerFile: number;
   fileBaseName: string;
   totalRows?: number | null;
+  requestId?: string;
   signal?: AbortSignal;
   onProgress?: (progress: ExportProgress) => void;
 };
+
+// "Only with websites", said as a filter.
+//
+// A background export is defined by a frozen result set, and a result set holds
+// a search and a set of filters - there is nowhere in it to put a websitesOnly
+// flag. Rather than widen the result set for one boolean, the flag is expressed
+// in the filter language it was always expressible in: __website not_empty
+// matches exactly the rows `btrim(coalesce(domain,'')) <> ''` matches, checked
+// against production at 319,060 of 419,218 companies.
+export function withWebsiteFilter(filters: ProspectFilter[], websitesOnly: boolean): ProspectFilter[] {
+  if (!websitesOnly) return filters;
+  if (filters.some((filter) => filter.field === "__website" && filter.operator === "not_empty")) return filters;
+  return [...filters, { field: "__website", operator: "not_empty", values: [] }];
+}
+
+// A people-DB pivot cannot be frozen either, and unlike websitesOnly it has no
+// equivalent in the filter language: it is a set of company ids derived from a
+// prospect search. So an export carrying one stays on the direct path, and the
+// dialog says so rather than starting a download that cannot finish.
 
 // The company export, written the way the prospect one is.
 //
@@ -257,6 +288,29 @@ export type CompanyExportOptions = {
 // carry thousands of values, which is more than a request line survives; the
 // companies route accepts the identical query either way.
 export async function runCompanyExport(options: CompanyExportOptions): Promise<ExportResult> {
+  // The choice companies never had. A company CSV was two narrow columns, so
+  // the direct path was always right; once Description became a checkbox it
+  // stopped being right - every field over 419,218 companies is about 1.36 GB,
+  // which no tab is going to assemble. Same thresholds as the prospect export,
+  // priced with the company catalogue.
+  const plan = planExport({
+    bytesPerRow: estimatedCompanyBytesPerRow(options.customFieldNames, options.fields),
+    rows: options.totalRows ?? null,
+  });
+  if (plan.mode === "background" && !options.peopleScope) {
+    return runBackgroundExport({
+      entityType: "company",
+      requestId: options.requestId,
+      clientScope: "",
+      search: options.search,
+      filters: withWebsiteFilter(options.filters, options.websitesOnly),
+      fields: options.fields,
+      fileBaseName: options.fileBaseName,
+      signal: options.signal,
+      onProgress: options.onProgress,
+    }, plan);
+  }
+
   const sink = await createSink(options, fileSystemAccessSupported());
   const response = await fetch("/api/companies", {
     method: "POST",
@@ -283,7 +337,7 @@ export async function runCompanyExport(options: CompanyExportOptions): Promise<E
     },
   });
   const { files } = await sink.close();
-  return { exported, files, canceled: Boolean(options.signal?.aborted) };
+  return { exported, files, canceled: Boolean(options.signal?.aborted), plan };
 }
 
 type ExportJobStatus = {
@@ -310,7 +364,26 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // browser downloads it the way it downloads anything else - with its own
 // progress, its own resume behaviour, and none of it in the JavaScript heap. It
 // also survives the tab being closed, which a streamed download does not.
-async function runBackgroundExport(options: ExportOptions, plan: ExportPlan): Promise<ExportResult> {
+// What a background job is made of, for either kind of row. Narrower than
+// ExportOptions because none of the sink or selection machinery reaches the
+// worker: the job is a question, and the worker answers it server-side.
+type BackgroundExportInput = {
+  entityType: "prospect" | "company";
+  requestId?: string;
+  clientScope: string;
+  search: string;
+  filters: ProspectFilter[];
+  // Prospects only. /api/exports answers 400 for a company export carrying one,
+  // because a company scope over a set OF companies is not a narrowing.
+  companyScope?: CompanyScope | null;
+  fields: string[];
+  excludedIds?: string[];
+  fileBaseName: string;
+  signal?: AbortSignal;
+  onProgress?: (progress: ExportProgress) => void;
+};
+
+async function runBackgroundExport(options: BackgroundExportInput, plan: ExportPlan): Promise<ExportResult> {
   const requestId = options.requestId;
   if (!requestId) throw new Error("This export needs a request id before it can run in the background.");
 
@@ -319,12 +392,12 @@ async function runBackgroundExport(options: ExportOptions, plan: ExportPlan): Pr
     headers: { "Content-Type": "application/json" },
     signal: options.signal,
     body: JSON.stringify({
-      entityType: "prospect",
+      entityType: options.entityType,
       requestId,
-      clientScope: options.clientId ?? "",
+      clientScope: options.clientScope,
       search: options.search,
       filters: options.filters,
-      companyScope: options.companyScope,
+      companyScope: options.entityType === "company" ? null : options.companyScope,
       fields: options.fields,
       excludedIds: options.excludedIds ?? [],
       fileBaseName: options.fileBaseName,
@@ -381,7 +454,19 @@ export async function runProspectExport(options: ExportOptions): Promise<ExportR
     rows: options.totalRows ?? null,
   });
   if (plan.mode === "direct") return runDirectExport(options, plan);
-  return runBackgroundExport(options, plan);
+  return runBackgroundExport({
+    entityType: "prospect",
+    requestId: options.requestId,
+    clientScope: options.clientId ?? "",
+    search: options.search,
+    filters: options.filters,
+    companyScope: options.companyScope,
+    fields: options.fields,
+    excludedIds: options.excludedIds,
+    fileBaseName: options.fileBaseName,
+    signal: options.signal,
+    onProgress: options.onProgress,
+  }, plan);
 }
 
 // What to tell someone whose export just went to the background, in their own

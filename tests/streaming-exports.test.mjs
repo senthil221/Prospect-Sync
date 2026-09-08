@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { directByteLimit, directRowLimit, estimatedBytesPerRow, planExport } from "../lib/export-plan.ts";
 import { exportRowKeys, buildExportColumns, csvHeaderLine, csvRowsBody } from "../lib/prospect-export.ts";
-import { availableCompanyExportFieldIds, buildCompanyCustomFields, buildCompanyExportColumns, companyExportColumns, companyExportRowKeys, estimatedCompanyBytesPerRow } from "../lib/company-export.ts";
+import { availableCompanyExportFieldIds, buildCompanyCustomFields, buildCompanyExportColumns, companyExportColumns, companyExportFields, companyExportRowKeys, defaultCompanyExportFields, estimatedCompanyBytesPerRow } from "../lib/company-export.ts";
+import { withWebsiteFilter } from "../lib/export-runner.ts";
 import { readCsvStream } from "../lib/csv-download.ts";
 
 // Release 2 item 6, section 9.4: direct streaming versus background chosen by
@@ -195,6 +196,59 @@ test("the company export names its columns in the select list rather than projec
   assert.match(code, /order by lower\(c\.name\), c\.id/);
   // The discovery scan is bounded whatever the table grows to.
   assert.match(code, /limit 20000/);
+});
+
+test("a company export too big for a tab goes to the worker instead", async () => {
+  const everything = companyExportFields.map((field) => field.id);
+  const companies = 419218;
+
+  // The case that wedged production: every field over the whole database. The
+  // direct path has to refuse this, because no tab assembles a gigabyte.
+  const all = planExport({ bytesPerRow: estimatedCompanyBytesPerRow([], everything), rows: companies });
+  assert.equal(all.mode, "background");
+  assert.ok(all.bytes > 500 * 1024 * 1024, `expected a very large file, got ${all.bytes} bytes`);
+
+  // Description alone is enough to cross the line, which is the point of
+  // pricing the columns rather than counting them.
+  assert.equal(planExport({ bytesPerRow: estimatedCompanyBytesPerRow([], ["__company_name", "__short_description"]), rows: companies }).mode, "background");
+
+  // And the ordinary export still streams straight down the response.
+  const small = planExport({ bytesPerRow: estimatedCompanyBytesPerRow([], defaultCompanyExportFields), rows: 2000 });
+  assert.equal(small.mode, "direct");
+
+  // An unknown row count is treated as large rather than assumed small.
+  assert.equal(planExport({ bytesPerRow: estimatedCompanyBytesPerRow([], defaultCompanyExportFields), rows: null }).mode, "background");
+
+  // A company catalogue id means nothing to the prospect estimator, so a
+  // company export priced through it would come out at zero bytes and stream a
+  // gigabyte. The explicit estimate is what stops that.
+  assert.equal(estimatedBytesPerRow([], ["__short_description"]), 0);
+
+  // "Only with websites" has to survive the trip to the worker, and a result
+  // set holds only a search and filters - so it travels as the filter it always
+  // could have been, added once and never twice.
+  const scoped = withWebsiteFilter([], true);
+  assert.deepEqual(scoped, [{ field: "__website", operator: "not_empty", values: [] }]);
+  assert.deepEqual(withWebsiteFilter(scoped, true), scoped);
+  assert.deepEqual(withWebsiteFilter([], false), []);
+
+  // The background runner must send the entity type it was given rather than a
+  // literal - hardcoding "prospect" in the request body is what kept companies
+  // off this path in the first place - and companies must actually take it.
+  const runner = codeOnly(await read("../lib/export-runner.ts"));
+  assert.match(runner, /entityType: options\.entityType/);
+  assert.match(runner, /runBackgroundExport\(\{\s*entityType: "company"/);
+  // A company job may not carry a company scope; /api/exports answers 400.
+  assert.match(runner, /options\.entityType === "company" \? null : options\.companyScope/);
+});
+
+test("the blob fallback never builds the file as one string", async () => {
+  // V8 caps a string at about 512 MB, so concatenating the document puts a
+  // ceiling on the export that has nothing to do with available memory.
+  const runner = codeOnly(await read("../lib/export-runner.ts"));
+  assert.match(runner, /function downloadBlob\(name: string, pieces: string\[\]\)/);
+  assert.match(runner, /new Blob\(pieces,/);
+  assert.doesNotMatch(runner, /buffered \+= /);
 });
 
 test("nothing accumulates the whole file", async () => {

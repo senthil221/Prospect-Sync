@@ -5,8 +5,9 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import CompanyFilterPanel, { BulkDomainPaste, addDomainsToWebsiteFilter } from "../CompanyFilterPanel";
 import { buildCompanyCustomFields, companyAllData, companyExportFields, defaultCompanyExportFields, estimatedCompanyBytesPerRow } from "../../lib/company-export";
-import { fileSystemAccessSupported, runCompanyExport, type ExportProgress } from "../../lib/export-runner";
-import { megabytes } from "../../lib/export-plan";
+import { backgroundExportNotice, fileSystemAccessSupported, runCompanyExport, type ExportProgress } from "../../lib/export-runner";
+import { megabytes, planExport } from "../../lib/export-plan";
+import { intentKey, requestIdFor, settleIntent } from "../../lib/request-intent";
 import { api, encodeFilters, fetchCompanies, isAbortError } from "../../lib/dashboard-api";
 import { filterPayloadWithSets } from "../../lib/filter-set-client";
 import { emptyWorkspaceState } from "../../lib/workspace-states";
@@ -335,8 +336,28 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
 
   async function exportCompanies() {
     if (!exportFields.length) { setCompanyError("Choose at least one field to export."); return; }
+    const names = customFieldNames ?? [];
+    // A pivot cannot be frozen into a result set, so it cannot go to the
+    // worker. Rather than start a download that will wedge the tab, say what
+    // will work - splitting is bounded per file and needs no worker at all.
+    const plan = planExport({ bytesPerRow: estimatedCompanyBytesPerRow(names, exportFields), rows: totalCapped ? null : total });
+    if (peopleScope && plan.mode === "background" && exportFormat === "single") {
+      setCompanyError(`${plan.reason} A people-scoped export cannot be built in the background, so choose "Split into parts" - or clear the people scope to have it built for you.`);
+      return;
+    }
     const controller = new AbortController();
     exportAbortRef.current = controller;
+    // One id per intent, as the bulk actions use: retrying after a dropped
+    // connection collects the file already being written rather than starting a
+    // second identical one.
+    const intent = intentKey({
+      action: "export-companies",
+      target: "master",
+      selectionMode: companyExportScope,
+      ids: [],
+      extra: { search: search.trim(), filters: encodeFilters(filters), fields: exportFields, peopleScope },
+    });
+    const requestId = requestIdFor(intent);
     setExportingCompanies(true); setCompanyError(""); setCompanyNotice("");
     setExportProgress({ exported: 0, files: 0, phase: "downloading" });
     try {
@@ -349,16 +370,23 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
         peopleScope,
         websitesOnly: companyExportScope === "with_websites",
         fields: exportFields,
+        customFieldNames: names,
         format: exportFormat,
         rowsPerFile: exportRowsPerFile,
         fileBaseName: `prospect-sync-companies-${companyExportScope === "with_websites" ? "with-websites" : "all"}-${new Date().toISOString().slice(0, 10)}`,
         totalRows: totalCapped ? null : total,
+        requestId,
         signal: controller.signal,
         onProgress: setExportProgress,
       });
       if (result.canceled) { setCompanyNotice("Export canceled."); return; }
+      // Settled: the next deliberate export of this shape is a new request.
+      // Deliberately not cleared on failure, so a retry reuses the id.
+      settleIntent(intent);
       setExportDialogOpen(false);
-      setCompanyNotice(`Exported ${formatNumber(result.exported)} ${search.trim() || filters.length || peopleScope ? "matching " : ""}companies${companyExportScope === "with_websites" ? " with websites" : ""}${result.files > 1 ? ` across ${formatNumber(result.files)} files` : ""} with ${formatNumber(exportFields.length)} selected fields.`);
+      setCompanyNotice(result.handedOff && result.plan
+        ? `Built ${formatNumber(result.exported)} companies. ${backgroundExportNotice(result.plan, exportFormat)}`
+        : `Exported ${formatNumber(result.exported)} ${search.trim() || filters.length || peopleScope ? "matching " : ""}companies${companyExportScope === "with_websites" ? " with websites" : ""}${result.files > 1 ? ` across ${formatNumber(result.files)} files` : ""} with ${formatNumber(exportFields.length)} selected fields.`);
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") setCompanyNotice("Export canceled.");
       else setCompanyError(caught instanceof Error ? caught.message : "Unable to export companies.");
