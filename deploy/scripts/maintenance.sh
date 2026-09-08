@@ -72,6 +72,47 @@ else
 fi
 
 echo
+echo "=== Fixed-field import payload audit ==="
+# Deployment does not delete historical source keys. The default is a dry run;
+# an operator reviews the counts and explicitly opts into checkpointed 1,000-row
+# batches. Obsolete typed People profile fields are cleared too; identifiers
+# for retained fields, memberships, operations and contact history are preserved.
+sanitize_apply="false"
+[[ "${MAINTENANCE_SANITIZE_IMPORTS:-0}" == "1" ]] && sanitize_apply="true"
+for entity in prospect company list_row membership catalog; do
+  cursor=""
+  total_candidates=0
+  total_updated=0
+  while :; do
+    result="$(psql_run -tAq -F '|' -v entity="$entity" -v cursor="$cursor" -v apply="$sanitize_apply" <<'SQL'
+select scanned,candidates,updated,replace(encode(convert_to(coalesce(next_after_id,''),'UTF8'),'base64'),E'\n',''),remaining
+from public.sanitize_import_payloads_v1(:'entity',nullif(convert_from(decode(:'cursor','base64'),'UTF8'),''),1000,:'apply'::boolean);
+SQL
+    )"
+    [[ -n "$result" ]] || { echo "Sanitization returned no checkpoint." >&2; exit 1; }
+    IFS='|' read -r scanned candidates updated cursor remaining <<< "$result"
+    total_candidates=$((total_candidates + candidates))
+    total_updated=$((total_updated + updated))
+    [[ "$remaining" == "t" ]] || break
+  done
+  echo "  ${entity}: ${total_candidates} payloads need cleanup; ${total_updated} updated (apply=${sanitize_apply})"
+done
+[[ "$sanitize_apply" == "false" ]] && echo "  dry run only; set MAINTENANCE_SANITIZE_IMPORTS=1 after reviewing counts"
+
+echo
+echo "=== Draining title-classification backlog ==="
+# One bounded, advisory-lock-serialized unit at a time. A stopped run resumes
+# from title_classified_at on the next maintenance invocation.
+for _ in $(seq 1 2000); do
+  classified="$(psql_run -tAq -F '|' -c "select processed,remaining,acquired from public.run_title_classification_batch_v2(1000);" 2>/dev/null || echo '')"
+  [[ -n "$classified" ]] || { echo "  classifier runner not present - skipping (apply migrations)"; break; }
+  IFS='|' read -r processed remaining acquired <<< "$classified"
+  [[ "$acquired" == "t" ]] || { echo "  another classifier runner is active; leaving it ownership of the backlog"; break; }
+  echo "  classified ${processed}; ${remaining} stale rows remain"
+  [[ "$remaining" == "0" || "$processed" == "0" ]] && break
+done
+
+echo
 echo "=== Search index drift ==="
 # A denormalized index you cannot verify is one you cannot trust.
 psql_run -c "select jsonb_pretty(public.prospect_index_drift());" 2>/dev/null \

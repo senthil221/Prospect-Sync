@@ -9,7 +9,7 @@ const BOM = "﻿";
 const CRLF = "\r\n";
 
 // Minimal File System Access API surface (Chromium). Absent elsewhere -> Blob fallback.
-type WritableLike = { write: (data: string) => Promise<void>; close: () => Promise<void> };
+type WritableLike = { write: (data: string) => Promise<void>; close: () => Promise<void>; abort?: () => Promise<void> };
 type FileHandleLike = { createWritable: () => Promise<WritableLike> };
 type DirectoryHandleLike = { getFileHandle: (name: string, options?: { create?: boolean }) => Promise<FileHandleLike> };
 type WindowFs = {
@@ -116,6 +116,7 @@ type Sink = {
   setHeader(header: string): void;
   add(text: string, rows: number): Promise<void>;
   close(): Promise<{ files: number }>;
+  abort(): Promise<void>;
 };
 
 // Only the three fields that decide where bytes go. Narrowed from ExportOptions
@@ -132,12 +133,18 @@ async function createSink(options: SinkOptions, canFs: boolean): Promise<Sink> {
     // The picker has to be opened while the click that started this is still
     // the browser's idea of a user gesture, which is why it happens before any
     // request rather than when the first bytes arrive.
-    const writable = canFs
-      ? await (await fsApi().showSaveFilePicker!({ suggestedName: `${options.fileBaseName}.csv`, types: csvPickerTypes })).createWritable()
+    // Acquire the handle while the click still carries user activation, but do
+    // not create the writable yet. createWritable() truncates an existing file;
+    // opening it before the server has returned a valid CSV response is how a
+    // timed-out export left a convincing but empty download behind.
+    const fileHandle = canFs
+      ? await fsApi().showSaveFilePicker!({ suggestedName: `${options.fileBaseName}.csv`, types: csvPickerTypes })
       : null;
+    let writable: WritableLike | null = null;
     const buffered: string[] = [];
     let started = false;
     const emit = async (text: string) => {
+      if (fileHandle && !writable) writable = await fileHandle.createWritable();
       if (writable) await writable.write(text);
       else buffered.push(text);
     };
@@ -153,6 +160,7 @@ async function createSink(options: SinkOptions, canFs: boolean): Promise<Sink> {
         else downloadBlob(`${options.fileBaseName}.csv`, buffered);
         return { files: 1 };
       },
+      async abort() { if (writable?.abort) await writable.abort(); },
     };
   }
 
@@ -186,6 +194,7 @@ async function createSink(options: SinkOptions, canFs: boolean): Promise<Sink> {
       }
       return { files };
     },
+    async abort() { bucket = []; bucketRows = 0; },
   };
 }
 
@@ -222,17 +231,19 @@ async function runDirectExport(options: ExportOptions, plan: ExportPlan): Promis
       fileBaseName: options.fileBaseName,
     }),
   });
-  if (!response.ok) throw await csvStreamError(response, "Export failed.");
+  if (!response.ok) { await sink.abort(); throw await csvStreamError(response, "Export failed."); }
 
   let exported = 0;
-  await readCsvStream(response, {
-    onHeader: (header) => sink.setHeader(header),
-    onRows: async (text, rows) => {
-      await sink.add(text, rows);
-      exported += rows;
-      options.onProgress?.({ exported, total: plan.rows ?? undefined, files: 0, phase: "downloading" });
-    },
-  });
+  try {
+    await readCsvStream(response, {
+      onHeader: (header) => sink.setHeader(header),
+      onRows: async (text, rows) => {
+        await sink.add(text, rows);
+        exported += rows;
+        options.onProgress?.({ exported, total: plan.rows ?? undefined, files: 0, phase: "downloading" });
+      },
+    });
+  } catch (error) { await sink.abort(); throw error; }
   const { files } = await sink.close();
   if (options.signal?.aborted) return { exported, files, canceled: true, plan };
   return { exported, files, canceled: false, plan };
@@ -325,17 +336,19 @@ export async function runCompanyExport(options: CompanyExportOptions): Promise<E
       fields: options.fields,
     }),
   });
-  if (!response.ok) throw await csvStreamError(response, "Unable to export companies.");
+  if (!response.ok) { await sink.abort(); throw await csvStreamError(response, "Unable to export companies."); }
 
   let exported = 0;
-  await readCsvStream(response, {
-    onHeader: (header) => sink.setHeader(header),
-    onRows: async (text, rows) => {
-      await sink.add(text, rows);
-      exported += rows;
-      options.onProgress?.({ exported, total: options.totalRows ?? undefined, files: 0, phase: "downloading" });
-    },
-  });
+  try {
+    await readCsvStream(response, {
+      onHeader: (header) => sink.setHeader(header),
+      onRows: async (text, rows) => {
+        await sink.add(text, rows);
+        exported += rows;
+        options.onProgress?.({ exported, total: options.totalRows ?? undefined, files: 0, phase: "downloading" });
+      },
+    });
+  } catch (error) { await sink.abort(); throw error; }
   const { files } = await sink.close();
   return { exported, files, canceled: Boolean(options.signal?.aborted), plan };
 }

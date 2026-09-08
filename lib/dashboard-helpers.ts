@@ -90,6 +90,8 @@ export function prospectFieldValue(prospect: Prospect, field: string) {
   if (field === "__first_name") return String(prospect.first_name || "");
   if (field === "__last_name") return String(prospect.last_name || "");
   if (field === "__company") return String(prospect.company_name || "");
+  if (field === "__website") return String(prospect.company_domain || "");
+  if (field === "__mobile_number") return String(prospect.mobile_number || "");
   if (field === "__email") return String(prospect.work_email || prospect.personal_email || "");
   if (field === "__title") return String(prospect.title || "");
   if (field === "__keywords") return Array.isArray(prospect.keywords) ? prospect.keywords.join(", ") : "";

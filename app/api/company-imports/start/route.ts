@@ -1,7 +1,7 @@
 import { authorizeApi } from "../../../../lib/auth";
 import { defaultCompanyMergeMode, normalizeCompanyMergeMode } from "../../../../lib/company-merge-mode";
 import { normalizeDataSource } from "../../../../lib/data-source";
-import { missingCompanyImportFields, resolvedImportFields, suggestedCompanyImportField } from "../../../../lib/import-schema";
+import { companyImportFields, fixedImportColumns, missingCompanyImportFields, suggestedCompanyImportField } from "../../../../lib/import-schema";
 import { importHeaderSignature } from "../../../../lib/import-resume";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
@@ -14,7 +14,9 @@ export async function POST(request: Request) {
   if (!dataSource) return Response.json({ error: "Choose a data source before importing." }, { status: 400 });
   const headers = Array.isArray(payload.headers) ? payload.headers.map(String).slice(0, 500) : [];
   const fieldMap = payload.fieldMap && typeof payload.fieldMap === "object" ? payload.fieldMap as Record<string, string> : undefined;
-  const missingFields = missingCompanyImportFields(resolvedImportFields(headers, fieldMap, suggestedCompanyImportField));
+  const fixedColumns = fixedImportColumns(headers, fieldMap, suggestedCompanyImportField, companyImportFields);
+  const fixedFieldMap = Object.fromEntries(fixedColumns.map(({ header, field }) => [header, field]));
+  const missingFields = missingCompanyImportFields(fixedColumns.map(({ field }) => field));
   if (missingFields.length) return Response.json({ error: `Map all required company columns: ${missingFields.join(", ")}.` }, { status: 400 });
   // Absent mergeMode means an older client: fall back to the historical behaviour
   // rather than guessing, since the wrong choice silently rewrites stored companies.
@@ -28,8 +30,8 @@ export async function POST(request: Request) {
     file_name: String(payload.fileName ?? "").trim().slice(0, 240),
     data_source: dataSource,
     total_rows: totalRows,
-    field_headers: headers,
-    field_map: fieldMap ?? {},
+    field_headers: fixedColumns.map(({ header }) => header),
+    field_map: fixedFieldMap,
     header_signature: importHeaderSignature(headers),
     merge_mode: mergeMode,
   });

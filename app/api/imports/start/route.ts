@@ -1,7 +1,7 @@
 import { getAuthorizedUser } from "../../../../lib/auth";
 import { normalizeText } from "../../../../db/normalize";
 import { normalizeDataSource } from "../../../../lib/data-source";
-import { missingRequiredFields, requiredPersonImportFields, resolvedImportFields, suggestedPersonImportField } from "../../../../lib/import-schema";
+import { fixedImportColumns, personImportFields, suggestedPersonImportField } from "../../../../lib/import-schema";
 import { unassignedClientId, unassignedClientName, unassignedClientNormalizedName } from "../../../../lib/import-owner";
 import { importHeaderSignature } from "../../../../lib/import-resume";
 import { prospectImportBucket, validProspectImportObjectPath } from "../../../../lib/import-storage.ts";
@@ -34,12 +34,9 @@ export async function POST(request: Request) {
   const dateContacted = validDateContacted(payload.dateContacted);
   if (dateContacted === undefined) return Response.json({ error: "Choose a valid Date Contacted between 1900-01-01 and today, or select no contact date." }, { status: 400 });
   const importHeaders = Array.isArray(payload.headers) ? payload.headers.map(String) : [];
-  const missingFields = missingRequiredFields(requiredPersonImportFields, resolvedImportFields(importHeaders, payload.fieldMap, suggestedPersonImportField));
-  // Missing mandatory columns normally block the import; the UI can override with an
-  // explicit warning + confirm, in which case rows import with whatever identity they have.
-  if (missingFields.length && payload.allowMissingFields !== true) {
-    return Response.json({ error: `Map all required person columns: ${missingFields.join(", ")}.`, missingFields }, { status: 400 });
-  }
+  const fixedColumns = fixedImportColumns(importHeaders, payload.fieldMap, suggestedPersonImportField, personImportFields);
+  if (!fixedColumns.length) return Response.json({ error: "Map at least one supported People field before importing." }, { status: 400 });
+  const fixedFieldMap = Object.fromEntries(fixedColumns.map(({ header, field }) => [header, field]));
   let clientId = payload.clientId ?? "";
   if (payload.withoutClient === true) {
     const owner = await supabase.from("clients").upsert({ id: unassignedClientId, name: unassignedClientName, normalized_name: unassignedClientNormalizedName }, { onConflict: "id" }).select("id").single();
@@ -61,7 +58,7 @@ export async function POST(request: Request) {
   if (!listName) return Response.json({ error: "List name is required." }, { status: 400 });
   const listId = crypto.randomUUID();
   const importId = crypto.randomUUID();
-  const headers = importHeaders.map((header) => header.trim()).filter(Boolean).slice(0, 500);
+  const headers = fixedColumns.map(({ header }) => header.trim()).filter(Boolean).slice(0, personImportFields.length);
   const sourceHeaders = (Array.isArray(payload.sourceHeaders) ? payload.sourceHeaders : importHeaders).map(String).slice(0, 500);
   const totalRows = Number.isSafeInteger(payload.totalRows) && Number(payload.totalRows) >= 0 ? Number(payload.totalRows) : null;
   if (payload.background === true) {
@@ -82,7 +79,7 @@ export async function POST(request: Request) {
     id: importId, client_id: clientId, list_id: listId, data_source: dataSource,
     file_name: payload.fileName ?? "", total_rows: totalRows, field_headers: headers,
     prospect_date_added: dateContacted,
-    field_map: payload.fieldMap ?? {}, header_signature: importHeaderSignature(sourceHeaders),
+    field_map: fixedFieldMap, header_signature: importHeaderSignature(sourceHeaders),
     status: payload.background === true ? "queued" : "processing",
     ingestion_mode: payload.background === true ? "background" : "browser",
     storage_object_path: payload.background === true ? payload.storageObjectPath : null,
@@ -95,7 +92,7 @@ export async function POST(request: Request) {
   }
   if (headers.length) {
     const seenAt = new Date().toISOString();
-    const fieldResult = await supabase.from("prospect_fields").upsert(headers.map((fieldName) => ({ field_name: fieldName, last_seen_at: seenAt })), { onConflict: "field_name" });
+    const fieldResult = await supabase.from("prospect_fields").upsert(fixedColumns.map(({ field: fieldName }) => ({ field_name: fieldName, last_seen_at: seenAt })), { onConflict: "field_name" });
     if (fieldResult.error) {
       await supabase.from("lists").delete().eq("id", listId);
       return Response.json({ error: fieldResult.error.message }, { status: 500 });

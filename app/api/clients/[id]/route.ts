@@ -6,8 +6,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
-  const { cooldownDays } = await request.json() as { cooldownDays?: number };
-  const days = Math.max(0, Math.min(730, Math.round(Number(cooldownDays ?? 90))));
+  const payload = await request.json().catch(() => null) as { cooldownDays?: unknown } | null;
+  const days = payload?.cooldownDays;
+  if (typeof days !== "number" || !Number.isInteger(days) || days < 0 || days > 730) {
+    return Response.json({ error: "Contact cooldown must be a whole number between 0 and 730 days." }, { status: 400 });
+  }
   const { data, error } = await createAdminClient().from("client_settings").upsert({ client_id: id, cooldown_days: days, updated_at: new Date().toISOString() }).select("cooldown_days").single();
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ cooldownDays: data.cooldown_days });

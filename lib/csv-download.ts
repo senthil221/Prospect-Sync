@@ -108,10 +108,12 @@ export async function readCsvStream(response: Response, handlers: CsvStreamHandl
       }
     }
 
+    if (done && inQuotes) throw new Error("The CSV download ended inside a quoted field. Please retry the export.");
     await drain(done);
     if (done) break;
   }
 
+  if (!headerSeen) throw new Error("The export returned an empty response. Please retry the export.");
   return rows;
 }
 

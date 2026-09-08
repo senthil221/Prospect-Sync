@@ -7,14 +7,14 @@ const migrationUrl = new URL("../supabase/migrations/20260812221326_remap_requir
 const narrowMigrationUrl = new URL("../supabase/migrations/20260812222615_narrow_company_people_pivot_rows.sql", import.meta.url);
 const completionMigrationUrl = new URL("../supabase/migrations/20260812223310_complete_company_import_and_refresh_index.sql", import.meta.url);
 
-test("employee count aliases map Employees Count into the canonical numeric filter", async () => {
+test("employee count aliases map into the fixed company import field", async () => {
   const [normalizer, schema, migration] = await Promise.all([
     readFile(new URL("../db/normalize.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/import-schema.ts", import.meta.url), "utf8"),
     readFile(migrationUrl, "utf8"),
   ]);
   assert.match(normalizer, /"employees count"/);
-  assert.match(schema, /employeescount: "Company Employee Count"/);
+  assert.match(schema, /employeescount: "#employees"/);
   assert.match(migration, /'employeescount'/);
   assert.match(migration, /employee_count_min = coalesce/);
 });
@@ -41,16 +41,18 @@ test("Company to People pivot computes eligible companies once", async () => {
   assert.match(narrowMigration, /join public\.prospect_index ps on ps\.id = page\.id/);
 });
 
-test("people and company imports require the approved schemas", async () => {
+test("people and company imports enforce the fixed schemas", async () => {
   const [schema, peopleStart, companyStart, companyChunk] = await Promise.all([
     readFile(new URL("../lib/import-schema.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/imports/start/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/company-imports/start/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/company-imports/chunk/route.ts", import.meta.url), "utf8"),
   ]);
-  assert.deepEqual(requiredPersonImportFields, ["First Name", "Last Name", "Company Name", "Email", "Personal LinkedIn URL", "Job Title"]);
+  assert.deepEqual(requiredPersonImportFields, []);
+  for (const field of ["First Name", "Last Name", "Job Title", "Email", "Mobile Number", "Personal LinkedIn URL", "Company Name", "Website"]) assert.match(schema, new RegExp(`"${field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
   for (const field of ["#employees", "Industry", "Website", "Company City", "Company State", "Company Country", "Keywords", "Short Description", "Founded Year", "Technologies", "Total Funding"]) assert.match(schema, new RegExp(`"${field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
-  assert.match(peopleStart, /missingRequiredFields/);
+  assert.match(peopleStart, /fixedImportColumns/);
+  assert.match(peopleStart, /Map at least one supported People field/);
   assert.match(companyStart, /missingCompanyImportFields/);
   // A company row is valid with either a name or a website (not both required).
   assert.match(schema, /companyIdentityFields = \["Company Name", "Website"\]/);

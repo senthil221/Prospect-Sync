@@ -6,8 +6,8 @@ import { companyMergeModeLabels, companyMergeModes, defaultCompanyMergeMode, typ
 import { commonDataSources } from "../../lib/data-source";
 import { api } from "../../lib/dashboard-api";
 import { deriveListName, formatNumber, readCsvPreview, readImportTable } from "../../lib/dashboard-helpers";
-import { companyImportFields, missingCompanyImportFields, missingRequiredFields, requiredPersonImportFields, resolvedImportFields, skipImportField, suggestedCompanyImportField, suggestedPersonImportField, unmappedCompanyDetailFields } from "../../lib/import-schema";
-import { parsePastedCompanyTable } from "../../lib/paste-table";
+import { companyImportFields, fixedImportColumns, missingCompanyImportFields, personImportFields, resolvedImportFields, skipImportField, suggestedCompanyImportField, suggestedPersonImportField, unmappedCompanyDetailFields } from "../../lib/import-schema";
+import { parsePastedCompanyTable, parsePastedPeopleTable } from "../../lib/paste-table";
 import { importHeadersMatch } from "../../lib/import-resume";
 import { unassignedClientId } from "../../lib/import-owner";
 import { canonicalImportFields } from "../../lib/prospect-field-definitions";
@@ -27,7 +27,7 @@ function localIsoDate() {
 }
 
 function ImportMappingPanel({ audit, fieldMap, onChange }: { audit: FileAudit; fieldMap: Record<string, string>; onChange: (header: string, value: string) => void }) {
-  return <div className="import-mapping"><div className="mapping-head"><div><strong>Field mapping</strong><small>Review how CSV columns map to master fields</small></div><span>{audit.invalidRows ? `${audit.invalidRows} rows need identity data` : "All rows identifiable"}</span></div><div className="mapping-list">{audit.headers.map((header) => <label key={header}><span title={header}>{header}</span><b><AppIcon name="arrow" size={14}/></b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Auto detect"} onChange={(event) => onChange(header, event.target.value)}>{canonicalImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p>Original headers and values are preserved when mapped or auto-detected. Set a column to “{skipImportField}” to drop it entirely - it won’t be stored or added to the field catalog.</p></div>;
+  return <div className="import-mapping"><div className="mapping-head"><div><strong>Field mapping</strong><small>Only the fixed People fields below can be imported</small></div><span>{audit.invalidRows ? `${audit.invalidRows} rows need identity data` : "All rows identifiable"}</span></div><div className="mapping-list">{audit.headers.map((header) => <label key={header}><span title={header}>{header}</span><b><AppIcon name="arrow" size={14}/></b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Auto detect"} onChange={(event) => onChange(header, event.target.value)}>{canonicalImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p>Columns outside the fixed import fields are discarded. Mapped values are stored under their canonical field names; source-only headers are not retained.</p></div>;
 }
 export default function ImportsPanel({ clients, onComplete, onChanged }: { clients: ClientRecord[]; onComplete: () => Promise<void>; onChanged: () => Promise<void> }) {
   const [kind, setKind] = useState<"prospects" | "companies">("prospects");
@@ -231,7 +231,6 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
         website: valueFor(row, "Website"),
         employeeCount: valueFor(row, "#employees"),
         industry: valueFor(row, "Industry"),
-        location: valueFor(row, "Company Location"),
         city: valueFor(row, "Company City"),
         state: valueFor(row, "Company State"),
         country: valueFor(row, "Company Country"),
@@ -240,7 +239,7 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
         foundedYear: valueFor(row, "Founded Year"),
         technologies: valueFor(row, "Technologies"),
         totalFunding: valueFor(row, "Total Funding"),
-        raw: Object.fromEntries(table.headers.map((header, column) => [header, String(row[column] ?? "").trim()]).filter(([header]) => savedFieldMap[header] !== skipImportField)),
+        raw: Object.fromEntries(fixedImportColumns(table.headers, savedFieldMap, suggestedCompanyImportField, companyImportFields).map(({ field, column }) => [field, String(row[column] ?? "").trim()])),
         sourceRowNumber: index + chunkIndex + 2,
       }));
       await api("/api/company-imports/chunk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId, rows, rowOffset: index }) });
@@ -359,6 +358,10 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
 
 function ProspectImportView({ clients, onComplete, dataSource, step, onStep, resumeImport, onCancelResume, onResumed }: { clients: ClientRecord[]; onComplete: () => Promise<void>; dataSource: string; step: ImportStepId; onStep: (step: ImportStepId) => void; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
+  const [inputMode, setInputMode] = useState<"file" | "paste">("file");
+  const [pastedText, setPastedText] = useState("");
+  const [pastedTable, setPastedTable] = useState<{ headers: string[]; rows: string[][] } | null>(null);
+  const [pasteNotice, setPasteNotice] = useState("");
   const [clientId, setClientId] = useState("");
   const [newClient, setNewClient] = useState("");
   const [listName, setListName] = useState("");
@@ -368,18 +371,17 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
   const [summary, setSummary] = useState<{ processed_rows: number; unique_added: number; duplicates_linked: number } | null>(null);
   const [fileAudit, setFileAudit] = useState<FileAudit | null>(null);
   const [fieldMap, setFieldMap] = useState<Record<string, string>>({});
-  const [allowMissing, setAllowMissing] = useState(false);
   const [activeBackgroundId, setActiveBackgroundId] = useState("");
   const [dateContacted, setDateContacted] = useState(localIsoDate);
   const [noDateContacted, setNoDateContacted] = useState(false);
-  const mappedFields = fileAudit ? resolvedImportFields(fileAudit.headers, fieldMap, suggestedPersonImportField) : [];
-  const missingFields = missingRequiredFields(requiredPersonImportFields, mappedFields);
-  const canSubmit = file && fileAudit && dataSource && (noDateContacted || dateContacted) && listName.trim() && (clientId || newClient.trim()) && (!missingFields.length || allowMissing) && phase === "idle";
+  const fixedColumns = fileAudit ? fixedImportColumns(fileAudit.headers, fieldMap, suggestedPersonImportField, personImportFields) : [];
+  const hasSource = inputMode === "paste" ? Boolean(pastedText.trim() && pastedTable) : Boolean(file);
+  const canSubmit = hasSource && fileAudit && fixedColumns.length > 0 && fileAudit.invalidRows === 0 && dataSource && (noDateContacted || dateContacted) && listName.trim() && (clientId || newClient.trim()) && phase === "idle";
   const [attempted, setAttempted] = useState<Partial<Record<ImportStepId, boolean>>>({});
   const destinationIssues = destinationProblems({ listName, clientId, newClient, dateContacted, noDateContacted });
   const stepIssues: StepProblem[] = step === "upload"
-    ? uploadProblems({ hasSource: Boolean(file), rows: fileAudit?.rows ?? 0 }, "prospect-file")
-    : step === "map" ? mapProblems({ missingFields, allowMissing, overrideField: "import-allow-missing" }, "prospect-mapping")
+    ? uploadProblems({ hasSource, rows: fileAudit?.rows ?? 0 }, inputMode === "paste" ? "prospect-paste" : "prospect-file")
+    : step === "map" ? (fixedColumns.length ? [] : [{ field: "prospect-mapping", message: "Map at least one of the fixed People fields." }])
       : destinationIssues;
   function advance(next: ImportStepId) {
     setAttempted((current) => ({ ...current, [step]: true }));
@@ -418,7 +420,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
 
   async function pickFile(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0] ?? null;
-    setFile(next); setFileAudit(null); setFieldMap({}); setMessage(""); setAllowMissing(false);
+    setFile(next); setPastedTable(null); setFileAudit(null); setFieldMap({}); setMessage(""); setPasteNotice("");
     if (next) setListName(deriveListName(next.name));
     if (!next) return;
     if (!/\.csv$/i.test(next.name)) {
@@ -428,13 +430,46 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
       const parsed = await readCsvPreview(next);
       const populatedCells = parsed.rows.reduce((count, row) => count + row.filter((value) => value.trim()).length, 0);
       const nextFieldMap = Object.fromEntries(parsed.headers.map((header) => [header, suggestedPersonImportField(header)]));
-      const mappedHeaders = parsed.headers.map((header) => nextFieldMap[header] === "Auto detect" ? header : nextFieldMap[header]);
-      const invalidRows = parsed.rows.filter((row) => mapProspect(mappedHeaders, row).identifiers.length === 0).length;
+      const previewColumns = fixedImportColumns(parsed.headers, nextFieldMap, suggestedPersonImportField, personImportFields);
+      const mappedHeaders = previewColumns.map(({ field }) => field);
+      const invalidRows = parsed.rows.filter((row) => mapProspect(mappedHeaders, previewColumns.map(({ column }) => row[column] ?? "")).identifiers.length === 0).length;
       setFieldMap(nextFieldMap);
       setFileAudit({ headers: parsed.headers, rows: parsed.rows.length, populatedCells, invalidRows, sampled: parsed.sampled });
     } catch (caught) {
       setMessage(caught instanceof Error ? caught.message : "Unable to read this CSV.");
     }
+  }
+
+  function applyPeopleTable(table: { headers: string[]; rows: string[][] }) {
+    const nextFieldMap = Object.fromEntries(table.headers.map((header) => [header, suggestedPersonImportField(header)]));
+    const columns = fixedImportColumns(table.headers, nextFieldMap, suggestedPersonImportField, personImportFields);
+    const mappedHeaders = columns.map(({ field }) => field);
+    const invalidRows = table.rows.filter((row) => mapProspect(mappedHeaders, columns.map(({ column }) => row[column] ?? "")).identifiers.length === 0).length;
+    const populatedCells = table.rows.reduce((count, row) => count + row.filter((value) => value.trim()).length, 0);
+    setPastedTable(table);
+    setFieldMap(nextFieldMap);
+    setFileAudit({ headers: table.headers, rows: table.rows.length, populatedCells, invalidRows });
+  }
+
+  function readPastedPeople(text: string) {
+    setPastedText(text); setFile(null); setMessage(""); setSummary(null); setProgress(0);
+    if (!text.trim()) { setPastedTable(null); setFileAudit(null); setFieldMap({}); setPasteNotice(""); return; }
+    try {
+      const table = parsePastedPeopleTable(text);
+      applyPeopleTable(table);
+      if (!listName.trim()) setListName(`Pasted people ${localIsoDate()}`);
+      setPasteNotice(table.inferredHeaders
+        ? `No header row found - ${formatNumber(table.rows.length)} rows read and fields inferred. Check the mapping below.`
+        : `Header row detected - ${formatNumber(table.rows.length)} people rows read.`);
+    } catch (caught) {
+      setPastedTable(null); setFileAudit(null); setFieldMap({}); setPasteNotice("");
+      setMessage(caught instanceof Error ? caught.message : "Unable to read this paste.");
+    }
+  }
+
+  function switchPeopleInputMode(next: "file" | "paste") {
+    setInputMode(next); setFile(null); setPastedText(""); setPastedTable(null);
+    setFileAudit(null); setFieldMap({}); setMessage(""); setSummary(null); setProgress(0); setPasteNotice("");
   }
 
   async function uploadProspectRows(table: { headers: string[]; rows: string[][] }, session: { importId: string; listId: string }, keptColumns: Array<{ header: string; column: number }>, keptHeaders: string[], resolvedFieldMap: Record<string, string>, rowOffset: number) {
@@ -452,8 +487,18 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
   }
 
   async function startImport() {
-    if (!file || !canSubmit) return;
+    if (!canSubmit) return;
     try {
+      if (inputMode === "paste" && pastedTable) {
+        const keptColumns = fixedImportColumns(pastedTable.headers, fieldMap, suggestedPersonImportField, personImportFields);
+        const keptHeaders = keptColumns.map(({ header }) => header);
+        const resolvedFieldMap = Object.fromEntries(keptColumns.map(({ header, field }) => [header, field]));
+        const withoutClient = clientId === unassignedClientId;
+        const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: `Pasted people ${localIsoDate()}`, totalRows: pastedTable.rows.length, headers: keptHeaders, sourceHeaders: pastedTable.headers, fieldMap: resolvedFieldMap }) });
+        await uploadProspectRows(pastedTable, started, keptColumns, keptHeaders, resolvedFieldMap, 0);
+        return;
+      }
+      if (!file) return;
       if (/\.csv$/i.test(file.name)) {
         setPhase("uploading"); setProgress(0); setMessage("Uploading the CSV safely - this can resume after a network interruption…");
         const fingerprint = await prospectUploadFingerprint(file);
@@ -465,14 +510,14 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
           await uploadProspectCsv(file, upload.objectPath, upload.token, setProgress);
         } else setProgress(100);
         const sourceHeaders = fileAudit?.headers ?? [];
-        const keptHeaders = sourceHeaders.filter((header) => fieldMap[header] !== skipImportField);
+        const keptHeaders = fixedImportColumns(sourceHeaders, fieldMap, suggestedPersonImportField, personImportFields).map(({ header }) => header);
         const withoutClient = clientId === unassignedClientId;
         const started = await api<{ importId: string; listId: string }>("/api/imports/start", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
             clientId: withoutClient ? undefined : clientId || undefined,
             clientName: newClient || undefined, withoutClient, listName, dataSource,
             fileName: file.name, headers: keptHeaders, sourceHeaders, fieldMap, dateContacted: noDateContacted ? null : dateContacted,
-            allowMissingFields: allowMissing, background: true,
+            background: true,
             storageObjectPath: upload.objectPath, fileSizeBytes: file.size,
           }),
         });
@@ -485,11 +530,11 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
       if (!parsed.headers.length || !parsed.rows.length) throw new Error("The CSV needs a header row and at least one data row.");
       // Columns set to "Skip column" are dropped here so they never reach the DB -
       // not stored in raw all_data, not registered in the field catalog.
-      const keptColumns = parsed.headers.map((header, column) => ({ header, column })).filter(({ header }) => fieldMap[header] !== skipImportField);
+      const keptColumns = fixedImportColumns(parsed.headers, fieldMap, suggestedPersonImportField, personImportFields);
       const keptHeaders = keptColumns.map(({ header }) => header);
-      const resolvedFieldMap = Object.fromEntries(Object.entries(fieldMap).filter(([header, value]) => value && value !== "Auto detect" && value !== skipImportField && keptHeaders.includes(header)));
+      const resolvedFieldMap = Object.fromEntries(keptColumns.map(({ header, field }) => [header, field]));
       const withoutClient = clientId === unassignedClientId;
-      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, sourceHeaders: parsed.headers, fieldMap, allowMissingFields: allowMissing }) });
+      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, sourceHeaders: parsed.headers, fieldMap }) });
       await uploadProspectRows(parsed, started, keptColumns, keptHeaders, resolvedFieldMap, 0);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Import failed."); setPhase("idle"); }
   }
@@ -506,10 +551,10 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
       if (!detail.headerSignature || !importHeadersMatch(table.headers, detail.headerSignature)) throw new Error("The selected file headers do not match the interrupted import. Re-select the original file or start a new import instead.");
       if (detail.totalRows !== table.rows.length) throw new Error(`The selected file has ${formatNumber(table.rows.length)} rows; the interrupted import expected ${formatNumber(detail.totalRows)}. Re-select the same file or start a new import instead.`);
       if (!detail.listId) throw new Error("The interrupted import no longer has a destination list.");
-      const keptColumns = table.headers.map((header, column) => ({ header, column })).filter(({ header }) => detail.fieldMap[header] !== skipImportField);
+      const keptColumns = fixedImportColumns(table.headers, detail.fieldMap, suggestedPersonImportField, personImportFields);
       const keptHeaders = keptColumns.map(({ header }) => header);
       if (JSON.stringify(keptHeaders) !== JSON.stringify(detail.headers)) throw new Error("The selected file headers do not match the interrupted import. Re-select the original file or start a new import instead.");
-      const resolvedFieldMap = Object.fromEntries(Object.entries(detail.fieldMap).filter(([header, value]) => value && value !== "Auto detect" && value !== skipImportField && keptHeaders.includes(header)));
+      const resolvedFieldMap = Object.fromEntries(keptColumns.map(({ header, field }) => [header, field]));
       const populatedCells = table.rows.reduce((count, row) => count + row.filter((value) => value.trim()).length, 0);
       setFile(selected); setFieldMap(detail.fieldMap); setFileAudit({ headers: table.headers, rows: table.rows.length, populatedCells, invalidRows: 0 });
       await uploadProspectRows(table, { importId: detail.id, listId: detail.listId }, keptColumns, keptHeaders, resolvedFieldMap, detail.committedRowOffset);
@@ -542,18 +587,18 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
       <p className="eyebrow">CSV IMPORT</p>
       {step === "upload" ? <>
         <h2>Bring every list into one clean database.</h2>
-        <p>The file is read in the browser first, so the columns and the row count are checked before a single row reaches the database.</p>
-        <RequiredFieldList title="Required person columns" fields={requiredPersonImportFields}/>
+        <p>Your file or pasted rows are checked in the browser before a single row reaches the database.</p>
+        <RequiredFieldList title="Supported People fields (all optional)" fields={personImportFields}/>
       </> : step === "map" ? <>
-        <h2>Control the mapping without losing the original.</h2>
-        <p>Original headers and values are preserved whether a column is mapped or auto-detected. Nothing here changes what the file contained.</p>
-        <RequiredFieldList title="Required person columns" fields={requiredPersonImportFields}/>
+        <h2>Map only the fixed People fields.</h2>
+        <p>Unsupported source columns are discarded; supported values are stored under their fixed field names.</p>
+        <RequiredFieldList title="Supported People fields (all optional)" fields={personImportFields}/>
       </> : <>
         <h2>Where these people land.</h2>
         <p>Existing prospects are linked rather than duplicated, new records are added once, and the whole import can be undone afterwards.</p>
         <div className="import-review-summary">
           <div><span>Source</span><strong>{dataSource || "Not set"}</strong></div>
-          <div><span>File</span><strong>{file?.name ?? "None"}</strong></div>
+          <div><span>Source rows</span><strong>{inputMode === "paste" ? `Pasted people ${localIsoDate()}` : file?.name ?? "None"}</strong></div>
           <div><span>Rows</span><strong>{formatNumber(fileAudit?.rows ?? 0)}{fileAudit?.sampled ? " sampled" : ""}</strong></div>
           <div><span>Fields detected</span><strong>{formatNumber(fileAudit?.headers.length ?? 0)}</strong></div>
         </div>
@@ -561,11 +606,14 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
     </div>
     <div className="import-card">
       {step === "upload" ? <>
-        <label className={`dropzone ${file ? "has-file" : ""}`}><input id="prospect-file" type="file" accept=".csv,text/csv" onChange={(event) => void pickFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to review</small></> : <><strong>Choose a prospect CSV</strong><small>CSV streams safely for lists up to 500,000+ rows</small></>}</label>
+        <Tabs variant="segmented" label="People input method" value={inputMode} onChange={switchPeopleInputMode} items={[{ id: "file", label: "Upload a CSV" }, { id: "paste", label: "Paste rows" }]}/>
+        {inputMode === "file"
+          ? <label className={`dropzone ${file ? "has-file" : ""}`}><input id="prospect-file" type="file" accept=".csv,text/csv" onChange={(event) => void pickFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span>{file ? <><strong>{file.name}</strong><small>{(file.size / 1024 / 1024).toFixed(2)} MB · Ready to review</small></> : <><strong>Choose a prospect CSV</strong><small>CSV streams safely for lists up to 500,000+ rows</small></>}</label>
+          : <div className="paste-zone"><label htmlFor="prospect-paste"><span>Paste people</span><textarea id="prospect-paste" rows={9} disabled={phase !== "idle"} value={pastedText} onChange={(event) => readPastedPeople(event.target.value)} placeholder={"Email\tPersonal LinkedIn URL\nana@example.com\thttps://linkedin.com/in/ana\n\nHeaders are optional. Email-only and LinkedIn-only rows are supported."}/></label>{pasteNotice ? <p className="source-selected-note" role="status">{pasteNotice}</p> : null}</div>}
         {fileAudit ? <div className="file-audit">
           <div><span className="audit-check"><AppIcon name="check" size={14}/></span><p><strong>{formatNumber(fileAudit.headers.length)} fields detected</strong><small>{fileAudit.sampled ? `${formatNumber(fileAudit.rows)} sample rows checked · full CSV will be processed by the server` : `${formatNumber(fileAudit.rows)} rows · ${formatNumber(fileAudit.populatedCells)} populated cells`}</small></p></div>
           <div className="audit-fields">{fileAudit.headers.slice(0, 8).map((header) => <span key={header}>{header}</span>)}{fileAudit.headers.length > 8 && <span>+{fileAudit.headers.length - 8} more</span>}</div>
-          <p>{fileAudit.invalidRows ? `${fileAudit.invalidRows} sampled rows have no email, LinkedIn, or name plus company and will be preserved without a People DB link.` : "The checked rows have enough identity data to match the People DB."}</p>
+          <p>{fileAudit.invalidRows ? `${fileAudit.invalidRows} checked rows have no email, LinkedIn, or name plus company/website and must be corrected before import.` : "The checked rows have enough identity data to match the People DB."}</p>
         </div> : null}
         {message ? <StatusMessage tone="alert">{message}</StatusMessage> : null}
         <StepFooter backLabel="Back to source" onBack={() => onStep("source")} continueLabel="Continue to mapping" attempted={Boolean(attempted.upload)} problems={stepIssues} onContinue={() => advance("map")}/>
@@ -573,9 +621,8 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
 
       {step === "map" && fileAudit ? <>
         <div id="prospect-mapping" tabIndex={-1}><ImportMappingPanel audit={fileAudit} fieldMap={fieldMap} onChange={(header, value) => setFieldMap((current) => ({ ...current, [header]: value }))}/></div>
-        {missingFields.length
-          ? <div className="cleanup-choice import-override"><input id="import-allow-missing" type="checkbox" checked={allowMissing} onChange={(event) => setAllowMissing(event.target.checked)} /><label htmlFor="import-allow-missing"><strong>Import anyway without all mandatory fields</strong><small>Rows import with whatever identity they have; those missing name/company and email/LinkedIn are preserved without a People DB link.</small></label></div>
-          : <p className="source-selected-note">All required person columns are mapped.</p>}
+        {fileAudit.invalidRows ? <p className="form-error" role="alert">{formatNumber(fileAudit.invalidRows)} checked row{fileAudit.invalidRows === 1 ? " has" : "s have"} no usable identity. Add an email, LinkedIn URL, or name plus company/website before importing.</p>
+          : <p className="source-selected-note">{formatNumber(fixedColumns.length)} fixed People field{fixedColumns.length === 1 ? "" : "s"} mapped. Unsupported columns will be discarded.</p>}
         <StepFooter backLabel="Back to upload" onBack={() => onStep("upload")} continueLabel="Continue to destination" attempted={Boolean(attempted.map)} problems={stepIssues} onContinue={() => advance("review")}/>
       </> : null}
 
@@ -602,7 +649,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
             if (canSubmit) void startImport();
           }}
         />
-        <p className="privacy-note">Original rows and fields remain stored in your private database.</p>
+        <p className="privacy-note">Only the fixed mapped People fields are stored in your private database.</p>
       </> : null}
     </div>
   </div>;

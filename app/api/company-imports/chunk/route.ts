@@ -1,12 +1,22 @@
 import { normalizeDomain, normalizeText, parseEmployeeCount } from "../../../../db/normalize";
 import { authorizeApi } from "../../../../lib/auth";
+import { companyImportFields } from "../../../../lib/import-schema";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
-type CompanyImportRow = { name?: unknown; website?: unknown; employeeCount?: unknown; industry?: unknown; location?: unknown; city?: unknown; state?: unknown; country?: unknown; keywords?: unknown; shortDescription?: unknown; foundedYear?: unknown; technologies?: unknown; totalFunding?: unknown; raw?: unknown; sourceRowNumber?: unknown };
+type CompanyImportRow = { name?: unknown; website?: unknown; employeeCount?: unknown; industry?: unknown; city?: unknown; state?: unknown; country?: unknown; keywords?: unknown; shortDescription?: unknown; foundedYear?: unknown; technologies?: unknown; totalFunding?: unknown; raw?: unknown; sourceRowNumber?: unknown };
 type ImportSummary = { processed: number; added: number; updated: number; skipped: number };
 
 function listValue(value: unknown) {
   return [...new Set(String(value ?? "").split(/[,;|]/).map((item) => item.trim()).filter(Boolean))].slice(0, 100);
+}
+
+const allowedCompanyRawFields = new Set<string>(companyImportFields);
+
+function fixedCompanyRaw(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([field]) => allowedCompanyRawFields.has(field))
+    .map(([field, item]) => [field, String(item ?? "").trim()]));
 }
 
 export async function POST(request: Request) {
@@ -23,6 +33,9 @@ export async function POST(request: Request) {
     const domain = normalizeDomain(String(row.website ?? ""));
     const employeeCount = parseEmployeeCount(String(row.employeeCount ?? ""));
     const foundedYear = Number(String(row.foundedYear ?? "").match(/\d{4}/)?.[0] ?? 0);
+    const city = String(row.city ?? "").trim().slice(0, 200);
+    const state = String(row.state ?? "").trim().slice(0, 200);
+    const country = String(row.country ?? "").trim().slice(0, 200);
     return {
       name,
       normalizedName: normalizeText(name),
@@ -31,19 +44,25 @@ export async function POST(request: Request) {
       employeeCountMin: employeeCount.min,
       employeeCountMax: employeeCount.max,
       industry: String(row.industry ?? "").trim().slice(0, 300),
-      location: String(row.location ?? "").trim().slice(0, 500),
-      city: String(row.city ?? "").trim().slice(0, 200),
-      state: String(row.state ?? "").trim().slice(0, 200),
-      country: String(row.country ?? "").trim().slice(0, 200),
+      location: [city, state, country].filter(Boolean).join(", ").slice(0, 500),
+      city,
+      state,
+      country,
       keywords: listValue(row.keywords),
       shortDescription: String(row.shortDescription ?? "").trim().slice(0, 5000),
       foundedYear: foundedYear >= 1000 && foundedYear <= new Date().getFullYear() ? foundedYear : null,
       technologies: listValue(row.technologies),
       totalFunding: String(row.totalFunding ?? "").trim().slice(0, 200),
-      raw: row.raw && typeof row.raw === "object" ? row.raw : {},
+      raw: fixedCompanyRaw(row.raw),
       sourceRowNumber: Math.max(2, Math.round(Number(row.sourceRowNumber ?? rowOffset + index + 2))),
     };
   });
+  const rejected = rows.filter((row) => !row.name && !row.domain);
+  if (rejected.length) return Response.json({
+    error: `${rejected.length} company row${rejected.length === 1 ? " has" : "s have"} neither a company name nor website.`,
+    rejectedRows: rejected.slice(0, 20).map((row) => row.sourceRowNumber),
+    rejectedCount: rejected.length,
+  }, { status: 422 });
   const supabase = createAdminClient();
   const isMissing = (candidate: { code?: string } | null) => candidate?.code === "PGRST202" || candidate?.code === "42883";
   const isTimeout = (candidate: { code?: string; message?: string } | null) => candidate?.code === "57014" || /statement timeout/i.test(candidate?.message ?? "");

@@ -14,10 +14,10 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 // classifier existed).
 
 const missingFunctionCodes = new Set(["PGRST202", "42883"]);
-const batchSize = 500;
-// Bounded so one request cannot run unattended forever; the client re-posts until
-// `remaining` comes back false.
-const maxBatchesPerRequest = 20;
+const batchSize = 2000;
+// One checkpoint per request keeps each HTTP run bounded. The client or the
+// maintenance job repeats it until the authoritative remaining count is zero.
+const maxBatchesPerRequest = 1;
 
 function isMissingFunction(error: { code?: string } | null | undefined) {
   return Boolean(error?.code && missingFunctionCodes.has(error.code));
@@ -71,19 +71,25 @@ export async function POST(request: Request) {
   const supabase = createAdminClient();
   let reclassified = 0;
   let remaining = false;
+  let remainingCount = 0;
 
   for (let run = 0; run < batches; run += 1) {
-    const { data, error } = await supabase.rpc("reclassify_prospect_titles_v1", { p_limit: batchSize });
+    const { data, error } = await supabase.rpc("run_title_classification_batch_v2", { p_limit: batchSize });
     if (error) {
       if (isMissingFunction(error)) return migrationRequired();
       return Response.json({ error: error.message }, { status: 500 });
     }
-    const count = Number(data ?? 0);
+    const result = (Array.isArray(data) ? data[0] : data) as { processed?: unknown; remaining?: unknown; acquired?: unknown } | null;
+    if (!result?.acquired) return Response.json({ error: "Another title-classification runner is active. Retry in a moment." }, { status: 409 });
+    const count = Number(result.processed ?? 0);
+    remainingCount = Number(result.remaining ?? 0);
     reclassified += count;
-    if (count === 0) break;
-    // A full batch means there is very likely more waiting.
-    remaining = count === batchSize && run === batches - 1;
+    if (remainingCount > 0 && count === 0) {
+      return Response.json({ error: `Classification made no progress; ${remainingCount} stale rows remain.`, reclassified, remainingCount }, { status: 500 });
+    }
+    if (remainingCount === 0) break;
+    remaining = run === batches - 1;
   }
 
-  return Response.json({ reclassified, remaining });
+  return Response.json({ reclassified, remaining, remainingCount });
 }

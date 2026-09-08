@@ -1,54 +1,50 @@
-export const requiredPersonImportFields = [
+// The import boundary is deliberately fixed. These are the only source values
+// a People import may persist; every other CSV column is ignored before it can
+// reach typed columns, all_data, or the field catalogue.
+export const personImportFields = [
   "First Name",
   "Last Name",
-  "Company Name",
-  "Email",
-  "Personal LinkedIn URL",
   "Job Title",
+  "Email",
+  "Mobile Number",
+  "Personal LinkedIn URL",
+  "Company Name",
+  "Website",
 ] as const;
+
+// People columns are optional. Row-level identity validation is separate: at
+// least one usable email/LinkedIn/name+company identity still has to exist.
+export const requiredPersonImportFields: readonly string[] = [];
 
 // A company row is identifiable by either its name or its website; at least one
 // of these must be mapped, but not both.
 export const companyIdentityFields = ["Company Name", "Website"] as const;
 
-// Geography is one thing, not three. A file that carries a single "Location"
-// column describes a company just as well as one with city, state and country -
-// which is how most exports actually ship it. Whichever arrives, the import stores
-// both the composed location and any parts it was given.
-export const companyGeographyFields = ["Company Location", "Company City", "Company State", "Company Country"] as const;
+export const companyGeographyFields = ["Company City", "Company State", "Company Country"] as const;
 
-// The rest of the canonical company profile. Wanted on a complete dataset upload,
-// but not required -- see missingCompanyImportFields.
+// The rest of the fixed company profile. These are advisory, not required.
 export const companyDetailFields = [
-  "#employees",
   "Industry",
   "Keywords",
   "Short Description",
   "Founded Year",
+  "#employees",
+  ...companyGeographyFields,
   "Technologies",
   "Total Funding",
 ] as const;
 
-// Every mappable company target, for the import column picker (identity first).
-export const companyImportFields = [...companyIdentityFields, ...companyGeographyFields, ...companyDetailFields] as const;
+// Every mappable company target, in the order of the approved import contract.
+export const companyImportFields = [...companyIdentityFields, ...companyDetailFields] as const;
 
 const personAliases: Record<string, string> = {
-  name: "Name", fullname: "Name", firstname: "First Name", lastname: "Last Name",
+  firstname: "First Name", lastname: "Last Name",
   email: "Email", emailaddress: "Email", workemail: "Email", businessemail: "Email",
-  personalemail: "Personal Email", mobile: "Mobile Number", mobilenumber: "Mobile Number", phone: "Mobile Number", phonenumber: "Mobile Number",
+  mobile: "Mobile Number", mobilenumber: "Mobile Number", phone: "Mobile Number", phonenumber: "Mobile Number",
   linkedin: "Personal LinkedIn URL", linkedinurl: "Personal LinkedIn URL", personlinkedinurl: "Personal LinkedIn URL", personallinkedinurl: "Personal LinkedIn URL", linkedinprofile: "Personal LinkedIn URL",
-  title: "Job Title", jobtitle: "Job Title", seniority: "Seniority", senioritylevel: "Seniority",
-  department: "Departments", departments: "Departments", function: "Departments",
-  subdepartment: "Sub Departments", subdepartments: "Sub Departments", subdepartmentname: "Sub Departments",
+  title: "Job Title", jobtitle: "Job Title",
   company: "Company Name", companyname: "Company Name", casualcompanyname: "Company Name", organization: "Company Name",
-  companywebsite: "Company Website", website: "Company Website", domain: "Company Website", companydomain: "Company Website",
-  employees: "Company Employee Count", employeecount: "Company Employee Count", employeescount: "Company Employee Count", numberofemployees: "Company Employee Count", companyemployeecount: "Company Employee Count", companyemployees: "Company Employee Count", companyheadcount: "Company Employee Count", headcount: "Company Employee Count",
-  keyword: "Keywords", keywords: "Keywords", personkeywords: "Keywords", prospectkeywords: "Keywords",
-  city: "City", state: "State", country: "Country", location: "Person Location", personlocation: "Person Location",
-  companylocation: "Company Location", accountlocation: "Company Location", headquarters: "Company Location", hqlocation: "Company Location",
-  companycity: "Company City", accountcity: "Company City", hqcity: "Company City",
-  companystate: "Company State", accountstate: "Company State", hqstate: "Company State", companyregion: "Company State",
-  companycountry: "Company Country", accountcountry: "Company Country", hqcountry: "Company Country",
+  companywebsite: "Website", website: "Website", domain: "Website", companydomain: "Website",
 };
 
 const companyAliases: Record<string, string> = {
@@ -56,7 +52,6 @@ const companyAliases: Record<string, string> = {
   employees: "#employees", employeecount: "#employees", employeescount: "#employees", numberofemployees: "#employees", companyemployeecount: "#employees", companyemployees: "#employees", headcount: "#employees",
   industry: "Industry", companyindustry: "Industry",
   website: "Website", domain: "Website", companywebsite: "Website", companydomain: "Website", url: "Website",
-  companylocation: "Company Location", location: "Company Location", headquarters: "Company Location", hqlocation: "Company Location", accountlocation: "Company Location",
   companycity: "Company City", city: "Company City", accountcity: "Company City", hqcity: "Company City",
   companystate: "Company State", state: "Company State", accountstate: "Company State", hqstate: "Company State", companyregion: "Company State",
   companycountry: "Company Country", country: "Company Country", accountcountry: "Company Country", hqcountry: "Company Country",
@@ -83,6 +78,40 @@ export function suggestedCompanyImportField(header: string) {
 // (from the mapped fields, the preserved raw all_data, and the field catalog).
 export const skipImportField = "Skip column";
 
+export function isPersonImportField(value: unknown): value is (typeof personImportFields)[number] {
+  return typeof value === "string" && (personImportFields as readonly string[]).includes(value);
+}
+
+export function isCompanyImportField(value: unknown): value is (typeof companyImportFields)[number] {
+  return typeof value === "string" && (companyImportFields as readonly string[]).includes(value);
+}
+
+/** Resolve one source header only when it maps onto the fixed import contract. */
+export function resolvedImportField(
+  header: string,
+  fieldMap: Record<string, string> | undefined,
+  suggest: (header: string) => string,
+  allowed: readonly string[],
+) {
+  const candidate = fieldMap?.[header] || suggest(header);
+  return allowed.includes(candidate) ? candidate : null;
+}
+
+export function fixedImportColumns(
+  headers: string[],
+  fieldMap: Record<string, string> | undefined,
+  suggest: (header: string) => string,
+  allowed: readonly string[],
+) {
+  const seen = new Set<string>();
+  return headers.flatMap((header, column) => {
+    const field = resolvedImportField(header, fieldMap, suggest, allowed);
+    if (!field || seen.has(field)) return [];
+    seen.add(field);
+    return [{ header, column, field }];
+  });
+}
+
 export function resolvedImportFields(headers: string[], fieldMap: Record<string, string> | undefined, suggest: (header: string) => string) {
   return headers.map((header) => fieldMap?.[header] || suggest(header)).filter((field) => field !== "Auto detect" && field !== "Not mapped" && field !== skipImportField);
 }
@@ -103,13 +132,7 @@ export function missingCompanyImportFields(mapped: string[]) {
 }
 
 // What a complete profile would have carried and this import does not. Advisory
-// only, so that uploading a partial dataset is a visible choice rather than a
-// silent one. Geography stays one line, not three: a single Company Location
-// column answers it just as well as separate city / state / country.
+// only, so that uploading a partial dataset is a visible choice.
 export function unmappedCompanyDetailFields(mapped: string[]) {
-  const missing = missingRequiredFields(companyDetailFields, mapped);
-  if (!companyGeographyFields.some((field) => mapped.includes(field))) {
-    missing.unshift("Company Location (or Company City / State / Country)");
-  }
-  return missing;
+  return missingRequiredFields(companyDetailFields, mapped);
 }

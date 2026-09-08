@@ -1,5 +1,5 @@
 import { uniqueHeaders } from "./dashboard-helpers.ts";
-import { suggestedCompanyImportField } from "./import-schema.ts";
+import { suggestedCompanyImportField, suggestedPersonImportField } from "./import-schema.ts";
 
 // Company lists are collected by copying, not by exporting: a column of domains out
 // of a spreadsheet, a list of names out of a doc, a two-column block out of Sheets.
@@ -40,12 +40,12 @@ function detectDelimiter(lines: string[]) {
   return delimiters.find((candidate) => lines.filter((line) => line.includes(candidate)).length * 2 >= lines.length) ?? "";
 }
 
-// Row one is a header only when every cell in it names a company field we know. A
-// data row does not: "Acme" and "acme.com" are aliases of nothing, so a bare list of
-// companies is read as data rather than quietly losing its first entry.
+// Row one is a header when it contains a company field we know. Unsupported
+// columns may sit beside it and will be removed by the fixed mapping boundary. A
+// data row such as "Acme" and "acme.com" still contains no field labels.
 function looksLikeHeader(cells: string[]) {
   const named = cells.filter(Boolean);
-  return named.length > 0 && named.every((cell) => suggestedCompanyImportField(cell) !== "Not mapped");
+  return named.some((cell) => suggestedCompanyImportField(cell) !== "Not mapped");
 }
 
 // With no header row, name each column after what it holds. Domains are
@@ -81,4 +81,45 @@ export function parsePastedCompanyTable(text: string): { headers: string[]; rows
     rows,
     inferredHeaders: !hasHeader,
   };
+}
+
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const linkedinPattern = /(?:https?:\/\/)?(?:[a-z]{2,3}\.)?linkedin\.com\/in\//i;
+
+function looksLikePeopleHeader(cells: string[]) {
+  const named = cells.filter(Boolean);
+  // Unsupported columns are valid input at the boundary: they are discarded
+  // after mapping. One known label is enough to keep that header row out of the
+  // data while still allowing headerless values to infer their own fields.
+  return named.some((cell) => suggestedPersonImportField(cell) !== "Auto detect");
+}
+
+function inferPeopleHeaders(rows: string[][], width: number) {
+  const used = new Set<string>();
+  return Array.from({ length: width }, (_unused, index) => {
+    const values = rows.map((row) => String(row[index] ?? "").trim()).filter(Boolean);
+    const candidates: string[] = [];
+    if (values.length && values.filter((value) => emailPattern.test(value)).length > values.length / 2) candidates.push("Email");
+    if (values.length && values.filter((value) => linkedinPattern.test(value)).length > values.length / 2) candidates.push("Personal LinkedIn URL");
+    if (values.length && values.filter((value) => websitePattern.test(value) && !linkedinPattern.test(value)).length > values.length / 2) candidates.push("Website");
+    const field = candidates.find((candidate) => !used.has(candidate)) ?? (used.has("First Name") ? "Last Name" : "First Name");
+    used.add(field);
+    return field;
+  });
+}
+
+/** People paste uses the same table contract as file import, including email
+ * and LinkedIn-only inputs. The caller can hand the result to the shared fixed
+ * mapping and chunk pipeline without a second normalization path. */
+export function parsePastedPeopleTable(text: string): { headers: string[]; rows: string[][]; inferredHeaders: boolean } {
+  const lines = text.split(/\r\n|\r|\n/).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length) throw new Error("Paste at least one person row.");
+  const delimiter = detectDelimiter(lines);
+  const cells = lines.map((line) => splitRow(line, delimiter)).filter((row) => row.some(Boolean));
+  const width = Math.max(...cells.map((row) => row.length));
+  const padded = cells.map((row) => row.length === width ? row : [...row, ...Array<string>(width - row.length).fill("")]);
+  const hasHeader = padded.length > 1 && looksLikePeopleHeader(padded[0]);
+  const rows = hasHeader ? padded.slice(1) : padded;
+  if (!rows.length) throw new Error("The paste has a header row but no person rows.");
+  return { headers: uniqueHeaders(hasHeader ? padded[0] : inferPeopleHeaders(rows, width)), rows, inferredHeaders: !hasHeader };
 }

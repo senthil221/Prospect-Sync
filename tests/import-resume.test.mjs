@@ -38,14 +38,14 @@ test("chunk routes pass row offsets into both resumable RPCs", async () => {
   assert.match(companyRoute, /importBatch\(batch\.slice\(midpoint\), offset \+ midpoint\)/);
 });
 
-test("company location reaches the active resumable RPC through a forward migration", async () => {
+test("fixed company location fields reach the active resumable RPC through a forward migration", async () => {
   const [migration, companyRoute] = await Promise.all([
     readFile(locationFixUrl, "utf8"),
     readFile(new URL("../app/api/company-imports/chunk/route.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(companyRoute, /location\?: unknown/);
-  assert.match(companyRoute, /location: String\(row\.location/);
+  assert.match(companyRoute, /city\?: unknown; state\?: unknown; country\?: unknown/);
+  assert.match(companyRoute, /location: \[city, state, country\]\.filter\(Boolean\)\.join\(", "\)/);
   assert.match(migration, /drop function if exists public\.import_company_batch_v2\(text, jsonb\)/);
   assert.match(migration, /import_company_batch_v2\(\s*p_import_id text,\s*p_rows jsonb,\s*p_row_offset integer\s*\)/);
   assert.match(migration, /row_data->>'location'/);

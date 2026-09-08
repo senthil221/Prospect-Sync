@@ -68,7 +68,7 @@ export function mapProspect(headers, values) {
   const personalEmail = findValue(raw, ["personal email", "personalemail"]).toLowerCase();
   const linkedinUrl = normalizeLinkedin(findValue(raw, ["linkedin", "linkedin url", "linkedin profile", "linkedinurl", "personal linkedin url", "person linkedin url"]));
   const companyName = findValue(raw, ["casual company name", "company name", "company", "organization"]);
-  const companyDomain = normalizeDomain(findValue(raw, ["company website", "website", "company domain", "domain", "companywebsite"]));
+  const companyDomain = normalizeDomain(findValue(raw, ["website", "company website", "company domain", "domain", "companywebsite"]));
   const employeeCount = parseEmployeeCount(findValue(raw, ["# employees", "number of employees", "employee count", "employees count", "employees", "company employee count", "company employees", "company headcount", "headcount"]));
   const city = findValue(raw, ["city"]);
   const state = findValue(raw, ["state", "region"]);

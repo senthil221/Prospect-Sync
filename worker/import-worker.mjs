@@ -36,7 +36,7 @@ const batchTimeout = pgInterval(process.env.IMPORT_BATCH_TIMEOUT, "120s", "IMPOR
 // Staging is a COPY of the whole CSV and is legitimately minutes long, so it
 // keeps the generous bound; only the batch loop is tightened.
 const stagingTimeout = pgInterval(process.env.IMPORT_STAGING_TIMEOUT, "10min", "IMPORT_STAGING_TIMEOUT");
-const skipImportField = "Skip column";
+const personImportFields = new Set(["First Name", "Last Name", "Job Title", "Email", "Mobile Number", "Personal LinkedIn URL", "Company Name", "Website"]);
 let stopping = false;
 let lastProgressAt = Date.now();
 let activeImportId = "";
@@ -119,13 +119,14 @@ function copyText(value) {
 
 function mappedPayload(headers, sourceValues, fieldMap, rowOffset) {
   const keptColumns = headers.map((header, column) => ({ header, column }))
-    .filter(({ header }) => fieldMap?.[header] !== skipImportField);
+    .map((column) => ({ ...column, field: String(fieldMap?.[column.header] ?? "") }))
+    .filter(({ field }) => personImportFields.has(field));
   if (!keptColumns.length) throw new Error("FATAL: Every import column was skipped.");
-  const keptHeaders = keptColumns.map(({ header }) => header);
+  const keptHeaders = keptColumns.map(({ field }) => field);
   const values = keptColumns.map(({ column }) => String(sourceValues[column] ?? ""));
-  const mappedHeaders = keptHeaders.map((header) => String(fieldMap?.[header] || header));
-  const prospect = mapProspect(mappedHeaders, values);
+  const prospect = mapProspect(keptHeaders, values);
   prospect.raw = Object.fromEntries(keptHeaders.map((header, index) => [header, String(values[index] ?? "").trim()]));
+  if (!prospect.identifiers.length) throw new Error(`FATAL: Source row ${rowOffset + 2} has no usable identity (email, LinkedIn, or name plus company/website).`);
   const companyId = prospect.companyDomain
     ? `domain:${prospect.companyDomain}`
     : prospect.companyName ? `name:${normalizeText(prospect.companyName)}` : "";

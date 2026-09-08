@@ -1,5 +1,5 @@
 import { mapProspect, normalizeText } from "../db/normalize.ts";
-import { skipImportField } from "./import-schema.ts";
+import { fixedImportColumns, personImportFields, suggestedPersonImportField } from "./import-schema.ts";
 import { createAdminClient } from "./supabase/admin.ts";
 
 export type ProspectChunkPayload = {
@@ -24,20 +24,27 @@ export async function importProspectChunk(payload: ProspectChunkPayload) {
     return { response: Response.json({ error: "A non-negative rowOffset is required." }, { status: 400 }) };
   }
 
-  const keptColumns = headers.map((header, column) => ({ header: String(header), column }))
-    .filter(({ header }) => fieldMap?.[header] !== skipImportField);
-  const keptHeaders = keptColumns.map(({ header }) => header);
+  const keptColumns = fixedImportColumns(headers.map(String), fieldMap, suggestedPersonImportField, personImportFields);
+  const keptHeaders = keptColumns.map(({ field }) => field);
   if (!keptHeaders.length) return { response: Response.json({ error: "Every import column was skipped." }, { status: 400 }) };
-  const mappedHeaders = keptHeaders.map((header) => String(fieldMap?.[header] || header));
   const mapped = rows.map((sourceValues, index) => {
     const values = keptColumns.map(({ column }) => String(sourceValues[column] ?? ""));
-    const prospect = mapProspect(mappedHeaders, values);
-    prospect.raw = Object.fromEntries(keptHeaders.map((header, valueIndex) => [header, String(values[valueIndex] ?? "").trim()]));
+    const prospect = mapProspect(keptHeaders, values);
+    prospect.raw = Object.fromEntries(keptHeaders.map((field, valueIndex) => [field, String(values[valueIndex] ?? "").trim()]));
     const companyId = prospect.companyDomain
       ? `domain:${prospect.companyDomain}`
       : prospect.companyName ? `name:${normalizeText(prospect.companyName)}` : "";
     return { ...prospect, companyId, normalizedCompanyName: normalizeText(prospect.companyName), sourceRowNumber: normalizedRowOffset + index + 2 };
   });
+  const rejected = mapped.filter((row) => row.identifiers.length === 0);
+  if (rejected.length) {
+    const rowNumbers = rejected.slice(0, 20).map((row) => row.sourceRowNumber);
+    return { response: Response.json({
+      error: `${rejected.length} row${rejected.length === 1 ? " has" : "s have"} no usable identity. Add an email, LinkedIn URL, or name plus company/website.`,
+      rejectedRows: rowNumbers,
+      rejectedCount: rejected.length,
+    }, { status: 422 }) };
+  }
 
   const supabase = createAdminClient();
   // This path goes through PostgREST, so import_prospect_batch_v5's declared

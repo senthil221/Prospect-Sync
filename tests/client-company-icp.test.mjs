@@ -15,12 +15,16 @@ test("mixed company websites and names are normalized for exact bulk selection",
 
 test("prospect idle age is derived from the client-specific Date Contacted", () => {
   const now = new Date("2026-08-28T14:30:00Z");
-  assert.deepEqual(clientIdleAge("2026-08-28", now), { days: 0, label: "Contacted today", tone: "fresh" });
-  assert.deepEqual(clientIdleAge("2026-08-27", now), { days: 1, label: "1 day ago", tone: "fresh" });
-  assert.deepEqual(clientIdleAge("2026-08-08", now), { days: 20, label: "20 days ago", tone: "waiting" });
-  assert.deepEqual(clientIdleAge("2026-07-01", now), { days: 58, label: "58 days ago", tone: "idle" });
-  assert.deepEqual(clientIdleAge("2026-01-01", now), { days: 239, label: "239 days ago", tone: "stale" });
+  assert.deepEqual(clientIdleAge("2026-08-28", 30, now), { days: 0, daysRemaining: 30, eligible: false, label: "Eligible in 30 days", nextEligibleDate: "2026-09-27", tone: "fresh" });
+  assert.deepEqual(clientIdleAge("2026-08-27", 30, now), { days: 1, daysRemaining: 29, eligible: false, label: "Eligible in 29 days", nextEligibleDate: "2026-09-26", tone: "fresh" });
+  assert.equal(clientIdleAge("2026-08-08", 30, now)?.eligible, false);
+  assert.equal(clientIdleAge("2026-07-01", 30, now)?.eligible, true);
+  assert.equal(clientIdleAge("2026-08-28", 0, now)?.eligible, true, "zero-day cooldown is immediately eligible");
   assert.equal(clientIdleAge("", now), null);
+  assert.equal(clientIdleAge("2026-02-30", 30, now), null);
+  assert.equal(clientIdleAge("2026-08-30", 30, now)?.daysRemaining, 32);
+  assert.equal(clientIdleAge("2026-08-30", 0, now)?.eligible, false);
+  assert.equal(clientIdleAge("2026-08-28", Number.NaN, now)?.daysRemaining, 90);
 });
 
 test("company ICP verification is isolated by client and supports selected segments", async () => {
@@ -87,6 +91,6 @@ test("company ICP verification is isolated by client and supports selected segme
   assert.doesNotMatch(prospectTable, /> Mark ICP verified</);
   assert.doesNotMatch(prospectTable, /> Clear verified</);
   assert.doesNotMatch(prospectRow, /onToggleVerified/);
-  assert.match(prospectRow, /clientIdleAge\(prospect\.client_date_contacted\)/);
+  assert.match(prospectRow, /clientIdleAge\(prospect\.client_date_contacted, clientCooldownDays\)/);
   assert.match(prospectRow, /No contact date/);
 });

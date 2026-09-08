@@ -124,15 +124,16 @@ test("the panel renders one step at a time and keeps what you entered", async ()
   assert.match(companyView, /\{step === "review" && parsed \? <>/);
 });
 
-test("both tab strips are the shared control", async () => {
+test("all import tab strips use the shared control", async () => {
   // IMPORT-03. Two hand-rolled strips: role="tab" on bare buttons, no arrow
   // keys, no roving tabindex, no panels - the same shape already replaced in
   // the prospect drawer.
   const source = await read("../app/components/ImportsPanel.tsx");
   assert.doesNotMatch(source, /import-kind-switch/);
-  assert.equal(source.match(/<Tabs\b/g)?.length, 2, "import type and file/paste both use it");
+  assert.equal(source.match(/<Tabs\b/g)?.length, 3, "import type plus both file/paste selectors use it");
   assert.match(source, /label="Import type"/);
   assert.match(source, /label="How to supply the companies"/);
+  assert.match(source, /label="People input method"/);
 
   const styles = await read("../app/workspace.css");
   assert.ok(!styles.includes(".import-kind-switch"), "and the duplicated strip styles are gone");

@@ -30,9 +30,9 @@ const missingOptions = [
 
 type MissingOption = (typeof missingOptions)[number][0];
 
-// The route caps a single POST at 20 batches of 500 and reports whether more is
-// waiting; keep re-posting so a backlog of any size finishes from one click.
-const maxReruns = 200;
+// Each POST commits one checkpoint and reports whether more is waiting; keep
+// re-posting so a backlog of any size finishes from one click.
+const maxReruns = 5000;
 
 function gapLabel(gap: Gap) {
   if (gap.missingSeniority && gap.missingDepartment) return "Seniority + department";
@@ -84,15 +84,17 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
   async function reclassify() {
     setRunning(true); setError(""); setProgress("Re-classifying…");
     let total = 0;
+    let completed = false;
     try {
       for (let run = 0; run < maxReruns; run += 1) {
         const response = await fetch("/api/prospects/classify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-        const data = await response.json() as { reclassified?: number; remaining?: boolean; error?: string };
+        const data = await response.json() as { reclassified?: number; remaining?: boolean; remainingCount?: number; error?: string };
         if (!response.ok) throw new Error(data.error || "The classifier run failed.");
         total += Number(data.reclassified ?? 0);
-        setProgress(`Re-classified ${formatNumber(total)} prospects…`);
-        if (!data.remaining) break;
+        setProgress(`Re-classified ${formatNumber(total)} prospects${data.remainingCount ? ` · ${formatNumber(data.remainingCount)} remaining` : ""}…`);
+        if (!data.remaining) { completed = true; break; }
       }
+      if (!completed) throw new Error("The classifier reached its safety limit before the backlog was empty. Run it again to resume.");
       setProgress(total ? `Done - ${formatNumber(total)} prospects re-classified.` : "Done - every prospect was already classified against the current keyword lists.");
       reload();
     } catch (caught) {

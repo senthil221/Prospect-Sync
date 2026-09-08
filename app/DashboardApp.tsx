@@ -84,6 +84,13 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   const companiesController = useCompaniesWorkspaceController({ active: !restoreError && section === "companies", search, filters: companyFilters, peopleScope: peopleCompanyScope, initialPage: initial.companyPage, onLoading: setWorkspaceLoading, onError: setError });
   const { setPage: setProspectPage } = prospectsController;
   const { setPage: setCompanyPage } = companiesController;
+  // A pivot is a reversible view transition. Keep the source workspace in
+  // memory so Company → People → Company (and the reverse) returns to the
+  // authorized query the user actually came from instead of nesting scopes and
+  // clearing both sides' filters.
+  const peopleBeforePivot = useRef<{ search: string; filters: ProspectFilter[]; page: number; sort: string; direction: "asc" | "desc"; companyScope: CompanyScope | null } | null>(null);
+  const companiesBeforePivot = useRef<{ search: string; filters: ProspectFilter[]; page: number; peopleScope: PeopleScope | null } | null>(null);
+  const pivotOrigin = useRef<"prospects" | "companies" | null>(null);
 
   // ---- The workspace, kept in the address bar (SHELL-STATE-01) -------------
 
@@ -212,6 +219,8 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   }, [clients, restoreError]);
 
   const navigate = useCallback((next: Section) => {
+    pivotOrigin.current = null;
+    peopleBeforePivot.current = null; companiesBeforePivot.current = null;
     setSection(next); setSearch(""); setError(""); setWorkspaceLoading(false); setProspectPage(1); setCompanyPage(1); setSelectedList(null);
     if (next === "prospects") setCompanyPeopleScope(null);
     if (next === "companies") setPeopleCompanyScope(null);
@@ -223,9 +232,19 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   // empty scope only produced a banner claiming a restriction that was not applied,
   // so the pivot looked broken while showing the right rows.
   const seePeople = useCallback((scope: CompanyScope) => {
+    if (pivotOrigin.current === "prospects" && peopleBeforePivot.current) {
+      const previous = peopleBeforePivot.current;
+      setSearch(previous.search); setProspectFilters(previous.filters); setProspectPage(previous.page);
+      setProspectSort(previous.sort); setProspectDirection(previous.direction); setCompanyPeopleScope(previous.companyScope);
+      setPeopleCompanyScope(null); setSection("prospects"); setSelectedClient(null);
+      pivotOrigin.current = null;
+      return;
+    }
+    companiesBeforePivot.current = { search, filters: companyFilters, page: companiesController.page, peopleScope: peopleCompanyScope };
+    pivotOrigin.current = "companies";
     setCompanyPeopleScope(scopeRestricts(scope) ? scope : null);
     setProspectFilters([]); setProspectPage(1); setSearch(""); setSection("prospects"); setSelectedClient(null);
-  }, [setProspectPage]);
+  }, [companiesController.page, companyFilters, peopleCompanyScope, search, setProspectPage]);
 
   // A query that times out leaves the screen holding the very filters that
   // caused it, and the only route back is to find them in the panel and take
@@ -246,9 +265,18 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
   }, [section, setProspectPage, setCompanyPage]);
 
   const seeCompanies = useCallback((scope: PeopleScope) => {
+    if (pivotOrigin.current === "companies" && companiesBeforePivot.current) {
+      const previous = companiesBeforePivot.current;
+      setSearch(previous.search); setCompanyFilters(previous.filters); setCompanyPage(previous.page); setPeopleCompanyScope(previous.peopleScope);
+      setCompanyPeopleScope(null); setSection("companies"); setSelectedClient(null);
+      pivotOrigin.current = null;
+      return;
+    }
+    peopleBeforePivot.current = { search, filters: prospectFilters, page: prospectsController.page, sort: prospectSort, direction: prospectDirection, companyScope: companyPeopleScope };
+    pivotOrigin.current = "prospects";
     setPeopleCompanyScope(scopeRestricts(scope) ? scope : null);
     setCompanyFilters([]); setCompanyPage(1); setSearch(""); setSection("companies"); setSelectedClient(null);
-  }, [setCompanyPage]);
+  }, [companyPeopleScope, prospectDirection, prospectFilters, prospectSort, prospectsController.page, search, setCompanyPage]);
 
   const confirmDelete = useCallback(async () => {
     if (!deleteRequest) return;

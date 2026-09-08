@@ -14,7 +14,10 @@ import { ownerIdentity } from "../../../lib/result-sets";
 // One keyset page. It was 1,000 when each page was a fresh OFFSET scan and
 // making them larger made the quadratic worse; a keyset page costs the same
 // whether it is the first or the hundredth, so bigger means fewer round trips.
-const exportBatchSize = 5000;
+// Production could return ~600 broad rows reliably, while a 5,000-row JSON
+// aggregate exhausted the function's statement budget. Keep each RPC page well
+// below that cliff; keyset pagination makes the number of pages linear.
+const exportBatchSize = 500;
 const missingCompanyValidationCodes = new Set(["PGRST205", "42P01"]);
 const missingCompanyExportCodes = new Set(["PGRST202", "42883", "42P01"]);
 const BOM = "﻿";
@@ -121,10 +124,10 @@ async function streamCompanyExport(
     }
   }
 
-  const rowsOf = (data: unknown): Row[] => {
+  const rowsOf = (data: unknown): Row[] | null => {
     const summary = Array.isArray(data) ? data[0] : data;
     const rows = (summary as { result_rows?: unknown } | null)?.result_rows;
-    return Array.isArray(rows) ? rows.filter((row): row is Row => Boolean(row) && typeof row === "object") : [];
+    return Array.isArray(rows) ? rows.filter((row): row is Row => Boolean(row) && typeof row === "object") : null;
   };
 
   // The first page runs before a byte is sent, so a missing migration or a
@@ -148,6 +151,7 @@ async function streamCompanyExport(
   };
 
   let pending: Row[] | null = rowsOf(first.data);
+  if (pending === null) return { response: Response.json({ error: "The company export returned an invalid first page; no file was created." }, { status: 502 }) };
   let cursor: Cursor = cursorAfter(pending, null);
   let exhausted = pending.length < exportBatchSize;
   let written = 0;
@@ -160,6 +164,7 @@ async function streamCompanyExport(
         const page = await readPage(cursor);
         if (page.error) throw new Error(page.error.message);
         const rows = rowsOf(page.data);
+        if (rows === null) throw new Error("The company export returned an invalid page and was stopped.");
         cursor = cursorAfter(rows, cursor);
         exhausted = rows.length < exportBatchSize;
         pending = rows;

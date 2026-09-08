@@ -8,7 +8,7 @@ import test from "node:test";
 // reachable and the interaction modes each one supports.
 test("Apollo panel exposes the requested main filters and interaction modes", async () => {
   const panel = await readFile(new URL("../app/ApolloFilterPanel.tsx", import.meta.url), "utf8");
-  for (const field of ["__name", "__company", "__email", "__linkedin", "__title_seniority", "__department", "__esp_type"]) {
+  for (const field of ["__name", "__company", "__email", "__linkedin", "__title_seniority", "__title_department", "__esp_type"]) {
     assert.match(panel, new RegExp(`id: "${field}"`), `${field} is missing from the filter panel`);
   }
   assert.match(panel, />Include</);
@@ -58,7 +58,7 @@ test("new filters are applied globally before pagination and are available to ex
   assert.match(dashboard, /Company Employee Count/);
 });
 
-test("geography is one filter, not three, in both panels", async () => {
+test("person geography is retired while company geography remains available", async () => {
   const [people, companies, schema] = await Promise.all([
     readFile(new URL("../app/ApolloFilterPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/CompanyFilterPanel.tsx", import.meta.url), "utf8"),
@@ -66,7 +66,7 @@ test("geography is one filter, not three, in both panels", async () => {
   ]);
 
   // The single Location field is offered in both panels...
-  assert.match(people, /id: "__person_location", label: "Location"/);
+  assert.doesNotMatch(people, /id: "__person_location"/);
   assert.match(companies, /id: "__company_location", label: "Company location"/);
 
   // ...and the three parts are not offered as separate filters anywhere. They
@@ -79,19 +79,12 @@ test("geography is one filter, not three, in both panels", async () => {
     assert.ok(!companies.includes(`id: "${part}"`), `${part} must not be a Company filter`);
   }
 
-  // A company file whose geography is a single Location column must import, so
-  // the three parts are not individually mandatory. Nor is any detail column:
-  // identity alone is required, and geography is named as one line in the
-  // advisory list of what a partial import leaves untouched.
+  // The fixed contract has the three approved geography fields and does not
+  // retain a legacy free-form Company Location import column.
   assert.match(schema, /companyGeographyFields/);
-  const detailBlock = schema.slice(
-    schema.indexOf("companyDetailFields = ["),
-    schema.indexOf("] as const", schema.indexOf("companyDetailFields = [")),
-  );
-  for (const part of ["Company City", "Company State", "Company Country"]) {
-    assert.ok(!detailBlock.includes(part), `${part} must not be listed individually`);
-  }
-  assert.match(schema, /"Company Location \(or Company City \/ State \/ Country\)"/);
+  assert.match(schema, /companyGeographyFields = \["Company City", "Company State", "Company Country"\]/);
+  assert.match(schema, /\.\.\.companyGeographyFields/);
+  assert.doesNotMatch(schema, /Company Location \(or/);
 });
 
 test("company keyword search defaults to name and keywords with optional description", async () => {
