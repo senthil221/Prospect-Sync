@@ -227,6 +227,18 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
     if (next !== "clients") setSelectedClient(null);
   }, [setCompanyPage, setProspectPage]);
 
+  // Open the People workspace on exactly the records a quality check counted.
+  //
+  // navigate() is deliberate rather than a bare setSection: it clears the search,
+  // the pivot scope and both pivot snapshots, so the records that arrive are the
+  // ones the tile counted and nothing else. The filters are applied after it,
+  // because navigate resets them.
+  const viewQualityRecords = useCallback((filters: ProspectFilter[]) => {
+    navigate("prospects");
+    setProspectFilters(filters);
+    setProspectPage(1);
+  }, [navigate, setProspectPage]);
+
   // Only carry a scope that actually narrows something. An unfiltered tab pivots to
   // "everyone", which is what the workspace functions already compute -- keeping the
   // empty scope only produced a banner claiming a restriction that was not applied,
@@ -344,7 +356,7 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
           }}
         />}
         {!loading && section === "coverage" && <CoveragePanel/>}
-        {!loading && section === "quality" && <DataQualityPanel onMerged={() => void refreshDashboard()}/>}
+        {!loading && section === "quality" && <DataQualityPanel onMerged={() => void refreshDashboard()} onViewRecords={viewQualityRecords}/>}
         {!loading && section === "imports" && <ImportsPanel
           clients={clients}
           onChanged={async () => { await refreshDashboard(); }}

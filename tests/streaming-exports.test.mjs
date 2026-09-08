@@ -341,3 +341,43 @@ test("an unfinished or emptied export is refused rather than served with holes",
   // could only be a truncated file.
   assert.match(download, /if \(job\.download_token !== token\)/);
 });
+
+test("a People export can carry the company profile without widening the index", async () => {
+  const fields = ["__name", "__company_industry", "__company_description", "__company_technologies"];
+  const columns = buildExportColumns([], fields);
+  assert.deepEqual(columns.map((column) => column.header),
+    ["Full Name", "Company Industry", "Company Description", "Company Technologies"]);
+
+  // The keys are still derived by running the renderer, so the company columns
+  // ask for the view's aliases rather than anything hand-listed.
+  const keys = exportRowKeys([], fields);
+  for (const key of ["company_industry", "company_short_description", "company_technologies"]) {
+    assert.ok(keys.includes(key), `expected ${key} in the projection`);
+  }
+  // An export that wants none of them must not read them - that is what keeps
+  // the left join eliminated and the description untouched.
+  assert.deepEqual(exportRowKeys([], ["__name", "__work_email"]), ["created_at", "full_name", "id", "work_email"]);
+
+  // Array columns render like every other list, and a missing company is blank
+  // rather than "undefined".
+  const rendered = csvRowsBody([
+    { full_name: "Ada", company_industry: "accounting", company_technologies: ["Gmail", "Cloudflare"] },
+    { full_name: "Grace" },
+  ], buildExportColumns([], ["__name", "__company_industry", "__company_technologies"])).split("\r\n");
+  assert.equal(rendered[0], '"Ada","accounting","Gmail | Cloudflare"');
+  assert.equal(rendered[1], '"Grace","",""');
+
+  // Description is a kilobyte a row; unpriced, a People export selecting it
+  // would be planned as though it were narrow.
+  assert.ok(estimatedBytesPerRow([], ["__company_description"]) > 20 * estimatedBytesPerRow([], ["__company_industry"]));
+
+  // Both export paths have to see the same columns, or a file one row over the
+  // direct limit would silently lose them.
+  const migration = codeOnly(await read("../supabase/migrations/20260910090000_people_export_carries_the_company_profile.sql"));
+  assert.match(migration, /create or replace view public\.prospect_export_source/);
+  assert.match(migration, /search_prospect_export_v5/);
+  assert.match(migration, /build_batch_v1/);
+  // A marker that no longer matches must raise, not skip: 20260825030000 is the
+  // cautionary tale for splicing into deployed bodies silently.
+  assert.match(migration, /refusing to patch blindly/);
+});

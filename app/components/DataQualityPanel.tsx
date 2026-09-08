@@ -5,7 +5,7 @@ import { api, clearApiCache } from "../../lib/dashboard-api";
 import { formatNumber } from "../../lib/dashboard-helpers";
 import { describeMerge, describeProspect } from "../../lib/duplicate-compare";
 import { qualityIssues, severityLabel } from "../../lib/quality-issues";
-import type { DuplicateCandidate, EnrichmentPreview, IndexDrift, Prospect, QualitySummary } from "../../lib/types";
+import type { DuplicateCandidate, EnrichmentPreview, IndexDrift, Prospect, ProspectFilter, QualitySummary } from "../../lib/types";
 import DuplicatesPanel from "./DuplicatesPanel";
 import { AppIcon, ConfirmDialog, EmptyCompact, StatusMessage } from "./DashboardUi";
 
@@ -14,7 +14,7 @@ type RowState = { status: "busy" | "done" | "error"; message?: string };
 
 const pairKey = (candidate: DuplicateCandidate) => `${candidate.left.id}:${candidate.right.id}`;
 
-export default function DataQualityPanel({ onMerged }: { onMerged: () => void }) {
+export default function DataQualityPanel({ onMerged, onViewRecords }: { onMerged: () => void; onViewRecords?: (filters: ProspectFilter[]) => void }) {
   const [quality, setQuality] = useState<QualitySummary | null>(null);
   const [candidates, setCandidates] = useState<DuplicateCandidate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -172,6 +172,14 @@ export default function DataQualityPanel({ onMerged }: { onMerged: () => void })
               <strong>{formatNumber(issue.count)}</strong>
               {/* QUALITY-03: 412 records are not "0% of database". */}
               <small>{issue.shareText} of database</small>
+              {/* The count was never the point - the records are. This opens the
+                  People workspace filtered to exactly the rows behind the number,
+                  where they can be edited, exported or pushed like any other
+                  selection. Checks that cannot be expressed as a filter get no
+                  button rather than an approximate one. */}
+              {onViewRecords && issue.filters ? <button type="button" className="quality-issue-view" onClick={() => onViewRecords(issue.filters!)}>
+                View records <AppIcon name="arrow" size={12}/>
+              </button> : null}
             </div>
           </li>)}
         </ul> : null}

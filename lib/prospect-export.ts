@@ -77,6 +77,15 @@ export const standardExportColumns: Array<{ id: string; header: string; value: (
   { id: "__company_city", header: "Company City", value: (row) => row.company_city },
   { id: "__company_state", header: "Company State", value: (row) => row.company_state },
   { id: "__company_country", header: "Company Country", value: (row) => row.company_country },
+  // The company profile, the same fields the Companies export offers. These do
+  // not live on prospect_index - they come from the prospect_export_source view,
+  // whose join costs nothing unless one of them is actually selected.
+  { id: "__company_industry", header: "Company Industry", value: (row) => row.company_industry },
+  { id: "__company_keywords", header: "Company Keywords", value: (row) => arrayText(row.company_keywords) },
+  { id: "__company_description", header: "Company Description", value: (row) => row.company_short_description },
+  { id: "__company_founded_year", header: "Company Founded Year", value: (row) => row.company_founded_year },
+  { id: "__company_technologies", header: "Company Technologies", value: (row) => arrayText(row.company_technologies) },
+  { id: "__company_total_funding", header: "Company Total Funding", value: (row) => row.company_total_funding },
   { id: "__esp", header: "ESP", value: (row) => row.esp },
   { id: "__email_provider_type", header: "Email Provider Type", value: (row) => row.email_provider_type },
   { id: "__mx_records", header: "MX Records", value: (row) => arrayText(row.mx_records) },

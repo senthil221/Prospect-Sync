@@ -12,9 +12,34 @@
 // field rather than of the count - an email gap is worse than a LinkedIn gap at
 // any scale - and the count only orders checks that are already equally severe.
 
+import type { ProspectFilter } from "./types.ts";
 import type { QualitySummary } from "./types.ts";
 
 export type QualitySeverity = "high" | "medium" | "low" | "clear";
+
+// The filter that selects exactly the records a check counted.
+//
+// A count is a fact; it is still not a task. "412 people have no email" tells
+// you nothing you can act on until you can see which 412, which is why every
+// check that can be expressed as a filter now carries one - the button opens
+// the People workspace already narrowed to those records, where they can be
+// edited, exported or pushed like any other selection.
+//
+// EXACTNESS IS THE WHOLE POINT. A tile reading 23 that opens onto 113 records
+// is worse than no button at all, because it quietly teaches you not to trust
+// the number. Each filter below was checked against the count its tile reads
+// from data_quality_overview, on production:
+//
+//   missing work email   23      -> __work_email empty AND __personal_email empty   23
+//   missing website      23,568  -> __website empty                                 23,568
+//   missing title        2,115   -> __title empty                                   2,115
+//   missing LinkedIn     82,322  -> __linkedin empty                                82,322
+//   missing company      42      -> see the note on that check
+//
+// A check with no filter simply gets no button. "Not touched in 180 days" reads
+// prospects.updated_at, and there is no updated_at filter to point at - inventing
+// an approximate one would break the rule above.
+const emptyFilter = (field: string): ProspectFilter => ({ id: `quality:${field}`, field, operator: "empty", values: [] });
 
 export type QualityIssue = {
   id: string;
@@ -28,6 +53,8 @@ export type QualityIssue = {
   impact: string;
   /** The one next action. */
   action: string;
+  /** Selects exactly the records this check counted, or null when it cannot be expressed. */
+  filters: ProspectFilter[] | null;
 };
 
 /**
@@ -47,42 +74,53 @@ export function formatShare(count: number, total: number) {
   return `${Math.round(percent)}%`;
 }
 
-const checks: Array<{ id: string; label: string; severity: Exclude<QualitySeverity, "clear">; read: (summary: QualitySummary) => number; impact: string; action: string }> = [
+const checks: Array<{ id: string; label: string; severity: Exclude<QualitySeverity, "clear">; read: (summary: QualitySummary) => number; impact: string; action: string; filters: ProspectFilter[] | null }> = [
   {
     id: "email", label: "Missing work email", severity: "high",
     read: (summary) => summary.missingEmail,
     impact: "These people cannot be contacted at all, and they still take up room in every list you push to a client.",
     action: "Re-import the source list with an email column, or exclude them from client pushes until it has one.",
+    // Both, because the count is people who have neither address.
+    filters: [emptyFilter("__work_email"), emptyFilter("__personal_email")],
   },
   {
     id: "domain", label: "Missing company website", severity: "high",
     read: (summary) => summary.missingDomain,
     impact: "The website is what companies are matched on. Without it these records duplicate against every future import, and the coverage checker cannot see them.",
     action: "Fill gaps from company records above, which recovers the website from other people at the same company.",
+    filters: [emptyFilter("__website")],
   },
   {
     id: "company", label: "Missing company", severity: "high",
     read: (summary) => summary.missingCompany,
     impact: "With no company these people cannot be filtered by industry, size or location, and they never appear in the Company database.",
     action: "Re-import with a company column. If you have the website, filling gaps recovers the name from it.",
+    // Counted as a blank company name rather than a missing link, so the number
+    // and this filter select the same rows -- see the accompanying migration.
+    filters: [emptyFilter("__company")],
   },
   {
     id: "stale", label: "Not touched in 180 days", severity: "medium",
     read: (summary) => summary.staleRecords,
     impact: "Titles and emails decay faster than anything else on a record. A stale list is where bounce rates come from.",
     action: "Re-scrape these people and re-import before the next campaign; the import updates in place.",
+    // prospects.updated_at has no filter field, and an approximate one would
+    // break the exactness rule above, so this check gets no button.
+    filters: null,
   },
   {
     id: "title", label: "Missing title", severity: "medium",
     read: (summary) => summary.missingTitle,
     impact: "Seniority and department are derived from the title, so every filter built on either skips these records entirely.",
     action: "Re-import with a title column - it is a person-level field, so filling gaps from company records cannot supply it.",
+    filters: [emptyFilter("__title")],
   },
   {
     id: "linkedin", label: "Missing LinkedIn", severity: "low",
     read: (summary) => summary.missingLinkedin,
     impact: "LinkedIn is the fallback identifier when name and email both fail to match, so gaps make future de-duplication less certain.",
     action: "No action needed now. A later import that carries the profile fills it in place.",
+    filters: [emptyFilter("__linkedin")],
   },
 ];
 
@@ -108,6 +146,7 @@ export function qualityIssues(summary: QualitySummary): QualityIssue[] {
         severity: count ? check.severity : ("clear" as QualitySeverity),
         impact: check.impact,
         action: check.action,
+        filters: check.filters,
       };
     })
     .sort((left, right) => rank[left.severity] - rank[right.severity] || right.count - left.count);

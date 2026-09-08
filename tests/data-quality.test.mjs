@@ -184,3 +184,39 @@ test("the duplicate list is a list, and its rows are announced", async () => {
   assert.match(styles, /\.duplicate-list \{[^}]*list-style: none/);
   assert.match(styles, /\.quality-severity\.high \{/);
 });
+
+test("each quality check can open the records it counted", async () => {
+  const issues = qualityIssues(summary({
+    missingEmail: 23, missingDomain: 23_568, missingCompany: 113,
+    missingTitle: 2_115, missingLinkedin: 82_322, staleRecords: 90_000,
+  }));
+  const byId = Object.fromEntries(issues.map((issue) => [issue.id, issue]));
+
+  // The filter has to select exactly what the tile counted, or the button
+  // teaches you not to trust the number.
+  assert.deepEqual(byId.domain.filters.map((filter) => filter.field), ["__website"]);
+  assert.deepEqual(byId.title.filters.map((filter) => filter.field), ["__title"]);
+  assert.deepEqual(byId.linkedin.filters.map((filter) => filter.field), ["__linkedin"]);
+  assert.deepEqual(byId.company.filters.map((filter) => filter.field), ["__company"]);
+  // Missing email counts people with neither address, so it takes both.
+  assert.deepEqual(byId.email.filters.map((filter) => filter.field), ["__work_email", "__personal_email"]);
+  for (const issue of issues) {
+    for (const filter of issue.filters ?? []) {
+      assert.equal(filter.operator, "empty");
+      assert.deepEqual(filter.values, []);
+      assert.ok(filter.id, "a filter needs an id to survive the URL round trip");
+    }
+  }
+
+  // Staleness reads prospects.updated_at, which no filter field exposes. No
+  // button is the honest answer; an approximate one is not.
+  assert.equal(byId.stale.filters, null);
+
+  const panel = await read("../app/components/DataQualityPanel.tsx");
+  assert.match(panel, /onViewRecords && issue\.filters \? <button/);
+  const dashboard = await read("../app/DashboardApp.tsx");
+  // navigate() first, so the pivot scope and search cannot narrow the result
+  // further than the tile said.
+  assert.match(dashboard, /const viewQualityRecords = useCallback[\s\S]{0,200}navigate\("prospects"\);\s*setProspectFilters\(filters\);/);
+  assert.match(dashboard, /onViewRecords=\{viewQualityRecords\}/);
+});

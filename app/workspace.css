@@ -501,6 +501,11 @@ main { min-width: 0; grid-column: 2; }
 .quality-issue-body p { margin: 0; color: var(--ph-muted); font-size: var(--text-2xs); line-height: 1.55; }
 .quality-issue-action { margin-top: var(--space-2) !important; display: flex; align-items: baseline; gap: var(--space-1); color: var(--text-secondary) !important; font-weight: var(--weight-semibold); }
 .quality-issue-count { text-align: right; }
+/* The way out of the tile and into the records it counted. Sits under the
+   number because that is what the reader is looking at when they decide they
+   want to see them. */
+.quality-issue-view { margin-top: var(--space-2); padding: var(--space-1) var(--space-2); display: inline-flex; align-items: center; gap: var(--space-1); border: 1px solid var(--border-control); border-radius: var(--radius-md); background: var(--surface); color: var(--accent-text); font-size: var(--text-2xs); font-weight: var(--weight-semibold); white-space: nowrap; }
+.quality-issue-view:hover { border-color: var(--accent); background: var(--accent-soft); }
 .quality-issue-count strong { display: block; color: var(--text-primary); font-size: var(--text-lg); letter-spacing: -.5px; }
 .quality-issue-count small { color: var(--text-tertiary); font-size: var(--text-2xs); }
 .quality-clear { margin: 0; padding: var(--space-3) var(--space-5); border-top: 1px solid var(--border-default); color: var(--text-tertiary); font-size: var(--text-2xs); }

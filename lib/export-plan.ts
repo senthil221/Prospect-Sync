@@ -21,6 +21,15 @@ import { availableExportFieldIds } from "./prospect-export.ts";
 // moves nothing across a 25 MB line. They come from the shape of the data rather
 // than from measurement, which is why the thresholds below leave a wide margin.
 const wideColumnBytes: Record<string, number> = {
+  // The company profile columns are the widest thing a People export can ask
+  // for - the description averages about a kilobyte, the same measurement that
+  // sizes the company export - so they have to be priced or a People export
+  // that selects them will be planned as though it were narrow.
+  __company_description: 1000,
+  __company_technologies: 400,
+  __company_keywords: 320,
+  __company_industry: 26,
+  __company_total_funding: 16,
   __keywords: 140,
   __lists: 60,
   __clients: 60,
