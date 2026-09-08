@@ -141,13 +141,20 @@ with checks(sort_key, area, check_name, ok, detail) as (
 
   -- 5. Keyword data ----------------------------------------------------------
   union all
-  select 70, 'keywords', 'seniority keywords loaded (expect 211)',
-    (select count(*) from public.title_seniority_keywords) = 211,
+  -- A floor, not an equality. The classifier spec treats the keyword lists as
+  -- the thing that grows: the Undefined log exists precisely to feed new rows
+  -- into them, and geographies are meant to be added to the CSVs rather than to
+  -- the code. Pinning the seed counts exactly made this script fail on every
+  -- legitimate addition (211 -> 319 seniority, 357 -> 478 department) while
+  -- still catching nothing that equality catches and a floor does not: a seed
+  -- that never loaded, or a table truncated underneath the classifier.
+  select 70, 'keywords', 'seniority keywords loaded (>= 211 seeded)',
+    (select count(*) from public.title_seniority_keywords) >= 211,
     (select 'found ' || count(*)::text from public.title_seniority_keywords)
 
   union all
-  select 71, 'keywords', 'department keywords loaded (expect 357)',
-    (select count(*) from public.title_department_keywords) = 357,
+  select 71, 'keywords', 'department keywords loaded (>= 357 seeded)',
+    (select count(*) from public.title_department_keywords) >= 357,
     (select 'found ' || count(*)::text from public.title_department_keywords)
 
   union all
