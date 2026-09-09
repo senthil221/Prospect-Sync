@@ -194,7 +194,9 @@ test("each quality check can open the records it counted", async () => {
 
   // The filter has to select exactly what the tile counted, or the button
   // teaches you not to trust the number.
-  assert.deepEqual(byId.domain.filters.map((filter) => filter.field), ["__website"]);
+  // __website is not a working prospect filter - it compiles to an empty literal
+  // and matches every row. __company_domain is the one that counts the 23,568.
+  assert.deepEqual(byId.domain.filters.map((filter) => filter.field), ["__company_domain"]);
   assert.deepEqual(byId.title.filters.map((filter) => filter.field), ["__title"]);
   assert.deepEqual(byId.linkedin.filters.map((filter) => filter.field), ["__linkedin"]);
   assert.deepEqual(byId.company.filters.map((filter) => filter.field), ["__company"]);

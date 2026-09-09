@@ -31,10 +31,19 @@ export type QualitySeverity = "high" | "medium" | "low" | "clear";
 // from data_quality_overview, on production:
 //
 //   missing work email   23      -> __work_email empty AND __personal_email empty   23
-//   missing website      23,568  -> __website empty                                 23,568
+//   missing website      23,568  -> __company_domain empty                          23,568
 //   missing title        2,115   -> __title empty                                   2,115
 //   missing LinkedIn     82,322  -> __linkedin empty                                82,322
-//   missing company      42      -> see the note on that check
+//   missing company      113     -> __company empty                                 113
+//
+// The website check reads __company_domain rather than the __website it shares a
+// name with, because __website is not a working prospect filter: the compiler
+// resolves it to an empty literal, so `__website empty` becomes
+// btrim(coalesce('', '')) = '' and matches every row in the database. Checked
+// rather than assumed - it returned all 681,785 against a tile reading 23,568.
+// The People filter panel never offers __website, so nothing else reaches it;
+// __company_domain compiles to btrim(coalesce(pi.company_domain, '')) = '' and
+// counts exactly the 23,568.
 //
 // A check with no filter simply gets no button. "Not touched in 180 days" reads
 // prospects.updated_at, and there is no updated_at filter to point at - inventing
@@ -88,7 +97,7 @@ const checks: Array<{ id: string; label: string; severity: Exclude<QualitySeveri
     read: (summary) => summary.missingDomain,
     impact: "The website is what companies are matched on. Without it these records duplicate against every future import, and the coverage checker cannot see them.",
     action: "Fill gaps from company records above, which recovers the website from other people at the same company.",
-    filters: [emptyFilter("__website")],
+    filters: [emptyFilter("__company_domain")],
   },
   {
     id: "company", label: "Missing company", severity: "high",
