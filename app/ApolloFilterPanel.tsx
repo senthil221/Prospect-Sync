@@ -6,11 +6,12 @@ import type { ProspectFieldDefinition } from "../lib/prospect-fields";
 import type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
 import { AppIcon } from "./components/DashboardUi";
+import { emptyTaxonomy, orderedDepartments, orderedTiers, tierLabel, type TitleTaxonomy } from "../lib/title-taxonomy";
 
 export type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 
 type FilterDefinition = ProspectFieldDefinition & {
-  kind?: "text" | "employee";
+  kind?: "text" | "employee" | "tiers" | "departments";
   advanced?: boolean;
   description?: string;
 };
@@ -29,10 +30,20 @@ const mainFilters: FilterDefinition[] = [
 // Derived from the job title by the deterministic classifier, not from the uploaded
 // Seniority/Departments columns -- so they are consistent across data sources even
 // when the file's own columns are blank or use a different vocabulary.
+// Pickers rather than value boxes. These three fields were filterable and
+// unusable at the same time: the value endpoint returns nothing for them, so
+// using one meant knowing to type "senior_ic" or "Demand Gen & Performance"
+// exactly. The taxonomy is a closed list, which is precisely the case a list of
+// checkboxes with counts serves better than free text.
+//
+// Sub-department has no section of its own any more. It is not a thing anyone
+// filters on alone - the spec is explicit that a blank sub means "department
+// known, slice unknown", so a sub filter without its department silently drops
+// every generic title - so it lives nested under its department, which is also
+// the only place it makes sense to read.
 const classifierFilters: FilterDefinition[] = [
-  { id: "__title_department", label: "Department (from title)", description: "One of 18 departments worked out from the job title itself." },
-  { id: "__title_sub_department", label: "Sub-department (from title)", description: "The finer slice, where the title is specific enough to tell. Titles that only identify the department have no sub-department, so pair this with the department filter rather than using it alone." },
-  { id: "__title_seniority_tier", label: "Seniority tier (from title)", description: "owner · c_suite · vp · director · manager · senior_ic · entry" },
+  { id: "__title_seniority_tier", label: "Management Level", kind: "tiers", description: "The seniority the classifier read from the job title." },
+  { id: "__title_department", label: "Departments & Job Function", kind: "departments", description: "The department the classifier read from the job title. Expand one to narrow it further." },
 ];
 
 // Person geography and uploaded department values are retired. Department and
@@ -86,12 +97,41 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, onC
   const visibleOptional = [...optionalFilters, ...customFields].filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
 
   function replaceField(field: string, replacements: ProspectFilter[]) {
-    onChange([...filters.filter((filter) => filter.field !== field), ...replacements]);
+    // Departments own the nested sub-department filter, so clearing the section
+    // has to take both; leaving a sub behind would keep narrowing the grid with
+    // nothing on screen to say so.
+    const owned = field === "__title_department" ? ["__title_department", "__title_sub_department"] : [field];
+    onChange([...filters.filter((filter) => !owned.includes(filter.field)), ...replacements]);
   }
+
+  // Fetched once when the panel mounts, not per keystroke: it is one grouped
+  // scan of prospect_index behind the endpoint. A database that has not had the
+  // migration yet answers with an empty taxonomy and the pickers say so rather
+  // than rendering nothing.
+  const [taxonomy, setTaxonomy] = useState<TitleTaxonomy>(emptyTaxonomy);
+  useEffect(() => {
+    let current = true;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch(`/api/prospects/title-taxonomy${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ""}`, { signal: controller.signal });
+        const data = await response.json() as { taxonomy?: TitleTaxonomy };
+        if (current && response.ok && data.taxonomy) setTaxonomy(data.taxonomy);
+      } catch { /* the pickers fall back to their empty state */ }
+    })();
+    return () => { current = false; controller.abort(); };
+  }, [clientId]);
 
   function renderDefinition(definition: FilterDefinition) {
     const fieldFilters = filters.filter((filter) => filter.field === definition.id);
-    const count = activeCount(fieldFilters);
+    // The departments section owns the nested sub-department filter, so its
+    // badge counts both: three sub-departments picked under Sales is three
+    // filters applied, and a section reading "1" would understate what the grid
+    // is doing.
+    const countedFilters = definition.kind === "departments"
+      ? filters.filter((filter) => filter.field === "__title_department" || filter.field === "__title_sub_department")
+      : fieldFilters;
+    const count = activeCount(countedFilters);
     const isExpanded = expanded === definition.id;
     return <section className={`apollo-filter-section ${isExpanded ? "expanded" : ""}`} key={definition.id}>
       {/* The clear control is a sibling of the disclosure button rather than a
@@ -113,7 +153,11 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, onC
       </div>
       {isExpanded ? <div id={`filter-panel-${definition.id}`} role="region" aria-labelledby={`filter-trigger-${definition.id}`} className="apollo-filter-content">
         {definition.description ? <p className="apollo-filter-description">{definition.description}</p> : null}
-        {definition.kind === "employee"
+        {definition.kind === "tiers"
+          ? <ManagementLevelFilter filters={fieldFilters} taxonomy={taxonomy} onChange={(next) => replaceField(definition.id, next)} />
+          : definition.kind === "departments"
+          ? <DepartmentFunctionFilter filters={filters} taxonomy={taxonomy} onChange={onChange} />
+          : definition.kind === "employee"
           ? <EmployeeFilter filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "text" && definition.advanced
             ? <TextBooleanFilter key={fieldFilters.map((filter) => `${filter.id}:${filter.values.join("|")}`).join(";")} definition={definition} filters={fieldFilters} clientId={clientId} onChange={(next) => replaceField(definition.id, next)} />
@@ -419,5 +463,117 @@ function EmployeeFilter({ filters, onChange }: { filters: ProspectFilter[]; onCh
     <div className="employee-mode"><button type="button" className={rangeMode === "predefined" ? "active" : ""} onClick={() => setRangeMode("predefined")}><i/>Predefined range</button><button type="button" className={rangeMode === "custom" ? "active" : ""} onClick={() => setRangeMode("custom")}><i/>Custom range</button></div>
     {rangeMode === "predefined" ? <div className="employee-range-list">{employeeRanges.map(([value, label]) => <label key={value}><input type="checkbox" checked={values.includes(value)} onChange={() => toggle(value)}/><span>{label}</span></label>)}</div> : <div className="employee-custom-range"><label>Minimum<input type="number" min="0" value={minimum} onChange={(event) => setMinimum(event.target.value)} placeholder="e.g. 50"/></label><label>Maximum<input type="number" min="0" value={maximum} onChange={(event) => setMaximum(event.target.value)} placeholder="No maximum"/></label><button type="button" onClick={applyCustom}>Apply range</button></div>}
     <label className="employee-unknown"><input type="checkbox" checked={values.includes("unknown")} onChange={() => toggle("unknown")}/><span># of employees is unknown</span></label>
+  </div>;
+}
+
+// A compact count, because the number beside a checkbox is a sense of scale
+// rather than a figure anyone reads exactly. 208,829 as "208.8K" keeps the rows
+// the same width and the list scannable.
+function compactCount(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
+  return String(value);
+}
+
+// Every tier the classifier can assign, highest first, with how many people are
+// on each. Checking several is an OR: the compiler turns a multi-value `equals`
+// into an IN, which was verified against production before this was built -
+// owner plus c_suite returns exactly the sum of the two.
+function ManagementLevelFilter({ filters, taxonomy, onChange }: {
+  filters: ProspectFilter[];
+  taxonomy: TitleTaxonomy;
+  onChange: (filters: ProspectFilter[]) => void;
+}) {
+  const selected = new Set(filters.flatMap((filter) => filter.values));
+  const tiers = orderedTiers(taxonomy.tiers);
+
+  function toggle(value: string) {
+    const next = new Set(selected);
+    if (next.has(value)) next.delete(value); else next.add(value);
+    onChange(next.size
+      ? [{ id: filterId("__title_seniority_tier", "equals"), field: "__title_seniority_tier", operator: "equals", values: [...next] }]
+      : []);
+  }
+
+  if (!tiers.length) return <p className="apollo-filter-description">Management levels load once the title classifier has run.</p>;
+
+  return <div className="taxonomy-picker" role="group" aria-label="Management level">
+    {tiers.map((tier) => <label key={tier.value} className="taxonomy-option">
+      <input type="checkbox" checked={selected.has(tier.value)} onChange={() => toggle(tier.value)}/>
+      <span className="taxonomy-name">{tierLabel(tier.value)}</span>
+      <span className="taxonomy-count">{compactCount(tier.count)}</span>
+    </label>)}
+  </div>;
+}
+
+// Departments, each expandable to the sub-departments it actually has.
+//
+// The two levels are separate filter fields rather than one nested value,
+// because that is what the compiler understands - and it also gives the right
+// semantics for free: checking Sales and then Inside Sales narrows to people
+// whose department is Sales AND whose sub-department is Inside Sales, which is
+// what the plus sign implies.
+function DepartmentFunctionFilter({ filters, taxonomy, onChange }: {
+  filters: ProspectFilter[];
+  taxonomy: TitleTaxonomy;
+  onChange: (filters: ProspectFilter[]) => void;
+}) {
+  const [expanded, setExpanded] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const departmentValues = new Set(filters.filter((filter) => filter.field === "__title_department").flatMap((filter) => filter.values));
+  const subValues = new Set(filters.filter((filter) => filter.field === "__title_sub_department").flatMap((filter) => filter.values));
+
+  function replace(field: string, values: Set<string>) {
+    const rest = filters.filter((filter) => filter.field !== field);
+    onChange(values.size
+      ? [...rest, { id: filterId(field, "equals"), field, operator: "equals", values: [...values] }]
+      : rest);
+  }
+
+  function toggleDepartment(name: string) {
+    const next = new Set(departmentValues);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    replace("__title_department", next);
+  }
+
+  function toggleSub(name: string) {
+    const next = new Set(subValues);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    replace("__title_sub_department", next);
+  }
+
+  const term = search.trim().toLocaleLowerCase();
+  const departments = orderedDepartments(taxonomy.departments).filter((department) => !term
+    || department.name.toLocaleLowerCase().includes(term)
+    || department.subs.some((sub) => sub.name.toLocaleLowerCase().includes(term)));
+
+  if (!taxonomy.departments.length) return <p className="apollo-filter-description">Departments load once the title classifier has run.</p>;
+
+  return <div className="taxonomy-picker">
+    <input className="taxonomy-search" type="search" value={search} placeholder="Search departments" aria-label="Search departments" onChange={(event) => setSearch(event.target.value)}/>
+    <div role="group" aria-label="Departments and job function">
+      {departments.map((department) => {
+        const isOpen = expanded.includes(department.name) || Boolean(term);
+        return <div key={department.name} className="taxonomy-branch">
+          <label className="taxonomy-option">
+            <input type="checkbox" checked={departmentValues.has(department.name)} onChange={() => toggleDepartment(department.name)}/>
+            <span className="taxonomy-name">{department.name}</span>
+            <span className="taxonomy-count">{compactCount(department.count)}</span>
+            {department.subs.length ? <button type="button" className="taxonomy-expand" aria-expanded={isOpen}
+              aria-label={`${isOpen ? "Hide" : "Show"} ${department.name} job functions`}
+              onClick={(event) => { event.preventDefault(); setExpanded((current) => current.includes(department.name) ? current.filter((name) => name !== department.name) : [...current, department.name]); }}>
+              {isOpen ? "−" : "+"}
+            </button> : null}
+          </label>
+          {isOpen && department.subs.length ? <div className="taxonomy-subs">
+            {department.subs.map((sub) => <label key={sub.name} className="taxonomy-option">
+              <input type="checkbox" checked={subValues.has(sub.name)} onChange={() => toggleSub(sub.name)}/>
+              <span className="taxonomy-name">{sub.name}</span>
+              <span className="taxonomy-count">{compactCount(sub.count)}</span>
+            </label>)}
+          </div> : null}
+        </div>;
+      })}
+    </div>
   </div>;
 }

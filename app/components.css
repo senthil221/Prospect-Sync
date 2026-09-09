@@ -768,3 +768,22 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
   .client-row { grid-template-columns: 34px minmax(0, 1fr) auto; row-gap: var(--space-2); }
   .client-row-metric { grid-column: 2 / -1; }
 }
+
+/* The Management Level and Departments pickers.
+   A closed taxonomy reads better as a list of checkboxes with counts than as a
+   value box someone has to type "senior_ic" into, which is what these two
+   fields offered before. Counts sit right-aligned so the column of numbers
+   scans as scale rather than as part of each label. */
+.taxonomy-picker { display: flex; flex-direction: column; gap: var(--space-1); }
+.taxonomy-search { width: 100%; min-height: var(--control-dense); margin-bottom: var(--space-1); padding: 0 var(--space-2); border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--surface); color: var(--text-primary); font-size: var(--text-2xs); }
+.taxonomy-search:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .08); }
+.taxonomy-option { min-height: var(--control-dense); padding: var(--space-1) var(--space-1); display: flex; align-items: center; gap: var(--space-2); border-radius: var(--radius-sm); cursor: pointer; }
+.taxonomy-option:hover { background: var(--accent-soft); }
+.taxonomy-option input { flex: none; accent-color: var(--ph-brand); }
+.taxonomy-name { flex: 1; min-width: 0; overflow: hidden; color: var(--text-primary); font-size: var(--text-2xs); text-overflow: ellipsis; white-space: nowrap; }
+.taxonomy-count { flex: none; color: var(--text-tertiary); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
+/* The expander is a real button inside the label, so clicking it must not also
+   toggle the checkbox the label wraps - hence preventDefault in the handler. */
+.taxonomy-expand { flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border-control); border-radius: var(--radius-sm); background: var(--surface); color: var(--accent-text); font-size: var(--text-xs); line-height: 1; }
+.taxonomy-expand:hover { border-color: var(--accent); background: var(--accent-soft); }
+.taxonomy-subs { margin: 2px 0 var(--space-2) var(--space-5); padding-left: var(--space-2); border-left: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 2px; }
