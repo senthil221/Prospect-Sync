@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import { completeProspectImport } from "../../../../../lib/import-complete.ts";
+import { logServerEvent } from "../../../../../lib/server-log.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin.ts";
 import { authorizeImportWorker } from "../../../../../lib/worker-auth.ts";
 
@@ -13,7 +14,10 @@ export async function POST(request: Request) {
   if (result.conflict) return Response.json({ error: result.conflict }, { status: 409 });
   after(async () => {
     const { error } = await createAdminClient().rpc("analyze_prospect_index");
-    if (error) console.error("Post-import ANALYZE failed", error);
+    if (error) {
+      console.error("Post-import ANALYZE failed", error);
+      logServerEvent({ level: "error", source: "imports-worker", message: "Post-import ANALYZE failed", detail: error });
+    }
   });
   return Response.json({ summary: result.summary });
 }

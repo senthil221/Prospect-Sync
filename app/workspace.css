@@ -346,6 +346,24 @@ main { min-width: 0; grid-column: 2; }
 .coverage-status.new { background: var(--info-soft); color: var(--info); }
 .company-pagination { min-height: 55px; padding: var(--space-3) var(--space-4); display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border-subtle); background: var(--accent-soft); color: var(--text-tertiary); font-size: var(--text-2xs); }
 .company-pagination > div { display: flex; gap: var(--space-2); }
+
+.logs-toolbar-panel { padding: var(--space-4); }
+.logs-toolbar { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.logs-toolbar label { display: flex; flex-direction: column; gap: var(--space-1); min-width: 160px; color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.logs-toolbar select, .logs-toolbar input { min-height: var(--control-standard); padding: 0 var(--space-3); border: 1px solid var(--ph-border-strong); border-radius: var(--radius-lg); background: var(--surface); color: var(--text-primary); font-size: var(--text-sm); }
+.log-level { padding: var(--space-1) var(--space-2); border-radius: var(--radius-full); font-size: var(--text-2xs); font-weight: var(--weight-bold); white-space: nowrap; }
+.log-level.error { background: var(--ph-danger-soft); color: var(--ph-danger); }
+.log-level.warn { background: var(--ph-warning-soft); color: var(--ph-warning); }
+.log-level.info { background: var(--info-soft); color: var(--info); }
+.logs-table td, .logs-table th { white-space: nowrap; }
+.logs-table .logs-message { white-space: normal; min-width: 260px; }
+.logs-row { cursor: pointer; }
+.logs-row:hover { background: var(--surface-hover); }
+.logs-detail-row td { background: var(--surface-sunken); white-space: normal; }
+.logs-detail { margin: 0; padding: var(--space-3) 0; display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-3); }
+.logs-detail dt { color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.logs-detail dd { margin: 0; color: var(--text-primary); font-size: var(--text-xs); }
+.logs-detail pre { margin: 0; max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
 .company-pagination button { min-height: var(--control-dense); padding: var(--space-2) var(--space-3); border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: var(--surface); color: var(--text-secondary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
 .company-pagination button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
 .company-pagination button:disabled { opacity: .4; cursor: not-allowed; }

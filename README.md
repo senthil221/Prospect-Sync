@@ -15,6 +15,7 @@ Prospect Sync is a centralized prospect database for cold-email agency operation
 3. In Supabase Authentication, open **Users** and create one user for each approved team member with an email and permanent password.
 4. Copy `.env.example` to `.env.local` and enter the project values.
 5. Set `ALLOWED_USER_EMAILS` to the comma-separated email addresses for the agency owner and boss. These must match the Supabase users.
+6. Optionally set `ADMIN_USER_EMAILS` to a subset of those addresses to grant access to the Server logs tab.
 
 ## Vercel environment variables
 
@@ -24,6 +25,7 @@ Add these to Production, Preview, and Development:
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `ALLOWED_USER_EMAILS`
+- `ADMIN_USER_EMAILS` (optional; gates the Server logs tab)
 
 Never expose the service-role key in client-side code or commit it to Git.
 

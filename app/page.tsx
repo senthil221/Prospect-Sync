@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import DashboardApp from "./DashboardApp";
 import { getAuthorizedUser } from "../lib/auth";
+import { isAdminEmail } from "../lib/supabase/env";
 
 export const metadata: Metadata = {
   title: "Prospect Sync | Master Prospect Database",
@@ -14,5 +15,5 @@ export default async function Home() {
   let user = null;
   try { user = await getAuthorizedUser(); } catch { redirect("/login?setup=required"); }
   if (!user) redirect("/login");
-  return <DashboardApp currentUserEmail={user.email ?? "Agency admin"} />;
+  return <DashboardApp currentUserEmail={user.email ?? "Agency admin"} isAdmin={isAdminEmail(user.email)} />;
 }

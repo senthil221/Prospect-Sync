@@ -14,12 +14,13 @@ import DataQualityPanel from "./components/DataQualityPanel";
 import { AppIcon, DeleteConfirmation, LoadingState, ProspectDrawer, type IconName } from "./components/DashboardUi";
 import ImportsPanel from "./components/ImportsPanel";
 import IntegrationsPanel from "./components/IntegrationsPanel";
+import LogsPanel from "./components/LogsPanel";
 import ThemeToggle from "./components/ThemeToggle";
 import MobileNav from "./components/MobileNav";
 import OverviewWorkspace from "./components/OverviewWorkspace";
 import ProspectsWorkspace, { useProspectsWorkspaceController } from "./components/ProspectsWorkspace";
 
-const navGroups: Array<{ label: string; items: Array<{ id: Section; label: string; mark: IconName }> }> = [
+const baseNavGroups: Array<{ label: string; items: Array<{ id: Section; label: string; mark: IconName }> }> = [
   {
     label: "Workspace",
     items: [
@@ -40,25 +41,35 @@ const navGroups: Array<{ label: string; items: Array<{ id: Section; label: strin
   },
 ];
 
-const navItems = navGroups.flatMap((group) => group.items);
+// Admin-only: kept out of navGroups entirely (not just hidden) so a
+// non-admin can never navigate to it, prefetch it, or land on it via a
+// bookmarked/shared "?section=logs" link - the section-restore path below
+// still checks isAdmin again for exactly that reason.
+const adminNavGroup = { label: "Admin", items: [{ id: "logs" as Section, label: "Server logs", mark: "alert" as IconName }] };
+
+function navGroupsFor(isAdmin: boolean) {
+  return isAdmin ? [...baseNavGroups, adminNavGroup] : baseNavGroups;
+}
 
 const subscribeHydration = () => () => {};
 const clientSnapshot = () => true;
 const serverSnapshot = () => false;
 
-export default function DashboardApp(props: { currentUserEmail: string }) {
+export default function DashboardApp(props: { currentUserEmail: string; isAdmin: boolean }) {
   // Fragments are unavailable to SSR. Mount controllers only once the browser
   // can restore the complete scope; never issue an unfiltered hydration query.
   const hydrated = useSyncExternalStore(subscribeHydration, clientSnapshot, serverSnapshot);
   return hydrated ? <DashboardWorkspace {...props}/> : <div role="status">Restoring workspace…</div>;
 }
 
-function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) {
+function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: string; isAdmin: boolean }) {
+  const navGroups = useMemo(() => navGroupsFor(isAdmin), [isAdmin]);
+  const navItems = useMemo(() => navGroups.flatMap((group) => group.items), [navGroups]);
   const searchParams = useSearchParams();
   // Read once. After mount the URL is written FROM state, and popstate is what
   // feeds it back in - re-reading on every render would fight the writer.
   const initial = useMemo(() => readWorkspaceUrl(new URLSearchParams(searchParams.toString()), window.location.hash), []); // eslint-disable-line react-hooks/exhaustive-deps
-  const [section, setSection] = useState<Section>(initial.section);
+  const [section, setSection] = useState<Section>(initial.section === "logs" && !isAdmin ? "overview" : initial.section);
   const [restoreError, setRestoreError] = useState(initial.restoreError ?? '');
   const [stats, setStats] = useState(emptyStats);
   const [recentImports, setRecentImports] = useState<ImportRecord[]>([]);
@@ -143,8 +154,9 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
       setRestoreError(restored.restoreError ?? '');
       if (restored.restoreError) return;
       restoring.current = true;
-      lastSection.current = restored.section;
-      setSection(restored.section);
+      const restoredSection = restored.section === "logs" && !isAdmin ? "overview" : restored.section;
+      lastSection.current = restoredSection;
+      setSection(restoredSection);
       setSearch(restored.search);
       setProspectFilters(restored.prospectFilters);
       setCompanyFilters(restored.companyFilters);
@@ -163,7 +175,7 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
       window.removeEventListener("popstate", onPopState);
       window.removeEventListener("hashchange", onPopState);
     };
-  }, [clients, setProspectPage, setCompanyPage]);
+  }, [clients, isAdmin, setProspectPage, setCompanyPage]);
 
   const encodedProspectFilters = useMemo(() => encodeFilters(prospectFilters), [prospectFilters]);
 
@@ -332,6 +344,7 @@ function DashboardWorkspace({ currentUserEmail }: { currentUserEmail: string }) 
       {error && <div className="alert"><span>!</span><p>{error}</p>{canResetQuery ? <button className="alert-reset" onClick={resetQuery}>Clear filters and start over</button> : null}<button aria-label="Dismiss" onClick={() => setError("")}><AppIcon name="close" size={14}/></button></div>}
       <section className="content" aria-busy={loading || workspaceLoading}>
         {!loading && section === "integrations" && <IntegrationsPanel/>}
+        {!loading && section === "logs" && isAdmin && <LogsPanel/>}
         {loading ? <LoadingState/> : null}
         {!loading && workspaceLoading ? <div className="workspace-progress" role="status"><span/>Updating {title.toLowerCase()}…</div> : null}
         {!loading && section === "overview" && <OverviewWorkspace stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name ?? "Unassigned"} · ${item.list_name ?? "Unassigned"}` })}/>}

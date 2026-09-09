@@ -4,6 +4,7 @@ import { observabilitySnapshot } from "../../../lib/observability";
 import { operationsHealth } from "../../../lib/operations-health";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { backgroundAlerts } from '../../../lib/background-health';
+import { logServerEvent } from '../../../lib/server-log';
 
 const timeoutMs = 5_000;
 const noStoreHeaders = { "Cache-Control": "no-store, max-age=0" };
@@ -81,5 +82,6 @@ export async function GET() {
     background, alerts: backgroundAlerts(background) } : undefined;
   if (!failed.length) return Response.json({ status: "ok", checks: checkStatus, load, features }, { headers: noStoreHeaders });
   console.error("Readiness check failed", { failed });
+  logServerEvent({ level: "error", source: "health", statusCode: 503, message: `Readiness check failed: ${failed.join(", ")}`, detail: { failed, checks: checkStatus } });
   return Response.json({ status: "unhealthy", checks: checkStatus, load, features }, { status: 503, headers: noStoreHeaders });
 }

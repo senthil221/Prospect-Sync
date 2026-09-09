@@ -14,6 +14,8 @@
 // what it is for - two application slots overlap during a release, so these
 // numbers are a signal, never an audit.
 
+import { logServerEvent } from "./server-log.ts";
+
 type Outcome = "ok" | "pending" | "client_error" | "over_cap" | "overloaded" | "timed_out" | "server_error";
 
 const counters = new Map<string, number>();
@@ -84,6 +86,23 @@ export function recordRequest(route: string, status: number, durationMs: number,
       requestId: context?.requestId,
       admissionMs: context ? Math.round(context.admissionMs) : undefined,
     }));
+    // Only the failure/timeout/breakdown outcomes the Logs tab exists for -
+    // not slow-but-ok requests or the 1-in-100 sample above, which are a
+    // volume/latency signal rather than something that needs diagnosing, and
+    // not client_error (400/401/404), which is ordinary client behavior, not
+    // a server failure.
+    if (outcome === "over_cap" || outcome === "overloaded" || outcome === "timed_out" || outcome === "server_error") {
+      logServerEvent({
+        level: outcome === "server_error" ? "error" : "warn",
+        source: "api",
+        route,
+        statusCode: status,
+        durationMs: Math.round(durationMs),
+        requestId: context?.requestId,
+        message: `${route} ${outcome} (${status})`,
+        detail: { admissionMs: context ? Math.round(context.admissionMs) : undefined },
+      });
+    }
   }
 }
 

@@ -1,5 +1,5 @@
 import type { CompanyMergeMode } from "./company-merge-mode.ts";
-export type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" | "quality" | "imports" | "integrations";
+export type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" | "quality" | "imports" | "integrations" | "logs";
 
 export type ProspectFilterOperator = "contains" | "equals" | "not_contains" | "not_equals" | "empty" | "not_empty" | "boolean" | "number_ranges";
 export type CompanyKeywordScope = "name" | "keywords" | "description";
@@ -45,5 +45,7 @@ export type PushResult = { added: number; alreadyPresent: number; blocked: numbe
 // as a clean bill of health.
 export type IndexDrift = { prospects: number; indexed: number; missingFromIndex: number; staleInIndex: number; queued: number; queuedFailing: number; oldestQueuedAt: string | null; companies?: number; companyCountsSampled?: number; companyCountsDrifted?: number };
 export type DuplicateCandidate = { left: Prospect; right: Prospect; reason: string; confidence: number };
+export type LogLevel = "info" | "warn" | "error";
+export type LogEntry = { id: number; created_at: string; level: LogLevel; source: string; route: string | null; status_code: number | null; duration_ms: number | null; request_id: string | null; message: string; detail: Record<string, unknown> };
 
 export const emptyStats = { prospects: 0, companies: 0, clients: 0, lists: 0, rowsImported: 0, duplicatesDetected: 0 };
