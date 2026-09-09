@@ -42,8 +42,9 @@ test("public resumable uploads translate the signed Supabase URL to Storage's in
 });
 
 test("restore, rollback, Studio, and backup guards fail closed", async () => {
-  const [restore, update, caddy, backup] = await Promise.all([
+  const [restore, restoreVerify, update, caddy, backup] = await Promise.all([
     readFile(new URL("../deploy/scripts/restore.sh", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/scripts/restore-verify.sql", import.meta.url), "utf8"),
     readFile(new URL("../deploy/scripts/update.sh", import.meta.url), "utf8"),
     readFile(new URL("../deploy/caddy/Caddyfile", import.meta.url), "utf8"),
     readFile(new URL("../deploy/scripts/backup.sh", import.meta.url), "utf8"),
@@ -51,6 +52,17 @@ test("restore, rollback, Studio, and backup guards fail closed", async () => {
 
   assert.doesNotMatch(restore, /pg_restore[^\n]*\|\s*grep[^\n]*\|\| true/);
   assert.doesNotMatch(restore, /pg_restore[^\n]*--jobs/);
+  assert.match(restore, /-U supabase_admin[^\n]*--exit-on-error/);
+  assert.doesNotMatch(restore, /pg_restore[^\n]*--no-owner|pg_restore[^\n]*--no-acl/);
+  assert.match(restore, /create database \$\{SCRATCH\} with template template0/);
+  assert.match(restore, /EXTENSION - pg_cron/);
+  assert.match(restore, /scratch_present/);
+  assert.match(restore, /trap scratch_cleanup EXIT/);
+  assert.match(restoreVerify, /vault\.secrets/);
+  assert.doesNotMatch(restoreVerify, /from vault\.secrets/i);
+  assert.match(restoreVerify, /not c\.relrowsecurity/);
+  assert.match(restoreVerify, /'PUBLIC', 'anon', 'authenticated'/);
+  assert.match(restoreVerify, /list_memberships/);
   assert.match(restore, /alter database \$\{POSTGRES_DB\} rename to \$\{POSTGRES_DB\}_old/);
   assert.match(restore, /psql_as -d template1/);
   assert.match(restore, /restore_failed/);

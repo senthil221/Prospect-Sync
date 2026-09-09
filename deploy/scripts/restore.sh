@@ -37,7 +37,8 @@ fi
 [[ -f "${BACKUP}/database.dump.zst" ]] || { echo "No database.dump.zst in ${BACKUP}" >&2; exit 1; }
 
 pg() { docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" db "$@"; }
-psql_as() { pg psql -v ON_ERROR_STOP=1 -U postgres -h 127.0.0.1 "$@"; }
+psql_as() { pg psql -X -v ON_ERROR_STOP=1 -U postgres -h 127.0.0.1 "$@"; }
+psql_admin() { pg psql -X -v ON_ERROR_STOP=1 -U supabase_admin -h 127.0.0.1 "$@"; }
 
 restore_globals() {
   local output unexpected
@@ -70,31 +71,96 @@ restore_globals() {
 }
 
 if [[ "$MODE" == "verify" ]]; then
-  SCRATCH="restore_check_$(date +%s)"
-  echo "Restoring into scratch database ${SCRATCH}"
-  psql_as -d postgres -q -c "create database ${SCRATCH};"
-  trap 'psql_as -d postgres -q -c "drop database if exists '"${SCRATCH}"' with (force);" >/dev/null 2>&1 || true' EXIT
+  VERIFY_SQL="$(pwd)/scripts/restore-verify.sql"
+  [[ -f "$VERIFY_SQL" ]] || { echo "Missing restore verification checks: ${VERIFY_SQL}" >&2; exit 1; }
 
-  # --no-owner / --no-acl: the scratch db does not need Supabase's role graph to
-  # prove the data survived the round trip.
+  # The image intentionally makes postgres a non-superuser. A full Supabase
+  # archive includes Vault ACLs and database-local event triggers, so a drill as
+  # postgres gives a false negative. supabase_admin is the image's existing
+  # container-local superuser and is also used by the bootstrap script.
+  admin_preflight="$(psql_admin -d postgres -tAq -c \
+    "select current_user || '|' || rolsuper from pg_roles where rolname = current_user")"
+  [[ "$admin_preflight" == "supabase_admin|true" ]] || {
+    echo "Restore verification requires the existing supabase_admin superuser; got ${admin_preflight:-no result}." >&2
+    exit 1
+  }
+  server_version="$(psql_admin -d postgres -tAq -c "show server_version")"
+  echo "Preflight: supabase_admin is a superuser; PostgreSQL ${server_version}."
+
+  # Refuse a same-cluster drill if an archive contains pg_cron. pg_cron can be
+  # installed in only cron.database_name on one cluster; skipping that archive
+  # entry would no longer prove a full restore.
+  if grep -Eq ' EXTENSION - pg_cron([[:space:]]|$)' "${BACKUP}/manifest.txt"; then
+    echo "This archive contains pg_cron; a full same-cluster restore drill cannot recreate it safely." >&2
+    echo "Verify this backup in a separate PostgreSQL cluster instead." >&2
+    exit 1
+  fi
+  while IFS= read -r extension; do
+    [[ -n "$extension" ]] || continue
+    [[ "$extension" =~ ^[A-Za-z0-9_-]+$ ]] || {
+      echo "Archive contains an unsafe extension name." >&2
+      exit 1
+    }
+    available="$(psql_admin -d postgres -tAq -c \
+      "select exists(select 1 from pg_available_extensions where name = '${extension}')")"
+    [[ "$available" == "t" ]] || {
+      echo "Archive extension ${extension} is unavailable in PostgreSQL ${server_version}." >&2
+      exit 1
+    }
+  done < <(sed -nE 's/.* EXTENSION - ([^[:space:]]+).*/\1/p' "${BACKUP}/manifest.txt" | sort -u)
+
+  SCRATCH="restore_check_$(date +%s)_$$_${RANDOM}"
+  [[ "$SCRATCH" =~ ^restore_check_[0-9]+_[0-9]+_[0-9]+$ ]] || {
+    echo "Generated scratch database name is unsafe." >&2
+    exit 1
+  }
+  case "$SCRATCH" in
+    "$POSTGRES_DB"|postgres|template0|template1)
+      echo "Refusing unsafe restore verification target: ${SCRATCH}" >&2
+      exit 1
+      ;;
+  esac
+
+  scratch_cleanup() {
+    local original_status=$? cleanup_status=0 still_present=""
+    trap - EXIT
+    set +e
+    if [[ -n "${SCRATCH:-}" ]]; then
+      psql_admin -d postgres -q -c "drop database if exists ${SCRATCH} with (force);" >/dev/null 2>&1 || cleanup_status=$?
+      still_present="$(psql_admin -d postgres -tAq -c \
+        "select exists(select 1 from pg_database where datname = '${SCRATCH}')" 2>/dev/null)" || cleanup_status=$?
+      if [[ "$still_present" != "f" ]]; then cleanup_status=1; fi
+    fi
+    if (( original_status == 0 && cleanup_status != 0 )); then
+      echo "Restore verification could not prove scratch database cleanup." >&2
+      original_status=$cleanup_status
+    fi
+    exit "$original_status"
+  }
+  trap scratch_cleanup EXIT
+
+  echo "Restoring into isolated scratch database ${SCRATCH} (template0)."
+  psql_admin -d postgres -q -c "create database ${SCRATCH} with template template0;"
+
+  # This is intentionally a full archive restore: ownership and ACLs are part
+  # of recoverability. No selective list, --no-owner, --no-acl, warning filter,
+  # or globals/bootstrap replay is allowed in verification mode.
   zstd -dc "${BACKUP}/database.dump.zst" \
-    | pg pg_restore -U postgres -h 127.0.0.1 -d "$SCRATCH" --no-owner --no-acl 2>&1 \
-    | sed '/warning\|already exists/Id'
+    | pg pg_restore -U supabase_admin -h 127.0.0.1 -d "$SCRATCH" --exit-on-error
 
   echo
-  echo "Row counts in the restored copy:"
-  psql_as -d "$SCRATCH" -c "
-    select 'clients' as table, count(*) from public.clients
-    union all select 'companies', count(*) from public.companies
-    union all select 'prospects', count(*) from public.prospects
-    union all select 'lists', count(*) from public.lists
-    union all select 'list_rows', count(*) from public.list_rows
-    union all select 'imports', count(*) from public.imports
-    union all select 'auth.users', count(*) from auth.users
-    order by 1;"
+  echo "Running restored data and security checks."
+  pg sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U supabase_admin -h 127.0.0.1 -d "$1" -f -' sh "$SCRATCH" < "$VERIFY_SQL"
+
+  echo "Dropping scratch database ${SCRATCH}."
+  psql_admin -d postgres -q -c "drop database ${SCRATCH} with (force);"
+  scratch_present="$(psql_admin -d postgres -tAq -c \
+    "select exists(select 1 from pg_database where datname = '${SCRATCH}')")"
+  [[ "$scratch_present" == "f" ]] || { echo "Scratch database still exists after drop." >&2; exit 1; }
+  SCRATCH=""
 
   echo
-  echo "Restore drill passed. Scratch database dropped."
+  echo "Restore drill passed. Full archive, ownership, ACLs, data checks, and scratch cleanup verified."
   exit 0
 fi
 
