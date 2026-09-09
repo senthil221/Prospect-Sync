@@ -15,7 +15,15 @@ load_env() {
   local file="${1:-.env}"
   local line key value
 
-  [[ -f "$file" ]] || { echo "No ${file} found. Run: cp .env.example .env" >&2; return 1; }
+  if [[ ! -f "$file" ]]; then
+    echo "No ${file} found. Run: cp .env.example .env" >&2
+    return 1
+  fi
+
+  if [[ ! -r "$file" ]]; then
+    echo "Cannot read ${file}. Check file permissions (chmod 600 .env)." >&2
+    return 1
+  fi
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line%$'\r'}"                       # tolerate CRLF from a Windows edit
