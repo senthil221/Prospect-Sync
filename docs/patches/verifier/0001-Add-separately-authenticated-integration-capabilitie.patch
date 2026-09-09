@@ -1,0 +1,91 @@
+From a2bba435a5cd1aebe92d04793d3893645d9147f2 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Sun, 6 Sep 2026 06:05:31 +0530
+Subject: [PATCH] Add separately authenticated integration capabilities
+ endpoint
+
+---
+ app/api/integration/v1/capabilities/route.ts | 14 ++++++++++++++
+ lib/integration-auth.test.ts                 | 15 +++++++++++++++
+ lib/integration-auth.ts                      | 10 ++++++++++
+ middleware.ts                                |  4 ++++
+ 4 files changed, 43 insertions(+)
+ create mode 100644 app/api/integration/v1/capabilities/route.ts
+ create mode 100644 lib/integration-auth.test.ts
+ create mode 100644 lib/integration-auth.ts
+
+diff --git a/app/api/integration/v1/capabilities/route.ts b/app/api/integration/v1/capabilities/route.ts
+new file mode 100644
+index 0000000..644e557
+--- /dev/null
++++ b/app/api/integration/v1/capabilities/route.ts
+@@ -0,0 +1,14 @@
++import { validIntegrationToken } from '@/lib/integration-auth';
++
++export const runtime = 'nodejs';
++export const dynamic = 'force-dynamic';
++
++export async function GET(request: Request) {
++  const headers = { 'Cache-Control': 'no-store' };
++  if (!validIntegrationToken(request.headers.get('authorization'), process.env.PROSPECT_SYNC_TOKEN_SHA256)) {
++    return Response.json({ error: 'Unauthorized' }, { status: 401, headers });
++  }
++  // Deliberately advertise only implemented functionality. Submission remains
++  // off until client bindings, idempotent ingestion and credit limits exist.
++  return Response.json({ service: 'no2ninja-verifier', version: 1, submissionEnabled: false, outcomes: ['valid', 'invalid', 'risky', 'unknown'] }, { headers });
++}
+diff --git a/lib/integration-auth.test.ts b/lib/integration-auth.test.ts
+new file mode 100644
+index 0000000..bc26588
+--- /dev/null
++++ b/lib/integration-auth.test.ts
+@@ -0,0 +1,15 @@
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { createHash, randomBytes } from 'node:crypto';
++import { validIntegrationToken } from './integration-auth';
++
++test('integration token is independently authenticated and fails closed', () => {
++  const token = randomBytes(32).toString('base64url');
++  const hash = createHash('sha256').update(token).digest('hex');
++  assert.ok(validIntegrationToken(`Bearer ${token}`, hash));
++  for (const input of [null, '', token, `Basic ${token}`, `Bearer ${'x'.repeat(43)}`, `Bearer ${token}\n`]) {
++    assert.equal(validIntegrationToken(input, hash), false);
++  }
++  assert.equal(validIntegrationToken(`Bearer ${token}`, undefined), false);
++  assert.equal(validIntegrationToken(`Bearer ${token}`, 'wrong'), false);
++});
+diff --git a/lib/integration-auth.ts b/lib/integration-auth.ts
+new file mode 100644
+index 0000000..549cb6f
+--- /dev/null
++++ b/lib/integration-auth.ts
+@@ -0,0 +1,10 @@
++import { createHash, timingSafeEqual } from 'node:crypto';
++
++// Separate service credential: never reuse a browser session or provider key.
++// Store only SHA-256 of a cryptographically random 32-byte bearer token.
++export function validIntegrationToken(authorization: string | null, expectedHash: string | undefined): boolean {
++  if (!expectedHash || !/^[a-fA-F0-9]{64}$/.test(expectedHash)) return false;
++  if (!authorization || !/^Bearer [A-Za-z0-9_-]{43,128}$/.test(authorization)) return false;
++  const digest = createHash('sha256').update(authorization.slice(7)).digest();
++  return timingSafeEqual(digest, Buffer.from(expectedHash, 'hex'));
++}
+diff --git a/middleware.ts b/middleware.ts
+index 74870d3..672c10c 100644
+--- a/middleware.ts
++++ b/middleware.ts
+@@ -13,6 +13,10 @@ const PUBLIC_PATHS = ["/login", "/setup", "/signup", "/api/health"];
+ export function middleware(req: NextRequest) {
+   const { pathname } = req.nextUrl;
+ 
++  // This exact endpoint verifies a separate service credential in its handler.
++  // Do not exempt the whole /api/integration subtree or browser list routes.
++  if (pathname === '/api/integration/v1/capabilities') return NextResponse.next();
++
+   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+     return NextResponse.next();
+   }
+-- 
+2.55.0.windows.3
+

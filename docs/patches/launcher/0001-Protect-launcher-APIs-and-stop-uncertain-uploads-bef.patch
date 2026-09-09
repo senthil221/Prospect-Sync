@@ -1,0 +1,624 @@
+From 37e6b0bb4db6614e877f70d28dc60b4e347a4a72 Mon Sep 17 00:00:00 2001
+From: Codex <codex@local>
+Date: Sun, 6 Sep 2026 06:05:36 +0530
+Subject: [PATCH] Protect launcher APIs and stop uncertain uploads before
+ activation
+
+---
+ README.md                     | 20 +++++++++++---
+ api/_lib/access.js            | 20 ++++++++++++++
+ api/session.js                |  7 +++++
+ api/smartlead-tag-accounts.js | 11 ++++----
+ api/smartlead-tags.js         |  8 ++++--
+ api/smartlead.js              | 16 +++++------
+ src/App.tsx                   |  5 ++++
+ src/lib/access.ts             |  4 +++
+ src/lib/config.ts             | 25 ------------------
+ src/lib/pipeline.ts           | 21 ++++++++-------
+ src/lib/smartlead.ts          | 21 ++++++++++++---
+ src/lib/tags.ts               |  7 ++---
+ src/views/AccessGate.tsx      | 30 +++++++++++++++++++++
+ tests/access.test.mjs         | 39 +++++++++++++++++++++++++++
+ tests/pipeline.test.ts        | 50 +++++++++++++++++++++++++++++++++++
+ 15 files changed, 223 insertions(+), 61 deletions(-)
+ create mode 100644 api/_lib/access.js
+ create mode 100644 api/session.js
+ create mode 100644 src/lib/access.ts
+ create mode 100644 src/views/AccessGate.tsx
+ create mode 100644 tests/access.test.mjs
+ create mode 100644 tests/pipeline.test.ts
+
+diff --git a/README.md b/README.md
+index 1c710d0..55dd194 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,14 @@
+ # Campaign Launcher
+ 
+-Production-grade Smartlead campaign launcher for cold email teams. Upload your CSVs, pick a schedule template, and launch or save as draft — all from a clean browser UI.
++Smartlead campaign launcher for cold email teams. This standalone browser runner
++is not a durable background queue. Prospect Sync's integration is the target for
++resumable large jobs. Failed or uncertain uploads now stop without activation.
++
++All APIs require a separate high-entropy launcher access token. Configure its
++SHA-256 hex digest as LAUNCHER_ACCESS_TOKEN_SHA256 on the server; distribute the
++token privately to authorized operators. It is held in tab memory only. This is
++a single-operator access gate, not multi-user identity/auditing or an SSO system.
++Do not deploy this change without provisioning that separate token.
+ 
+ ## Setup in 3 commands
+ 
+@@ -13,8 +21,8 @@ npm run dev
+ ## .env setup
+ 
+ ```env
+-VITE_SMARTLEAD_API_KEY=your_api_key_here
+-VITE_SMARTLEAD_BASE_URL=https://server.smartlead.ai/api/v1
++SMARTLEAD_API_KEY=your_server_only_api_key_here
++LAUNCHER_ACCESS_TOKEN_SHA256=sha256_hex_digest_of_separate_random_access_token
+ ```
+ 
+ ## CSV formats
+@@ -41,7 +49,11 @@ npm run build   # outputs to dist/
+ vercel --prod
+ ```
+ 
+-Set `VITE_SMARTLEAD_API_KEY` and `VITE_SMARTLEAD_BASE_URL` as Vercel environment variables.
++Set `SMARTLEAD_API_KEY` and `LAUNCHER_ACCESS_TOKEN_SHA256` as server-only Vercel
++environment variables. Never put provider credentials in VITE variables or browser
++storage. Rotate any provider key previously exposed in a frontend build. Local
++Vite alone does not serve the protected API routes; use the Vercel development
++runtime for an end-to-end local session.
+ 
+ ## Architecture
+ 
+diff --git a/api/_lib/access.js b/api/_lib/access.js
+new file mode 100644
+index 0000000..a4810ab
+--- /dev/null
++++ b/api/_lib/access.js
+@@ -0,0 +1,20 @@
++import { createHash, timingSafeEqual } from 'node:crypto';
++
++export function requireAccess(req, res) {
++  res.setHeader('Cache-Control', 'private, no-store');
++  res.setHeader('Vary', 'Authorization');
++  const expected = process.env.LAUNCHER_ACCESS_TOKEN_SHA256;
++  const authorization = req.headers?.authorization;
++  const configured = typeof expected === 'string' && /^[a-fA-F0-9]{64}$/.test(expected);
++  const valid = configured && typeof authorization === 'string' && /^Bearer [A-Za-z0-9_-]{43,128}$/.test(authorization)
++    && timingSafeEqual(createHash('sha256').update(authorization.slice(7)).digest(), Buffer.from(expected, 'hex'));
++  if (valid) return true;
++  res.status(configured ? 401 : 503).setHeader('Content-Type', 'application/json');
++  res.end(JSON.stringify({ error: configured ? 'Launcher access required.' : 'Launcher access is not configured.' }));
++  return false;
++}
++
++export function allowedOperation(method, path, params) {
++  return method === 'POST' && params === undefined && typeof path === 'string'
++    && (/^\/campaigns\/create$/.test(path) || /^\/campaigns\/[1-9][0-9]{0,14}\/(sequences|email-accounts|schedule|settings|leads|status)$/.test(path));
++}
+diff --git a/api/session.js b/api/session.js
+new file mode 100644
+index 0000000..fc95416
+--- /dev/null
++++ b/api/session.js
+@@ -0,0 +1,7 @@
++import { requireAccess } from './_lib/access.js';
++export default function handler(req, res) {
++  if (!requireAccess(req, res)) return;
++  if (req.method !== 'GET') { res.status(405).end(); return; }
++  res.status(200).setHeader('Content-Type', 'application/json');
++  res.end(JSON.stringify({ authenticated: true }));
++}
+diff --git a/api/smartlead-tag-accounts.js b/api/smartlead-tag-accounts.js
+index ad9475c..3c8ddd2 100644
+--- a/api/smartlead-tag-accounts.js
++++ b/api/smartlead-tag-accounts.js
+@@ -1,5 +1,6 @@
+ // Fetches email accounts for a single tag by ID, paginated in parallel.
+ // Called only when the user selects a tag — not on initial load.
++import { requireAccess } from './_lib/access.js';
+ 
+ const ACCOUNTS_URL = "https://server.smartlead.ai/api/v1/email-accounts";
+ const LIMIT = 100;
+@@ -34,6 +35,7 @@ function normalizeAccount(account) {
+ }
+ 
+ export default async function handler(req, res) {
++  if (!requireAccess(req, res)) return;
+   if (req.method !== "GET") {
+     res.setHeader("Allow", "GET");
+     return json(res, 405, { error: "Method not allowed" });
+@@ -45,7 +47,7 @@ export default async function handler(req, res) {
+   }
+ 
+   const tagId = req.query.tagId;
+-  if (!tagId) {
++  if (typeof tagId !== 'string' || !/^[1-9][0-9]{0,14}$/.test(tagId)) {
+     return json(res, 400, { error: "Missing tagId query parameter." });
+   }
+ 
+@@ -56,13 +58,12 @@ export default async function handler(req, res) {
+     url.searchParams.set("offset", String(offset));
+     url.searchParams.set("limit", String(LIMIT));
+ 
+-    const upstream = await fetch(url, { headers: { Accept: "application/json" } });
++    const upstream = await fetch(url, { headers: { Accept: "application/json" }, redirect: 'error', signal: AbortSignal.timeout(15000) });
+ 
+     if (!upstream.ok) {
+       const text = await upstream.text();
+       const err = new Error(`Account fetch failed with HTTP ${upstream.status}`);
+       err.status = upstream.status;
+-      err.detail = text.slice(0, 500);
+       throw err;
+     }
+ 
+@@ -77,6 +78,7 @@ export default async function handler(req, res) {
+     let done = false;
+ 
+     while (!done) {
++      if (offset >= 10000) throw new Error('Account listing exceeds the supported size.');
+       const offsets = [];
+       for (let i = 0; i < BATCH; i++, offset += LIMIT) {
+         offsets.push(offset);
+@@ -104,7 +106,7 @@ export default async function handler(req, res) {
+ 
+     accounts.sort((a, b) => a.email.localeCompare(b.email));
+ 
+-    res.setHeader("Cache-Control", "s-maxage=1800, stale-while-revalidate=7200");
++    res.setHeader("Cache-Control", "private, no-store");
+     return json(res, 200, {
+       tagId: Number(tagId),
+       totalAccounts: accounts.length,
+@@ -114,7 +116,6 @@ export default async function handler(req, res) {
+   } catch (err) {
+     return json(res, err.status || 500, {
+       error: err instanceof Error ? err.message : "Unknown error fetching tag accounts.",
+-      ...(err.detail ? { detail: err.detail } : {}),
+     });
+   }
+ }
+diff --git a/api/smartlead-tags.js b/api/smartlead-tags.js
+index 46898d7..c58b92c 100644
+--- a/api/smartlead-tags.js
++++ b/api/smartlead-tags.js
+@@ -1,5 +1,6 @@
+ // Single-page proxy — JWT stays server-side, client handles pagination.
+ // Each call returns one page of raw accounts (max 100). No aggregation here.
++import { requireAccess } from './_lib/access.js';
+ 
+ function json(res, status, body) {
+   res.status(status).setHeader("Content-Type", "application/json");
+@@ -7,6 +8,7 @@ function json(res, status, body) {
+ }
+ 
+ export default async function handler(req, res) {
++  if (!requireAccess(req, res)) return;
+   if (req.method !== "GET") {
+     res.setHeader("Allow", "GET");
+     return json(res, 405, { error: "Method not allowed" });
+@@ -17,13 +19,15 @@ export default async function handler(req, res) {
+     return json(res, 500, { error: "Missing SMARTLEAD_JWT in Vercel environment variables." });
+   }
+ 
+-  const offset = Math.max(0, Number(req.query.offset || 0));
++  const offset = Number(req.query.offset || 0);
++  if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1000000) return json(res, 400, { error: 'Invalid offset.' });
+   const url = new URL("https://server.smartlead.ai/api/email-account/get-total-email-accounts");
+   url.searchParams.set("offset", String(offset));
+   url.searchParams.set("limit", "100");
+ 
+   try {
+     const upstream = await fetch(url, {
++      redirect: 'error', signal: AbortSignal.timeout(15000),
+       headers: {
+         Authorization: jwt.startsWith("Bearer ") ? jwt : `Bearer ${jwt}`,
+         Accept: "application/json",
+@@ -38,7 +42,7 @@ export default async function handler(req, res) {
+       .end(text);
+   } catch (err) {
+     return json(res, 500, {
+-      error: err instanceof Error ? err.message : "Proxy error.",
++      error: "Unable to fetch account tags.",
+     });
+   }
+ }
+diff --git a/api/smartlead.js b/api/smartlead.js
+index e79809b..8f6dae8 100644
+--- a/api/smartlead.js
++++ b/api/smartlead.js
+@@ -1,3 +1,4 @@
++import { requireAccess, allowedOperation } from './_lib/access.js';
+ const DEFAULT_BASE_URL = "https://server.smartlead.ai/api/v1";
+ 
+ function json(res, status, body) {
+@@ -6,6 +7,7 @@ function json(res, status, body) {
+ }
+ 
+ export default async function handler(req, res) {
++  if (!requireAccess(req, res)) return;
+   if (req.method !== "POST") {
+     res.setHeader("Allow", "POST");
+     return json(res, 405, { error: "Method not allowed" });
+@@ -19,22 +21,18 @@ export default async function handler(req, res) {
+   try {
+     const { method = "GET", path, body, params } = req.body || {};
+ 
+-    if (!path || typeof path !== "string" || !path.startsWith("/") || path.includes("http")) {
++    if (!allowedOperation(method, path, params)) {
+       return json(res, 400, { error: "Invalid Smartlead path." });
+     }
+ 
+-    const baseUrl = (process.env.SMARTLEAD_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, "");
++    const baseUrl = DEFAULT_BASE_URL;
+     const url = new URL(`${baseUrl}${path}`);
+     url.searchParams.set("api_key", apiKey);
+ 
+-    if (params && typeof params === "object") {
+-      for (const [key, value] of Object.entries(params)) {
+-        if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
+-      }
+-    }
+-
+     const upstream = await fetch(url, {
+       method,
++      redirect: 'error',
++      signal: AbortSignal.timeout(15000),
+       headers: { "Content-Type": "application/json" },
+       body: method === "GET" || method === "HEAD" ? undefined : JSON.stringify(body ?? {}),
+     });
+@@ -45,7 +43,7 @@ export default async function handler(req, res) {
+     res.end(text || "{}");
+   } catch (error) {
+     return json(res, 500, {
+-      error: error instanceof Error ? error.message : "Unknown server error while calling Smartlead.",
++      error: "The provider request failed. Its outcome may be unknown; review before retrying.",
+     });
+   }
+ }
+diff --git a/src/App.tsx b/src/App.tsx
+index 8e4708d..7f4ec7e 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -1,4 +1,5 @@
+ import { useState, useCallback } from "react";
++import AccessGate from './views/AccessGate';
+ import LaunchForm, { type FormValues } from "./views/LaunchForm";
+ import Progress from "./views/Progress";
+ import Result from "./views/Result";
+@@ -16,6 +17,10 @@ interface RunState {
+ }
+ 
+ export default function App() {
++  return <AccessGate><Launcher/></AccessGate>;
++}
++
++function Launcher() {
+   const [view, setView] = useState<View>("form");
+   const [runState, setRunState] = useState<RunState | null>(null);
+ 
+diff --git a/src/lib/access.ts b/src/lib/access.ts
+new file mode 100644
+index 0000000..7f8f7b2
+--- /dev/null
++++ b/src/lib/access.ts
+@@ -0,0 +1,4 @@
++// Separate launcher access token; never the Smartlead API key. Memory only.
++let accessToken = '';
++export function setAccessToken(value: string) { accessToken = value; }
++export function accessHeaders() { return { Authorization: `Bearer ${accessToken}` }; }
+diff --git a/src/lib/config.ts b/src/lib/config.ts
+index 68bd08a..2ae9b02 100644
+--- a/src/lib/config.ts
++++ b/src/lib/config.ts
+@@ -14,11 +14,6 @@ export interface CampaignSettings {
+   autoCategorizeOOO: boolean;
+ }
+ 
+-export interface ApiConfig {
+-  apiKey: string;
+-  baseUrl: string;
+-}
+-
+ // ── Defaults ──────────────────────────────────────────────────────────────────
+ 
+ export const DEFAULT_CAMPAIGN_SETTINGS: CampaignSettings = {
+@@ -37,30 +32,10 @@ export const DEFAULT_CAMPAIGN_SETTINGS: CampaignSettings = {
+ 
+ // ── localStorage keys ─────────────────────────────────────────────────────────
+ 
+-const LS_API_KEY = "sl_api_key";
+-const LS_BASE_URL = "sl_base_url";
+ const LS_CAMPAIGN_SETTINGS = "sl_campaign_settings";
+ 
+ // ── Loaders / savers ──────────────────────────────────────────────────────────
+ 
+-export function loadApiConfig(): ApiConfig {
+-  return {
+-    apiKey:
+-      localStorage.getItem(LS_API_KEY) ??
+-      (import.meta.env.VITE_SMARTLEAD_API_KEY as string | undefined) ??
+-      "",
+-    baseUrl:
+-      localStorage.getItem(LS_BASE_URL) ??
+-      (import.meta.env.VITE_SMARTLEAD_BASE_URL as string | undefined) ??
+-      "https://server.smartlead.ai/api/v1",
+-  };
+-}
+-
+-export function saveApiConfig(config: ApiConfig) {
+-  localStorage.setItem(LS_API_KEY, config.apiKey.trim());
+-  localStorage.setItem(LS_BASE_URL, config.baseUrl.trim());
+-}
+-
+ export function loadCampaignSettings(): CampaignSettings {
+   try {
+     const raw = localStorage.getItem(LS_CAMPAIGN_SETTINGS);
+diff --git a/src/lib/pipeline.ts b/src/lib/pipeline.ts
+index 3e9d708..50e5715 100644
+--- a/src/lib/pipeline.ts
++++ b/src/lib/pipeline.ts
+@@ -116,6 +116,11 @@ export async function* runPipeline(
+ 
+   const startStep = input.resumeFromStep ?? "parse";
+   const startIndex = STEP_ORDER.indexOf(startStep);
++  if (input.resumeFromStep === 'create' || input.resumeFromStep === 'leads') {
++    steps.find(s => s.id === startStep)!.status = 'error';
++    steps.find(s => s.id === startStep)!.error = 'This write may already have reached Smartlead. Review the campaign before starting a new operation.';
++    yield emit(); return;
++  }
+ 
+   for (let i = 0; i < startIndex; i++) steps[i].status = "done";
+   yield emit();
+@@ -263,17 +268,15 @@ export async function* runPipeline(
+         try {
+           result = await uploadLeadBatch(campaignId, batches[i]);
+         } catch (err) {
+-          await sleep(2000);
+-          try {
+-            result = await uploadLeadBatch(campaignId, batches[i]);
+-          } catch (retryErr) {
+-            lastError = extractErrorMessage(retryErr);
+-            console.warn(`Lead batch ${i + 1} failed after retry:`, lastError);
+-          }
++          lastError = extractErrorMessage(err);
++          s.status = 'error';
++          s.error = `Batch ${i + 1} stopped: ${lastError}. ${totalAdded} earlier leads were confirmed added. Review before retrying.`;
++          yield emit({ campaignId, skippedLeads: allSkippedLeads });
++          return;
+         }
+         if (result) {
+-          totalAdded += result.added_count ?? batches[i].length;
+-          totalSkipped += result.skipped_count ?? 0;
++          totalAdded += result.added_count;
++          totalSkipped += result.skipped_count;
+           if (result.skipped_leads?.length) allSkippedLeads.push(...result.skipped_leads);
+         }
+         s.detail = `batch ${i + 1} of ${batches.length} ✓`;
+diff --git a/src/lib/smartlead.ts b/src/lib/smartlead.ts
+index d84f965..38cf631 100644
+--- a/src/lib/smartlead.ts
++++ b/src/lib/smartlead.ts
+@@ -2,6 +2,7 @@ import type { SequenceRow, LeadRow, InboxRow } from "./csv";
+ import type { ScheduleTemplate } from "./templates";
+ import type { CampaignSettings } from "./config";
+ import { settingsToApiPayload } from "./config";
++import { accessHeaders } from './access';
+ 
+ // ── Proxy helper — API key lives in Vercel env, never in the browser ──────────
+ 
+@@ -12,7 +13,7 @@ async function call<T = unknown>(
+ ): Promise<T> {
+   const res = await fetch("/api/smartlead", {
+     method: "POST",
+-    headers: { "Content-Type": "application/json" },
++    headers: { "Content-Type": "application/json", ...accessHeaders() },
+     body: JSON.stringify({ method, path, body }),
+   });
+ 
+@@ -89,16 +90,23 @@ export async function uploadLeadBatch(
+   campaignId: number,
+   leads: LeadRow[]
+ ): Promise<UploadLeadBatchResult> {
+-  const ALLOWED = new Set(["email", "first_name", "last_name", "company_name", "location"]);
++  if (!leads.length || leads.length > 400) throw new Error('Upload batches must contain 1–400 leads.');
++  const ALLOWED = new Set(["email", "first_name", "last_name", "company_name", "location", "phone_number", "website", "linkedin_profile", "company_url"]);
+   const lead_list = leads.map((lead) => {
+     const clean: Record<string, string> = {};
++    const custom_fields: Record<string, string> = Object.create(null);
+     for (const [k, v] of Object.entries(lead)) {
+       if (ALLOWED.has(k)) clean[k] = v;
++      else {
++        if (!/^[A-Za-z][A-Za-z0-9_]{0,99}$/.test(k) || ['constructor', 'prototype', '__proto__'].includes(k)) throw new Error('Invalid custom field name.');
++        custom_fields[k] = v;
++      }
+     }
+-    return clean;
++    if (Object.keys(custom_fields).length > 200) throw new Error('Too many custom fields.');
++    return { ...clean, custom_fields };
+   });
+ 
+-  return call<UploadLeadBatchResult>(`POST`, `/campaigns/${campaignId}/leads`, {
++  const result = await call<UploadLeadBatchResult>(`POST`, `/campaigns/${campaignId}/leads`, {
+     lead_list,
+     settings: {
+       ignore_global_block_list: false,
+@@ -106,6 +114,11 @@ export async function uploadLeadBatch(
+       ignore_duplicate_leads_in_other_campaign: false,
+     },
+   });
++  if (!result || !Number.isSafeInteger(result.added_count) || !Number.isSafeInteger(result.skipped_count)
++    || result.added_count < 0 || result.skipped_count < 0 || result.added_count + result.skipped_count !== leads.length) {
++    throw new Error('Upload outcome is not fully accounted for. Review campaign membership before retrying.');
++  }
++  return result;
+ }
+ 
+ export async function activateCampaign(campaignId: number): Promise<void> {
+diff --git a/src/lib/tags.ts b/src/lib/tags.ts
+index 96f5e54..6810631 100644
+--- a/src/lib/tags.ts
++++ b/src/lib/tags.ts
+@@ -1,3 +1,4 @@
++import { accessHeaders } from './access';
+ export interface SmartleadTagAccount {
+   id: number;
+   email: string;
+@@ -68,13 +69,13 @@ function normalizeAccount(raw: Record<string, unknown>): SmartleadTagAccount {
+     dailySent: (raw.daily_sent_count ?? raw.sent_count ?? null) as number | null,
+     reputation,
+     status: String(raw.warmup_status || raw.status || ""),
+-    smtpOk: raw.is_smtp_success !== false,
+-    imapOk: raw.is_imap_success !== false,
++    smtpOk: raw.is_smtp_success === true,
++    imapOk: raw.is_imap_success === true,
+   };
+ }
+ 
+ async function fetchPage(offset: number, attempt = 0): Promise<Record<string, unknown>[]> {
+-  const res = await fetch(`/api/smartlead-tags?offset=${offset}`, { cache: "no-store" });
++  const res = await fetch(`/api/smartlead-tags?offset=${offset}`, { cache: "no-store", headers: accessHeaders() });
+ 
+   if (res.status === 429) {
+     if (attempt >= MAX_RETRIES) throw new Error("Rate limited by Smartlead — too many requests.");
+diff --git a/src/views/AccessGate.tsx b/src/views/AccessGate.tsx
+new file mode 100644
+index 0000000..a49e8a0
+--- /dev/null
++++ b/src/views/AccessGate.tsx
+@@ -0,0 +1,30 @@
++import { useState, type ReactNode } from 'react';
++import { setAccessToken } from '../lib/access';
++
++export default function AccessGate({ children }: { children: ReactNode }) {
++  const [ready, setReady] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [error, setError] = useState('');
++  if (ready) return <>{children}</>;
++  return <main style={{ maxWidth: 480, margin: '80px auto', padding: 24 }}>
++    <h1>Campaign Launcher access</h1>
++    <p>Enter your separate launcher access token. Do not enter a Smartlead API key.</p>
++    <form onSubmit={async event => {
++      event.preventDefault(); const form = event.currentTarget;
++      const token = String(new FormData(form).get('token') ?? '').trim(); form.reset();
++      setBusy(true); setError('');
++      try {
++        const response = await fetch('/api/session', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal: AbortSignal.timeout(10000) });
++        if (!response.ok) throw new Error('Access rejected or not configured.');
++        setAccessToken(token); setReady(true);
++      } catch (e) { setError(e instanceof Error ? e.message : 'Unable to sign in.'); }
++      finally { setBusy(false); }
++    }}>
++      <label htmlFor="launcher-access">Launcher access token</label>
++      <input id="launcher-access" name="token" type="password" autoComplete="off" required disabled={busy}/>
++      <button disabled={busy}>{busy ? 'Checking…' : 'Continue'}</button>
++    </form>
++    {error && <p role="alert">{error}</p>}
++    <p>The token stays in this tab only. Closing or reloading requires signing in again.</p>
++  </main>;
++}
+diff --git a/tests/access.test.mjs b/tests/access.test.mjs
+new file mode 100644
+index 0000000..69130a4
+--- /dev/null
++++ b/tests/access.test.mjs
+@@ -0,0 +1,39 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { createHash } from 'node:crypto';
++import main from '../api/smartlead.js';
++import tags from '../api/smartlead-tags.js';
++import accounts from '../api/smartlead-tag-accounts.js';
++import { allowedOperation } from '../api/_lib/access.js';
++
++const token = 'a'.repeat(43);
++const hash = createHash('sha256').update(token).digest('hex');
++function response() { return { headers: {}, code: 0, value: '', status(n) { this.code = n; return this; }, setHeader(k,v) { this.headers[k] = v; return this; }, end(v) { this.value = v; return this; } }; }
++test('all three routes deny missing or wrong authentication before fetch', async () => {
++  const prior = globalThis.fetch; const old = process.env.LAUNCHER_ACCESS_TOKEN_SHA256;
++  process.env.LAUNCHER_ACCESS_TOKEN_SHA256 = hash;
++  globalThis.fetch = async () => { throw new Error('Unexpected upstream call'); };
++  try {
++    for (const handler of [main, tags, accounts]) for (const authorization of [undefined, 'Bearer wrong']) {
++      const res = response(); await handler({ method: handler === main ? 'POST' : 'GET', headers: { authorization }, query: {} }, res);
++      assert.equal(res.code, 401); assert.equal(res.headers['Cache-Control'], 'private, no-store');
++    }
++  } finally { globalThis.fetch = prior; if (old === undefined) delete process.env.LAUNCHER_ACCESS_TOKEN_SHA256; else process.env.LAUNCHER_ACCESS_TOKEN_SHA256 = old; }
++});
++test('allowlist rejects alternate representations and arbitrary methods', () => {
++  for (const path of ['/campaigns/1/leads?x=y', '/campaigns/%31/leads', '/campaigns/../create', '/campaigns/0/leads', '/campaigns/1/leads#x']) assert.equal(allowedOperation('POST', path, undefined), false);
++  assert.equal(allowedOperation('DELETE', '/campaigns/1/leads', undefined), false);
++  assert.equal(allowedOperation('POST', '/campaigns/1/leads', { api_key: 'override' }), false);
++  for (const suffix of ['leads','sequences','email-accounts','settings','schedule','status']) assert.ok(allowedOperation('POST', `/campaigns/1/${suffix}`, undefined));
++  assert.ok(allowedOperation('POST', '/campaigns/create', undefined));
++});
++test('authenticated legitimate operation reaches only the fixed provider', async () => {
++  const prior = globalThis.fetch; const env = { ...process.env };
++  process.env.LAUNCHER_ACCESS_TOKEN_SHA256 = hash; process.env.SMARTLEAD_API_KEY = 'fixture';
++  let calls = 0;
++  globalThis.fetch = async (url, options) => { calls++; assert.equal(url.origin, 'https://server.smartlead.ai'); assert.equal(options.redirect, 'error'); return Response.json({ id: 1 }); };
++  try {
++    const res = response(); await main({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body: { method: 'POST', path: '/campaigns/create', body: { name: 'Fixture' } } }, res);
++    assert.equal(calls, 1); assert.equal(res.code, 200);
++  } finally { globalThis.fetch = prior; for (const key of ['LAUNCHER_ACCESS_TOKEN_SHA256','SMARTLEAD_API_KEY']) { if (env[key] === undefined) delete process.env[key]; else process.env[key] = env[key]; } }
++});
+diff --git a/tests/pipeline.test.ts b/tests/pipeline.test.ts
+new file mode 100644
+index 0000000..efab817
+--- /dev/null
++++ b/tests/pipeline.test.ts
+@@ -0,0 +1,50 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { runPipeline, type PipelineInput } from '../src/lib/pipeline';
++import { uploadLeadBatch } from '../src/lib/smartlead';
++import { DEFAULT_CAMPAIGN_SETTINGS } from '../src/lib/config';
++import { DEFAULT_CUSTOM_SCHEDULE } from '../src/lib/templates';
++
++const input: PipelineInput = {
++  campaignName: 'Fixture', mode: 'launch', templateKey: 'custom', customSchedule: DEFAULT_CUSTOM_SCHEDULE,
++  sendGap: 20, leads: Array.from({length: 101}, (_, i) => ({email: `a${i}@example.test`,first_name:'A',last_name:'B',company_name:'Fixture'})),
++  sequences: [], inboxes: [], inboxTag: '', campaignSettings: DEFAULT_CAMPAIGN_SETTINGS,
++};
++test('partial upload failure stops without activation or blind retries', async () => {
++  const previous = globalThis.fetch; const paths: string[] = []; let uploads = 0;
++  globalThis.fetch = async (_url, options) => {
++    const body = JSON.parse(String(options?.body)); paths.push(body.path);
++    if (body.path.endsWith('/leads')) {
++      uploads++;
++      return uploads === 1 ? Response.json({added_count:100,skipped_count:0,skipped_leads:[]}) : Response.json({error:'Timeout'}, {status:504});
++    }
++    return Response.json({id:1});
++  };
++  try {
++    const updates = []; for await (const update of runPipeline(input)) updates.push(update);
++    assert.equal(uploads,2);
++    assert.equal(paths.some(p => p.endsWith('/status')),false);
++    assert.equal(updates.at(-1)?.steps.find(s=>s.id==='leads')?.status,'error');
++  } finally { globalThis.fetch = previous; }
++});
++test('ambiguous create or upload retries never replay the write', async () => {
++  const previous = globalThis.fetch;
++  globalThis.fetch = async () => { throw new Error('Must not fetch'); };
++  try {
++    for (const step of ['create','leads'] as const) {
++      const updates = []; for await (const update of runPipeline({...input,resumeFromStep:step,existingCampaignId:1})) updates.push(update);
++      assert.equal(updates.at(-1)?.steps.find(s=>s.id===step)?.status,'error');
++    }
++  } finally { globalThis.fetch = previous; }
++});
++test('custom fields survive upload and missing counts are rejected', async () => {
++  const previous = globalThis.fetch;
++  globalThis.fetch = async (_url, options) => {
++    const payload = JSON.parse(String(options?.body)).body;
++    assert.equal(payload.lead_list[0].custom_fields.job_title,'Director');
++    assert.equal(payload.settings.ignore_unsubscribe_list,false);
++    return Response.json({});
++  };
++  try { await assert.rejects(uploadLeadBatch(1,[{...input.leads[0],job_title:'Director'}]), /not fully accounted/); }
++  finally { globalThis.fetch = previous; }
++});
+-- 
+2.55.0.windows.3
+
