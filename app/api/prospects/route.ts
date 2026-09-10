@@ -1,6 +1,6 @@
 import { withInteractiveSlot } from "../../../lib/admission";
 import { authorizeFilterSets } from "../../../lib/filter-sets";
-import { isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
+import { databaseErrorResponse, isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
 import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { filterErrorResponse, parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
 import { createAdminClient } from "../../../lib/supabase/admin";
@@ -125,7 +125,7 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   if (isStatementTimeout(error)) {
     return statementTimeoutResponse("This filter combination", "Narrow it - fewer filters, or a search term alongside them - or export the full set instead.");
   }
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return databaseErrorResponse("The prospect listing", error);
   const summary = workspaceSummary(workspace.data);
   return Response.json({
     prospects: summary.result_rows ?? [],

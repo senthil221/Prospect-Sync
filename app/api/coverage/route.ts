@@ -1,3 +1,4 @@
+import { withAnalyticsSlot } from "../../../lib/admission";
 import { authorizeApi } from "../../../lib/auth";
 import { normalizeDomain, normalizeText } from "../../../db/normalize";
 import { createAdminClient } from "../../../lib/supabase/admin";
@@ -7,6 +8,10 @@ type IncomingCompany = { name?: string; domain?: string; row?: number };
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
+  return withAnalyticsSlot(request, () => measureCoverage(request));
+}
+
+async function measureCoverage(request: Request) {
   const payload = await request.json() as { companies?: IncomingCompany[] };
   const incoming = (payload.companies ?? []).slice(0, 5000).map((company, index) => ({
     row: Number(company.row ?? index + 2),

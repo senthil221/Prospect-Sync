@@ -1,14 +1,26 @@
+import { withAnalyticsSlot } from "../../../lib/admission";
 import { authorizeApi } from "../../../lib/auth";
+import { isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
 import { indexNotice, reindexProspects } from "../../../lib/reindex.ts";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
-export async function GET() {
+export async function GET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const { data, error } = await createAdminClient().rpc("find_duplicate_candidates", { p_limit: 100 });
-  if (error) return Response.json({ error: error.message }, { status: 500 });
-  const result = Array.isArray(data) ? data[0] : data;
-  return Response.json({ candidates: result?.result_rows ?? [] });
+  // The heaviest query in the application: a self-join of prospect_summaries on
+  // an unindexed lower(trim(full_name)). Bounded here so it cannot take the
+  // connection pool, and by a statement timeout so it cannot run unbounded.
+  return withAnalyticsSlot(request, async () => {
+    const { data, error } = await createAdminClient()
+      .rpc("find_duplicate_candidates", { p_limit: 100 })
+      .abortSignal(request.signal ?? AbortSignal.timeout(120_000));
+    if (isStatementTimeout(error)) {
+      return statementTimeoutResponse("Finding duplicates", "Try again when imports have finished.");
+    }
+    if (error) return Response.json({ error: error.message }, { status: 500 });
+    const result = Array.isArray(data) ? data[0] : data;
+    return Response.json({ candidates: result?.result_rows ?? [] });
+  });
 }
 
 export async function POST(request: Request) {

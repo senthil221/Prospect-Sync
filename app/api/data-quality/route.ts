@@ -1,3 +1,5 @@
+import { withAnalyticsSlot } from "../../../lib/admission";
+import { isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
 import { authorizeApi } from "../../../lib/auth";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
@@ -7,14 +9,22 @@ function isMissing(error: { code?: string } | null | undefined) {
   return Boolean(error?.code && missingFunctionCodes.has(error.code));
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
+  return withAnalyticsSlot(request, () => qualitySummary(request));
+}
+
+async function qualitySummary(request: Request) {
   const supabase = createAdminClient();
+  const signal = request.signal ?? AbortSignal.timeout(120_000);
   const [quality, drift] = await Promise.all([
-    supabase.rpc("data_quality_overview"),
-    supabase.rpc("prospect_index_drift"),
+    supabase.rpc("data_quality_overview").abortSignal(signal),
+    supabase.rpc("prospect_index_drift").abortSignal(signal),
   ]);
+  if (isStatementTimeout(quality.error)) {
+    return statementTimeoutResponse("The data quality summary", "Try again when imports have finished.");
+  }
   if (quality.error) return Response.json({ error: quality.error.message }, { status: 500 });
   // Drift reporting is additive: an older database still returns the quality
   // overview rather than failing the whole page.

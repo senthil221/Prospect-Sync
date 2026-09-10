@@ -1,9 +1,14 @@
+import { withInteractiveSlot } from "../../../lib/admission";
 import { authorizeApi } from "../../../lib/auth";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
-export async function GET() {
+export async function GET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
+  return withInteractiveSlot(request, () => workspace());
+}
+
+async function workspace() {
   const supabase = createAdminClient();
   const workspace = await supabase.rpc("dashboard_workspace");
   if (!workspace.error) {
