@@ -46,31 +46,19 @@ async function suggestValues(request: Request) {
     });
   }
 
-  // v3 reads the flat prospect_index; v2 (identical semantics) is the fallback before migration.
-  let result = await supabase.rpc("prospect_filter_values_v3", {
+  // v3 reads the flat prospect_index. It has no fallback: update.sh applies
+  // migrations before the candidate app container starts, and a rollback
+  // deliberately does not undo them, so a deployed app never runs against a
+  // database without v3. The v2 and v1 chains that used to be here could only
+  // fire in a state that cannot occur, and both carried a predicate that a
+  // generic plan turns into a full scan - see 20260910150000.
+  const result = await supabase.rpc("prospect_filter_values_v3", {
     p_field: field,
     p_search: search,
     p_client_id: clientId,
     p_limit: limit,
   }).abortSignal(request.signal ?? AbortSignal.timeout(30_000));
-  if (missing(result)) {
-    result = await supabase.rpc("prospect_filter_values_v2", {
-      p_field: field,
-      p_search: search,
-      p_client_id: clientId,
-      p_limit: limit,
-    });
-  }
 
-  const requiresV2 = field.startsWith("custom:") || ["__first_name", "__last_name", "__keywords", "__person_location", "__company_location", "__company_city", "__company_state", "__company_country"].includes(field);
-  if (!requiresV2 && missing(result)) {
-    result = await supabase.rpc("prospect_filter_values", {
-      p_field: field,
-      p_search: search,
-      p_client_id: clientId,
-      p_limit: limit,
-    });
-  }
   const { data, error } = result;
 
   if (isStatementTimeout(error)) {
