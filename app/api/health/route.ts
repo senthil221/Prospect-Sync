@@ -5,6 +5,7 @@ import { operationsHealth } from "../../../lib/operations-health";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { backgroundAlerts } from '../../../lib/background-health';
 import { logServerEvent } from '../../../lib/server-log';
+import { readinessLogDecision } from '../../../lib/readiness-log';
 
 const timeoutMs = 5_000;
 const noStoreHeaders = { "Cache-Control": "no-store, max-age=0" };
@@ -80,8 +81,17 @@ export async function GET() {
   }
   const load = authorized ? { admission: admissionState(), ...observabilitySnapshot(),
     background, alerts: backgroundAlerts(background) } : undefined;
+  // A rollout restarts the import worker while this container is still serving,
+  // so the first seconds of a failure are expected and are recorded as a warning.
+  // It escalates to error on its own once it has outlasted any restart, and
+  // repeats at most every five minutes - the healthcheck polls every 10s, so
+  // logging each poll would bury the rest of the log under duplicates.
+  // Called on the healthy path too: that is what clears the failure clock.
+  const readiness = readinessLogDecision(failed);
   if (!failed.length) return Response.json({ status: "ok", checks: checkStatus, load, features }, { headers: noStoreHeaders });
-  console.error("Readiness check failed", { failed });
-  logServerEvent({ level: "error", source: "health", statusCode: 503, message: `Readiness check failed: ${failed.join(", ")}`, detail: { failed, checks: checkStatus } });
+  console[readiness.level === "error" ? "error" : "warn"]("Readiness check failed", { failed });
+  if (readiness.log) {
+    logServerEvent({ level: readiness.level, source: "health", statusCode: 503, message: `Readiness check failed: ${failed.join(", ")}`, detail: { failed, checks: checkStatus } });
+  }
   return Response.json({ status: "unhealthy", checks: checkStatus, load, features }, { status: 503, headers: noStoreHeaders });
 }
