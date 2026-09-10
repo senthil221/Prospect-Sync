@@ -52,12 +52,24 @@ async function suggestValues(request: Request) {
   // database without v3. The v2 and v1 chains that used to be here could only
   // fire in a state that cannot occur, and both carried a predicate that a
   // generic plan turns into a full scan - see 20260910150000.
-  const result = await supabase.rpc("prospect_filter_values_v3", {
-    p_field: field,
-    p_search: search,
-    p_client_id: clientId,
-    p_limit: limit,
-  }).abortSignal(request.signal ?? AbortSignal.timeout(30_000));
+  // Opening a dropdown and typing in one are different questions. Typing is
+  // 20-250ms because the trigram indexes narrow the scan. Opening asks for the
+  // most common values across every row, which is a full aggregation at 3-4s -
+  // honest work, but for an answer that only changes when the data does, so it
+  // is served from a version-stamped cache instead. Search stays on v3: caching
+  // per term would be a cache with one entry per keystroke.
+  const result = search
+    ? await supabase.rpc("prospect_filter_values_v3", {
+      p_field: field,
+      p_search: search,
+      p_client_id: clientId,
+      p_limit: limit,
+    }).abortSignal(request.signal ?? AbortSignal.timeout(30_000))
+    : await supabase.rpc("prospect_filter_values_cached_v1", {
+      p_field: field,
+      p_client_id: clientId,
+      p_limit: limit,
+    }).abortSignal(request.signal ?? AbortSignal.timeout(30_000));
 
   const { data, error } = result;
 
