@@ -28,7 +28,10 @@ test("ships agency operations without enrichment or reporting modules", async ()
   assert.match(migration, /create or replace function public\.data_quality_overview/);
   assert.match(coverage, /normalized_domain/);
   assert.match(operations, /mark_contacted/);
-  assert.match(quality, /data_quality_overview/);
+  // Still the data quality summary, now read from the snapshot the operations
+  // worker computes rather than scanned on request - see 20260911120000. The
+  // underlying function is unchanged and still asserted on the migration above.
+  assert.match(quality, /dashboard_snapshot_v1", { p_key: "dataQuality" }/);
   assert.match(lists, /list_workspace/);
   assert.match(savedViews, /saved_views/);
   assert.doesNotMatch(migration, /enrichment_provider|campaign_reporting/);

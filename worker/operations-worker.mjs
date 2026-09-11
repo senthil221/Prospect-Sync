@@ -16,6 +16,11 @@ const applyBatchSize = setting('OPERATIONS_APPLY_BATCH', 500, 50, 5000);
 const exportBatchSize = setting('OPERATIONS_EXPORT_BATCH', 5000, 500, 25000);
 const idleDelayMs = setting('OPERATIONS_IDLE_MS', 3000, 1000, 30000);
 const retentionIntervalMs = setting('OPERATIONS_RETENTION_MS', 5000, 1000, 86400000);
+// Dashboard summaries are O(table) and must not be computed on a request. The
+// refresh itself is a no-op when no data has changed, so this interval is the
+// worst-case lag after a write, not a fixed cost.
+const snapshotIntervalMs = setting('OPERATIONS_SNAPSHOT_MS', 300000, 10000, 3600000);
+let lastSnapshotAt = 0;
 const statementTimeout = pgInterval(process.env.OPERATIONS_STATEMENT_TIMEOUT, "120s", "OPERATIONS_STATEMENT_TIMEOUT");
 const timeoutParts = /^(\d+)(ms|s|min|h)$/.exec(statementTimeout);
 const timeoutMs = Number(timeoutParts[1]) * ({ ms: 1, s: 1000, min: 60000, h: 3600000 }[timeoutParts[2]]);
@@ -69,6 +74,31 @@ async function runRetention() {
   finally { activeWork = ''; }
 }
 
+async function runSnapshots() {
+  if (Date.now() - lastSnapshotAt < snapshotIntervalMs) return;
+  lastSnapshotAt = Date.now();
+  activeWork = 'snapshot';
+  const started = performance.now();
+  try {
+    // SET LOCAL needs a transaction to mean anything, and the worker connection
+    // carries a much shorter deadline than a whole-database summary needs.
+    // Nobody is waiting on this one.
+    await client.query('BEGIN');
+    await client.query("SET LOCAL statement_timeout = '300s'");
+    await client.query("SET LOCAL lock_timeout = '5s'");
+    const result = await client.query('select prospect_operations.refresh_dashboard_snapshots_v1() as refreshed');
+    await client.query('COMMIT');
+    const refreshed = Number(result.rows[0]?.refreshed ?? 0);
+    if (refreshed) console.log(JSON.stringify({ event: 'dashboard_snapshot', refreshed, durationMs: Math.round(performance.now() - started) }));
+    markProgress();
+  } catch (error) {
+    // A stale summary is not worth failing the worker over; the tab keeps
+    // serving the previous one and says when it was computed.
+    try { await client.query('ROLLBACK'); } catch { /* The main loop handles a dead connection. */ }
+    console.error('Dashboard snapshot refresh failed', { code: error.code ?? 'unknown' });
+  } finally { activeWork = ''; }
+}
+
 async function main() {
   await client.connect();
   await client.query(`set statement_timeout = '${statementTimeout}'`);
@@ -89,6 +119,7 @@ async function main() {
   while (!stopping) {
     const progressed = await round();
     if (!stopping) await runRetention();
+    if (!stopping) await runSnapshots();
     if (!progressed && !stopping) await wait(idleDelayMs);
   }
 }

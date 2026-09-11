@@ -18,9 +18,12 @@ export async function GET(request: Request) {
 async function qualitySummary(request: Request) {
   const supabase = createAdminClient();
   const signal = request.signal ?? AbortSignal.timeout(120_000);
+  // Read, do not compute. Both of these scan the whole database - 12.2s and
+  // 13.3s today, and past their own ceilings at 10M rows - so the operations
+  // worker computes them once per data version and this reads one row each.
   const [quality, drift] = await Promise.all([
-    supabase.rpc("data_quality_overview").abortSignal(signal),
-    supabase.rpc("prospect_index_drift").abortSignal(signal),
+    supabase.rpc("dashboard_snapshot_v1", { p_key: "dataQuality" }).abortSignal(signal),
+    supabase.rpc("dashboard_snapshot_v1", { p_key: "indexDrift" }).abortSignal(signal),
   ]);
   if (isStatementTimeout(quality.error)) {
     return statementTimeoutResponse("The data quality summary", "Try again when imports have finished.");
@@ -28,9 +31,15 @@ async function qualitySummary(request: Request) {
   if (quality.error) return Response.json({ error: quality.error.message }, { status: 500 });
   // Drift reporting is additive: an older database still returns the quality
   // overview rather than failing the whole page.
+  const snapshot = (result: { data?: unknown }) => (result.data as { payload?: unknown } | null)?.payload ?? null;
+  const computedAt = (result: { data?: unknown }) => (result.data as { computedAt?: string } | null)?.computedAt ?? null;
   return Response.json({
-    quality: quality.data ?? {},
-    drift: drift.error ? null : drift.data ?? null,
+    quality: snapshot(quality) ?? {},
+    drift: drift.error ? null : snapshot(drift),
+    // Said plainly rather than implied: after an import these lag by one
+    // refresh cycle, and the tab can show as-of rather than pretending it is live.
+    computedAt: computedAt(quality),
+    current: (quality.data as { current?: boolean } | null)?.current ?? null,
   });
 }
 

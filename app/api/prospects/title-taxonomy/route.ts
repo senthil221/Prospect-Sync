@@ -18,8 +18,18 @@ export async function GET(request: Request) {
   const clientId = (new URL(request.url).searchParams.get("clientId") ?? "").trim();
 
   return withInteractiveSlot(request, async () => {
-    const { data, error } = await createAdminClient()
-      .rpc("prospect_title_taxonomy_v1", { p_client_id: clientId || null });
+    const supabase = createAdminClient();
+    // The master-wide taxonomy is the same answer for everyone and costs a full
+    // scan (2.3s now, past its 30s ceiling at 10M), so it is read from the
+    // snapshot. A client-scoped one is not snapshotted - it is per workspace,
+    // and narrower, so it still computes.
+    const { data, error } = clientId
+      ? await supabase.rpc("prospect_title_taxonomy_v1", { p_client_id: clientId })
+      : await supabase.rpc("dashboard_snapshot_v1", { p_key: "titleTaxonomy" })
+        .then((result) => ({
+          ...result,
+          data: (result.data as { payload?: unknown } | null)?.payload ?? null,
+        }));
     if (error) {
       // Additive: a database one migration behind returns an empty taxonomy, and
       // the panel falls back to its plain value box rather than failing to open.
