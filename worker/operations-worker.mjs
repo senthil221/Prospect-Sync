@@ -21,6 +21,7 @@ const retentionIntervalMs = setting('OPERATIONS_RETENTION_MS', 5000, 1000, 86400
 // worst-case lag after a write, not a fixed cost.
 const snapshotIntervalMs = setting('OPERATIONS_SNAPSHOT_MS', 300000, 10000, 3600000);
 let lastSnapshotAt = 0;
+let lastJanitorAt = 0;
 const statementTimeout = pgInterval(process.env.OPERATIONS_STATEMENT_TIMEOUT, "120s", "OPERATIONS_STATEMENT_TIMEOUT");
 const timeoutParts = /^(\d+)(ms|s|min|h)$/.exec(statementTimeout);
 const timeoutMs = Number(timeoutParts[1]) * ({ ms: 1, s: 1000, min: 60000, h: 3600000 }[timeoutParts[2]]);
@@ -74,6 +75,27 @@ async function runRetention() {
   finally { activeWork = ''; }
 }
 
+async function runImportJanitor() {
+  if (Date.now() - lastJanitorAt < snapshotIntervalMs) return;
+  lastJanitorAt = Date.now();
+  // Separate transaction from the snapshots on purpose: a failure to close an
+  // abandoned import must not roll back a refreshed dashboard, and neither
+  // should wait on the other.
+  try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL statement_timeout = '30s'");
+    await client.query("SET LOCAL lock_timeout = '5s'");
+    const result = await client.query('select public.expire_abandoned_company_imports_v1(24, 50) as expired');
+    await client.query('COMMIT');
+    const expired = Number(result.rows[0]?.expired ?? 0);
+    // Only worth a line when it did something; the normal case is zero.
+    if (expired) console.log(JSON.stringify({ event: 'company_imports_expired', expired }));
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch { /* The main loop handles a dead connection. */ }
+    console.error('Abandoned import sweep failed', { code: error.code ?? 'unknown' });
+  }
+}
+
 async function runSnapshots() {
   if (Date.now() - lastSnapshotAt < snapshotIntervalMs) return;
   lastSnapshotAt = Date.now();
@@ -120,6 +142,7 @@ async function main() {
     const progressed = await round();
     if (!stopping) await runRetention();
     if (!stopping) await runSnapshots();
+    if (!stopping) await runImportJanitor();
     if (!progressed && !stopping) await wait(idleDelayMs);
   }
 }
