@@ -1,5 +1,6 @@
 import { configuredInteger, createAdmissionQueue } from './bounded-admission.ts';
 import { recordRequest, routeOf } from './observability.ts';
+import { logServerEvent } from './server-log.ts';
 
 // PostgREST's pool is 24. Two app slots can overlap during blue/green releases.
 // This leaves headroom for other REST callers; Auth and Storage have their own
@@ -57,6 +58,18 @@ async function withSlot(queue: { acquire: typeof acquireSlot }, request: Request
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   } catch (error) {
     recordRequest(route, 500, performance.now() - startedAt, { requestId, admissionMs });
+    // recordRequest stores the status and the admission wait, and nothing about
+    // WHY. Five /api/companies 500s on 13-14 Sep 2026 left only
+    // {"admissionMs": 0} in system_event_log and never appeared in the
+    // PostgREST error log either, which made them unattributable after the
+    // fact - the cause had been thrown straight past the only thing recording
+    // anything. This covers every slot-guarded route, not just companies.
+    const thrown = error as { message?: string; code?: string; name?: string; stack?: string };
+    logServerEvent({
+      level: "error", source: "api", route, statusCode: 500, requestId,
+      message: `${route} threw ${thrown?.name ?? "Error"}: ${thrown?.message ?? "unknown"}`,
+      detail: { code: thrown?.code ?? null, stack: thrown?.stack?.slice(0, 2000) ?? null },
+    });
     throw error;
   } finally { release?.(); }
 }

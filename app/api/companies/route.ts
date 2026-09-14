@@ -1,6 +1,6 @@
 import { acquireSlot, withInteractiveSlot } from "../../../lib/admission";
 import { authorizeFilterSets } from "../../../lib/filter-sets";
-import { isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
+import { databaseErrorResponse, isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
 import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { availableCompanyExportFieldIds, buildCompanyExportColumns, companyExportRowKeys } from "../../../lib/company-export";
 import { csvHeaderLine, csvRowsBody, type ProspectRow } from "../../../lib/prospect-export";
@@ -154,7 +154,7 @@ async function streamCompanyExport(
     if (missingCompanyExportCodes.has(first.error.code ?? "")) {
       return { response: Response.json({ error: "Apply the latest database migration to enable company exports." }, { status: 503 }) };
     }
-    return { response: Response.json({ error: first.error.message }, { status: 500 }) };
+    return { response: databaseErrorResponse("The company export", first.error) };
   }
 
   const cursorAfter = (rows: Row[], previous: Cursor): Cursor => {
@@ -317,7 +317,7 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
     const summary = Array.isArray(data) ? data[0] : data;
     let companies;
     try { companies = await withClientIcpValidation(supabase, summary?.result_rows ?? [], clientId); }
-    catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to load company verification." }, { status: 500 }); }
+    catch (error) { return databaseErrorResponse("Company ICP verification", error as { message?: string; code?: string }); }
     return Response.json({ companies, total: Number(summary?.total_count ?? 0), totalCapped: Boolean(summary?.total_capped), covered: Number(summary?.covered_count ?? 0), prospectTotal: Number(summary?.prospect_count ?? 0), page, pageSize });
   }
 
@@ -358,7 +358,7 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
     const summary = Array.isArray(data) ? data[0] : data;
     let companies;
     try { companies = await withClientIcpValidation(supabase, summary?.result_rows ?? [], clientId); }
-    catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Unable to load company validation." }, { status: 500 }); }
+    catch (error) { return databaseErrorResponse("Company ICP validation", error as { message?: string; code?: string }); }
     // Counting companies is exact now, not capped at 50,000, so the answer is
     // worth reusing: null means "you already have this count and the data has
     // not moved", and the client fills it from its own cache. Only null when the
@@ -397,7 +397,7 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
   if (isStatementTimeout(failure)) {
     return statementTimeoutResponse("The company directory", "Search for a name or domain to narrow it.");
   }
-  if (failure) return Response.json({ error: failure.message }, { status: 500 });
+  if (failure) return databaseErrorResponse("The company directory", failure);
   return Response.json({
     companies: companies.data ?? [],
     total: Number(companies.count ?? 0),

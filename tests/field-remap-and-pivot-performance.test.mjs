@@ -6,6 +6,7 @@ import { requiredPersonImportFields } from "../lib/import-schema.ts";
 const migrationUrl = new URL("../supabase/migrations/20260812221326_remap_required_fields_and_fast_company_people.sql", import.meta.url);
 const narrowMigrationUrl = new URL("../supabase/migrations/20260812222615_narrow_company_people_pivot_rows.sql", import.meta.url);
 const completionMigrationUrl = new URL("../supabase/migrations/20260812223310_complete_company_import_and_refresh_index.sql", import.meta.url);
+const completionFixUrl = new URL("../supabase/migrations/20260914090000_company_import_completion_stops_rolling_back.sql", import.meta.url);
 
 test("employee count aliases map into the fixed company import field", async () => {
   const [normalizer, schema, migration] = await Promise.all([
@@ -61,13 +62,52 @@ test("people and company imports enforce the fixed schemas", async () => {
   assert.match(companyChunk, /technologies/);
 });
 
-test("completing a company import refreshes company-derived prospect filters", async () => {
-  const [route, migration] = await Promise.all([
+// The original of this test asserted that completion rebuilt prospect_index
+// inline, against the 20260812223310 migration that introduced it. That is the
+// behaviour 20260914090000 removed - one transaction doing the status flip and
+// a 131,769-row index rewrite, where a timeout rolled back both and left the
+// import unfinishable. Pointed at the historical file the assertions kept
+// passing while describing something the database no longer does, so it is
+// retargeted rather than deleted: the company columns still have to reach
+// prospect_index, just not inside the user's request.
+test("completing a company import queues its re-index instead of rebuilding inline", async () => {
+  const [route, migration, historical] = await Promise.all([
     readFile(new URL("../app/api/company-imports/complete/route.ts", import.meta.url), "utf8"),
+    readFile(completionFixUrl, "utf8"),
     readFile(completionMigrationUrl, "utf8"),
   ]);
+  // The behaviour that used to be asserted here, kept as the record of what
+  // changed and why the retarget was needed.
+  assert.match(historical, /update public\.prospect_index pi/);
+
   assert.match(route, /complete_company_import_v1/);
-  assert.match(migration, /update public\.prospect_index pi/);
-  assert.match(migration, /employee_count_min = c\.employee_count_min/);
-  assert.match(migration, /company_location = coalesce\(c\.location, ''\)/);
+  assert.match(route, /reindexCompanyImport/);
+  assert.match(migration, /create or replace function public\.queue_company_import_reindex_v1/);
+  assert.match(migration, /insert into public\.reindex_backlog/);
+  // The status flip must no longer share a transaction with an index rebuild.
+  // Asserted against the installed function rather than this file's text: the
+  // header quotes the old UPDATE while explaining what it removed, so a naive
+  // doesNotMatch on the source would fail on the explanation itself.
+  assert.match(migration, /if v_def ilike '%update public\.prospect_index%' then/);
+  assert.match(migration, /raise exception 'complete_company_import_v1 still rebuilds prospect_index inline'/);
+  // A queue with nothing draining it is a slower way to be stale.
+  assert.match(migration, /grant execute on function public\.drain_reindex_backlog\(integer\) to prospect_operator/);
+});
+
+test("the operations worker drains the re-index backlog", async () => {
+  const worker = await readFile(new URL("../worker/operations-worker.mjs", import.meta.url), "utf8");
+  assert.match(worker, /drain_reindex_backlog\(2000\)/);
+  assert.match(worker, /runReindexDrain\(\)/);
+  assert.match(worker, /event: 'reindex_drain'/);
+});
+
+// reindex_scope_v1 resolves p_import_ids through list_rows, a People-import
+// concept, so a company import id matches nothing and it returns 0 with no
+// error. Anything that "simplifies" the helper back onto reindexScope
+// reintroduces a silent no-op, so the warning is pinned by a test.
+test("company import re-index does not go through the list-based scope resolver", async () => {
+  const reindex = await readFile(new URL("../lib/reindex.ts", import.meta.url), "utf8");
+  assert.match(reindex, /export async function reindexCompanyImport/);
+  assert.match(reindex, /queue_company_import_reindex_v1/);
+  assert.match(reindex, /DO NOT reach for reindexScope\(\{ importIds \}\)/);
 });

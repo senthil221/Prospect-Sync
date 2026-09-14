@@ -271,6 +271,48 @@ with checks(sort_key, area, check_name, ok, detail) as (
       where n.nspname = 'public' and p.prosecdef
         and (p.proname like 'search\_%' or p.proname like '%\_filter\_values%' or p.proname like 'filter\_companies%')
         and not coalesce(array_to_string(p.proconfig, ',') like '%statement_timeout%', false)), '')
+
+  -- 10. Company import completion (20260914090000).
+  --
+  -- Completion used to flip the import status and rewrite prospect_index in one
+  -- transaction; a 57014 rolled back both and left the import unfinishable.
+  -- 140-142 assert it stayed split. 143 is the one that matters most: without
+  -- the prospect_operator grant the queue fills and nothing empties it, and the
+  -- only symptom is search results quietly going stale.
+  union all
+  select 140, 'import', 'complete_company_import_v1 no longer rebuilds prospect_index inline',
+    coalesce(pg_get_functiondef(to_regprocedure('public.complete_company_import_v1(text)'))
+      not ilike '%update public.prospect_index%', false),
+    coalesce((select array_to_string(proconfig, ', ')
+      from pg_proc where oid = to_regprocedure('public.complete_company_import_v1(text)')), 'function missing')
+
+  union all
+  select 141, 'import', 'complete_company_import_v1 kept its pinned search_path and a timeout',
+    coalesce((select array_to_string(proconfig, ',') like '%search_path=%'
+                and array_to_string(proconfig, ',') like '%statement_timeout=%'
+      from pg_proc where oid = to_regprocedure('public.complete_company_import_v1(text)')), false),
+    coalesce((select array_to_string(proconfig, ', ')
+      from pg_proc where oid = to_regprocedure('public.complete_company_import_v1(text)')), 'function missing')
+
+  union all
+  select 142, 'import', 'queue_company_import_reindex_v1 exists and is bounded',
+    to_regprocedure('public.queue_company_import_reindex_v1(text,text,integer)') is not null,
+    coalesce((select array_to_string(proconfig, ', ')
+      from pg_proc where oid = to_regprocedure('public.queue_company_import_reindex_v1(text,text,integer)')), 'function missing')
+
+  union all
+  select 143, 'reindex', 'the operations worker can drain the reindex backlog',
+    coalesce(has_function_privilege('prospect_operator', 'public.drain_reindex_backlog(integer)', 'EXECUTE'), false),
+    'prospect_ops_worker inherits prospect_operator and has service_role revoked'
+
+  -- Not a schema assertion: a backlog whose oldest row is days old means the
+  -- drain is not running, which no amount of correct DDL would reveal.
+  union all
+  select 144, 'reindex', 'nothing has been stuck in the reindex backlog for over a day',
+    coalesce((select min(enqueued_at) > now() - interval '1 day' from public.reindex_backlog), true),
+    coalesce((select 'queued=' || count(*) || ', failing=' || count(*) filter (where attempts > 0)
+      || ', oldest=' || coalesce(min(enqueued_at)::text, 'none')
+      from public.reindex_backlog), 'table missing')
 )
 select
   area,

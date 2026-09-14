@@ -90,6 +90,62 @@ export async function reindexScope(supabase: Admin, scope: {
   };
 }
 
+// Re-index everything a COMPANY import touched.
+//
+// DO NOT reach for reindexScope({ importIds }) here. reindex_scope_v1 resolves
+// p_import_ids through public.list_rows, which is a People-import concept: a
+// company import id matches nothing there, so it returns reindexed: 0 with no
+// error at all. Silent success is the worst possible failure for an index
+// refresh, and it is one rename away from happening again.
+//
+// Queue first, then drain. Queueing is a narrow insert measured at ~2s for the
+// 131,769 prospects of a 12,498-company import; draining is the expensive half
+// and is bounded per call so it can be abandoned and resumed. The operations
+// worker drains continuously, so finishing here is an accelerator, not the
+// guarantee - which is why running out of budget is not an error.
+export async function reindexCompanyImport(
+  supabase: Admin,
+  importId: string,
+  budgetMs = 45_000,
+): Promise<ReindexOutcome & { remaining: number }> {
+  const deadline = Date.now() + budgetMs;
+  const pageSize = 25_000;
+  let queued = 0;
+  let reindexed = 0;
+  let remaining = 0;
+  let degraded = false;
+  let cursor = "";
+
+  for (let page = 0; page < 200; page += 1) {
+    const { data, error } = await supabase.rpc("queue_company_import_reindex_v1", {
+      p_import_id: importId, p_after_prospect_id: cursor, p_limit: pageSize,
+    });
+    if (error) { degraded = true; break; }
+    const row = Array.isArray(data) ? data[0] : data;
+    const added = Number(row?.queued ?? 0);
+    queued += added;
+    cursor = String(row?.last_prospect_id ?? cursor);
+    if (added < pageSize) break;
+    if (Date.now() > deadline) break;
+  }
+
+  // Same stop conditions as the Data Quality re-index button: no progress means
+  // the queue is empty or every row in it is failing, and either way spinning
+  // helps nobody.
+  for (let pass = 0; pass < 25; pass += 1) {
+    if (Date.now() > deadline) break;
+    const { data, error } = await supabase.rpc("drain_reindex_backlog", { p_limit: 2000 });
+    if (error) { if (!isBenign(error)) degraded = true; break; }
+    const row = Array.isArray(data) ? data[0] : data;
+    const done = Number(row?.processed ?? 0);
+    remaining = Number(row?.remaining ?? 0);
+    reindexed += done;
+    if (!done || !remaining) break;
+  }
+
+  return { reindexed, queued, remaining, degraded };
+}
+
 export async function reindexProspectsOfLists(supabase: Admin, listIds: Array<string | null | undefined>) {
   return reindexScope(supabase, { listIds });
 }

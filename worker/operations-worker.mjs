@@ -22,6 +22,10 @@ const retentionIntervalMs = setting('OPERATIONS_RETENTION_MS', 5000, 1000, 86400
 const snapshotIntervalMs = setting('OPERATIONS_SNAPSHOT_MS', 300000, 10000, 3600000);
 let lastSnapshotAt = 0;
 let lastJanitorAt = 0;
+// The backlog is usually empty, so this is a cheap poll; it only has real work
+// to do just after a company import or a bulk client change.
+const reindexDrainIntervalMs = setting('OPERATIONS_REINDEX_MS', 15000, 1000, 600000);
+let lastReindexDrainAt = 0;
 const statementTimeout = pgInterval(process.env.OPERATIONS_STATEMENT_TIMEOUT, "120s", "OPERATIONS_STATEMENT_TIMEOUT");
 const timeoutParts = /^(\d+)(ms|s|min|h)$/.exec(statementTimeout);
 const timeoutMs = Number(timeoutParts[1]) * ({ ms: 1, s: 1000, min: 60000, h: 3600000 }[timeoutParts[2]]);
@@ -96,6 +100,39 @@ async function runImportJanitor() {
   }
 }
 
+// Drain the re-index backlog.
+//
+// Before this existed the ONLY caller of drain_reindex_backlog anywhere was the
+// Re-index button in Data Quality, so anything queued sat there until a human
+// noticed. Company import completion now queues instead of rebuilding inline
+// (20260914090000), which only works if something empties the queue. This is
+// that something.
+//
+// One bounded unit per pass, deliberately: looping to empty here would starve
+// run_queue_unit_v1 behind a 131,769-row backlog.
+async function runReindexDrain() {
+  if (Date.now() - lastReindexDrainAt < reindexDrainIntervalMs) return;
+  lastReindexDrainAt = Date.now();
+  try {
+    await client.query('BEGIN');
+    await client.query("SET LOCAL statement_timeout = '60s'");
+    await client.query("SET LOCAL lock_timeout = '5s'");
+    const result = await client.query('select * from public.drain_reindex_backlog(2000)');
+    await client.query('COMMIT');
+    const processed = Number(result.rows[0]?.processed ?? 0);
+    const remaining = Number(result.rows[0]?.remaining ?? 0);
+    // Only worth a line when it did something; the normal case is an empty queue.
+    if (processed) console.log(JSON.stringify({ event: 'reindex_drain', processed, remaining }));
+    if (processed) markProgress();
+  } catch (error) {
+    // A lagging index is not worth failing the worker over - the rows stay
+    // queued, drain_reindex_backlog records why on each one, and the next pass
+    // retries them.
+    try { await client.query('ROLLBACK'); } catch { /* The main loop handles a dead connection. */ }
+    console.error('Reindex backlog drain failed', { code: error.code ?? 'unknown' });
+  }
+}
+
 async function runSnapshots() {
   if (Date.now() - lastSnapshotAt < snapshotIntervalMs) return;
   lastSnapshotAt = Date.now();
@@ -128,6 +165,15 @@ async function main() {
   // Fail readiness before serving health if the compatible schema is absent.
   await client.query("select 'prospect_operations.run_queue_unit_v1(text,text,integer)'::regprocedure");
   await client.query("select 'prospect_operations.reclaim_unit_v1(text,integer)'::regprocedure");
+  // Soft on purpose. Draining the re-index backlog is secondary work, and a
+  // worker deployed a few minutes ahead of 20260914090000 - or without the
+  // prospect_operator grant - should still run queues rather than refuse to
+  // start. The line in the log is how that gets noticed.
+  try {
+    await client.query("select 'public.drain_reindex_backlog(integer)'::regprocedure");
+  } catch (error) {
+    console.error('Reindex backlog drain unavailable; the search index will lag until this is resolved', { code: error.code ?? 'unknown' });
+  }
   connected = true;
   console.log(JSON.stringify({ event: 'worker_started', scheduler: 'atomic-round-v1', statementTimeout, batchSize, applyBatchSize, exportBatchSize }));
   const round = createFairScheduler({ classes: ['search', 'operation', 'export'], runUnit,
@@ -143,6 +189,7 @@ async function main() {
     if (!stopping) await runRetention();
     if (!stopping) await runSnapshots();
     if (!stopping) await runImportJanitor();
+    if (!stopping) await runReindexDrain();
     if (!progressed && !stopping) await wait(idleDelayMs);
   }
 }
