@@ -148,3 +148,18 @@ test("total funding filters by range and by not-known, not by substring", async 
   assert.match(migration, /total_funding_amount >= %s::bigint/);
   assert.match(migration, /a funding bound above the integer range did not compile/);
 });
+
+// Master-DB tagging must name the global tag explicitly.
+//
+// prospect_tags stopped being globally unique in 20260825040000 - one name key
+// became two partial unique indexes, (client_id, lower(name)) and lower(name)
+// where client_id is null. An unqualified .eq("name", ...).maybeSingle() can
+// therefore match a global tag and a client tag of the same name and answer
+// PGRST116, turning a tag action into a 500. Client ICP tags are what populate
+// that table, so this guard goes in before them.
+test("the master tag action is scoped to agency-wide tags", async () => {
+  const route = await readFile(new URL("../app/api/operations/route.ts", import.meta.url), "utf8");
+  assert.match(route, /from\("prospect_tags"\)\.select\("id"\)\.eq\("name", tagName\)\.is\("client_id", null\)/);
+  // And the row it creates is explicitly global rather than global by omission.
+  assert.match(route, /insert\(\{ id: tagId, name: tagName, client_id: null \}\)/);
+});

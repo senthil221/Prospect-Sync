@@ -69,11 +69,25 @@ export async function POST(request: Request) {
   if (payload.action === "tag") {
     const tagName = String(payload.tagName ?? "").trim().slice(0, 60);
     if (!tagName) return Response.json({ error: "Tag name is required." }, { status: 400 });
-    const existing = await supabase.from("prospect_tags").select("id").eq("name", tagName).maybeSingle();
+    // This is the MASTER People DB, so it reads and writes agency-wide tags -
+    // the ones with no client_id. Both halves of that have to be said.
+    //
+    // prospect_tags stopped being globally unique in 20260825040000: the single
+    // name key became two partial unique indexes, (client_id, lower(name)) for
+    // client tags and lower(name) for global ones. An unqualified lookup on
+    // name can therefore match more than one row - a global "Hot" alongside one
+    // client's "Hot" - and .maybeSingle() answers PGRST116, so tagging failed
+    // with a 500 rather than tagging anything. Nothing has hit it yet because
+    // production carries exactly one tag and no client-scoped ones, but client
+    // ICP tags are precisely what would populate that table.
+    //
+    // The insert needs the same qualification: without client_id the new row is
+    // global by default, which is right here, but only because it is explicit.
+    const existing = await supabase.from("prospect_tags").select("id").eq("name", tagName).is("client_id", null).maybeSingle();
     if (existing.error) return Response.json({ error: existing.error.message }, { status: 500 });
     const tagId = existing.data?.id ?? crypto.randomUUID();
     if (!existing.data) {
-      const created = await supabase.from("prospect_tags").insert({ id: tagId, name: tagName });
+      const created = await supabase.from("prospect_tags").insert({ id: tagId, name: tagName, client_id: null });
       if (created.error) return Response.json({ error: created.error.message }, { status: 500 });
     }
     const result = await supabase.from("prospect_tag_links").upsert(prospectIds.map((prospectId) => ({ prospect_id: prospectId, tag_id: tagId })), { onConflict: "prospect_id,tag_id", ignoreDuplicates: true });
