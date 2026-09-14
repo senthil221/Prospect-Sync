@@ -20,7 +20,7 @@ const allowedOperators = new Set<string>([
 ]);
 
 const companyKeywordScopes = new Set(["name", "keywords", "description"]);
-const defaultCompanyKeywordScopes = ["name", "keywords"];
+const defaultCompanyKeywordScopes = ["name", "keywords", "description"];
 
 // A pasted spreadsheet column is routinely hundreds of domains long. The old cap
 // of 50 silently discarded everything past the fiftieth value, so a 500-domain

@@ -21,7 +21,7 @@ type CompanyFilterDefinition = {
 
 // Every one of these maps to a real companies column populated on import.
 const companyFilters: CompanyFilterDefinition[] = [
-  { id: "__company_keywords", label: "Company keywords", kind: "company_keywords", description: "Search company names and keywords together. Add description when you want broader coverage." },
+  { id: "__company_keywords", label: "Company keywords", kind: "company_keywords", description: "Searches company names, keywords and descriptions together. Untick description to narrow it." },
   { id: "__company", label: "Company name only", kind: "text", autocomplete: true, description: "Use for known accounts or imported company-name lists. Simple include/exclude and Boolean search are supported." },
   { id: "__website", label: "Website", kind: "token", autocomplete: true, description: "Matches the company domain. Use the Bulk domains tab to paste a list." },
   { id: "__industry", label: "Industry", kind: "token", autocomplete: true },
@@ -200,7 +200,7 @@ const companyKeywordScopeOptions: Array<{ id: CompanyKeywordScope; label: string
 ];
 
 function CompanyKeywordFilter({ filters, onChange }: { filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void }) {
-  const initialScopes = filters.find((filter) => filter.scopes?.length)?.scopes ?? ["name", "keywords"];
+  const initialScopes = filters.find((filter) => filter.scopes?.length)?.scopes ?? ["name", "keywords", "description"];
   const [scopes, setScopes] = useState<CompanyKeywordScope[]>(initialScopes);
 
   function updateScopes(scope: CompanyKeywordScope) {
@@ -219,7 +219,7 @@ function CompanyKeywordFilter({ filters, onChange }: { filters: ProspectFilter[]
         <span>{option.label}{option.note ? <small>{option.note}</small> : null}</span>
       </label>)}
     </fieldset>
-    <p className="company-keyword-scope-note">Selected fields are searched together. Description increases recall and may return more companies.</p>
+    <p className="company-keyword-scope-note">Selected fields are searched together. Description is on by default for wider coverage; untick it to return fewer, closer matches.</p>
     {/* Without an explicit endpoint TokenValuePicker falls back to the PEOPLE
         one, so typing here asked prospect_filter_values_v3 for a company field.
         It has no case for it, so every keystroke scanned 674k prospect_index

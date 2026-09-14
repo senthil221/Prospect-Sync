@@ -87,7 +87,7 @@ test("person geography is retired while company geography remains available", as
   assert.doesNotMatch(schema, /Company Location \(or/);
 });
 
-test("company keyword search defaults to name and keywords with optional description", async () => {
+test("company keyword search defaults to name, keywords and description", async () => {
   const [panel, transport, migration] = await Promise.all([
     readFile(new URL("../app/CompanyFilterPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/dashboard-api.ts", import.meta.url), "utf8"),
@@ -95,10 +95,10 @@ test("company keyword search defaults to name and keywords with optional descrip
   ]);
 
   assert.match(panel, /id: "__company_keywords", label: "Company keywords"/);
-  assert.match(panel, /\["name", "keywords"\]/);
+  assert.match(panel, /\["name", "keywords", "description"\]/);
   assert.match(panel, /Company description/);
   assert.match(panel, /Broader coverage/);
-  assert.match(panel, /Description increases recall/);
+  assert.match(panel, /Description is on by default/);
   assert.match(panel, /Company name only/);
   assert.match(transport, /scopes\?\.length/);
   assert.match(migration, /when '__company_keywords' then concat_ws/);
