@@ -107,3 +107,44 @@ test("company keyword search defaults to name, keywords and description", async 
   assert.match(migration, /array_append\(scope_parts, 'c\.name'\)/);
   assert.doesNotMatch(migration, /scope_parts := scope_parts \|\|/);
 });
+
+// Total funding is a range with a "Not known" option, not a text box.
+//
+// Verified against production on 2026-09-15 by compiling each band through
+// company_filter_sql_v3 and counting: unknown -> 410,634, and the seven bands
+// sum to exactly 8,887, which is every company carrying a parseable funding
+// figure. No overlaps and no gaps, so the bands partition the funded set.
+test("total funding filters by range and by not-known, not by substring", async () => {
+  const [panel, migration] = await Promise.all([
+    readFile(new URL("../app/CompanyFilterPanel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260915090000_total_funding_is_a_range_not_a_string.sql", import.meta.url), "utf8"),
+  ]);
+
+  // A token filter would match 10000000 inside 110000000; a range cannot.
+  assert.match(panel, /id: "__total_funding", label: "Total funding", kind: "funding"/);
+  assert.match(panel, /presets=\{fundingRanges\} unknownLabel="Funding is not known"/);
+  // Open-ended top band: production's maximum is 178 billion.
+  assert.match(panel, /\["500000001:", "\$500M\+"\]/);
+
+  // The column, kept true by a trigger rather than by whoever remembers to set
+  // it, and indexed only where it is non-null (98% of rows are null).
+  assert.match(migration, /add column if not exists total_funding_amount bigint/);
+  assert.match(migration, /create trigger companies_total_funding_amount_sync/);
+  assert.match(migration, /where total_funding_amount is not null/);
+
+  // Both filter paths are patched, and each splice raises if its anchor moved -
+  // a silently missed patch would leave the SQL builder and the row matcher
+  // disagreeing, which returns wrong answers rather than errors.
+  for (const guard of [
+    /raise exception 'Could not patch company_filter_sql_v3 funding unknown branch'/,
+    /raise exception 'Could not patch company_filter_sql_v3 funding range branch'/,
+    /raise exception 'Could not patch company_matches_filters_v1 range bounds'/,
+    /raise exception 'Could not patch company_matches_filters_v1 funding clause'/,
+  ]) assert.match(migration, guard);
+
+  // Funding parses its own bigint bounds; the shared ones are ::integer and
+  // would raise 22003 on anything past 2,147,483,647.
+  assert.match(migration, /minimum_big/);
+  assert.match(migration, /total_funding_amount >= %s::bigint/);
+  assert.match(migration, /a funding bound above the integer range did not compile/);
+});

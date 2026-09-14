@@ -10,7 +10,7 @@ import { AppIcon } from "./components/DashboardUi";
 
 const COMPANY_VALUES_ENDPOINT = "/api/companies/filter-values";
 
-type CompanyFieldKind = "company_keywords" | "text" | "token" | "employee" | "year";
+type CompanyFieldKind = "company_keywords" | "text" | "token" | "employee" | "year" | "funding";
 type CompanyFilterDefinition = {
   id: string;
   label: string;
@@ -29,7 +29,7 @@ const companyFilters: CompanyFilterDefinition[] = [
   { id: "__company_location", label: "Company location", kind: "token", autocomplete: true, description: "One field for city, state and country - e.g. “London”, “California”, “India”." },
   { id: "__founded_year", label: "Founded year", kind: "year" },
   { id: "__technologies", label: "Technologies", kind: "token", autocomplete: true },
-  { id: "__total_funding", label: "Total funding", kind: "token", autocomplete: true },
+  { id: "__total_funding", label: "Total funding", kind: "funding", description: "Ranges over the funding amount. Most companies carry no funding figure, so Not known is by far the largest group." },
 ];
 
 // Company city / state / country are deliberately NOT filters. "Company
@@ -48,6 +48,19 @@ const employeeRanges = [
 const foundedYearRanges = [
   ["2020:", "2020 or later"], ["2010:2019", "2010–2019"], ["2000:2009", "2000–2009"],
   ["1990:1999", "1990–1999"], ["1980:1989", "1980–1989"], ["0:1979", "Before 1980"],
+] as const;
+
+// Funding bands, in whole dollars because that is how the column stores it.
+//
+// Ranges are non-overlapping and the top one is open-ended: production's
+// maximum is 178 billion, which no closed band should have to anticipate.
+// Bounds above 2,147,483,647 are why the funding filter parses its own bigint
+// bounds rather than sharing the integer ones - see 20260915090000.
+const fundingRanges = [
+  ["0:1000000", "Up to $1M"], ["1000001:5000000", "$1M – $5M"],
+  ["5000001:10000000", "$5M – $10M"], ["10000001:50000000", "$10M – $50M"],
+  ["50000001:100000000", "$50M – $100M"], ["100000001:500000000", "$100M – $500M"],
+  ["500000001:", "$500M+"],
 ] as const;
 
 function activeCount(filters: ProspectFilter[]) {
@@ -161,6 +174,8 @@ export default function CompanyFilterPanel({ filters, onChange }: {
           ? <CompanyKeywordFilter key={fieldFilters.map((filter) => filter.scopes?.join("|") ?? "default").join(";") || "default"} filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "employee"
           ? <RangeFilter field={definition.id} filters={fieldFilters} presets={employeeRanges} unknownLabel="# of employees is unknown" onChange={(next) => replaceField(definition.id, next)} />
+          : definition.kind === "funding"
+          ? <RangeFilter field={definition.id} filters={fieldFilters} presets={fundingRanges} unknownLabel="Funding is not known" minPlaceholder="e.g. 1000000" maxPlaceholder="No maximum" onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "year"
             ? <RangeFilter field={definition.id} filters={fieldFilters} presets={foundedYearRanges} unknownLabel="Founded year is unknown" minPlaceholder="e.g. 2005" maxPlaceholder="e.g. 2015" onChange={(next) => replaceField(definition.id, next)} />
             : definition.kind === "text"
