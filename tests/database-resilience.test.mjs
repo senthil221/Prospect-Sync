@@ -84,3 +84,31 @@ test("debounces and cancels superseded workspace searches", async () => {
   assert.match(dashboard, /!isAbortError\(caught\)/);
   assert.match(dashboard, /const deferredSearch = useDeferredValue\(search\)/);
 });
+
+// A failed background import must be removable, not only retryable.
+//
+// The background panel rendered Retry as its only action, so a job that had
+// exhausted its automatic retries - "deadlock detected" on a 104,874-row file -
+// stayed in the panel permanently with no way to clear it. The DELETE route has
+// always accepted it: for ingestion_mode 'background' it treats queued,
+// processing AND failed as cancellable. Only the button was missing.
+test("a failed background import can be cancelled, not just retried", async () => {
+  const [panel, route] = await Promise.all([
+    readFile(new URL("../app/components/ImportsPanel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/imports/[id]/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  // The API contract this relies on.
+  assert.match(route, /ingestion_mode === "background"\s*\?\s*\["queued", "processing", "failed"\]\.includes\(existing\.data\.status\)/);
+
+  // The button exists for a failed job and goes through the same confirm dialog
+  // as an interrupted import, so the same "already-committed rows stay" wording
+  // is shown before anything is removed.
+  assert.match(panel, /item\.status === "failed" \|\| item\.status === "queued" \? <button className="interrupted-cancel"/);
+  assert.match(panel, /setCancelImport\(\{ id: item\.id, kind: "prospects"/);
+  // Cancelling clears it from the background list too, not only the
+  // interrupted one - otherwise the row stays on screen until a refresh.
+  assert.match(panel, /setBackgroundImports\(\(current\) => current\.filter\(\(item\) => item\.id !== cancelImport\.id\)\)/);
+  // A background job can be cancelled before its row count is known.
+  assert.match(panel, /cancelImport\.totalRows === null \?/);
+});

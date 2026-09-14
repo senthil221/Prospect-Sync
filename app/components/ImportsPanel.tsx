@@ -36,7 +36,14 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
   const [interruptedImports, setInterruptedImports] = useState<InterruptedImport[]>([]);
   const [backgroundImports, setBackgroundImports] = useState<BackgroundImport[]>([]);
   const [resumeImport, setResumeImport] = useState<InterruptedImport | null>(null);
-  const [cancelImport, setCancelImport] = useState<InterruptedImport | null>(null);
+  // The cancel dialog needs an id, something to call it, what has already
+  // committed, and which table it lives in - not a whole resumable import. A
+  // background job has no resume point, so it could never satisfy
+  // InterruptedImport, which is why cancelling one was unreachable from here.
+  const [cancelImport, setCancelImport] = useState<{
+    id: string; kind: "prospects" | "companies"; fileName: string;
+    committedRowOffset: number; totalRows: number | null;
+  } | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelError, setCancelError] = useState("");
   const [activeImportId, setActiveImportId] = useState("");
@@ -83,6 +90,7 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
     try {
       await api(`/api/imports/${encodeURIComponent(cancelImport.id)}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cancel: true, kind: cancelImport.kind }) });
       setInterruptedImports((current) => current.filter((item) => item.id !== cancelImport.id));
+      setBackgroundImports((current) => current.filter((item) => item.id !== cancelImport.id));
       if (resumeImport?.id === cancelImport.id) setResumeImport(null);
       setCancelImport(null);
       void onChanged().catch(() => undefined);
@@ -90,7 +98,12 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
     finally { setCancelBusy(false); }
   }
   return <section className="import-workspace">
-    {backgroundImports.length ? <div className="interrupted-imports panel"><div><p className="eyebrow">BACKGROUND IMPORTS</p><h3>Server-side processing</h3><p>These jobs continue even when this browser is closed.</p></div>{backgroundImports.map((item) => <div className="interrupted-import" key={item.id}><div><strong>{item.fileName}</strong><small>{item.status === "failed" ? `Failed after automatic retries - ${item.lastError}` : item.totalRows ? `${formatNumber(item.committedRowOffset)} of ${formatNumber(item.totalRows)} rows committed` : "Queued or validating the CSV"}</small></div><span className="interrupted-import-actions"><span>{item.status}</span>{item.status === "failed" ? <button className="secondary" onClick={() => void retryBackgroundImport(item.id)}>Retry</button> : null}</span></div>)}</div> : null}
+    {backgroundImports.length ? <div className="interrupted-imports panel"><div><p className="eyebrow">BACKGROUND IMPORTS</p><h3>Server-side processing</h3><p>These jobs continue even when this browser is closed.</p></div>{backgroundImports.map((item) => <div className="interrupted-import" key={item.id}><div><strong>{item.fileName}</strong><small>{item.status === "failed" ? `Failed after automatic retries - ${item.lastError}` : item.totalRows ? `${formatNumber(item.committedRowOffset)} of ${formatNumber(item.totalRows)} rows committed` : "Queued or validating the CSV"}</small></div><span className="interrupted-import-actions"><span>{item.status}</span>{item.status === "failed" ? <button className="secondary" onClick={() => void retryBackgroundImport(item.id)}>Retry</button> : null}{/* A background job that has failed its automatic retries is otherwise
+    unremovable from here: Retry was the only action, so a job that will never
+    succeed sat in the panel for good. The API has always allowed cancelling a
+    queued, processing or failed background import - only the button was
+    missing. Background ingestion is prospects-only, so the kind is fixed. */}
+{item.status === "failed" || item.status === "queued" ? <button className="interrupted-cancel" onClick={() => { setCancelError(""); setCancelImport({ id: item.id, kind: "prospects", fileName: item.fileName, committedRowOffset: item.committedRowOffset, totalRows: item.totalRows }); }}>Cancel import</button> : null}</span></div>)}</div> : null}
     {visibleInterruptedImports.length ? <div className="interrupted-imports panel"><div><p className="eyebrow">INTERRUPTED IMPORTS</p><h3>Continue an unfinished import</h3><p>Re-select the original file; committed rows will not be imported twice.</p></div>{visibleInterruptedImports.map((item) => <div className="interrupted-import" key={item.id}><div><strong>{item.fileName}</strong><small>Interrupted - resume from row {formatNumber(item.resumeFromRow)} of {formatNumber(item.totalRows)}</small></div><span className="interrupted-import-actions"><button className="secondary" onClick={() => chooseResume(item)}>Resume</button><button className="interrupted-cancel" onClick={() => { setCancelError(""); setCancelImport(item); }}>Cancel import</button></span></div>)}</div> : null}
     {resumeImport ? null : <ImportStepper current={step} furthest={furthest} onSelect={setStep}/>}
     {resumeImport || step !== "source" ? null : <div className="import-setup panel">
@@ -122,7 +135,7 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
     {kind === "prospects"
       ? <ProspectImportView key="prospects" clients={clients} dataSource={activeDataSource} step={step} onStep={goToStep} resumeImport={resumeImport?.kind === "prospects" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onComplete={onComplete}/>
       : <CompanyImportView key="companies" dataSource={activeDataSource} step={step} onStep={goToStep} resumeImport={resumeImport?.kind === "companies" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onActiveImportChange={setActiveImportId} onComplete={onComplete}/>}
-    {cancelImport ? <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-import-title"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="cancel-import-title">Cancel unfinished import?</h2><p>The unfinished session and any client-list links it created will be removed. Records already added to the People or Company database stay in place.</p><div className="delete-target"><strong>{cancelImport.fileName}</strong><span>{formatNumber(cancelImport.committedRowOffset)} of {formatNumber(cancelImport.totalRows)} rows committed</span></div>{cancelError ? <p className="form-error" role="alert">{cancelError}</p> : null}<div className="modal-actions"><button className="secondary" disabled={cancelBusy} onClick={() => setCancelImport(null)}>Keep import</button><button className="danger-button solid" disabled={cancelBusy} onClick={() => void confirmCancelImport()}>{cancelBusy ? "Cancelling…" : "Cancel import"}</button></div></section></div> : null}
+    {cancelImport ? <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-import-title"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="cancel-import-title">Cancel unfinished import?</h2><p>The unfinished session and any client-list links it created will be removed. Records already added to the People or Company database stay in place.</p><div className="delete-target"><strong>{cancelImport.fileName}</strong><span>{cancelImport.totalRows === null ? `${formatNumber(cancelImport.committedRowOffset)} rows committed` : `${formatNumber(cancelImport.committedRowOffset)} of ${formatNumber(cancelImport.totalRows)} rows committed`}</span></div>{cancelError ? <p className="form-error" role="alert">{cancelError}</p> : null}<div className="modal-actions"><button className="secondary" disabled={cancelBusy} onClick={() => setCancelImport(null)}>Keep import</button><button className="danger-button solid" disabled={cancelBusy} onClick={() => void confirmCancelImport()}>{cancelBusy ? "Cancelling…" : "Cancel import"}</button></div></section></div> : null}
   </section>;
 }
 
