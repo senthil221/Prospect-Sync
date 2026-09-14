@@ -155,6 +155,48 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
 
 
 /**
+ * The frame both CSV export dialogs are drawn in.
+ *
+ * EXPORT-01. The People and Companies export dialogs were two hand-rolled
+ * copies of the same backdrop-and-panel markup. Being copies, they drifted -
+ * and both of them skipped useDialogFocus, which every other dialog and drawer
+ * in the product uses. So both announced themselves to a screen reader as modal
+ * while none of it was true: Tab walked out into the table behind, Escape did
+ * nothing, the background stayed live, and closing dropped focus on <body>.
+ * They were the only two surfaces still in that state.
+ *
+ * Sharing the shell is also what makes "the same as the other one" a fact
+ * rather than a thing to keep re-checking: there is now one backdrop, one
+ * panel, one focus lifecycle, and the two dialogs differ only in the fields
+ * they list.
+ *
+ * `busy` is the running export: while one is streaming, Escape must not close
+ * the dialog out from under it - the same rule the delete dialogs follow once
+ * the delete is committed.
+ */
+export function ExportDialogShell({ titleId, busy = false, onClose, children }: {
+  titleId: string;
+  busy?: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const panel = useRef<HTMLElement>(null);
+  useDialogFocus(panel, { onClose, busy });
+  // The page behind a modal must not scroll. useDialogFocus makes the
+  // background inert, which stops Tab and pointer input but not the wheel.
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previous; };
+  }, []);
+  return <div className="modal-backdrop" role="presentation">
+    <section ref={panel} className="export-modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      {children}
+    </section>
+  </div>;
+}
+
+/**
  * The confirmation used for anything the shared DeleteConfirmation does not
  * already cover.
  *

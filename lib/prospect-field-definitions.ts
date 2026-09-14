@@ -42,4 +42,33 @@ export const standardProspectExportFields = [
   { id: "__last_contacted", label: "Last Contacted" }, { id: "__created_at", label: "Created At" }, { id: "__updated_at", label: "Updated At" },
 ];
 
-export const defaultProspectExportFields = ["__name", "__work_email", "__company", "__website", "__title", "__esp"];
+// What the People export picker offers, and nothing else.
+//
+// The picker used to list all 37 entries above plus every uploaded custom key,
+// which made choosing columns a job of its own and made two exports of "the
+// same" data rarely match. This is the agreed fixed set: eight fields, all
+// ticked, in this order.
+//
+// standardProspectExportFields is deliberately NOT deleted. It still resolves
+// values and headers for saved views, result sets and background exports queued
+// before this change, so a job that asked for Seniority or MX Status still gets
+// it - those columns are just no longer offered to pick.
+//
+// The labels here are the picker's, not the CSV's. __work_email writes a "Work
+// Email" header and is shown as "Email"; that split already existed and is kept
+// so downstream sheets keyed on the old headers do not break.
+export const prospectExportPickerFields = [
+  { id: "__first_name", label: "First Name" },
+  { id: "__last_name", label: "Last Name" },
+  { id: "__title", label: "Job Title" },
+  { id: "__work_email", label: "Email" },
+  { id: "__mobile_number", label: "Mobile Number" },
+  { id: "__linkedin", label: "Personal LinkedIn URL" },
+  { id: "__company", label: "Company Name" },
+  { id: "__website", label: "Website" },
+];
+
+// Every offered field, ticked. "Recommended" and the initial state are now the
+// same thing, which is the point - there is no shorter sensible subset of a
+// list this size.
+export const defaultProspectExportFields = prospectExportPickerFields.map((field) => field.id);

@@ -43,23 +43,29 @@ export type CompanyExportField = {
   bytes: number;
 };
 
+// buildCompanyExportColumns emits in THIS order, not in the order the caller
+// asked for its fields, so this list is the CSV's column order. The twelve
+// offered by the picker are kept at the top, in the order they appear there, so
+// the file reads the way the dialog does. Everything after them is still
+// resolvable for exports queued before the picker was fixed.
 export const companyExportFields: CompanyExportField[] = [
   { id: "__company_name", label: "Company Name", header: "Company Name", bytes: 32, value: (row) => String(row.name ?? "").trim() || String(row.domain ?? "").trim() || "Unnamed company" },
   { id: "__website", label: "Website", header: "Website", bytes: 34, value: (row) => companyWebsiteUrl(row.domain) },
-  { id: "__domain", label: "Domain (bare)", header: "Domain", bytes: 26, value: (row) => row.domain },
   { id: "__industry", label: "Industry", header: "Industry", bytes: 26, value: (row) => row.industry },
   { id: "__company_keywords", label: "Keywords", header: "Keywords", bytes: 320, value: (row) => arrayText(row.keywords) },
-  { id: "__short_description", label: "Description", header: "Description", bytes: 1000, value: (row) => row.short_description },
+  { id: "__short_description", label: "Short Description", header: "Short Description", bytes: 1000, value: (row) => row.short_description },
   { id: "__founded_year", label: "Founded Year", header: "Founded Year", bytes: 12, value: (row) => row.founded_year },
-  { id: "__technologies", label: "Technologies", header: "Technologies", bytes: 400, value: (row) => arrayText(row.technologies) },
-  { id: "__total_funding", label: "Total Funding", header: "Total Funding", bytes: 16, value: (row) => row.total_funding },
   { id: "__employee_count", label: "# Employees", header: "# Employees", bytes: 14, value: employeeCountText },
-  { id: "__employee_count_min", label: "Employee Count Min", header: "Employee Count Min", bytes: 12, value: (row) => row.employee_count_min },
-  { id: "__employee_count_max", label: "Employee Count Max", header: "Employee Count Max", bytes: 12, value: (row) => row.employee_count_max },
-  { id: "__company_location", label: "Company Location", header: "Company Location", bytes: 40, value: (row) => row.location },
   { id: "__company_city", label: "Company City", header: "Company City", bytes: 20, value: (row) => row.city },
   { id: "__company_state", label: "Company State", header: "Company State", bytes: 20, value: (row) => row.state },
   { id: "__company_country", label: "Company Country", header: "Company Country", bytes: 20, value: (row) => row.country },
+  { id: "__technologies", label: "Technologies", header: "Technologies", bytes: 400, value: (row) => arrayText(row.technologies) },
+  { id: "__total_funding", label: "Total Funding", header: "Total Funding", bytes: 16, value: (row) => row.total_funding },
+  // No longer offered by the picker; still resolved for older saved exports.
+  { id: "__domain", label: "Domain (bare)", header: "Domain", bytes: 26, value: (row) => row.domain },
+  { id: "__employee_count_min", label: "Employee Count Min", header: "Employee Count Min", bytes: 12, value: (row) => row.employee_count_min },
+  { id: "__employee_count_max", label: "Employee Count Max", header: "Employee Count Max", bytes: 12, value: (row) => row.employee_count_max },
+  { id: "__company_location", label: "Company Location", header: "Company Location", bytes: 40, value: (row) => row.location },
   { id: "__esp", label: "ESP", header: "ESP", bytes: 20, value: (row) => row.esp },
   { id: "__email_provider_type", label: "Email Provider Type", header: "Email Provider Type", bytes: 22, value: (row) => row.email_provider_type },
   { id: "__mx_records", label: "MX Records", header: "MX Records", bytes: 60, value: (row) => arrayText(row.mx_records) },
@@ -71,11 +77,42 @@ export const companyExportFields: CompanyExportField[] = [
   { id: "__updated_at", label: "Updated At", header: "Updated At", bytes: 34, value: (row) => row.updated_at },
 ];
 
-// What an export writes when nobody chose. Name and Website is what the company
-// file was before there was anything to choose; the three after it are the
-// columns populated on nearly every row, which is what makes them a default
-// rather than a preference.
-export const defaultCompanyExportFields = ["__company_name", "__website", "__industry", "__employee_count", "__company_location"];
+// What the Companies export picker offers, and nothing else.
+//
+// The picker used to list all 25 fields above plus every uploaded custom key
+// discovered by company_export_field_names_v1. This is the agreed fixed set:
+// twelve fields, all ticked, in this order.
+//
+// companyExportFields above is deliberately NOT trimmed. It still resolves
+// values and headers for exports queued before this change, so a background job
+// that asked for MX Status or Linked Prospects still gets it - those columns
+// are simply no longer offered.
+//
+// SHORT DESCRIPTION IS IN HERE, AND IT IS THE EXPENSIVE ONE. It averages about
+// a kilobyte a row against twenty or thirty for everything else - the reason
+// `bytes` exists on these definitions at all. Ticked by default it multiplies a
+// full-database export by roughly forty. That is deliberate and requested; what
+// keeps it safe is that estimatedCompanyBytesPerRow feeds planExport, which
+// routes a file this size to the background/split path instead of trying to
+// hold it in the browser. Do not "optimise" that estimate away.
+export const companyExportPickerFields = [
+  { id: "__company_name", label: "Company Name" },
+  { id: "__website", label: "Website" },
+  { id: "__industry", label: "Industry" },
+  { id: "__company_keywords", label: "Keywords" },
+  { id: "__short_description", label: "Short Description" },
+  { id: "__founded_year", label: "Founded Year" },
+  { id: "__employee_count", label: "# Employees" },
+  { id: "__company_city", label: "Company City" },
+  { id: "__company_state", label: "Company State" },
+  { id: "__company_country", label: "Company Country" },
+  { id: "__technologies", label: "Technologies" },
+  { id: "__total_funding", label: "Total Funding" },
+];
+
+// Every offered field, ticked. This is also what an export writes when nobody
+// chose, so the fallback and the picker cannot drift apart.
+export const defaultCompanyExportFields = companyExportPickerFields.map((field) => field.id);
 
 export const companyExportFieldIds = companyExportFields.map((field) => field.id);
 

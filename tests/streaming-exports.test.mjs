@@ -111,8 +111,11 @@ test("the stream reader cuts on record boundaries, not on chunk boundaries", asy
 
 test("the company CSV has one definition, used by every path", async () => {
   // The default set is what a caller who chose nothing gets, on all three paths.
+  // It is now the same twelve the picker offers, in the order the picker lists
+  // them, so the dialog and the file cannot disagree about either.
   assert.deepEqual(companyExportColumns.map((column) => column.header),
-    ["Company Name", "Website", "Industry", "# Employees", "Company Location"]);
+    ["Company Name", "Website", "Industry", "Keywords", "Short Description", "Founded Year",
+     "# Employees", "Company City", "Company State", "Company Country", "Technologies", "Total Funding"]);
   assert.deepEqual(buildCompanyExportColumns([], []).map((column) => column.header),
     companyExportColumns.map((column) => column.header));
 
@@ -380,4 +383,82 @@ test("a People export can carry the company profile without widening the index",
   // A marker that no longer matches must raise, not skip: 20260825030000 is the
   // cautionary tale for splicing into deployed bodies silently.
   assert.match(migration, /refusing to patch blindly/);
+});
+
+// The export pickers offer a fixed field set, all ticked.
+//
+// Both dialogs used to list every column plus every uploaded custom key - 37
+// and 25 respectively, before custom fields - which made two exports of the
+// same search routinely disagree about their columns. The set is now fixed, and
+// these assertions are what stops it drifting back.
+test("both export pickers offer a fixed set, ticked by default, in the order the CSV writes", async () => {
+  const [{ companyExportPickerFields, defaultCompanyExportFields: companyDefaults },
+         { prospectExportPickerFields, defaultProspectExportFields: peopleDefaults },
+         { standardExportColumns }] = await Promise.all([
+    import("../lib/company-export.ts"),
+    import("../lib/prospect-field-definitions.ts"),
+    import("../lib/prospect-export.ts"),
+  ]);
+
+  assert.deepEqual(prospectExportPickerFields.map((field) => field.label),
+    ["First Name", "Last Name", "Job Title", "Email", "Mobile Number",
+     "Personal LinkedIn URL", "Company Name", "Website"]);
+  assert.deepEqual(companyExportPickerFields.map((field) => field.label),
+    ["Company Name", "Website", "Industry", "Keywords", "Short Description", "Founded Year",
+     "# Employees", "Company City", "Company State", "Company Country", "Technologies", "Total Funding"]);
+
+  // "All ticked by default" is the requirement; asserting the identity rather
+  // than a copied list keeps them from drifting apart.
+  assert.deepEqual(peopleDefaults, prospectExportPickerFields.map((field) => field.id));
+  assert.deepEqual(companyDefaults, companyExportPickerFields.map((field) => field.id));
+
+  // buildCompanyExportColumns emits in definition order, not requested order,
+  // so the definition list has to carry the picker's order or the file and the
+  // dialog disagree. Same for the People columns.
+  assert.deepEqual(buildCompanyExportColumns([], companyDefaults).map((column) => column.header),
+    companyExportColumns.map((column) => column.header));
+  const peopleHeaders = standardExportColumns.filter((column) => peopleDefaults.includes(column.id)).map((column) => column.header);
+  assert.deepEqual(peopleHeaders,
+    ["First Name", "Last Name", "Title", "Work Email", "Mobile Number", "LinkedIn", "Company", "Website"]);
+
+  // Every offered id must actually resolve to a column, or a ticked box writes
+  // nothing.
+  const companyIds = new Set(companyExportFields.map((field) => field.id));
+  for (const field of companyExportPickerFields) assert.ok(companyIds.has(field.id), `no column for ${field.id}`);
+  const peopleIds = new Set(standardExportColumns.map((column) => column.id));
+  for (const field of prospectExportPickerFields) assert.ok(peopleIds.has(field.id), `no column for ${field.id}`);
+});
+
+// Opening the Companies export dialog used to call
+// /api/companies/export-fields, which runs company_export_field_names_v1 - an
+// 8s-bounded sample over every populated all_data document. It timed out on
+// production on 14/Sep and the failure was swallowed, so custom columns simply
+// vanished from the picker with no error. With a fixed set there is nothing to
+// discover and the call is gone.
+test("opening the company export dialog makes no field-discovery request", async () => {
+  const workspace = await readFile(new URL("../app/components/CompaniesWorkspace.tsx", import.meta.url), "utf8");
+  // Comments out first: the note explaining why the call was removed names the
+  // endpoint, and would satisfy a naive doesNotMatch just as well as the call.
+  assert.doesNotMatch(codeOnly(workspace), /companies\/export-fields/);
+  assert.match(workspace, /function openExportDialog\(\)/);
+  assert.match(workspace, /setExportFields\(defaultCompanyExportFields\)/);
+});
+
+// Both dialogs are drawn in one shared shell, so "the same as the other one" is
+// structural rather than something to keep re-checking by eye.
+test("both export dialogs share one modal shell", async () => {
+  const [companies, prospects, ui] = await Promise.all([
+    readFile(new URL("../app/components/CompaniesWorkspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ProspectTable.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/DashboardUi.tsx", import.meta.url), "utf8"),
+  ]);
+  for (const [name, source] of [["CompaniesWorkspace", companies], ["ProspectTable", prospects]]) {
+    assert.match(source, /<ExportDialogShell titleId=/, `${name} does not use the shared shell`);
+    // No hand-rolled backdrop left behind for the export dialog.
+    assert.doesNotMatch(source, /className="export-modal"/, `${name} still builds its own export panel`);
+  }
+  // The shell carries the focus lifecycle and the scroll lock the two
+  // hand-rolled copies both lacked.
+  assert.match(ui, /export function ExportDialogShell/);
+  assert.match(ui, /document\.body\.style\.overflow = "hidden"/);
 });

@@ -49,11 +49,13 @@ export const standardExportColumns: Array<{ id: string; header: string; value: (
   { id: "__name", header: "Full Name", value: (row) => row.full_name },
   { id: "__first_name", header: "First Name", value: (row) => row.first_name },
   { id: "__last_name", header: "Last Name", value: (row) => row.last_name },
+  // Title sits here rather than after the emails so the eight fields the picker
+  // offers come out in the order the picker lists them.
+  { id: "__title", header: "Title", value: (row) => row.title },
   { id: "__work_email", header: "Work Email", value: (row) => row.work_email },
   { id: "__personal_email", header: "Personal Email", value: (row) => row.personal_email },
   { id: "__mobile_number", header: "Mobile Number", value: (row) => row.mobile_number },
   { id: "__linkedin", header: "LinkedIn", value: (row) => row.linkedin_url },
-  { id: "__title", header: "Title", value: (row) => row.title },
   { id: "__keywords", header: "Keywords", value: (row) => arrayText(row.keywords) },
   { id: "__seniority", header: "Seniority", value: (row) => row.seniority },
   { id: "__department", header: "Department", value: (row) => row.department },

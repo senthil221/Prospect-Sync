@@ -4,7 +4,7 @@ import { BoundedCache } from '../../lib/bounded-cache';
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import CompanyFilterPanel, { BulkDomainPaste, addDomainsToWebsiteFilter } from "../CompanyFilterPanel";
-import { buildCompanyCustomFields, companyAllData, companyExportFields, defaultCompanyExportFields, estimatedCompanyBytesPerRow } from "../../lib/company-export";
+import { companyAllData, companyExportPickerFields, defaultCompanyExportFields, estimatedCompanyBytesPerRow } from "../../lib/company-export";
 import { backgroundExportNotice, fileSystemAccessSupported, runCompanyExport, type ExportProgress } from "../../lib/export-runner";
 import { megabytes, planExport } from "../../lib/export-plan";
 import { intentKey, requestIdFor, settleIntent } from "../../lib/request-intent";
@@ -13,7 +13,7 @@ import { filterPayloadWithSets } from "../../lib/filter-set-client";
 import { emptyWorkspaceState } from "../../lib/workspace-states";
 import { colorTone, formatNumber, initials } from "../../lib/dashboard-helpers";
 import type { ClientRecord, Company, CompanyDetail, Prospect, ProspectFilter } from "../../lib/types";
-import { AppIcon, WorkspaceEmpty } from "./DashboardUi";
+import { AppIcon, ExportDialogShell, WorkspaceEmpty } from "./DashboardUi";
 import CompanyTableRow from "./CompanyTableRow";
 import MenuButton from "./MenuButton";
 import { useDebouncedValue } from "./useDebouncedValue";
@@ -112,22 +112,18 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   const [exportFormat, setExportFormat] = useState<"single" | "parts">("single");
   const [exportRowsPerFile, setExportRowsPerFile] = useState(25000);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
-  // Uploaded companies.all_data keys, found by a sampling scan on the server.
-  // Fetched once, when the dialog first opens, and never on a page load: the
-  // typed fields are what the picker is for and these are the extras.
-  const [customFieldNames, setCustomFieldNames] = useState<string[] | null>(null);
   const exportAbortRef = useRef<AbortController | null>(null);
-  const exportFieldCatalog = useMemo(
-    () => [...companyExportFields.map((field) => ({ id: field.id, label: field.label })), ...buildCompanyCustomFields(customFieldNames ?? [])],
-    [customFieldNames],
-  );
+  // The fixed twelve. No uploaded custom keys, so opening this dialog no longer
+  // waits on company_export_field_names_v1 - an 8s-bounded sample over every
+  // populated all_data document, which timed out on production on 14/Sep.
+  const exportFieldCatalog = companyExportPickerFields;
   // Roughly how large the file will be. Worth showing because the columns are
   // not comparable: Description alone is about a kilobyte a row, so ticking it
   // over 400,000 companies is the difference between a 20 MB file and a 400 MB
   // one, and nothing else on the picker hints at that.
   const exportBytes = useMemo(
-    () => totalCapped ? null : total * estimatedCompanyBytesPerRow(customFieldNames ?? [], exportFields),
-    [customFieldNames, exportFields, total, totalCapped],
+    () => totalCapped ? null : total * estimatedCompanyBytesPerRow([], exportFields),
+    [exportFields, total, totalCapped],
   );
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -330,17 +326,18 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
     finally { setLoadingCompany(""); }
   }
 
-  async function openExportDialog() {
+  // Opening the dialog is now a state change and nothing else.
+  //
+  // It used to fetch /api/companies/export-fields first, to discover uploaded
+  // all_data keys for the picker. That endpoint runs
+  // company_export_field_names_v1, which samples up to 20,000 all_data
+  // documents under an 8s ceiling and timed out on production on 14/Sep after
+  // an import made those documents bigger. The failure was swallowed, so the
+  // only symptom was custom columns silently vanishing from the picker. With a
+  // fixed field set there is nothing to discover, so the call is gone.
+  function openExportDialog() {
+    setExportFields(defaultCompanyExportFields);
     setExportDialogOpen(true);
-    if (customFieldNames !== null) return;
-    try {
-      const data = await api<{ fields: string[] }>("/api/companies/export-fields");
-      setCustomFieldNames(data.fields ?? []);
-    } catch {
-      // The typed fields are the picker; the uploaded ones are extra. Failing to
-      // find them is not a reason to refuse to export.
-      setCustomFieldNames([]);
-    }
   }
 
   function toggleExportField(id: string) {
@@ -349,7 +346,8 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
 
   async function exportCompanies() {
     if (!exportFields.length) { setCompanyError("Choose at least one field to export."); return; }
-    const names = customFieldNames ?? [];
+    // No custom columns are selectable any more, so none are requested.
+    const names: string[] = [];
     // A pivot cannot be frozen into a result set, so it cannot go to the
     // worker. Rather than start a download that will wedge the tab, say what
     // will work - splitting is bounded per file and needs no worker at all.
@@ -439,13 +437,13 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
     {onFilters && filtersOpen ? <CompanyFilterPanel filters={filters} onChange={onFilters} /> : null}
     </div>
     {selectedCompany ? <CompanyDrawer company={selectedCompany} detail={detailsByCompany[selectedCompany.id] ?? null} loadingDetail={loadingDetail === selectedCompany.id} prospects={prospectsByCompany[selectedCompany.id] ?? []} total={prospectTotalsByCompany[selectedCompany.id] ?? selectedCompany.prospect_count} loading={loadingCompany === selectedCompany.id} error={companyError} onLoadMore={() => void loadMoreProspects(selectedCompany)} onClose={() => { setSelectedCompany(null); setCompanyError(""); }} /> : null}
-    {exportDialogOpen ? <div className="modal-backdrop" role="presentation"><section className="export-modal" role="dialog" aria-modal="true" aria-labelledby="company-export-title">
+    {exportDialogOpen ? <ExportDialogShell titleId="company-export-title" busy={exportingCompanies} onClose={() => setExportDialogOpen(false)}>
       <div className="export-modal-head"><div><p className="eyebrow">CSV EXPORT</p><h2 id="company-export-title">Choose companies and fields</h2><p>Only the fields checked below will be included in the download.</p></div><button aria-label="Close export dialog" disabled={exportingCompanies} onClick={() => setExportDialogOpen(false)}><AppIcon name="close" size={14}/></button></div>
       <fieldset className="export-scope"><legend>Companies to export</legend>
         <label htmlFor="company-export-all"><span className="sr-only">All matching companies</span><input id="company-export-all" type="radio" name="company-export-scope" disabled={exportingCompanies} checked={companyExportScope === "all"} onChange={() => setCompanyExportScope("all")}/><span><strong>All {search.trim() || activeFilterCount || peopleScope ? "matching " : ""}companies</strong><small>{totalLabel} records across every page</small></span></label>
         <label htmlFor="company-export-websites"><span className="sr-only">Only companies with a website</span><input id="company-export-websites" type="radio" name="company-export-scope" disabled={exportingCompanies} checked={companyExportScope === "with_websites"} onChange={() => setCompanyExportScope("with_websites")}/><span><strong>Only with websites</strong><small>Skips companies with no domain saved</small></span></label>
       </fieldset>
-      <div className="export-fields-head"><div><strong>Fields to include</strong><span>{formatNumber(exportFields.length)} selected{exportBytes === null ? "" : ` · roughly ${megabytes(exportBytes)} MB`}</span></div><div><button disabled={exportingCompanies} onClick={() => setExportFields(exportFieldCatalog.map((field) => field.id))}>Select all</button><button disabled={exportingCompanies} onClick={() => setExportFields(defaultCompanyExportFields)}>Recommended</button><button disabled={exportingCompanies} onClick={() => setExportFields([])}>Clear</button></div></div>
+      <div className="export-fields-head"><div><strong>Fields to include</strong><span>{formatNumber(exportFields.length)} selected{exportBytes === null ? "" : ` · roughly ${megabytes(exportBytes)} MB`}</span></div><div><button disabled={exportingCompanies} onClick={() => setExportFields(defaultCompanyExportFields)}>Select all</button><button disabled={exportingCompanies} onClick={() => setExportFields([])}>Clear</button></div></div>
       <div className="export-field-grid">{exportFieldCatalog.map((field) => <label key={field.id}><input type="checkbox" disabled={exportingCompanies} checked={exportFields.includes(field.id)} onChange={() => toggleExportField(field.id)}/><span>{field.label}</span></label>)}</div>
       <fieldset className="export-scope export-format"><legend>Output</legend>
         <label htmlFor="company-export-single"><span className="sr-only">Single CSV file</span><input id="company-export-single" type="radio" name="company-export-format" checked={exportFormat === "single"} disabled={exportingCompanies} onChange={() => setExportFormat("single")}/><span><strong>One CSV file</strong><small>Everything in a single download, any size</small></span></label>
@@ -456,8 +454,8 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
           size estimate is a warning rather than a note. */}
       {!fileSystemAccessSupported() ? <p className="export-hint">Your browser will download the file{exportFormat === "parts" ? "s" : ""} when the export finishes{exportBytes !== null && exportBytes > 25 * 1024 * 1024 ? `, holding roughly ${megabytes(exportBytes)} MB in memory first - a Chromium browser writes straight to disk instead` : ""}.</p> : null}
       {exportProgress ? <div className="export-progress" role="status"><span className="export-progress-bar"><i style={{ width: `${exportProgress.total ? Math.min(100, Math.round((exportProgress.exported / Math.max(1, exportProgress.total)) * 100)) : 100}%` }}/></span><span>Exported {formatNumber(exportProgress.exported)}{exportProgress.total ? ` of ${formatNumber(exportProgress.total)}` : ""} companies</span></div> : null}
-      <div className="modal-actions">{exportingCompanies ? <button className="secondary" onClick={() => exportAbortRef.current?.abort()}>Cancel export</button> : <button className="secondary" onClick={() => setExportDialogOpen(false)}>Close</button>}<button className="primary" disabled={exportingCompanies || !exportFields.length} onClick={() => void exportCompanies()}>{exportingCompanies ? "Exporting…" : `Export ${totalLabel} companies`}</button></div>
-    </section></div> : null}
+      <div className="modal-actions">{exportingCompanies ? <button className="secondary" onClick={() => exportAbortRef.current?.abort()}>Cancel export</button> : <button className="secondary" data-autofocus onClick={() => setExportDialogOpen(false)}>Close</button>}<button className="primary" disabled={exportingCompanies || !exportFields.length} onClick={() => void exportCompanies()}>{exportingCompanies ? "Exporting…" : `Export ${totalLabel} companies`}</button></div>
+    </ExportDialogShell> : null}
     {deleteRequest ? <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="company-delete-title"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="company-delete-title">Delete {formatNumber(deleteRequest.count)} {deleteRequest.count === 1 ? "company" : "companies"}?</h2><p>This permanently removes {deleteRequest.count === 1 ? "this company" : "these companies"} from the Company database. Any linked people stay in the People database - they just lose the company link. This cannot be undone.</p>{deleteRequest.mode === "all_matching" && !search.trim() && !filters.length && !excludedIds.size ? <p className="form-error" role="alert"><AppIcon name="warning" size={14}/> No search or filters are applied - this will empty your entire Company database.</p> : null}<div className="modal-actions"><button className="secondary" disabled={deleting} onClick={() => setDeleteRequest(null)}>Cancel</button><button className="danger-button solid" disabled={deleting} onClick={() => void deleteCompanies()}>{deleting ? "Deleting…" : `Delete ${formatNumber(deleteRequest.count)}`}</button></div></section></div> : null}
   </section>;
 }
