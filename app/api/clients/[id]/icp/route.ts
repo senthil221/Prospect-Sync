@@ -11,6 +11,42 @@ const maxDescription = 20_000;
 const maxName = 120;
 const maxProfiles = 50;
 
+// An ICP is the thing you describe and the thing you label with, so a named
+// profile owns a client-scoped tag of the same name. Creating the tag here is
+// what makes "apply this ICP to these prospects" possible at all - there is no
+// other way to create a client tag in the product.
+//
+// prospect_tags is unique on (client_id, lower(name)) for client tags, so the
+// lookup must carry the client. An unqualified lookup is the bug fixed in
+// 44af7a1 for the master path.
+async function syncProfileTag(
+  supabase: ReturnType<typeof createAdminClient>,
+  clientId: string,
+  profile: { id: string; name: string; tag_id: string | null },
+) {
+  const name = profile.name.trim();
+  // An unnamed ICP gets no tag: a tag with an empty name is not selectable and
+  // would collide with the next unnamed one.
+  if (!name) return profile.tag_id;
+
+  if (profile.tag_id) {
+    // Rename in place, so everything already tagged keeps its label.
+    const renamed = await supabase.from("prospect_tags").update({ name }).eq("id", profile.tag_id).eq("client_id", clientId).select("id").maybeSingle();
+    if (!renamed.error && renamed.data) return profile.tag_id;
+    // Fall through and re-resolve if the tag has gone, or the new name
+    // collides with another of this client's tags.
+  }
+
+  const existing = await supabase.from("prospect_tags").select("id").eq("client_id", clientId).ilike("name", name).maybeSingle();
+  if (!existing.error && existing.data) return existing.data.id as string;
+
+  const tagId = crypto.randomUUID();
+  const created = await supabase.from("prospect_tags").insert({ id: tagId, name, client_id: clientId, color: "blue" }).select("id").maybeSingle();
+  // A tag that cannot be created must not fail the save of the description the
+  // user just typed; the next edit retries.
+  return created.error ? profile.tag_id : tagId;
+}
+
 function failure(error: { code?: string; message: string }) {
   const missing = Boolean(error.code && missingTableCodes.has(error.code));
   return Response.json(
@@ -89,7 +125,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   // Scoped by client_id as well as id: an ICP id from another client must not
   // be editable through this client's route.
-  const { data, error } = await createAdminClient()
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
     .from("client_icp_profiles")
     .update({ name: body.name, description: body.description, updated_at: new Date().toISOString() })
     .eq("id", profileId)
@@ -98,6 +135,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     .maybeSingle();
   if (error) return failure(error);
   if (!data) return Response.json({ error: "That ICP no longer exists." }, { status: 404 });
+
+  // Naming an ICP is what creates its tag, and renaming one renames the tag
+  // rather than orphaning it.
+  const tagId = await syncProfileTag(supabase, id, data);
+  if (tagId !== data.tag_id) {
+    await supabase.from("client_icp_profiles").update({ tag_id: tagId }).eq("id", profileId).eq("client_id", id);
+    return Response.json({ profile: { ...data, tag_id: tagId } });
+  }
   return Response.json({ profile: data });
 }
 

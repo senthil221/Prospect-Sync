@@ -161,3 +161,51 @@ test("a client can hold several named ICP briefs", async () => {
   assert.match(clients, /id: "icp" as const, label: "ICPs"/);
   assert.match(clients, /<ClientIcpPanel client=\{client\}\/>/);
 });
+
+// Client ICP tags, on prospects and on companies.
+test("client ICP tags share one vocabulary and reindex only where they must", async () => {
+  const [migration, icpRoute, peopleRoute, companyRoute] = await Promise.all([
+    read("../supabase/migrations/20260915150000_client_icp_tags_on_prospects_and_companies.sql"),
+    read("../app/api/clients/[id]/icp/route.ts"),
+    read("../app/api/clients/[id]/prospects/route.ts"),
+    read("../app/api/clients/[id]/companies/route.ts"),
+  ]);
+
+  // One tag table, two narrow link tables. A polymorphic link table cannot
+  // carry a foreign key to two parents.
+  assert.match(migration, /create table if not exists public\.company_tag_links/);
+  assert.match(migration, /references public\.prospect_tags\(id\) on delete cascade/);
+  assert.match(migration, /idx_company_tag_links_tag/);
+  assert.match(migration, /must not be readable by anon or authenticated/);
+
+  // Filters take tag ids, so there is nothing to parse out of a field name and
+  // no join - and a renamed tag cannot change what a saved view returns.
+  assert.match(migration, /ptl\.tag_id = any \(%L::text\[\]\)/);
+  assert.match(migration, /ctl\.tag_id = any \(%L::text\[\]\)/);
+
+  // Prospect tags feed prospect_index.tag_text and therefore search_text;
+  // company tags appear nowhere in it. Hence two write functions.
+  assert.match(migration, /select \* into v_reindex from public\.reindex_scope_v1\(p_prospect_ids => v_ids\)/);
+  assert.match(migration, /Deliberately no re-index: prospect_index carries no company tags/);
+
+  // A workspace must not be able to apply another client's tag by sending its id.
+  assert.equal(migration.match(/That tag does not belong to this client/g)?.length, 2);
+
+  // The value picker stops offering one client's tags to another.
+  assert.match(migration, /pt\.client_id is null/);
+  assert.match(migration, /still lists client tags under __tags/);
+
+  // Every splice raises rather than silently skipping.
+  assert.equal(migration.match(/raise exception 'Could not patch/g)?.length, 6);
+
+  // Naming an ICP creates its tag; renaming renames it rather than orphaning
+  // it. The lookup is client-qualified, which is the 44af7a1 bug not repeated.
+  assert.match(icpRoute, /async function syncProfileTag/);
+  assert.match(icpRoute, /\.eq\("client_id", clientId\)\.ilike\("name", name\)/);
+  assert.match(icpRoute, /An unnamed ICP gets no tag/);
+
+  // Both write paths are reachable.
+  assert.match(peopleRoute, /action === "add_tag" \|\| action === "remove_tag"/);
+  assert.match(peopleRoute, /set_client_prospect_tag_v1/);
+  assert.match(companyRoute, /set_client_company_tag_v1/);
+});

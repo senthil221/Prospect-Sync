@@ -138,6 +138,12 @@ export default function ClientIcpPanel({ client }: { client: ClientRecord }) {
               </div>
               <div className="client-icp-actions">
                 <button className="row-danger" disabled={busyId === profile.id} onClick={() => setPendingDelete(profile)}>Delete</button>
+                {/* The tag is created by naming the ICP, and renaming the ICP
+                    renames it. Saying so here is the only place the two are
+                    visibly one thing. */}
+                <span className="client-icp-tag">{profile.tag_id
+                  ? <><AppIcon name="tag" size={12}/> Taggable as &ldquo;{profile.name}&rdquo;</>
+                  : <>Name this ICP to tag prospects and companies with it</>}</span>
                 <span className="client-icp-state">{dirty ? "Unsaved changes" : "Saved"}</span>
                 <button className="secondary" disabled={!dirty || over || busyId === profile.id} onClick={() => void saveProfile(profile)}>
                   {busyId === profile.id ? "Saving…" : "Save"}

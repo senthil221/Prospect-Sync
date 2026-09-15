@@ -160,6 +160,24 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return finish(data);
   }
 
+  // Applying a client ICP tag. The tag is checked against the client inside
+  // set_client_prospect_tag_v1, so a workspace cannot reach another client's
+  // tag by sending its id. Unlike the lead mark this one DOES re-index:
+  // prospect_index carries tags and tag_text, and tag_text feeds search_text.
+  if (action === "add_tag" || action === "remove_tag") {
+    const tagId = String(payload.tagId ?? "").trim();
+    if (!tagId) return Response.json({ error: "Choose an ICP tag." }, { status: 400 });
+    const { data, error } = await supabase.rpc("set_client_prospect_tag_v1", {
+      p_client_id: id,
+      p_tag_id: tagId,
+      p_apply: action === "add_tag",
+      ...selectionArgs(selection),
+      p_actor: actor,
+    });
+    if (error) return failure(error, "Tagging");
+    return finish(data);
+  }
+
   // Leads are the same shape as ICP verification: a client-scoped mark on a
   // shared prospect. The one difference is that nothing in prospect_index
   // changes, so set_client_lead_v1 does no re-indexing and always reports

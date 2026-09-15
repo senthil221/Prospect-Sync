@@ -48,6 +48,37 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       : [];
     return Response.json({ companyIds, matched: companyIds.length, submitted: parsed.submitted, truncated: parsed.truncated });
   }
+  // Applying a client ICP tag to companies. Explicit selections only for now:
+  // set_client_company_tag_v1 takes ids, and resolving an all-matching company
+  // scope is the expensive half of this product (it is what times out on the
+  // People pivot), so it is not done inline on a tagging request.
+  //
+  // No re-index: prospect_index carries no company tags, so nothing it holds
+  // changes. The tag's ownership is checked against the client inside the RPC.
+  if (action === "add_tag" || action === "remove_tag") {
+    const tagId = String(payload.tagId ?? "").trim();
+    const companyIds = Array.isArray(payload.companyIds)
+      ? [...new Set(payload.companyIds.map((value) => String(value ?? "").trim()).filter(Boolean))].slice(0, 50000)
+      : [];
+    if (!tagId) return Response.json({ error: "Choose an ICP tag." }, { status: 400 });
+    if (!companyIds.length) return Response.json({ error: "Select companies to tag." }, { status: 400 });
+    const tagged = await createAdminClient().rpc("set_client_company_tag_v1", {
+      p_client_id: clientId,
+      p_tag_id: tagId,
+      p_apply: action === "add_tag",
+      p_company_ids: companyIds,
+      p_actor: (await getAuthorizedUser())?.email ?? "",
+    });
+    if (tagged.error) {
+      const missing = Boolean(tagged.error.code && missingFunctionCodes.has(tagged.error.code));
+      return Response.json(
+        { error: missing ? "Apply the latest database migration to enable company ICP tags." : tagged.error.message },
+        { status: missing ? 503 : tagged.error.code === "P0002" ? 404 : 500 },
+      );
+    }
+    return Response.json({ result: tagged.data });
+  }
+
   if (action !== "push" && action !== "set_icp_verified" && action !== "clear_icp_verified") {
     return Response.json({ error: "Unsupported client company action." }, { status: 400 });
   }

@@ -1547,6 +1547,8 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 /* Save sits at the far right, Delete at the far left, with the dirty marker
    between them - so the destructive control is never next to the one you reach
    for after typing. */
+/* Says the ICP and its tag are one thing - the only place that is visible. */
+.client-icp-tag { display: inline-flex; align-items: center; gap: 4px; margin-left: var(--space-2); color: var(--ph-muted); font-size: var(--text-2xs); }
 .client-icp-actions .client-icp-state { margin-left: auto; color: var(--ph-muted); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
 .client-icp-panel .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
 
