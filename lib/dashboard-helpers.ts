@@ -9,7 +9,7 @@ export function formatNumber(value: unknown) {
 export function filterChipValue(field: string, value: string) {
   if (field === "__icp_verified" || field === "__company_icp_verified") return "Verified";
   // The value is a client id; the chip says what the filter means, not the id.
-  if (field === "__client_ids") return "Client";
+  if (field === "__client_ids" || field === "__company_client_ids") return "Client";
   if (field === "__lead") return "Lead";
   if (field === "__contactable") return "Contactable";
   if (field !== "__employee_count") return value;

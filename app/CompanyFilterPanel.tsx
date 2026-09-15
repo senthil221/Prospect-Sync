@@ -3,7 +3,7 @@
 import { ChangeEvent, useRef, useState } from "react";
 import { describeBulkMerge, describeMatchMode, exactMatchThreshold, mergeBulkValues, splitPastedValues, switchesToExactMatch } from "../lib/bulk-values";
 import { isXlsxFile, readXlsxRows } from "../lib/spreadsheet";
-import { filterId, IncludeExcludeFilter, TextBooleanFilter, type ProspectFilter, type ProspectFilterOperator } from "./ApolloFilterPanel";
+import { ClientMembershipFilter, filterId, IncludeExcludeFilter, TextBooleanFilter, type ProspectFilter, type ProspectFilterOperator } from "./ApolloFilterPanel";
 import type { CompanyKeywordScope } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
 import { AppIcon } from "./components/DashboardUi";
@@ -100,8 +100,10 @@ async function readImportTable(file: File) {
   return { headers: rows[0], rows: rows.slice(1) };
 }
 
-export default function CompanyFilterPanel({ filters, onChange }: {
+export default function CompanyFilterPanel({ filters, clients = [], onChange }: {
   filters: ProspectFilter[];
+  /** For the Client section. Already held by the dashboard, so no round trip. */
+  clients?: Array<{ id: string; name: string }>;
   onChange: (filters: ProspectFilter[]) => void;
 }) {
   const [search, setSearch] = useState("");
@@ -197,6 +199,14 @@ export default function CompanyFilterPanel({ filters, onChange }: {
     <div className="apollo-filter-scroll">
       {visible.length ? <div className="apollo-filter-group"><small>Company filters</small>{visible.map(renderDefinition)}</div> : null}
       {visibleDetail.length ? <div className="apollo-filter-group optional"><small>More filters</small>{visibleDetail.map(renderDefinition)}</div> : null}
+      {/* Companies a client has. Same control as the People panel, writing
+          __company_client_ids instead - see 20260915140000. */}
+      {clients.length && "client".includes(normalizedSearch) ? <div className="apollo-filter-group">
+        <small>Client</small>
+        <ClientMembershipFilter field="__company_client_ids" noun="companies" clients={clients} filters={filters}
+          expanded={expanded === "__company_client_ids"} onToggle={() => setExpanded(expanded === "__company_client_ids" ? "" : "__company_client_ids")}
+          onChange={onChange}/>
+      </div> : null}
       {!visible.length && !visibleDetail.length ? <p className="filter-search-empty">No filters match “{search}”.</p> : null}
     </div>
     {/* Same applied-state footer as the People panel, so both rails read alike. */}

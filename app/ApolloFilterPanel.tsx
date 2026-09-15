@@ -78,7 +78,7 @@ function activeCount(filters: ProspectFilter[]) {
 
 export function filterLabel(field: string, customFields: ProspectFieldDefinition[] = []) {
   if (field === "__icp_verified" || field === "__company_icp_verified") return "ICP verification";
-  if (field === "__client_ids") return "Client";
+  if (field === "__client_ids" || field === "__company_client_ids") return "Client";
   if (field === "__lead") return "Lead";
   if (field === "__contactable") return "Contactable";
   return [...mainFilters, ...classifierFilters, ...optionalFilters, ...customFields].find((definition) => definition.id === field)?.label ?? field;
@@ -100,33 +100,6 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
   const visibleMain = mainFilters.filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
   const visibleClassifier = classifierFilters.filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
   const visibleOptional = [...optionalFilters, ...customFields].filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
-
-  // Client membership is carried as at most two filters - one include and one
-  // exclude - each holding a list of ids, rather than one filter per client.
-  // That keeps the compiled SQL to a single array overlap per direction however
-  // many clients are picked.
-  const clientIncludes = filters.find((filter) => filter.field === "__client_ids" && (filter.operator === "contains" || filter.operator === "equals"));
-  const clientExcludes = filters.find((filter) => filter.field === "__client_ids" && (filter.operator === "not_contains" || filter.operator === "not_equals"));
-  const clientFilterCount = (clientIncludes?.values.length ?? 0) + (clientExcludes?.values.length ?? 0);
-  function clientFilterState(id: string): "include" | "exclude" | "off" {
-    if (clientIncludes?.values.includes(id)) return "include";
-    if (clientExcludes?.values.includes(id)) return "exclude";
-    return "off";
-  }
-  function setClientFilter(id: string, next: "include" | "exclude" | "off") {
-    // A client is in exactly one of the two lists, never both: "include Acme
-    // and exclude Acme" is a filter that can only ever return nothing.
-    const include = (clientIncludes?.values ?? []).filter((value) => value !== id);
-    const exclude = (clientExcludes?.values ?? []).filter((value) => value !== id);
-    if (next === "include") include.push(id);
-    if (next === "exclude") exclude.push(id);
-    const rest = filters.filter((filter) => filter.field !== "__client_ids");
-    onChange([
-      ...rest,
-      ...(include.length ? [{ id: "__client_ids:include", field: "__client_ids", operator: "contains" as const, values: include }] : []),
-      ...(exclude.length ? [{ id: "__client_ids:exclude", field: "__client_ids", operator: "not_contains" as const, values: exclude }] : []),
-    ]);
-  }
 
   function replaceField(field: string, replacements: ProspectFilter[]) {
     // Departments own the nested sub-department filter, so clearing the section
@@ -209,37 +182,13 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
       {visibleMain.length ? <div className="apollo-filter-group"><small>Main filters</small>{visibleMain.map(renderDefinition)}</div> : null}
       {visibleClassifier.length ? <div className="apollo-filter-group"><small>From job title</small>{visibleClassifier.map(renderDefinition)}</div> : null}
       {visibleOptional.length ? <div className="apollo-filter-group optional"><small>More filters</small>{visibleOptional.map(renderDefinition)}</div> : null}
-      {/* Client membership, by id.
-          Only in the Master DB: inside a client workspace every row is already
-          that client's, so the filter would be a no-op or a contradiction.
-          The list comes from the clients the dashboard already holds - no
-          round trip - and shows names while sending ids, because names are
-          editable and a saved filter must not change meaning when one is
-          renamed. See 20260915130000 for why __clients cannot do this. */}
+      {/* Only in the Master DB: inside a client workspace every row is already
+          that client's, so the filter could only be a no-op or a contradiction. */}
       {!clientId && clients.length && "client".includes(normalizedSearch) ? <div className="apollo-filter-group">
         <small>Client</small>
-        <section className={`apollo-filter-section ${expanded === "__client_ids" ? "expanded" : ""}`}>
-          <button type="button" className="apollo-filter-summary" aria-expanded={expanded === "__client_ids"} onClick={() => setExpanded(expanded === "__client_ids" ? "" : "__client_ids")}>
-            <span className="apollo-filter-mark"><AppIcon name="company" size={14}/></span>
-            <strong>Client</strong>
-            {clientFilterCount ? <span className="filter-count">{clientFilterCount}</span> : null}
-            <span className="apollo-chevron"><AppIcon name="chevron" size={14}/></span>
-          </button>
-          {expanded === "__client_ids" ? <div role="region" className="apollo-filter-content">
-            <p className="apollo-filter-description">Include only these clients&rsquo; prospects, or exclude them. Excluding is not index-served, so pair it with another filter on very large searches.</p>
-            <div className="client-filter-list">{clients.map((client) => {
-              const state = clientFilterState(client.id);
-              return <div className="client-filter-row" key={client.id}>
-                <span>{client.name}</span>
-                <span className="client-filter-actions">
-                  <button type="button" className={state === "include" ? "active" : ""} aria-pressed={state === "include"} onClick={() => setClientFilter(client.id, state === "include" ? "off" : "include")}>Include</button>
-                  <button type="button" className={state === "exclude" ? "active" : ""} aria-pressed={state === "exclude"} onClick={() => setClientFilter(client.id, state === "exclude" ? "off" : "exclude")}>Exclude</button>
-                </span>
-              </div>;
-            })}</div>
-            {clientFilterCount ? <button type="button" className="clear-section-filter" onClick={() => onChange(filters.filter((filter) => filter.field !== "__client_ids"))}>Clear client filter</button> : null}
-          </div> : null}
-        </section>
+        <ClientMembershipFilter field="__client_ids" noun="prospects" clients={clients} filters={filters}
+          expanded={expanded === "__client_ids"} onToggle={() => setExpanded(expanded === "__client_ids" ? "" : "__client_ids")}
+          onChange={onChange}/>
       </div> : null}
       {!visibleMain.length && !visibleClassifier.length && !visibleOptional.length ? <p className="filter-search-empty">No filters match “{search}”.</p> : null}
     </div>
@@ -640,4 +589,85 @@ function DepartmentFunctionFilter({ filters, taxonomy, onChange }: {
       })}
     </div>
   </div>;
+}
+
+/**
+ * Include or exclude whole clients, in either Master database.
+ *
+ * Shared by both panels because the two differ only in which field they write
+ * — __client_ids on prospect_index, __company_client_ids on client_companies.
+ * Two copies of a control with this much state in it is how the two export
+ * dialogs drifted.
+ *
+ * WHY IDS AND NOT NAMES. The value sent is the client id; the name is only
+ * rendered. Names are editable, and a saved view must not change what it
+ * returns because somebody corrected a spelling. It is also what makes the
+ * filter correct at all: the pre-existing __clients field compares against the
+ * joined name string, so excluding one of a prospect's two clients kept 3,570
+ * rows it should have removed (measured 2026-09-15; see 20260915130000).
+ *
+ * At most two filters are produced — one include, one exclude — each carrying a
+ * list of ids, rather than one filter per client. That keeps the compiled SQL
+ * to a single predicate per direction however many clients are picked.
+ */
+export function ClientMembershipFilter({ field, noun, clients, filters, expanded, onToggle, onChange }: {
+  field: "__client_ids" | "__company_client_ids";
+  noun: string;
+  clients: Array<{ id: string; name: string }>;
+  filters: ProspectFilter[];
+  expanded: boolean;
+  onToggle: () => void;
+  onChange: (filters: ProspectFilter[]) => void;
+}) {
+  const includes = filters.find((filter) => filter.field === field && (filter.operator === "contains" || filter.operator === "equals"));
+  const excludes = filters.find((filter) => filter.field === field && (filter.operator === "not_contains" || filter.operator === "not_equals"));
+  const count = (includes?.values.length ?? 0) + (excludes?.values.length ?? 0);
+
+  function stateOf(id: string): "include" | "exclude" | "off" {
+    if (includes?.values.includes(id)) return "include";
+    if (excludes?.values.includes(id)) return "exclude";
+    return "off";
+  }
+
+  function set(id: string, next: "include" | "exclude" | "off") {
+    // A client lands in exactly one list, never both: "include Acme and exclude
+    // Acme" is a filter that can only ever return nothing.
+    const include = (includes?.values ?? []).filter((value) => value !== id);
+    const exclude = (excludes?.values ?? []).filter((value) => value !== id);
+    if (next === "include") include.push(id);
+    if (next === "exclude") exclude.push(id);
+    onChange([
+      ...filters.filter((filter) => filter.field !== field),
+      ...(include.length ? [{ id: `${field}:include`, field, operator: "contains" as const, values: include }] : []),
+      ...(exclude.length ? [{ id: `${field}:exclude`, field, operator: "not_contains" as const, values: exclude }] : []),
+    ]);
+  }
+
+  return <section className={`apollo-filter-section ${expanded ? "expanded" : ""}`}>
+    <button type="button" className="apollo-filter-summary" aria-expanded={expanded} onClick={onToggle}>
+      <span className="apollo-filter-mark"><AppIcon name="company" size={14}/></span>
+      <strong>Client</strong>
+      {count ? <span className="filter-count">{count}</span> : null}
+      <span className="apollo-chevron"><AppIcon name="chevron" size={14}/></span>
+    </button>
+    {expanded ? <div role="region" className="apollo-filter-content">
+      <p className="apollo-filter-description">
+        Show only these clients&rsquo; {noun}, or exclude them. Excluding cannot use the index, so pair it with another filter on very large searches.
+      </p>
+      <div className="client-filter-list">{clients.map((client) => {
+        const state = stateOf(client.id);
+        return <div className="client-filter-row" key={client.id}>
+          <span>{client.name}</span>
+          <span className="client-filter-actions">
+            <button type="button" className={state === "include" ? "active" : ""} aria-pressed={state === "include"}
+              onClick={() => set(client.id, state === "include" ? "off" : "include")}>Include</button>
+            <button type="button" className={state === "exclude" ? "active" : ""} aria-pressed={state === "exclude"}
+              onClick={() => set(client.id, state === "exclude" ? "off" : "exclude")}>Exclude</button>
+          </span>
+        </div>;
+      })}</div>
+      {count ? <button type="button" className="clear-section-filter"
+        onClick={() => onChange(filters.filter((filter) => filter.field !== field))}>Clear client filter</button> : null}
+    </div> : null}
+  </section>;
 }

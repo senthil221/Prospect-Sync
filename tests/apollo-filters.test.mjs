@@ -204,13 +204,37 @@ test("the master DB filters by client id, not by joined client names", async () 
   // __clients keeps working: saved views depend on it.
   assert.doesNotMatch(migration, /drop function public\.prospect_filter_sql_v1/);
 
-  // The picker shows names and sends ids, and never offers both directions for
-  // the same client.
-  assert.match(panel, /clients\?: Array<\{ id: string; name: string \}>/);
-  assert.match(panel, /function setClientFilter\(id: string, next: "include" \| "exclude" \| "off"\)/);
+  // One control, shared by both Master panels, because two copies of something
+  // with this much state in it is how the two export dialogs drifted.
+  assert.match(panel, /export function ClientMembershipFilter/);
+  assert.match(panel, /field: "__client_ids" \| "__company_client_ids"/);
+  // Shows names, sends ids, and never puts one client in both directions.
   assert.match(panel, /operator: "not_contains" as const, values: exclude/);
+  assert.match(panel, /A client lands in exactly one list, never both/);
   // Not offered inside a client workspace, where it could only be a no-op or a
   // contradiction.
   assert.match(panel, /!clientId && clients\.length/);
   assert.match(table, /clients=\{clients\}/);
+
+  // The Company half, against client_companies rather than an array column.
+  const [companyMigration, companyPanel, workspace] = await Promise.all([
+    readFile(new URL("../supabase/migrations/20260915140000_filter_the_master_company_db_by_client.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/CompanyFilterPanel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/CompaniesWorkspace.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(companyMigration, /exists \(select 1 from public\.client_companies cc/);
+  // companies.client_count is a stored count, not a membership set; "exclude
+  // Krishify" is not a question a number can answer.
+  assert.match(companyMigration, /it says how many clients a company touches, not which/);
+  for (const guard of [
+    /raise exception 'Could not patch company_filter_sql_v3 for __company_client_ids'/,
+    /raise exception 'Could not patch company_matches_filters_v1 for __company_client_ids'/,
+    /raise exception 'Could not close the wrapped CASE in company_matches_filters_v1'/,
+    /raise exception 'Could not patch company_prefilter_sql for __company_client_ids'/,
+  ]) assert.match(companyMigration, guard);
+  // The anchor lesson: a two-line anchor was split by an earlier splice, so it
+  // anchors on the single stable line instead.
+  assert.match(companyMigration, /spliced __company_icp_verified in between them/);
+  assert.match(companyPanel, /<ClientMembershipFilter field="__company_client_ids"/);
+  assert.match(workspace, /<CompanyFilterPanel filters=\{filters\} clients=\{clients\}/);
 });
