@@ -48,6 +48,18 @@ export type QualitySeverity = "high" | "medium" | "low" | "clear";
 // A check with no filter simply gets no button. "Not touched in 180 days" reads
 // prospects.updated_at, and there is no updated_at filter to point at - inventing
 // an approximate one would break the rule above.
+//
+// The three company-profile checks added later were held back for exactly this
+// rule: two of them had no People filter to point at until 20260916090000 taught
+// the compiler to read public.companies. Their counts were re-verified the same
+// way, against the tiles, on production:
+//
+//   missing # employees           78,995  -> __employee_count is "unknown"   78,995
+//   missing company keywords      94,089  -> __company_keywords empty        94,089
+//   missing company description   94,444  -> __company_description empty     94,444
+//
+// That equality is asserted inside 20260916100000 rather than only checked once,
+// because the tile and the button drift the moment either side is edited alone.
 const emptyFilter = (field: string): ProspectFilter => ({ id: `quality:${field}`, field, operator: "empty", values: [] });
 
 export type QualityIssue = {
@@ -123,6 +135,33 @@ const checks: Array<{ id: string; label: string; severity: Exclude<QualitySeveri
     impact: "Seniority and department are derived from the title, so every filter built on either skips these records entirely.",
     action: "Re-import with a title column - it is a person-level field, so filling gaps from company records cannot supply it.",
     filters: [emptyFilter("__title")],
+  },
+  // The company profile. None of these three stops an email going out, so none
+  // of them is "high" - they cost you targeting, which is the tier below. They
+  // are also the three biggest gaps in the database, which is why the tab was
+  // reporting a cleaner picture than the data supports until they were added.
+  {
+    id: "employees", label: "Missing # employees", severity: "medium",
+    read: (summary) => summary.missingEmployees ?? 0,
+    impact: "Company size is the first cut in almost every ICP, so these people are invisible to any search that sets a size band - including the client's own.",
+    action: "Import the company list with an employee count column; the People import reads it from the company row, so one company file fixes everyone at it.",
+    // Not an empty filter: employee count is two numeric columns, and the range
+    // control expresses "no number at all" as the 'unknown' band.
+    filters: [{ id: "quality:__employee_count", field: "__employee_count", operator: "number_ranges", values: ["unknown"] }],
+  },
+  {
+    id: "company_keywords", label: "Missing company keywords", severity: "medium",
+    read: (summary) => summary.missingCompanyKeywords ?? 0,
+    impact: "Keywords are what a keyword search matches. Without them a company can only be found by name, industry or description, so these people never appear in a keyword-built list.",
+    action: "Re-import the company file with a Keywords column. It is a company-level field, so it cannot be recovered from the person's record.",
+    filters: [emptyFilter("__company_keywords")],
+  },
+  {
+    id: "company_description", label: "Missing company description", severity: "low",
+    read: (summary) => summary.missingCompanyDescription ?? 0,
+    impact: "The description is the widest of the keyword scopes - it is what finds a company that does the thing without using the word for it. Gaps narrow every keyword search that ticks it.",
+    action: "No action needed now. A later company import carrying descriptions fills them in place, and the narrower scopes still work meanwhile.",
+    filters: [emptyFilter("__company_description")],
   },
   {
     id: "linkedin", label: "Missing LinkedIn", severity: "low",

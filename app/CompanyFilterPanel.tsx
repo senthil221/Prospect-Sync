@@ -3,7 +3,7 @@
 import { ChangeEvent, useRef, useState } from "react";
 import { describeBulkMerge, describeMatchMode, exactMatchThreshold, mergeBulkValues, splitPastedValues, switchesToExactMatch } from "../lib/bulk-values";
 import { isXlsxFile, readXlsxRows } from "../lib/spreadsheet";
-import { ClientMembershipFilter, filterId, IncludeExcludeFilter, TextBooleanFilter, type ProspectFilter, type ProspectFilterOperator } from "./ApolloFilterPanel";
+import { ClientMembershipFilter, employeeRanges, filterId, foundedYearRanges, fundingRanges, IncludeExcludeFilter, RangeFilter, TextBooleanFilter, type ProspectFilter, type ProspectFilterOperator } from "./ApolloFilterPanel";
 import type { CompanyKeywordScope } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
 import { AppIcon } from "./components/DashboardUi";
@@ -38,31 +38,11 @@ const companyFilters: CompanyFilterDefinition[] = [
 // The columns still exist and are still exported and read by the
 // fill-from-company enrichment - they just are not three things to filter on.
 const companyDetailFilters: CompanyFilterDefinition[] = [];
+// The bands themselves live in ApolloFilterPanel, beside the control that
+// renders them, so the People rail and this one cannot offer different bands
+// for the same number.
 
-const employeeRanges = [
-  ["1:10", "1–10"], ["11:20", "11–20"], ["21:50", "21–50"], ["51:100", "51–100"],
-  ["101:200", "101–200"], ["201:500", "201–500"], ["501:1000", "501–1,000"],
-  ["1001:2000", "1,001–2,000"], ["2001:5000", "2,001–5,000"],
-  ["5001:10000", "5,001–10,000"], ["10001:", "10,001+"],
-] as const;
 
-const foundedYearRanges = [
-  ["2020:", "2020 or later"], ["2010:2019", "2010–2019"], ["2000:2009", "2000–2009"],
-  ["1990:1999", "1990–1999"], ["1980:1989", "1980–1989"], ["0:1979", "Before 1980"],
-] as const;
-
-// Funding bands, in whole dollars because that is how the column stores it.
-//
-// Ranges are non-overlapping and the top one is open-ended: production's
-// maximum is 178 billion, which no closed band should have to anticipate.
-// Bounds above 2,147,483,647 are why the funding filter parses its own bigint
-// bounds rather than sharing the integer ones - see 20260915090000.
-const fundingRanges = [
-  ["0:1000000", "Up to $1M"], ["1000001:5000000", "$1M – $5M"],
-  ["5000001:10000000", "$5M – $10M"], ["10000001:50000000", "$10M – $50M"],
-  ["50000001:100000000", "$50M – $100M"], ["100000001:500000000", "$100M – $500M"],
-  ["500000001:", "$500M+"],
-] as const;
 
 function activeCount(filters: ProspectFilter[]) {
   return filters.reduce((count, filter) => count + (filter.operator === "empty" || filter.operator === "not_empty" ? 1 : filter.values.length), 0);
@@ -320,46 +300,5 @@ export function BulkDomainPaste({ onAdd }: { onAdd: (domains: string[]) => void 
       <button type="button" onClick={apply} disabled={!pending}>Add {pending ? pending.toLocaleString("en-IN") : ""} domains</button>
       {note ? <span className="bulk-domain-note">{note}</span> : null}
     </div>
-  </div>;
-}
-
-function RangeFilter({ field, filters, presets, unknownLabel, minPlaceholder = "e.g. 50", maxPlaceholder = "No maximum", onChange }: {
-  field: string;
-  filters: ProspectFilter[];
-  presets: ReadonlyArray<readonly [string, string]>;
-  unknownLabel: string;
-  minPlaceholder?: string;
-  maxPlaceholder?: string;
-  onChange: (filters: ProspectFilter[]) => void;
-}) {
-  const existing = filters.find((filter) => filter.operator === "number_ranges");
-  const values = existing?.values ?? [];
-  const [rangeMode, setRangeMode] = useState<"predefined" | "custom">("predefined");
-  const [minimum, setMinimum] = useState("");
-  const [maximum, setMaximum] = useState("");
-
-  function setValues(nextValues: string[]) {
-    onChange(nextValues.length ? [{ id: existing?.id ?? filterId(field, "number_ranges"), field, operator: "number_ranges", values: nextValues }] : []);
-  }
-
-  function toggle(value: string) {
-    setValues(values.includes(value) ? values.filter((item) => item !== value) : [...values, value]);
-  }
-
-  function applyCustom() {
-    const min = Math.max(0, Number(minimum));
-    const max = maximum.trim() ? Math.max(0, Number(maximum)) : null;
-    if (!minimum.trim() || !Number.isFinite(min) || (max !== null && (!Number.isFinite(max) || max < min))) return;
-    const custom = `${Math.trunc(min)}:${max === null ? "" : Math.trunc(max)}`;
-    setValues(values.includes(custom) ? values : [...values, custom]);
-    setMinimum(""); setMaximum("");
-  }
-
-  return <div className="employee-filter">
-    <div className="employee-mode"><button type="button" className={rangeMode === "predefined" ? "active" : ""} onClick={() => setRangeMode("predefined")}><i/>Predefined range</button><button type="button" className={rangeMode === "custom" ? "active" : ""} onClick={() => setRangeMode("custom")}><i/>Custom range</button></div>
-    {rangeMode === "predefined"
-      ? <div className="employee-range-list">{presets.map(([value, label]) => <label key={value}><input type="checkbox" checked={values.includes(value)} onChange={() => toggle(value)}/><span>{label}</span></label>)}</div>
-      : <div className="employee-custom-range"><label>Minimum<input type="number" min="0" value={minimum} onChange={(event) => setMinimum(event.target.value)} placeholder={minPlaceholder}/></label><label>Maximum<input type="number" min="0" value={maximum} onChange={(event) => setMaximum(event.target.value)} placeholder={maxPlaceholder}/></label><button type="button" onClick={applyCustom}>Apply range</button></div>}
-    <label className="employee-unknown"><input type="checkbox" checked={values.includes("unknown")} onChange={() => toggle("unknown")}/><span>{unknownLabel}</span></label>
   </div>;
 }

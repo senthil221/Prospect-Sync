@@ -336,6 +336,43 @@ with checks(sort_key, area, check_name, ok, detail) as (
     coalesce((select 'stamped-looking rows: ' || count(*) from public.client_prospects
                where date_added is not null and date_added = added_at::date), 'table missing')
 
+  -- 12. The People database reaching the company profile (20260916090000 /
+  -- 20260916100000).
+  --
+  -- 147 and 148 are the pair that has to move together: the SQL compiler and
+  -- the row matcher answer the same filter on different surfaces, so one
+  -- knowing __company_industry and the other not is the grid and a bulk delete
+  -- acting on different rows. 149 is the tab's own rule - a tile with no filter
+  -- to open onto is a number nobody can act on.
+  union all
+  select 147, 'filters', 'the SQL compiler reads the company profile',
+    coalesce(public.prospect_filter_sql_v1('',
+      '[{"field":"__company_industry","operator":"contains","values":["fintech"]}]'::jsonb)
+      like '%public.companies co where co.id = pi.company_id%', false),
+    coalesce(public.prospect_filter_sql_v1('',
+      '[{"field":"__company_industry","operator":"contains","values":["fintech"]}]'::jsonb), 'compiler missing')
+
+  union all
+  select 148, 'filters', 'the row matcher knows the same six company fields',
+    coalesce((select count(*) = 6 from unnest(array['__company_industry', '__company_keywords',
+        '__company_description', '__company_technologies', '__company_founded_year',
+        '__company_total_funding']) field
+      where pg_get_functiondef(to_regprocedure(
+        'public.prospect_index_matches_v1(public.prospect_index,text,jsonb)')) like '%' || field || '%'), false),
+    coalesce((select string_agg(field, ', ') from unnest(array['__company_industry', '__company_keywords',
+        '__company_description', '__company_technologies', '__company_founded_year',
+        '__company_total_funding']) field
+      where pg_get_functiondef(to_regprocedure(
+        'public.prospect_index_matches_v1(public.prospect_index,text,jsonb)')) not like '%' || field || '%'),
+      'all six present')
+
+  union all
+  select 149, 'quality', 'every Data Quality tile the tab shows has a filter behind it',
+    coalesce((select public.data_quality_overview() ?& array['missingEmployees',
+      'missingCompanyKeywords', 'missingCompanyDescription']), false),
+    coalesce((select 'keys: ' || (select string_agg(k, ', ' order by k)
+      from jsonb_object_keys(public.data_quality_overview()) k)), 'overview missing')
+
   -- Not a schema assertion: a backlog whose oldest row is days old means the
   -- drain is not running, which no amount of correct DDL would reveal.
   union all

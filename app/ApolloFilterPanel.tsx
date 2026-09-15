@@ -12,10 +12,18 @@ import { useClientIcps } from "./components/use-client-icps";
 export type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 
 type FilterDefinition = ProspectFieldDefinition & {
-  kind?: "text" | "employee" | "tiers" | "departments";
+  kind?: "text" | "employee" | "tiers" | "departments" | "year" | "funding";
   advanced?: boolean;
   description?: string;
+  /** Which value endpoint autocompletes this field. Company fields ask the company one. */
+  valuesEndpoint?: string;
 };
+
+// The company filters below are company data, so their suggestions come from
+// public.companies, not from prospect_index. Leaving this off made the Companies
+// panel scan 674k prospect rows per keystroke to return nothing, which is
+// recorded at the CompanyKeywordFilter it broke; the same trap is here.
+const COMPANY_VALUES_ENDPOINT = "/api/companies/filter-values";
 
 // Only the mandatory person fields are offered as filters. Industry (and any other
 // kept field) arrives through the whitelisted custom fields in "MORE FILTERS".
@@ -58,11 +66,56 @@ const optionalFilters: FilterDefinition[] = [
   { id: "__tags", label: "Tags", description: "Tags added from the bulk actions bar after selecting rows." },
 ];
 
-const employeeRanges = [
+// The company profile, filterable from the People database.
+//
+// These are the SAME six keys the People export has offered since 20260910090000
+// (lib/prospect-export.ts) plus the two that prospect_index already carried, so
+// a column you can export is now a column you can filter on, under one name.
+//
+// None of them live on prospect_index. The compiler reads public.companies
+// through company_id, which is why adding eight filters cost no storage and no
+// backfill - see 20260916090000 for the measured plans and for the 1.7 GB of
+// duplication the alternative would have added.
+const companyFilters: FilterDefinition[] = [
+  { id: "__company_industry", label: "Industry", valuesEndpoint: COMPANY_VALUES_ENDPOINT },
+  { id: "__company_keywords", label: "Company Keywords", valuesEndpoint: COMPANY_VALUES_ENDPOINT, description: "The company's own keyword tags, not the person's." },
+  { id: "__company_description", label: "Company Description", kind: "text", advanced: true, valuesEndpoint: COMPANY_VALUES_ENDPOINT, description: "Search the company description. Boolean supported." },
+  { id: "__employee_count", label: "# Employees", kind: "employee" },
+  // Suggestions for this one come from the PEOPLE endpoint on purpose: the
+  // predicate reads the company location carried on prospect_index, so the list
+  // offered is exactly the list that can match.
+  { id: "__company_location", label: "Company Location", description: "One field for the company's city, state and country - e.g. “London”, “California”, “India”." },
+  { id: "__company_founded_year", label: "Founded Year", kind: "year" },
+  { id: "__company_technologies", label: "Technologies", valuesEndpoint: COMPANY_VALUES_ENDPOINT },
+  { id: "__company_total_funding", label: "Total Funding", kind: "funding", description: "Ranges over the funding amount. Most companies carry no funding figure, so Not known is by far the largest group." },
+];
+
+// Shared with the Companies panel, which imports them from here. Both rails have
+// to offer the same bands or "51-100 employees" would mean two different things
+// depending on which database you asked.
+export const employeeRanges = [
   ["1:10", "1–10"], ["11:20", "11–20"], ["21:50", "21–50"], ["51:100", "51–100"],
   ["101:200", "101–200"], ["201:500", "201–500"], ["501:1000", "501–1,000"],
   ["1001:2000", "1,001–2,000"], ["2001:5000", "2,001–5,000"],
   ["5001:10000", "5,001–10,000"], ["10001:", "10,001+"],
+] as const;
+
+export const foundedYearRanges = [
+  ["2020:", "2020 or later"], ["2010:2019", "2010–2019"], ["2000:2009", "2000–2009"],
+  ["1990:1999", "1990–1999"], ["1980:1989", "1980–1989"], ["0:1979", "Before 1980"],
+] as const;
+
+// Funding bands, in whole dollars because that is how the column stores it.
+//
+// Ranges are non-overlapping and the top one is open-ended: production's
+// maximum is 178 billion, which no closed band should have to anticipate.
+// Bounds above 2,147,483,647 are why the funding filter parses its own bigint
+// bounds rather than sharing the integer ones - see 20260915090000.
+export const fundingRanges = [
+  ["0:1000000", "Up to $1M"], ["1000001:5000000", "$1M – $5M"],
+  ["5000001:10000000", "$5M – $10M"], ["10000001:50000000", "$10M – $50M"],
+  ["50000001:100000000", "$50M – $100M"], ["100000001:500000000", "$100M – $500M"],
+  ["500000001:", "$500M+"],
 ] as const;
 
 // Separators a pasted list can arrive with: commas, semicolons, pipes, newlines, and
@@ -83,7 +136,7 @@ export function filterLabel(field: string, customFields: ProspectFieldDefinition
   if (field === "__client_tags" || field === "__company_tags") return "Client ICP";
   if (field === "__lead") return "Lead";
   if (field === "__contactable") return "Contactable";
-  return [...mainFilters, ...classifierFilters, ...optionalFilters, ...customFields].find((definition) => definition.id === field)?.label ?? field;
+  return [...mainFilters, ...classifierFilters, ...companyFilters, ...optionalFilters, ...customFields].find((definition) => definition.id === field)?.label ?? field;
 }
 
 export default function ApolloFilterPanel({ filters, customFields, clientId, clients = [], onChange }: {
@@ -101,6 +154,7 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const visibleMain = mainFilters.filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
   const visibleClassifier = classifierFilters.filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
+  const visibleCompany = companyFilters.filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
   const visibleOptional = [...optionalFilters, ...customFields].filter((item) => item.label.toLocaleLowerCase().includes(normalizedSearch));
 
   function replaceField(field: string, replacements: ProspectFilter[]) {
@@ -148,7 +202,7 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
           would end up silently expanding the section instead. */}
       <div className="apollo-filter-head">
         <button type="button" id={`filter-trigger-${definition.id}`} className="apollo-filter-summary" aria-expanded={isExpanded} aria-controls={`filter-panel-${definition.id}`} onClick={() => setExpanded(isExpanded ? "" : definition.id)}>
-          <span className="apollo-filter-mark"><AppIcon name={definition.kind === "employee" ? "hash" : "target"} size={14}/></span>
+          <span className="apollo-filter-mark"><AppIcon name={definition.kind === "employee" || definition.kind === "year" || definition.kind === "funding" ? "hash" : "target"} size={14}/></span>
           <strong>{definition.label}</strong>
           {count ? <span className="filter-count">{count}</span> : null}
           <span className="apollo-chevron"><AppIcon name="chevron" size={14}/></span>
@@ -166,10 +220,14 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
           : definition.kind === "departments"
           ? <DepartmentFunctionFilter filters={filters} taxonomy={taxonomy} onChange={onChange} />
           : definition.kind === "employee"
-          ? <EmployeeFilter filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
+          ? <RangeFilter field={definition.id} filters={fieldFilters} presets={employeeRanges} unknownLabel="# of employees is unknown" onChange={(next) => replaceField(definition.id, next)} />
+          : definition.kind === "year"
+          ? <RangeFilter field={definition.id} filters={fieldFilters} presets={foundedYearRanges} unknownLabel="Founded year is unknown" minPlaceholder="e.g. 2005" maxPlaceholder="e.g. 2015" onChange={(next) => replaceField(definition.id, next)} />
+          : definition.kind === "funding"
+          ? <RangeFilter field={definition.id} filters={fieldFilters} presets={fundingRanges} unknownLabel="Funding is not known" minPlaceholder="e.g. 1000000" maxPlaceholder="No maximum" onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "text" && definition.advanced
-            ? <TextBooleanFilter key={fieldFilters.map((filter) => `${filter.id}:${filter.values.join("|")}`).join(";")} definition={definition} filters={fieldFilters} clientId={clientId} onChange={(next) => replaceField(definition.id, next)} />
-            : <IncludeExcludeFilter field={definition.id} filters={fieldFilters} clientId={clientId} onChange={(next) => replaceField(definition.id, next)} />}
+            ? <TextBooleanFilter key={fieldFilters.map((filter) => `${filter.id}:${filter.values.join("|")}`).join(";")} definition={definition} filters={fieldFilters} clientId={clientId} valuesEndpoint={definition.valuesEndpoint} onChange={(next) => replaceField(definition.id, next)} />
+            : <IncludeExcludeFilter field={definition.id} filters={fieldFilters} clientId={clientId} valuesEndpoint={definition.valuesEndpoint} onChange={(next) => replaceField(definition.id, next)} />}
         {count ? <button type="button" className="clear-section-filter" onClick={() => replaceField(definition.id, [])}>Clear {definition.label}</button> : null}
       </div> : null}
     </section>;
@@ -184,6 +242,12 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
     <div className="apollo-filter-scroll">
       {visibleMain.length ? <div className="apollo-filter-group"><small>Main filters</small>{visibleMain.map(renderDefinition)}</div> : null}
       {visibleClassifier.length ? <div className="apollo-filter-group"><small>From job title</small>{visibleClassifier.map(renderDefinition)}</div> : null}
+      {/* The person's company, filtered from the People database. Its own group
+          rather than folded into "More filters": every field in it is a fact
+          about the company, and reading them together is how anyone builds an
+          ICP. Shown in both databases - a client workspace narrows to that
+          client's people first, and then still needs to narrow by company. */}
+      {visibleCompany.length ? <div className="apollo-filter-group"><small>Company</small>{visibleCompany.map(renderDefinition)}</div> : null}
       {visibleOptional.length ? <div className="apollo-filter-group optional"><small>More filters</small>{visibleOptional.map(renderDefinition)}</div> : null}
       {/* Client filter only in the Master DB: inside a client workspace every
           row is already that client's, so it could only be a no-op or a
@@ -201,7 +265,7 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
           expanded={expanded === "__client_tags"} onToggle={() => setExpanded(expanded === "__client_tags" ? "" : "__client_tags")}
           onChange={onChange}/>
       </div> : null}
-      {!visibleMain.length && !visibleClassifier.length && !visibleOptional.length ? <p className="filter-search-empty">No filters match “{search}”.</p> : null}
+      {!visibleMain.length && !visibleClassifier.length && !visibleCompany.length && !visibleOptional.length ? <p className="filter-search-empty">No filters match “{search}”.</p> : null}
     </div>
     {/* Applied state stays visible without scrolling the list back to the top. */}
     <div className="filter-panel-footer" role="status">
@@ -460,7 +524,20 @@ export function TokenValuePicker({ field, values, clientId, placeholder, valuesE
   </div>;
 }
 
-function EmployeeFilter({ filters, onChange }: { filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void }) {
+// One range control for every banded number in the product: employees, founded
+// year, funding. It used to exist twice - EmployeeFilter here and RangeFilter in
+// CompanyFilterPanel, the second a generalisation of the first - and the copies
+// had already drifted (only one cleared the custom inputs after applying). Both
+// panels now render this one.
+export function RangeFilter({ field, filters, presets, unknownLabel, minPlaceholder = "e.g. 50", maxPlaceholder = "No maximum", onChange }: {
+  field: string;
+  filters: ProspectFilter[];
+  presets: ReadonlyArray<readonly [string, string]>;
+  unknownLabel: string;
+  minPlaceholder?: string;
+  maxPlaceholder?: string;
+  onChange: (filters: ProspectFilter[]) => void;
+}) {
   const existing = filters.find((filter) => filter.operator === "number_ranges");
   const values = existing?.values ?? [];
   const [rangeMode, setRangeMode] = useState<"predefined" | "custom">("predefined");
@@ -468,7 +545,7 @@ function EmployeeFilter({ filters, onChange }: { filters: ProspectFilter[]; onCh
   const [maximum, setMaximum] = useState("");
 
   function setValues(nextValues: string[]) {
-    onChange(nextValues.length ? [{ id: existing?.id ?? filterId("__employee_count", "number_ranges"), field: "__employee_count", operator: "number_ranges", values: nextValues }] : []);
+    onChange(nextValues.length ? [{ id: existing?.id ?? filterId(field, "number_ranges"), field, operator: "number_ranges", values: nextValues }] : []);
   }
 
   function toggle(value: string) {
@@ -481,12 +558,15 @@ function EmployeeFilter({ filters, onChange }: { filters: ProspectFilter[]; onCh
     if (!minimum.trim() || !Number.isFinite(min) || (max !== null && (!Number.isFinite(max) || max < min))) return;
     const custom = `${Math.trunc(min)}:${max === null ? "" : Math.trunc(max)}`;
     setValues(values.includes(custom) ? values : [...values, custom]);
+    setMinimum(""); setMaximum("");
   }
 
   return <div className="employee-filter">
     <div className="employee-mode"><button type="button" className={rangeMode === "predefined" ? "active" : ""} onClick={() => setRangeMode("predefined")}><i/>Predefined range</button><button type="button" className={rangeMode === "custom" ? "active" : ""} onClick={() => setRangeMode("custom")}><i/>Custom range</button></div>
-    {rangeMode === "predefined" ? <div className="employee-range-list">{employeeRanges.map(([value, label]) => <label key={value}><input type="checkbox" checked={values.includes(value)} onChange={() => toggle(value)}/><span>{label}</span></label>)}</div> : <div className="employee-custom-range"><label>Minimum<input type="number" min="0" value={minimum} onChange={(event) => setMinimum(event.target.value)} placeholder="e.g. 50"/></label><label>Maximum<input type="number" min="0" value={maximum} onChange={(event) => setMaximum(event.target.value)} placeholder="No maximum"/></label><button type="button" onClick={applyCustom}>Apply range</button></div>}
-    <label className="employee-unknown"><input type="checkbox" checked={values.includes("unknown")} onChange={() => toggle("unknown")}/><span># of employees is unknown</span></label>
+    {rangeMode === "predefined"
+      ? <div className="employee-range-list">{presets.map(([value, label]) => <label key={value}><input type="checkbox" checked={values.includes(value)} onChange={() => toggle(value)}/><span>{label}</span></label>)}</div>
+      : <div className="employee-custom-range"><label>Minimum<input type="number" min="0" value={minimum} onChange={(event) => setMinimum(event.target.value)} placeholder={minPlaceholder}/></label><label>Maximum<input type="number" min="0" value={maximum} onChange={(event) => setMaximum(event.target.value)} placeholder={maxPlaceholder}/></label><button type="button" onClick={applyCustom}>Apply range</button></div>}
+    <label className="employee-unknown"><input type="checkbox" checked={values.includes("unknown")} onChange={() => toggle("unknown")}/><span>{unknownLabel}</span></label>
   </div>;
 }
 

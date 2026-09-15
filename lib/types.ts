@@ -36,7 +36,11 @@ export type ImportResumeDetail = { id: string; kind: "prospects" | "companies"; 
 export type SavedViewReview = { reason: string; limit: "filters" | "values" | "value_length" | "total_values" | "request_bytes" | "invalid_filter"; received: number; allowed: number; field: string | null; alternative: string };
 export type SavedView = { id: string; name: string; definition: { filters: ProspectFilter[]; columns: string[]; sort: string; direction: "asc" | "desc" }; needsReview?: SavedViewReview };
 export type CoverageRow = { row: number; name: string; domain: string; status: "known" | "new"; matchedBy: string; matchedCompany: string; prospectCount: number; clientCount: number };
-export type QualitySummary = { total: number; missingEmail: number; missingTitle: number; missingLinkedin: number; missingCompany: number; missingDomain: number; staleRecords: number; potentialDuplicateGroups: number };
+// The three company-profile counts arrive from a database one migration behind
+// as undefined, which qualityIssues reads as 0 and reports as "Clear" - so they
+// are optional rather than required. 20260916100000 recomputes the stored
+// snapshot on the way in, so the window is the deploy, not a refresh cycle.
+export type QualitySummary = { total: number; missingEmail: number; missingTitle: number; missingLinkedin: number; missingCompany: number; missingDomain: number; staleRecords: number; potentialDuplicateGroups: number; missingEmployees?: number; missingCompanyKeywords?: number; missingCompanyDescription?: number };
 export type ClientIcpProfile = { id: string; name: string; description: string; tag_id: string | null; sort_order: number; created_at: string; updated_at: string };
 export type BlocklistEntry = { id: string; kind: "domain" | "email"; value: string; reason: string; source: string; created_at: string };
 export type EnrichmentPreview = { companies: number; fields: number; sample: Array<{ companyId: string; company: string; domain: string; fields: number }> };

@@ -115,16 +115,23 @@ test("company keyword search defaults to name, keywords and description", async 
 // sum to exactly 8,887, which is every company carrying a parseable funding
 // figure. No overlaps and no gaps, so the bands partition the funded set.
 test("total funding filters by range and by not-known, not by substring", async () => {
-  const [panel, migration] = await Promise.all([
+  const [panel, people, migration] = await Promise.all([
     readFile(new URL("../app/CompanyFilterPanel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ApolloFilterPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../supabase/migrations/20260915090000_total_funding_is_a_range_not_a_string.sql", import.meta.url), "utf8"),
   ]);
 
   // A token filter would match 10000000 inside 110000000; a range cannot.
   assert.match(panel, /id: "__total_funding", label: "Total funding", kind: "funding"/);
   assert.match(panel, /presets=\{fundingRanges\} unknownLabel="Funding is not known"/);
+  // The bands live beside the control that renders them, and both rails import
+  // them from there - see 20260916090000, which gave the People panel the same
+  // funding filter. Two copies would let the two databases disagree about what
+  // "$100M - $500M" means.
+  assert.match(people, /export const fundingRanges = \[/);
+  assert.doesNotMatch(panel, /const fundingRanges = \[/);
   // Open-ended top band: production's maximum is 178 billion.
-  assert.match(panel, /\["500000001:", "\$500M\+"\]/);
+  assert.match(people, /\["500000001:", "\$500M\+"\]/);
 
   // The column, kept true by a trigger rather than by whoever remembers to set
   // it, and indexed only where it is non-null (98% of rows are null).

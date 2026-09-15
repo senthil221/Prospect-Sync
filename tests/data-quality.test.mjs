@@ -9,8 +9,21 @@ import { formatShare, qualityIssues, severityLabel } from "../lib/quality-issues
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 const summary = (over) => ({
   total: 681_085, missingEmail: 0, missingTitle: 0, missingLinkedin: 0,
-  missingCompany: 0, missingDomain: 0, staleRecords: 0, potentialDuplicateGroups: 0, ...over,
+  missingCompany: 0, missingDomain: 0, staleRecords: 0, potentialDuplicateGroups: 0,
+  missingEmployees: 0, missingCompanyKeywords: 0, missingCompanyDescription: 0, ...over,
 });
+// A summary where every count is non-zero, so "all of them" is expressed as a
+// relationship rather than as a number that has to be edited each time a check
+// is added. The tab gained three company-profile checks in 20260916100000, and
+// the tests that carried literal 6 all had to be found by failing.
+const everyGap = () => {
+  const seeded = summary({});
+  for (const key of Object.keys(seeded)) {
+    if (key !== "total" && key !== "potentialDuplicateGroups") seeded[key] = 1;
+  }
+  return seeded;
+};
+const checkCount = qualityIssues(everyGap()).length;
 const person = (over) => ({
   id: "p1", full_name: "", title: "", company_name: "", work_email: "", personal_email: "",
   linkedin_url: "", mobile_number: "", seniority: "", department: "", city: "", state: "",
@@ -45,7 +58,7 @@ test("the checks are ranked by what they cost, not by declaration order", () => 
 
 test("every issue explains its impact and names one next action", () => {
   // QUALITY-AC-01. A tile reading "412,883" is a fact, not a task.
-  for (const issue of qualityIssues(summary({ missingEmail: 1, missingTitle: 1, missingLinkedin: 1, missingCompany: 1, missingDomain: 1, staleRecords: 1 }))) {
+  for (const issue of qualityIssues(everyGap())) {
     assert.ok(issue.impact.length > 40, `${issue.id} must say what the gap breaks`);
     assert.ok(issue.action.length > 20, `${issue.id} must say what to do about it`);
     assert.notEqual(issue.severity, "clear");
@@ -60,9 +73,9 @@ test("every issue explains its impact and names one next action", () => {
 
 test("a check that finds nothing stays on the list as clear", () => {
   const issues = qualityIssues(summary({ missingEmail: 12 }));
-  assert.equal(issues.length, 6, "all six checks are always reported");
+  assert.equal(issues.length, checkCount, "every check is always reported");
   const clear = issues.filter((issue) => issue.severity === "clear");
-  assert.equal(clear.length, 5);
+  assert.equal(clear.length, checkCount - 1, "the one with a count is the only one not clear");
   // Clear checks sort last, so the queue reads worst-first from the top.
   assert.equal(issues[0].id, "email");
   assert.equal(issues.at(-1).severity, "clear");
@@ -189,6 +202,7 @@ test("each quality check can open the records it counted", async () => {
   const issues = qualityIssues(summary({
     missingEmail: 23, missingDomain: 23_568, missingCompany: 113,
     missingTitle: 2_115, missingLinkedin: 82_322, staleRecords: 90_000,
+    missingEmployees: 78_995, missingCompanyKeywords: 94_089, missingCompanyDescription: 94_444,
   }));
   const byId = Object.fromEntries(issues.map((issue) => [issue.id, issue]));
 
@@ -202,10 +216,22 @@ test("each quality check can open the records it counted", async () => {
   assert.deepEqual(byId.company.filters.map((filter) => filter.field), ["__company"]);
   // Missing email counts people with neither address, so it takes both.
   assert.deepEqual(byId.email.filters.map((filter) => filter.field), ["__work_email", "__personal_email"]);
+  // The company profile. These three read public.companies through the People
+  // compiler (20260916090000), which is what let them have buttons at all - the
+  // tab's rule is that a tile without an exact filter gets no button.
+  assert.deepEqual(byId.company_keywords.filters.map((filter) => filter.field), ["__company_keywords"]);
+  assert.deepEqual(byId.company_description.filters.map((filter) => filter.field), ["__company_description"]);
+  assert.deepEqual(byId.employees.filters.map((filter) => filter.field), ["__employee_count"]);
   for (const issue of issues) {
     for (const filter of issue.filters ?? []) {
-      assert.equal(filter.operator, "empty");
-      assert.deepEqual(filter.values, []);
+      // Two shapes, and only two. "No value at all" is `empty` for a text
+      // column; employee count is two numeric columns, where the range control
+      // spells the same thing as the 'unknown' band.
+      if (filter.operator === "number_ranges") assert.deepEqual(filter.values, ["unknown"]);
+      else {
+        assert.equal(filter.operator, "empty");
+        assert.deepEqual(filter.values, []);
+      }
       assert.ok(filter.id, "a filter needs an id to survive the URL round trip");
     }
   }
