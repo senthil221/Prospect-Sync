@@ -426,3 +426,50 @@ test("every action the client route accepts, the worker can actually apply", asy
 function routeActions(source) {
   return new Set([...source.matchAll(/action === "([a-z_]+)"/g)].map((match) => match[1]));
 }
+
+// The nine superseded search functions, and why dropping them is safe
+// (20260916130000).
+test("the retired search functions are dropped, and the live three are not", async () => {
+  const migration = await read("../supabase/migrations/20260916130000_drop_the_superseded_search_functions.sql");
+  const code = codeOnly(migration);
+
+  // Every drop names a full signature. DROP FUNCTION by bare name is ambiguous
+  // across overloads, and filter_companies sits one underscore away from the
+  // live filter_companies_v4.
+  const drops = code.match(/^drop function if exists public\.[a-z_0-9]+\([^)]*\);$/gm) ?? [];
+  assert.equal(drops.length, 9, `expected nine fully-signed drops, found ${drops.length}`);
+  for (const statement of drops) {
+    assert.doesNotMatch(statement, /cascade/i, "a drop here must fail rather than take dependents with it");
+  }
+  assert.ok(drops.some((statement) => statement.includes("public.filter_companies(")));
+  assert.ok(!drops.some((statement) => statement.includes("filter_companies_v4")));
+
+  // The premise is re-checked in the transaction that acts on it, not only when
+  // the file was written - the gap between the two is where a new caller would
+  // have appeared.
+  assert.match(code, /is still called by %/);
+  // And matched as name||'(' so a comment mentioning the name cannot fool it,
+  // which is exactly what happened while writing this.
+  assert.match(code, /p\.prosrc like '%' \|\| v_name \|\| '\(%'/);
+
+  // The real risk is dropping the wrong one of a near-identical pair, so the
+  // three the app actually calls are asserted to survive - still timed.
+  for (const live of ["filter_companies_v4", "search_prospect_export_v5", "search_prospect_workspace_v12"]) {
+    assert.ok(code.includes(live), `${live} must be asserted to survive`);
+  }
+  assert.match(code, /this migration dropped the wrong one/);
+
+  // And the report the file exists to clean is checked in the file's own terms.
+  assert.match(code, /still untimed after the drops: %/);
+
+  // The app calls those three and nothing else from these families. This is the
+  // assertion that would fail if someone reintroduced a call to a dropped one.
+  const sources = await Promise.all([
+    read("../app/api/companies/route.ts"),
+    read("../app/api/prospects/route.ts"),
+    read("../app/api/prospects/export/route.ts"),
+  ]);
+  const calls = new Set(sources.flatMap((source) =>
+    [...codeOnly(source).matchAll(/rpc\("(search_prospect_[a-z_0-9]+|filter_companies[a-z_0-9]*)"/g)].map((match) => match[1])));
+  assert.deepEqual([...calls].sort(), ["filter_companies_v4", "search_prospect_export_v5", "search_prospect_workspace_v12"]);
+});
