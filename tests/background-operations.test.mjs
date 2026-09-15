@@ -333,3 +333,45 @@ test("leads and contactability are client-scoped without widening the index", as
   // Seeded, not forced: the filter is ordinary state the user can then clear.
   assert.match(clientsPanel, /useState<ProspectFilter\[\]>\(initialFilters\)/);
 });
+
+// The cooldown clock was stamped, not set.
+//
+// 20260828010000 added client_prospects.date_added as `not null default
+// current_date`, so 673,859 memberships were recorded as contacted on the day
+// they were imported. 20260829004125 dropped the default the next day and
+// fixed nothing that had already been written.
+test("default-stamped contact dates are cleared, and the default cannot come back", async () => {
+  const [repair, verify] = await Promise.all([
+    read("../supabase/migrations/20260915120000_clear_the_default_stamped_contact_dates.sql"),
+    read("../scripts/verify-migrations.sql"),
+  ]);
+  const sql = codeOnly(repair);
+
+  // Pinned to the two import days the default was live for. Without that
+  // predicate this would also eat a genuine contact date that happened to fall
+  // on its import day - 11,798 rows it has no business touching.
+  assert.match(sql, /added_at::date in \(date '2026-08-25', date '2026-08-28'\)/);
+  assert.match(sql, /set date_added = null/);
+
+  // Two triggers sit on client_prospects and both are UPDATE OF specific
+  // columns. If either ever loses its column list, this file's single UPDATE
+  // becomes 673,859 trigger invocations - so it is checked, not assumed.
+  assert.match(repair, /would fire once per row for this update/);
+  assert.match(sql, /t\.tgtype::integer & 16/);
+
+  // Refuses to run if the schema fix is missing, since the next import would
+  // just re-stamp everything.
+  assert.match(repair, /still has a default; 20260829004125 has not been applied/);
+
+  // Counted before and after: the repair must clear exactly the stamped rows
+  // and leave every genuine date untouched, and re-running must do nothing.
+  assert.match(repair, /genuine contact dates changed: % before, % after/);
+  assert.match(repair, /the repair is not idempotent/);
+
+  // prospect_index holds no copy of date_added, so nothing is queued.
+  assert.doesNotMatch(sql, /enqueue_reindex|reindex_scope_v1/);
+
+  // And the guard that stops this recurring silently.
+  assert.match(verify, /client_prospects\.date_added has no default and stays nullable/);
+  assert.match(verify, /no bulk of contact dates equal to their own import date/);
+});

@@ -305,6 +305,37 @@ with checks(sort_key, area, check_name, ok, detail) as (
     coalesce(has_function_privilege('prospect_operator', 'public.drain_reindex_backlog(integer)', 'EXECUTE'), false),
     'prospect_ops_worker inherits prospect_operator and has service_role revoked'
 
+  -- 11. The cooldown clock (20260828010000 / 20260829004125 / 20260915120000).
+  --
+  -- date_added carried `not null default current_date` for one day, which
+  -- stamped 673,859 memberships with a Client Date Contacted nobody set and
+  -- gave every one of them a cooldown that never started. The schema was fixed
+  -- the next day; the data was not, for two and a half weeks. 145 stops the
+  -- default coming back, 146 catches the data shape it produced.
+  union all
+  select 145, 'cooldown', 'client_prospects.date_added has no default and stays nullable',
+    coalesce((select not a.attnotnull
+                and not exists (select 1 from pg_attrdef d where d.adrelid = a.attrelid and d.adnum = a.attnum)
+              from pg_attribute a
+              where a.attrelid = 'public.client_prospects'::regclass
+                and a.attname = 'date_added' and not a.attisdropped), false),
+    coalesce((select case when a.attnotnull then 'NOT NULL; ' else '' end
+                || coalesce((select pg_get_expr(d.adbin, d.adrelid) from pg_attrdef d
+                              where d.adrelid = a.attrelid and d.adnum = a.attnum), 'no default')
+              from pg_attribute a
+              where a.attrelid = 'public.client_prospects'::regclass
+                and a.attname = 'date_added' and not a.attisdropped), 'column missing')
+
+  -- Informational, and the shape that betrayed it: a contact date equal to the
+  -- day the membership was imported, in bulk, is a stamp rather than a fact.
+  -- A handful is plausible; six figures is the default having come back.
+  union all
+  select 146, 'cooldown', 'no bulk of contact dates equal to their own import date',
+    coalesce((select count(*) < 1000 from public.client_prospects
+               where date_added is not null and date_added = added_at::date), true),
+    coalesce((select 'stamped-looking rows: ' || count(*) from public.client_prospects
+               where date_added is not null and date_added = added_at::date), 'table missing')
+
   -- Not a schema assertion: a backlog whose oldest row is days old means the
   -- drain is not running, which no amount of correct DDL would reveal.
   union all
