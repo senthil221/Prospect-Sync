@@ -16,6 +16,8 @@ export const maxCoverageRows = 5000;
 
 const spreadsheetExtensions = [".csv", ".tsv", ".txt", ".xlsx", ".xls"];
 
+import type { CoverageRow, ProspectFilter } from "./types.ts";
+
 export type CoverageProblem = { cause: string; remedy: string };
 
 export function formatFileSize(bytes: number) {
@@ -116,4 +118,30 @@ export function coverageMappingProblem(input: { headers: string[]; nameField: st
 export function coverageRowNotice(rowCount: number) {
   if (rowCount <= maxCoverageRows) return "";
   return `This file holds ${rowCount.toLocaleString("en-US")} rows. Only the first ${maxCoverageRows.toLocaleString("en-US")} companies are checked — split the file to check the rest.`;
+}
+
+// Open a set of coverage rows in the Company database.
+//
+// By id, never by name: 19,823 of 419,448 companies on production share a
+// normalized name with another, so a name-based button would open onto more
+// companies than the number printed on it. That is the failure lib/quality-
+// issues.ts names - a button that overshoots its own count teaches you not to
+// trust the count - and it is why 20260916110000 added __company_ids.
+//
+// De-duplicated by id, because summary.covered counts ROWS and a real upload
+// repeats companies. The button's number is the number of companies that open.
+//
+// Net-new rows deliberately belong to neither set. They have no company record
+// to open; the export is what they are for.
+export function coverageCompanyFilter(rows: CoverageRow[], covered: boolean): ProspectFilter[] {
+  const ids = [...new Set(rows
+    .filter((row) => row.status === "known" && row.matchedCompanyId && (row.prospectCount > 0) === covered)
+    .map((row) => row.matchedCompanyId))];
+  // Never an empty values list: that compiles to a no-op, which would open the
+  // WHOLE company database - the opposite of what the button says. No filter at
+  // all is the honest answer, and the panel disables the button on it.
+  if (!ids.length) return [];
+  // equals rather than contains: these are exact keys, and the Company DB
+  // answers an id set off companies_pkey.
+  return [{ id: `coverage:${covered ? "covered" : "uncovered"}`, field: "__company_ids", operator: "equals", values: ids }];
 }

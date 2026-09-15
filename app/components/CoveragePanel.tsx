@@ -5,10 +5,10 @@ import { api } from "../../lib/dashboard-api";
 import { formatNumber, readImportTable } from "../../lib/dashboard-helpers";
 import {
   checkCoverageFile, checkCoverageTable, coverageMappingProblem, coverageReadProblem,
-  coverageRowNotice, coverageServerProblem, formatFileSize, maxCoverageRows, problemText,
+  coverageCompanyFilter, coverageRowNotice, coverageServerProblem, formatFileSize, maxCoverageRows, problemText,
   type CoverageProblem,
 } from "../../lib/coverage-file";
-import type { CoverageRow } from "../../lib/types";
+import type { CoverageRow, ProspectFilter } from "../../lib/types";
 import { AppIcon, ProgressBar, StatusMessage } from "./DashboardUi";
 
 type CoverageSummary = { total: number; known: number; new: number; covered: number; existingProspects: number };
@@ -29,7 +29,7 @@ const nameHeaders = ["company", "companyname", "casualcompanyname", "organizatio
  * upload, then map, then results. The stage is derived from what actually
  * exists rather than tracked separately, so it can never disagree with the data.
  */
-export default function CoveragePanel() {
+export default function CoveragePanel({ onViewCompanies }: { onViewCompanies?: (filters: ProspectFilter[]) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [table, setTable] = useState<ParsedTable | null>(null);
   const [nameField, setNameField] = useState("");
@@ -41,6 +41,13 @@ export default function CoveragePanel() {
   const [notice, setNotice] = useState("");
 
   const stage = summary ? "results" : table && file ? "mapping" : "upload";
+  // De-duplicated by company id, so the button's number is the number of
+  // companies that open - a file naming the same company on three rows counts
+  // it once, and summary.covered counts ROWS.
+  const withProspects = coverageCompanyFilter(rows, true);
+  const withoutProspects = coverageCompanyFilter(rows, false);
+  const coveredCompanies = withProspects[0]?.values.length ?? 0;
+  const uncoveredCompanies = withoutProspects[0]?.values.length ?? 0;
   const mappingHint = table ? coverageMappingProblem({ headers: table.headers, nameField, domainField }) : null;
   const checking = table ? Math.min(table.rows.length, maxCoverageRows) : 0;
 
@@ -191,6 +198,25 @@ export default function CoveragePanel() {
             <AppIcon name="download" size={14}/>{summary.new ? `Export ${formatNumber(summary.new)} net-new companies` : "No net-new companies to export"}
           </button>
         </div>
+        {/* Three numbers with somewhere to go. Each button opens the Company
+            database on exactly the rows its own label counts - by company id,
+            so the count and what opens cannot drift apart. Net new has no
+            button because there is no record yet to open; that is the export. */}
+        {onViewCompanies ? <div className="coverage-open-actions">
+          <button className="secondary" disabled={!withProspects.length}
+            title="Open the Company database on the known companies that already contain prospects"
+            onClick={() => onViewCompanies(withProspects)}>
+            <AppIcon name="arrow" size={14}/> {withProspects.length ? `See ${formatNumber(coveredCompanies)} with prospects` : "None with prospects"}
+          </button>
+          <button className="secondary" disabled={!withoutProspects.length}
+            title="Open the Company database on the known companies that have no prospects yet"
+            onClick={() => onViewCompanies(withoutProspects)}>
+            <AppIcon name="arrow" size={14}/> {withoutProspects.length ? `See ${formatNumber(uncoveredCompanies)} without prospects` : "None without prospects"}
+          </button>
+          {/* Said out loud rather than left to be noticed: these counts are
+              companies, and one company can appear on several rows of a file. */}
+          <small>Counted as companies. A file listing the same company twice opens it once.</small>
+        </div> : null}
         <div className="table-wrap coverage-table"><table>
           <thead><tr><th>Company</th><th>Domain</th><th>Status</th><th>Matched by</th><th>Prospects</th><th>Clients</th></tr></thead>
           <tbody>{rows.map((row) => <tr key={`${row.row}-${row.domain}-${row.name}`}>

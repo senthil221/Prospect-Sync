@@ -35,7 +35,7 @@ export type ImportResumeDetail = { id: string; kind: "prospects" | "companies"; 
 // set is larger than a request may now carry. The view is left exactly as saved.
 export type SavedViewReview = { reason: string; limit: "filters" | "values" | "value_length" | "total_values" | "request_bytes" | "invalid_filter"; received: number; allowed: number; field: string | null; alternative: string };
 export type SavedView = { id: string; name: string; definition: { filters: ProspectFilter[]; columns: string[]; sort: string; direction: "asc" | "desc" }; needsReview?: SavedViewReview };
-export type CoverageRow = { row: number; name: string; domain: string; status: "known" | "new"; matchedBy: string; matchedCompany: string; prospectCount: number; clientCount: number };
+export type CoverageRow = { row: number; name: string; domain: string; status: "known" | "new"; matchedBy: string; matchedCompany: string; matchedCompanyId: string; prospectCount: number; clientCount: number };
 // The three company-profile counts arrive from a database one migration behind
 // as undefined, which qualityIssues reads as 0 and reports as "Clear" - so they
 // are optional rather than required. 20260916100000 recomputes the stored

@@ -251,6 +251,16 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
     setProspectPage(1);
   }, [navigate, setProspectPage]);
 
+  // The same move for the coverage checker, into the Company database instead.
+  // Its filters are an exact set of company ids, so navigate() clearing the
+  // search and the pivot first is what keeps the rows that arrive equal to the
+  // number on the button that was pressed.
+  const viewCoverageCompanies = useCallback((filters: ProspectFilter[]) => {
+    navigate("companies");
+    setCompanyFilters(filters);
+    setCompanyPage(1);
+  }, [navigate, setCompanyPage]);
+
   // Only carry a scope that actually narrows something. An unfiltered tab pivots to
   // "everyone", which is what the workspace functions already compute -- keeping the
   // empty scope only produced a banner claiming a restriction that was not applied,
@@ -368,7 +378,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
               current ? refreshed.find((client) => client.id === current.id) ?? current : current));
           }}
         />}
-        {!loading && section === "coverage" && <CoveragePanel/>}
+        {!loading && section === "coverage" && <CoveragePanel onViewCompanies={viewCoverageCompanies}/>}
         {!loading && section === "quality" && <DataQualityPanel onMerged={() => void refreshDashboard()} onViewRecords={viewQualityRecords}/>}
         {!loading && section === "imports" && <ImportsPanel
           clients={clients}

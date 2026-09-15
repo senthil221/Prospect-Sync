@@ -44,7 +44,11 @@ async function measureCoverage(request: Request) {
   const rows = incoming.map((company) => {
     const match = (company.domain && byDomain.get(company.domain)) || byName.get(company.normalizedName);
     const summary = match ? counts.get(match.id) : undefined;
-    return { ...company, status: match ? "known" : "new", matchedBy: match ? (company.domain && match.normalized_domain === company.domain ? "domain" : "name") : "", matchedCompany: match?.name ?? "", prospectCount: Number(summary?.prospect_count ?? 0), clientCount: Number(summary?.client_count ?? 0) };
+    // The id, not just the name. A coverage result is a set of rows somebody
+    // then wants to open, and 19,823 of 419,448 companies share a name with
+    // another - so a name is not a way to address them. __company_ids is
+    // (20260916110000).
+    return { ...company, status: match ? "known" : "new", matchedBy: match ? (company.domain && match.normalized_domain === company.domain ? "domain" : "name") : "", matchedCompany: match?.name ?? "", matchedCompanyId: match?.id ?? "", prospectCount: Number(summary?.prospect_count ?? 0), clientCount: Number(summary?.client_count ?? 0) };
   });
   return Response.json({
     rows,

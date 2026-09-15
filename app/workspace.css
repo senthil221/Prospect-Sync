@@ -480,6 +480,11 @@ main { min-width: 0; grid-column: 2; }
 .mapping-grid label { color: var(--ph-muted); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
 .mapping-grid select { width: 100%; height: var(--control-standard); margin-top: var(--space-1); padding: 0 var(--space-2); border: 1px solid var(--ph-border-strong); border-radius: var(--radius-lg); background: var(--surface); color: var(--ph-text); font-size: var(--text-xs); }
 .coverage-check { width: 100%; }
+/* The two "open these companies" buttons, under the results head. Wrapping
+   rather than a fixed pair of columns: their labels carry a count, so they are
+   as wide as the numbers make them, and at phone width they stack. */
+.coverage-open-actions { padding: 0 var(--space-4) var(--space-3); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.coverage-open-actions small { flex-basis: 100%; color: var(--text-tertiary); font-size: var(--text-2xs); }
 .coverage-table { max-height: 520px; overflow: auto; }
 .quality-metrics { margin-bottom: var(--space-3); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
 .quality-metrics.four { margin: 0; padding: var(--space-4) var(--space-4) var(--space-1); }
