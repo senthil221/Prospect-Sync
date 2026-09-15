@@ -321,4 +321,15 @@ test("leads and contactability are client-scoped without widening the index", as
   // All-matching lead marking is refused rather than accepted and failed later
   // in the worker: apply_batch_v1 does not know set_lead yet.
   assert.match(table, /disabled=\{bulkBusy \|\| selectionMode === "all_matching"\}/);
+
+  // Both are also reachable as tabs, which are the People DB opened
+  // pre-filtered rather than a second grid. A separate grid would be a second
+  // copy of paging, selection, freezing, export and the company pivot.
+  const clientsPanel = await read("../app/components/ClientsPanel.tsx");
+  assert.match(clientsPanel, /id: "leads" as const, label: "Leads"/);
+  assert.match(clientsPanel, /id: "contactable" as const, label: "Contactable"/);
+  assert.match(clientsPanel, /field: "__lead", operator: "contains", values: \[client\.id\]/);
+  assert.match(clientsPanel, /field: "__contactable", operator: "contains", values: \[client\.id\]/);
+  // Seeded, not forced: the filter is ordinary state the user can then clear.
+  assert.match(clientsPanel, /useState<ProspectFilter\[\]>\(initialFilters\)/);
 });

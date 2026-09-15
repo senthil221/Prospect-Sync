@@ -59,7 +59,7 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
   const [cooldown, setCooldown] = useState(client.cooldown_days ?? 90);
   const [savedCooldown, setSavedCooldown] = useState(client.cooldown_days ?? 90);
   const [cooldownState, setCooldownState] = useState("");
-  const [tab, setTab] = useState<"lists" | "prospects" | "companies" | "icp" | "blocklist">("lists");
+  const [tab, setTab] = useState<"lists" | "prospects" | "leads" | "contactable" | "companies" | "icp" | "blocklist">("lists");
   const [companyPeopleScope, setCompanyPeopleScope] = useState<CompanyScope | null>(null);
   const [peopleCompanyScope, setPeopleCompanyScope] = useState<PeopleScope | null>(null);
   async function saveCooldown() {
@@ -76,6 +76,8 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
       items={[
         { id: "lists" as const, label: "Uploaded lists", count: formatNumber(client.list_count), icon: <AppIcon name="upload" size={15}/> },
         { id: "prospects" as const, label: "People DB", count: formatNumber(client.prospect_count), icon: <AppIcon name="database" size={15}/> },
+        { id: "leads" as const, label: "Leads", icon: <AppIcon name="star" size={15}/> },
+        { id: "contactable" as const, label: "Contactable", icon: <AppIcon name="check" size={15}/> },
         { id: "companies" as const, label: "Company DB", icon: <AppIcon name="company" size={15}/> },
         { id: "icp" as const, label: "ICPs", icon: <AppIcon name="target" size={15}/> },
         { id: "blocklist" as const, label: "Blocklist", count: client.blocked_count ? formatNumber(client.blocked_count) : undefined, icon: <AppIcon name="quality" size={15}/> },
@@ -83,6 +85,13 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
     />
     <TabPanel id="lists" active={tab === "lists"} keepMounted className="client-tab-panel"><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Open any list to search its original rows and inspect preserved fields.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Data source</th><th>Source file</th><th>Rows</th><th>Fields preserved</th><th>New to master</th><th>Cross-client duplicates</th><th>Imported</th><th>Actions</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><button className="list-open-button" onClick={() => onOpenList(list)}><strong>{list.name}</strong><span>Open</span></button></td><td><span className="data-source-badge">{list.data_source}</span></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="field-verified"><AppIcon name="check" size={14}/> {formatNumber(list.field_count)} fields</span></td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><button className="row-danger" onClick={() => onDeleteList(list)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></TabPanel>
     <TabPanel id="prospects" active={tab === "prospects"} keepMounted className="client-tab-panel"><ClientMasterDatabase key={`people:${client.prospect_count}:${client.blocked_count ?? 0}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients.map((item) => item.id === client.id ? { ...item, cooldown_days: savedCooldown } : item)} active={tab === "prospects"} companyScope={companyPeopleScope} onClearCompanyScope={() => setCompanyPeopleScope(null)} onSeeCompanies={(scope) => { if (companyPeopleScope) { setCompanyPeopleScope(null); setPeopleCompanyScope(null); } else setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/></TabPanel>
+    {/* Leads and Contactable are the People DB with a filter already applied,
+        not separate grids. The workspace owns paging, selection, freezing,
+        export and the company pivot; a second copy of it would be a second
+        copy of all of that, and would drift. Mounted only while open so two
+        extra client listings are not fetched on every client screen. */}
+    <TabPanel id="leads" active={tab === "leads"} keepMounted className="client-tab-panel">{tab === "leads" ? <ClientMasterDatabase key={`leads:${client.id}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients} active initialFilters={[{ id: `__lead:${client.id}`, field: "__lead", operator: "contains", values: [client.id] }]} companyScope={null} onClearCompanyScope={() => {}} onSeeCompanies={(scope) => { setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/> : null}</TabPanel>
+    <TabPanel id="contactable" active={tab === "contactable"} keepMounted className="client-tab-panel">{tab === "contactable" ? <ClientMasterDatabase key={`contactable:${client.id}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients} active initialFilters={[{ id: `__contactable:${client.id}`, field: "__contactable", operator: "contains", values: [client.id] }]} companyScope={null} onClearCompanyScope={() => {}} onSeeCompanies={(scope) => { setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/> : null}</TabPanel>
     <TabPanel id="companies" active={tab === "companies"} keepMounted className="client-tab-panel"><ClientCompanyDatabase key={`companies:${client.prospect_count}:${client.blocked_count ?? 0}`} client={client} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onSeePeople={(scope) => { if (peopleCompanyScope) { setPeopleCompanyScope(null); setCompanyPeopleScope(null); } else setCompanyPeopleScope(scope); setTab("prospects"); }} onImport={onImport}/></TabPanel>
     {/* Mounted only while open, like the blocklist: the ICP list is its own
         fetch and there is no reason to pay for it on every client screen. */}
@@ -91,14 +100,18 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
   </>;
 }
 
-function ClientMasterDatabase({ client, clients, active, companyScope, onClearCompanyScope, onSeeCompanies, onSelect, onImport }: { client: ClientRecord; clients: ClientRecord[]; active: boolean; companyScope: CompanyScope | null; onClearCompanyScope: () => void; onSeeCompanies: (scope: PeopleScope) => void; onSelect: (prospect: Prospect) => void; onImport: () => void }) {
+function ClientMasterDatabase({ client, clients, active, companyScope, onClearCompanyScope, onSeeCompanies, onSelect, onImport, initialFilters = [] }: { client: ClientRecord; clients: ClientRecord[]; active: boolean; companyScope: CompanyScope | null; onClearCompanyScope: () => void; onSeeCompanies: (scope: PeopleScope) => void; onSelect: (prospect: Prospect) => void; onImport: () => void; initialFilters?: ProspectFilter[] }) {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [preparation, setPreparation] = useState<PreparationProgress | null>(null);
   const [preparationError, setPreparationError] = useState('');
   const [total, setTotal] = useState(client.prospect_count);
   const [totalCapped, setTotalCapped] = useState(false);
   const [fields, setFields] = useState<string[]>([]);
-  const [filters, setFilters] = useState<ProspectFilter[]>([]);
+  // Seeded, not forced: the Leads and Contactable tabs open pre-filtered, and
+  // the filter is then editable and clearable like any other. Each tab passes a
+  // distinct key so switching remounts with its own seed rather than inheriting
+  // whatever the previous tab was left showing.
+  const [filters, setFilters] = useState<ProspectFilter[]>(initialFilters);
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState("created_at");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
