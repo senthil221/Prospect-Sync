@@ -18,6 +18,7 @@ import MenuButton from "./MenuButton";
 import Tabs from "./Tabs";
 import TitleClassifierPanel from "./TitleClassifierPanel";
 import IntegrationPreview from './IntegrationPreview';
+import { useClientIcps } from "./use-client-icps";
 
 const DENSITIES = ["compact", "default", "comfortable"] as const;
 type Density = (typeof DENSITIES)[number];
@@ -51,6 +52,8 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const [bulkClientId, setBulkClientId] = useState("");
   const [pushClientId, setPushClientId] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkTagId, setBulkTagId] = useState("");
+  const clientIcps = useClientIcps(clientId);
   const [dateContactedDialogOpen, setDateContactedDialogOpen] = useState(false);
   const [bulkDateContacted, setBulkDateContacted] = useState(localIsoDate);
   const [bulkNoDateContacted, setBulkNoDateContacted] = useState(false);
@@ -457,6 +460,26 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     );
   }
 
+  // Tagging is its own call rather than another clientAction branch: it carries
+  // a tagId, and it is explicit-selection only, so it never needs the frozen
+  // all-matching path clientAction exists to drive.
+  async function clientTagAction(action: "add_tag" | "remove_tag") {
+    if (!clientId || !bulkTagId || !selectedCount) return;
+    setBulkBusy(true); setNotice("");
+    try {
+      const result = await api<{ result?: { updated?: number; queued?: number } }>(`/api/clients/${encodeURIComponent(clientId)}/prospects`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, tagId: bulkTagId, prospectIds: [...selectedIds] }),
+      });
+      const updated = result.result?.updated ?? 0;
+      const queued = result.result?.queued ?? 0;
+      const icp = clientIcps.find((item) => item.id === bulkTagId)?.name ?? "this ICP";
+      setNotice(`${action === "add_tag" ? "Tagged" : "Untagged"} ${formatNumber(updated)} ${updated === 1 ? "prospect" : "prospects"} with ${icp}.${queued ? ` ${formatNumber(queued)} queued for re-indexing.` : ""}`);
+      onRefresh();
+    } catch (caught) { setNotice(caught instanceof Error ? caught.message : "Unable to apply the ICP tag."); }
+    finally { setBulkBusy(false); }
+  }
+
   async function clientAction(action: "push" | "set_date_contacted" | "set_lead" | "clear_lead", targetClientId: string, dateContacted?: string | null) {
     if (!selectedCount || !targetClientId) return;
     // One id per intent, not per click. A click that fails and is tried again is
@@ -637,7 +660,13 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
                   apply_batch_v1 does not know set_lead yet - it would be
                   accepted here and fail in the worker minutes later. */}
               <button disabled={bulkBusy || selectionMode === "all_matching"} title={selectionMode === "all_matching" ? "Marking leads needs an explicit selection" : "Mark these prospects as leads for this client"} onClick={() => void clientAction("set_lead", clientId)}><AppIcon name="star" size={14}/> Mark as lead</button>
-              <button disabled={bulkBusy || selectionMode === "all_matching"} title={selectionMode === "all_matching" ? "Clearing leads needs an explicit selection" : "Remove the lead mark for this client"} onClick={() => void clientAction("clear_lead", clientId)}>Clear lead</button></div>
+              <button disabled={bulkBusy || selectionMode === "all_matching"} title={selectionMode === "all_matching" ? "Clearing leads needs an explicit selection" : "Remove the lead mark for this client"} onClick={() => void clientAction("clear_lead", clientId)}>Clear lead</button>
+              {/* Apply one of this client's ICPs to the selection. The list is
+                  the client's ICPs, because an ICP owns its tag - there is no
+                  separate tag vocabulary to keep in step. */}
+              {clientIcps.length ? <><select aria-label="Client ICP to apply" value={bulkTagId} onChange={(event) => setBulkTagId(event.target.value)}><option value="">Apply ICP…</option>{clientIcps.map((icp) => <option key={icp.id} value={icp.id}>{icp.name}</option>)}</select>
+              <button disabled={bulkBusy || !bulkTagId || selectionMode === "all_matching"} title={selectionMode === "all_matching" ? "Tagging needs an explicit selection" : "Tag the selection with this ICP"} onClick={() => void clientTagAction("add_tag")}><AppIcon name="tag" size={14}/> Tag</button>
+              <button disabled={bulkBusy || !bulkTagId || selectionMode === "all_matching"} onClick={() => void clientTagAction("remove_tag")}>Untag</button></> : null}</div>
             : <div className="bulk-action-group bulk-action-group-primary"><select aria-label="Client to push these prospects into" value={pushClientId} onChange={(event) => setPushClientId(event.target.value)}><option value="">Push to client…</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><button className="bulk-push" disabled={bulkBusy || !pushClientId} onClick={() => void clientAction("push", pushClientId)}><AppIcon name="arrow" size={14}/> Push {selectionMode === "all_matching" ? selectedLabel : "selected"}</button></div>}
           {selectionMode === "all_matching" && !clientId ? <span className="selection-scope-note">Tagging and contact history need an explicit selection</span> : null}{canDeleteMaster ? <div className="bulk-action-group bulk-action-group-danger"><button className="row-danger bulk-delete" disabled={deletingProspects} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? selectedLabel : "selected"}</button></div> : null}<button className="bulk-clear" onClick={clearSelection}>Clear</button></div> : null}
         {effectiveFilters.length ? <div className="active-filter-strip">{effectiveFilters.flatMap((filter) => {

@@ -19,6 +19,7 @@ import MenuButton from "./MenuButton";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { needsCompanyPreparation, type PreparationProgress } from "../../lib/prepared-search";
 import SearchPreparation from './SearchPreparation';
+import { useClientIcps } from "./use-client-icps";
 
 export function useCompaniesWorkspaceController({ active, search, filters, peopleScope, initialPage, onLoading, onError }: { active: boolean; search: string; filters: ProspectFilter[]; peopleScope: PeopleScope | null; initialPage?: number; onLoading: (loading: boolean) => void; onError: (error: string) => void }) {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -163,6 +164,8 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   const [deleteRequest, setDeleteRequest] = useState<{ mode: "ids" | "all_matching"; count: number; ids?: string[] } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [updatingIcp, setUpdatingIcp] = useState(false);
+  const [bulkTagId, setBulkTagId] = useState("");
+  const clientIcps = useClientIcps(clientId);
   const [pushClientId, setPushClientId] = useState("");
   const [pushing, setPushing] = useState(false);
   const selectionKey = JSON.stringify({ search: search.trim(), filters: filters.map(({ field, operator, values, scopes }) => ({ field, operator, values, ...(scopes?.length ? { scopes } : {}) })), peopleScope });
@@ -215,6 +218,24 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
       setDeleteRequest(null); clearSelection(); onRefresh?.();
     } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to delete companies."); }
     finally { setDeleting(false); }
+  }
+
+  // Explicit ids only, so this never goes near the all-matching resolve.
+  async function companyTagAction(action: "add_tag" | "remove_tag") {
+    if (!clientId || !bulkTagId || !selectedCount) return;
+    setUpdatingIcp(true); setCompanyError(""); setCompanyNotice("");
+    try {
+      const response = await api<{ result?: { updated?: number } }>(`/api/clients/${encodeURIComponent(clientId)}/companies`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, tagId: bulkTagId, companyIds: [...selectedIds] }),
+      });
+      const updated = response.result?.updated ?? 0;
+      const icp = clientIcps.find((item) => item.id === bulkTagId)?.name ?? "this ICP";
+      setCompanyNotice(`${action === "add_tag" ? "Tagged" : "Untagged"} ${formatNumber(updated)} ${updated === 1 ? "company" : "companies"} with ${icp}.`);
+      // Optional: the Master workspace passes one, the client drawer may not.
+      onRefresh?.();
+    } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to apply the ICP tag."); }
+    finally { setUpdatingIcp(false); }
   }
 
   async function setCompanyIcpValidation(validated: boolean) {
@@ -428,13 +449,19 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
           <div className="bulk-action-group bulk-action-group-primary">
           <button className="bulk-verify" disabled={updatingIcp} onClick={() => void setCompanyIcpValidation(true)}><AppIcon name="check" size={14}/> Mark ICP verified</button>
           <button disabled={updatingIcp} onClick={() => void setCompanyIcpValidation(false)}><AppIcon name="close" size={14}/> Remove ICP verification</button>
+          {/* Apply one of this client's ICPs. Explicit selections only: the RPC
+              takes ids, and resolving an all-matching company scope is the
+              expensive half of this product. */}
+          {clientIcps.length ? <><select aria-label="Client ICP to apply" value={bulkTagId} onChange={(event) => setBulkTagId(event.target.value)}><option value="">Apply ICP…</option>{clientIcps.map((icp) => <option key={icp.id} value={icp.id}>{icp.name}</option>)}</select>
+          <button disabled={updatingIcp || !bulkTagId || selectionMode === "all_matching"} title={selectionMode === "all_matching" ? "Tagging needs an explicit selection" : "Tag the selected companies with this ICP"} onClick={() => void companyTagAction("add_tag")}><AppIcon name="tag" size={14}/> Tag</button>
+          <button disabled={updatingIcp || !bulkTagId || selectionMode === "all_matching"} onClick={() => void companyTagAction("remove_tag")}>Untag</button></> : null}
           </div>
         </>}
         <button className="bulk-clear" disabled={updatingIcp || deleting || pushing} onClick={clearSelection}>Clear</button>
       </div> : null}
       {companies.length ? <><div className="table-wrap"><table className="company-table"><thead><tr>{showSelection ? <th className="select-column"><input aria-label="Select all companies on this page" title="Select all companies on this page" type="checkbox" checked={companies.length > 0 && companies.every((company) => isSelected(company.id))} onChange={togglePageSelection}/></th> : null}<th>Company</th><th>Website</th><th className="numeric-cell">Prospects</th><th className="numeric-cell">Client coverage</th><th>Added</th><th>Status</th>{clientId ? <th className="company-icp-column">ICP verified</th> : null}{canDelete ? <th className="row-detail-column">Actions</th> : null}</tr></thead><tbody>{companies.map((company) => <CompanyTableRow key={company.id} company={company} selected={isSelected(company.id)} showSelection={showSelection} canDelete={canDelete} clientScoped={Boolean(clientId)} onOpen={openCompany} onToggleSelected={toggleSelected} onDelete={deleteCompany}/>)}</tbody></table></div><div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}><AppIcon name="back" size={14}/> Previous</button><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button></div></div></> : <WorkspaceEmpty state={emptyWorkspaceState({ entity: "companies", search, filterCount: activeFilterCount, scoped: Boolean(peopleScope), clientScoped: Boolean(clientId) })} onClearSearch={onClearSearch} onClearFilters={onFilters ? () => onFilters([]) : undefined} onClearScope={onClearPeopleScope} onImport={onImport} />}
     </article>
-    {onFilters && filtersOpen ? <CompanyFilterPanel filters={filters} clients={clients} onChange={onFilters} /> : null}
+    {onFilters && filtersOpen ? <CompanyFilterPanel filters={filters} clients={clients} clientId={clientId} onChange={onFilters} /> : null}
     </div>
     {selectedCompany ? <CompanyDrawer company={selectedCompany} detail={detailsByCompany[selectedCompany.id] ?? null} loadingDetail={loadingDetail === selectedCompany.id} prospects={prospectsByCompany[selectedCompany.id] ?? []} total={prospectTotalsByCompany[selectedCompany.id] ?? selectedCompany.prospect_count} loading={loadingCompany === selectedCompany.id} error={companyError} onLoadMore={() => void loadMoreProspects(selectedCompany)} onClose={() => { setSelectedCompany(null); setCompanyError(""); }} /> : null}
     {exportDialogOpen ? <ExportDialogShell titleId="company-export-title" busy={exportingCompanies} onClose={() => setExportDialogOpen(false)}>

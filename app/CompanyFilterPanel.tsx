@@ -7,6 +7,7 @@ import { ClientMembershipFilter, filterId, IncludeExcludeFilter, TextBooleanFilt
 import type { CompanyKeywordScope } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
 import { AppIcon } from "./components/DashboardUi";
+import { useClientIcps } from "./components/use-client-icps";
 
 const COMPANY_VALUES_ENDPOINT = "/api/companies/filter-values";
 
@@ -100,15 +101,18 @@ async function readImportTable(file: File) {
   return { headers: rows[0], rows: rows.slice(1) };
 }
 
-export default function CompanyFilterPanel({ filters, clients = [], onChange }: {
+export default function CompanyFilterPanel({ filters, clients = [], clientId, onChange }: {
   filters: ProspectFilter[];
   /** For the Client section. Already held by the dashboard, so no round trip. */
   clients?: Array<{ id: string; name: string }>;
+  /** Set inside a client workspace; enables the Client ICP section. */
+  clientId?: string;
   onChange: (filters: ProspectFilter[]) => void;
 }) {
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState("");
   const [importError, setImportError] = useState("");
+  const icps = useClientIcps(clientId);
   const panelRef = useRef<HTMLElement>(null);
   useDismiss(panelRef, () => setExpanded(""), Boolean(expanded));
   const normalizedSearch = search.trim().toLocaleLowerCase();
@@ -203,8 +207,14 @@ export default function CompanyFilterPanel({ filters, clients = [], onChange }: 
           __company_client_ids instead - see 20260915140000. */}
       {clients.length && "client".includes(normalizedSearch) ? <div className="apollo-filter-group">
         <small>Client</small>
-        <ClientMembershipFilter field="__company_client_ids" noun="companies" clients={clients} filters={filters}
+        <ClientMembershipFilter field="__company_client_ids" title="Client" noun="companies" options={clients} filters={filters}
           expanded={expanded === "__company_client_ids"} onToggle={() => setExpanded(expanded === "__company_client_ids" ? "" : "__company_client_ids")}
+          onChange={onChange}/>
+      </div> : null}
+      {clientId && icps.length && "client icp".includes(normalizedSearch) ? <div className="apollo-filter-group">
+        <small>Client ICP</small>
+        <ClientMembershipFilter field="__company_tags" title="Client ICP" noun="companies" options={icps} filters={filters}
+          expanded={expanded === "__company_tags"} onToggle={() => setExpanded(expanded === "__company_tags" ? "" : "__company_tags")}
           onChange={onChange}/>
       </div> : null}
       {!visible.length && !visibleDetail.length ? <p className="filter-search-empty">No filters match “{search}”.</p> : null}

@@ -7,6 +7,7 @@ import type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
 import { AppIcon } from "./components/DashboardUi";
 import { emptyTaxonomy, orderedDepartments, orderedTiers, tierLabel, type TitleTaxonomy } from "../lib/title-taxonomy";
+import { useClientIcps } from "./components/use-client-icps";
 
 export type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 
@@ -79,6 +80,7 @@ function activeCount(filters: ProspectFilter[]) {
 export function filterLabel(field: string, customFields: ProspectFieldDefinition[] = []) {
   if (field === "__icp_verified" || field === "__company_icp_verified") return "ICP verification";
   if (field === "__client_ids" || field === "__company_client_ids") return "Client";
+  if (field === "__client_tags" || field === "__company_tags") return "Client ICP";
   if (field === "__lead") return "Lead";
   if (field === "__contactable") return "Contactable";
   return [...mainFilters, ...classifierFilters, ...optionalFilters, ...customFields].find((definition) => definition.id === field)?.label ?? field;
@@ -113,6 +115,7 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
   // scan of prospect_index behind the endpoint. A database that has not had the
   // migration yet answers with an empty taxonomy and the pickers say so rather
   // than rendering nothing.
+  const icps = useClientIcps(clientId);
   const [taxonomy, setTaxonomy] = useState<TitleTaxonomy>(emptyTaxonomy);
   useEffect(() => {
     let current = true;
@@ -182,12 +185,20 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
       {visibleMain.length ? <div className="apollo-filter-group"><small>Main filters</small>{visibleMain.map(renderDefinition)}</div> : null}
       {visibleClassifier.length ? <div className="apollo-filter-group"><small>From job title</small>{visibleClassifier.map(renderDefinition)}</div> : null}
       {visibleOptional.length ? <div className="apollo-filter-group optional"><small>More filters</small>{visibleOptional.map(renderDefinition)}</div> : null}
-      {/* Only in the Master DB: inside a client workspace every row is already
-          that client's, so the filter could only be a no-op or a contradiction. */}
+      {/* Client filter only in the Master DB: inside a client workspace every
+          row is already that client's, so it could only be a no-op or a
+          contradiction. The ICP filter is the exact mirror — it needs a client
+          to have ICPs, so it appears only inside one. */}
       {!clientId && clients.length && "client".includes(normalizedSearch) ? <div className="apollo-filter-group">
         <small>Client</small>
-        <ClientMembershipFilter field="__client_ids" noun="prospects" clients={clients} filters={filters}
+        <ClientMembershipFilter field="__client_ids" title="Client" noun="prospects" options={clients} filters={filters}
           expanded={expanded === "__client_ids"} onToggle={() => setExpanded(expanded === "__client_ids" ? "" : "__client_ids")}
+          onChange={onChange}/>
+      </div> : null}
+      {clientId && icps.length && "client icp".includes(normalizedSearch) ? <div className="apollo-filter-group">
+        <small>Client ICP</small>
+        <ClientMembershipFilter field="__client_tags" title="Client ICP" noun="prospects" options={icps} filters={filters}
+          expanded={expanded === "__client_tags"} onToggle={() => setExpanded(expanded === "__client_tags" ? "" : "__client_tags")}
           onChange={onChange}/>
       </div> : null}
       {!visibleMain.length && !visibleClassifier.length && !visibleOptional.length ? <p className="filter-search-empty">No filters match “{search}”.</p> : null}
@@ -610,10 +621,13 @@ function DepartmentFunctionFilter({ filters, taxonomy, onChange }: {
  * list of ids, rather than one filter per client. That keeps the compiled SQL
  * to a single predicate per direction however many clients are picked.
  */
-export function ClientMembershipFilter({ field, noun, clients, filters, expanded, onToggle, onChange }: {
-  field: "__client_ids" | "__company_client_ids";
+export function ClientMembershipFilter({ field, title, noun, options, filters, expanded, onToggle, onChange }: {
+  /** __client_ids, __company_client_ids, __client_tags or __company_tags. */
+  field: string;
+  title: string;
   noun: string;
-  clients: Array<{ id: string; name: string }>;
+  /** Clients, or a client's ICPs — anything identified by an id, shown by name. */
+  options: Array<{ id: string; name: string }>;
   filters: ProspectFilter[];
   expanded: boolean;
   onToggle: () => void;
@@ -645,16 +659,16 @@ export function ClientMembershipFilter({ field, noun, clients, filters, expanded
 
   return <section className={`apollo-filter-section ${expanded ? "expanded" : ""}`}>
     <button type="button" className="apollo-filter-summary" aria-expanded={expanded} onClick={onToggle}>
-      <span className="apollo-filter-mark"><AppIcon name="company" size={14}/></span>
-      <strong>Client</strong>
+      <span className="apollo-filter-mark"><AppIcon name={field.endsWith("_tags") ? "tag" : "company"} size={14}/></span>
+      <strong>{title}</strong>
       {count ? <span className="filter-count">{count}</span> : null}
       <span className="apollo-chevron"><AppIcon name="chevron" size={14}/></span>
     </button>
     {expanded ? <div role="region" className="apollo-filter-content">
       <p className="apollo-filter-description">
-        Show only these clients&rsquo; {noun}, or exclude them. Excluding cannot use the index, so pair it with another filter on very large searches.
+        Show only the matching {noun}, or exclude them. Excluding cannot use the index, so pair it with another filter on very large searches.
       </p>
-      <div className="client-filter-list">{clients.map((client) => {
+      <div className="client-filter-list">{options.map((client) => {
         const state = stateOf(client.id);
         return <div className="client-filter-row" key={client.id}>
           <span>{client.name}</span>
@@ -667,7 +681,7 @@ export function ClientMembershipFilter({ field, noun, clients, filters, expanded
         </div>;
       })}</div>
       {count ? <button type="button" className="clear-section-filter"
-        onClick={() => onChange(filters.filter((filter) => filter.field !== field))}>Clear client filter</button> : null}
+        onClick={() => onChange(filters.filter((filter) => filter.field !== field))}>Clear {title.toLocaleLowerCase()} filter</button> : null}
     </div> : null}
   </section>;
 }

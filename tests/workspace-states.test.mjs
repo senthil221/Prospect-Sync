@@ -209,3 +209,40 @@ test("client ICP tags share one vocabulary and reindex only where they must", as
   assert.match(peopleRoute, /set_client_prospect_tag_v1/);
   assert.match(companyRoute, /set_client_company_tag_v1/);
 });
+
+// The ICP tag UI: one list, two entities, four surfaces.
+test("client ICPs are the tag vocabulary everywhere they are offered", async () => {
+  const [hook, peoplePanel, companyPanel, peopleTable, companyTable, icpPanel] = await Promise.all([
+    read("../app/components/use-client-icps.ts"),
+    read("../app/ApolloFilterPanel.tsx"),
+    read("../app/CompanyFilterPanel.tsx"),
+    read("../app/components/ProspectTable.tsx"),
+    read("../app/components/CompaniesWorkspace.tsx"),
+    read("../app/components/ClientIcpPanel.tsx"),
+  ]);
+
+  // "The client's ICP tags" and "the client's ICPs" are the same list, so
+  // nothing fetches tags. Unnamed profiles have no tag and are dropped.
+  assert.match(hook, /filter\(\(profile\) => profile\.tag_id && profile\.name\.trim\(\)\)/);
+  assert.match(hook, /Returns the ids of TAGS, not of profiles/);
+  // Clearing in the effect body would be a cascading render.
+  assert.match(hook, /return clientId \? icps : \[\]/);
+
+  // Filter sections on both entities, only inside a client workspace.
+  assert.match(peoplePanel, /<ClientMembershipFilter field="__client_tags"/);
+  assert.match(companyPanel, /<ClientMembershipFilter field="__company_tags"/);
+  assert.match(peoplePanel, /clientId && icps\.length/);
+  assert.match(companyPanel, /clientId && icps\.length/);
+
+  // Apply/remove on both entities, explicit selections only - the all-matching
+  // company resolve is the expensive half of this product.
+  assert.match(peopleTable, /async function clientTagAction/);
+  assert.match(companyTable, /async function companyTagAction/);
+  for (const source of [peopleTable, companyTable]) {
+    assert.match(source, /Tagging needs an explicit selection/);
+  }
+
+  // And the ICP panel says the two are one thing, which is the only place that
+  // relationship is visible.
+  assert.match(icpPanel, /Taggable as/);
+});

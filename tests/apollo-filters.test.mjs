@@ -207,7 +207,10 @@ test("the master DB filters by client id, not by joined client names", async () 
   // One control, shared by both Master panels, because two copies of something
   // with this much state in it is how the two export dialogs drifted.
   assert.match(panel, /export function ClientMembershipFilter/);
-  assert.match(panel, /field: "__client_ids" \| "__company_client_ids"/);
+  // Generalised to any id-and-name list, so the same control serves the client
+  // filter and the client ICP tag filter on both entities.
+  assert.match(panel, /__client_ids, __company_client_ids, __client_tags or __company_tags/);
+  assert.match(panel, /options: Array<\{ id: string; name: string \}>/);
   // Shows names, sends ids, and never puts one client in both directions.
   assert.match(panel, /operator: "not_contains" as const, values: exclude/);
   assert.match(panel, /A client lands in exactly one list, never both/);
