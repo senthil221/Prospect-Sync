@@ -163,3 +163,54 @@ test("the master tag action is scoped to agency-wide tags", async () => {
   // And the row it creates is explicitly global rather than global by omission.
   assert.match(route, /insert\(\{ id: tagId, name: tagName, client_id: null \}\)/);
 });
+
+// Client include/exclude in the Master DB, by id.
+//
+// Verified on production 2026-09-15: 4,497 prospects belong to two or more
+// clients, and excluding one of them the way __clients does it left 3,570 rows
+// in the result that ARE in that client - the joined name string
+// "Krishify | Unassigned" equals neither name on its own. By id: 0.
+test("the master DB filters by client id, not by joined client names", async () => {
+  const [migration, panel, table] = await Promise.all([
+    readFile(new URL("../supabase/migrations/20260915130000_filter_the_master_db_by_client.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/ApolloFilterPanel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/ProspectTable.tsx", import.meta.url), "utf8"),
+  ]);
+
+  // Ids against the GIN index, never the display names.
+  assert.match(migration, /pi\.client_ids && %L::text\[\]/);
+  assert.match(migration, /not \(pi\.client_ids && %L::text\[\]\)/);
+
+  // Every splice raises if its anchor moved, and the migration proves the
+  // result on real rows before it commits.
+  for (const guard of [
+    /raise exception 'Could not patch prospect_filter_sql_v1 for __client_ids'/,
+    /raise exception 'Could not patch prospect_index_matches_v1 for __client_ids'/,
+    /raise exception 'Could not patch prospect_prefilter_sql for __client_ids'/,
+  ]) assert.match(migration, guard);
+  // Include and exclude must partition the index - the property the name-based
+  // filter breaks for anyone in two clients.
+  assert.match(migration, /include \(%\) \+ exclude \(%\) <> % rows/);
+  assert.match(migration, /prospects in the client survived being excluded/);
+  // A pre-filter must be a NECESSARY condition, so it may never return fewer
+  // rows than the complete predicate.
+  assert.match(migration, /the pre-filter \(% rows\) drops rows the complete filter keeps/);
+
+  // Only the include half is pre-filtered. A GIN index answers "contains",
+  // never "does not contain", so a negated overlap there would be wrong rather
+  // than merely slow - and the migration says so.
+  assert.match(migration, /no index is possible/);
+
+  // __clients keeps working: saved views depend on it.
+  assert.doesNotMatch(migration, /drop function public\.prospect_filter_sql_v1/);
+
+  // The picker shows names and sends ids, and never offers both directions for
+  // the same client.
+  assert.match(panel, /clients\?: Array<\{ id: string; name: string \}>/);
+  assert.match(panel, /function setClientFilter\(id: string, next: "include" \| "exclude" \| "off"\)/);
+  assert.match(panel, /operator: "not_contains" as const, values: exclude/);
+  // Not offered inside a client workspace, where it could only be a no-op or a
+  // contradiction.
+  assert.match(panel, /!clientId && clients\.length/);
+  assert.match(table, /clients=\{clients\}/);
+});

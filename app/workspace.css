@@ -1560,3 +1560,11 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
    contactable" is the question asked before a send. */
 .status-quick-filters { margin-top: calc(var(--space-2) * -1); }
 .status-quick-filters button { display: inline-flex; align-items: center; gap: var(--space-1); }
+
+/* Client include/exclude. Names are shown, ids are sent: a renamed client must
+   not change what a saved filter returns. */
+.client-filter-list { display: grid; gap: var(--space-1); }
+.client-filter-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-1) 0; font-size: var(--text-xs); }
+.client-filter-actions { display: flex; gap: var(--space-1); flex: none; }
+.client-filter-actions button { padding: 2px var(--space-2); border: 1px solid var(--ph-border); border-radius: var(--radius-full); background: var(--surface); color: var(--text-secondary); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
+.client-filter-actions button.active { border-color: var(--ph-brand); background: var(--accent-soft); color: var(--accent-text); }
