@@ -234,13 +234,17 @@ test("client ICPs are the tag vocabulary everywhere they are offered", async () 
   assert.match(peoplePanel, /clientId && icps\.length/);
   assert.match(companyPanel, /clientId && icps\.length/);
 
-  // Apply/remove on both entities, explicit selections only - the all-matching
-  // company resolve is the expensive half of this product.
+  // Apply/remove on both entities. The two halves differ on "all matching", and
+  // the difference is real rather than an oversight: 20260916120000 taught
+  // prospect_operations.apply_batch_v1 the add_tag/remove_tag verbs, so People
+  // tagging freezes a result set and runs in the background - but apply_batch_v1
+  // refuses any job whose entity_type is not 'prospect', and there is no company
+  // batch applier, so company tagging is still explicit-selection only.
   assert.match(peopleTable, /async function clientTagAction/);
   assert.match(companyTable, /async function companyTagAction/);
-  for (const source of [peopleTable, companyTable]) {
-    assert.match(source, /Tagging needs an explicit selection/);
-  }
+  assert.match(peopleTable, /runAllMatching\(action, clientId, requestId, null, bulkTagId\)/);
+  assert.doesNotMatch(peopleTable, /Tagging needs an explicit selection/);
+  assert.match(companyTable, /Tagging needs an explicit selection/);
 
   // And the ICP panel says the two are one thing, which is the only place that
   // relationship is visible.

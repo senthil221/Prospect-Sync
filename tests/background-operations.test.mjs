@@ -318,9 +318,16 @@ test("leads and contactability are client-scoped without widening the index", as
   assert.match(table, /const contactableOn = /);
   assert.match(table, /toggleClientState\("__lead", leadOn\)/);
   assert.match(table, /toggleClientState\("__contactable", contactableOn\)/);
-  // All-matching lead marking is refused rather than accepted and failed later
-  // in the worker: apply_batch_v1 does not know set_lead yet.
-  assert.match(table, /disabled=\{bulkBusy \|\| selectionMode === "all_matching"\}/);
+  // All-matching lead marking works, and the reason it can is that
+  // apply_batch_v1 learned the verb. Before 20260916120000 the route accepted
+  // the job and the worker failed it minutes later, so the buttons were greyed
+  // out; asserting the gate is GONE is what stops it coming back by accident
+  // while the worker still cannot run it.
+  const applyBatch = codeOnly(await read("../supabase/migrations/20260916120000_lead_marks_and_icp_tags_run_in_the_background.sql"));
+  assert.match(applyBatch, /v_job\.action in \('set_lead', 'clear_lead'\)/);
+  assert.match(applyBatch, /public\.set_client_lead_v1\(/);
+  assert.doesNotMatch(table, /Marking leads needs an explicit selection/);
+  assert.doesNotMatch(table, /Clearing leads needs an explicit selection/);
 
   // Both are also reachable as tabs, which are the People DB opened
   // pre-filtered rather than a second grid. A separate grid would be a second
@@ -375,3 +382,47 @@ test("default-stamped contact dates are cleared, and the default cannot come bac
   assert.match(verify, /client_prospects\.date_added has no default and stays nullable/);
   assert.match(verify, /no bulk of contact dates equal to their own import date/);
 });
+
+// The verb gap that kept four bulk buttons greyed out (20260916120000).
+test("every action the client route accepts, the worker can actually apply", async () => {
+  const [migration, route, helper, table] = await Promise.all([
+    read("../supabase/migrations/20260916120000_lead_marks_and_icp_tags_run_in_the_background.sql"),
+    read("../app/api/clients/[id]/prospects/route.ts"),
+    read("../lib/background-operation.ts"),
+    read("../app/components/ProspectTable.tsx"),
+  ]);
+  const code = codeOnly(migration);
+
+  // The route creates a job for ANY action, so an action it accepts and
+  // apply_batch_v1 cannot dispatch is a job that fails after the user has
+  // already watched a result set build. The migration asserts the whole list
+  // against the deployed function; this asserts the list is the route's.
+  const accepted = [...routeActions(codeOnly(route))].sort();
+  for (const action of accepted) {
+    assert.ok(code.includes(`'${action}'`), `20260916120000 must cover ${action}`);
+  }
+  assert.ok(accepted.includes("set_lead") && accepted.includes("add_tag"), "the route still accepts the deferred verbs");
+  assert.match(code, /cannot dispatch %, which the API will happily accept/);
+  // It must still REFUSE what it does not know. A dispatcher that shrugs at a
+  // typo reports success having applied nothing.
+  assert.match(code, /no longer refuses an unknown action/);
+
+  // The tag travels with the job, because the worker has nobody to ask for it -
+  // checked at both ends, since only the route can see the user.
+  assert.match(codeOnly(route), /\.\.\.\(tagId \? \{ tagId \} : \{\}\)/);
+  assert.match(codeOnly(route), /action === "add_tag" \|\| action === "remove_tag"\) && !tagId/);
+  assert.match(codeOnly(helper), /action === "add_tag" \|\| input\.action === "remove_tag" \? \{ tagId/);
+  assert.match(code, /no ICP tag to apply/);
+  // Proved against a real job rather than asserted about the text: frozen over
+  // an id that matches nothing, so the branch runs and no data moves.
+  assert.match(code, /a tag job with no tagId was applied instead of refused/);
+
+  // Retagging the same selection with a DIFFERENT ICP is a new operation, not a
+  // retry of the last one - so the tag is part of the intent key.
+  assert.match(codeOnly(table), /const key = intentKey\(\{\s*action,\s*target: clientId,[\s\S]{0,260}tagId: bulkTagId/);
+});
+
+// Which actions app/api/clients/[id]/prospects/route.ts will build a job for.
+function routeActions(source) {
+  return new Set([...source.matchAll(/action === "([a-z_]+)"/g)].map((match) => match[1]));
+}

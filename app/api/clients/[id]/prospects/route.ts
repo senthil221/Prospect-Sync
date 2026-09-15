@@ -53,11 +53,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (action === "set_date_contacted" && dateContacted === undefined) {
     return Response.json({ error: "Choose a valid Date Contacted between 1900-01-01 and today, or select no contact date." }, { status: 400 });
   }
+  // Validated here rather than inside the branch that runs it, for the same
+  // reason the date is: a tag action can become a background job, and the worker
+  // has nobody to ask. apply_batch_v1 refuses a tag job with no tag as well -
+  // both ends, because only this one can see the user.
+  const tagId = action === "add_tag" || action === "remove_tag" ? String(payload.tagId ?? "").trim() : "";
+  if ((action === "add_tag" || action === "remove_tag") && !tagId) {
+    return Response.json({ error: "Choose an ICP tag." }, { status: 400 });
+  }
   const jobPayload: Record<string, unknown> = {
     clientId: id,
     ...(selection.sourceClientId ? { sourceClientId: selection.sourceClientId } : {}),
     // Present-and-null means "clear the date", which is different from absent.
     ...(action === "set_date_contacted" ? { dateContacted: dateContacted ?? null } : {}),
+    ...(tagId ? { tagId } : {}),
   };
 
   // Section 9.3, the part that was still missing: "all matching" freezes from a
@@ -165,8 +174,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   // tag by sending its id. Unlike the lead mark this one DOES re-index:
   // prospect_index carries tags and tag_text, and tag_text feeds search_text.
   if (action === "add_tag" || action === "remove_tag") {
-    const tagId = String(payload.tagId ?? "").trim();
-    if (!tagId) return Response.json({ error: "Choose an ICP tag." }, { status: 400 });
+    // Already validated and frozen into the job payload above.
     const { data, error } = await supabase.rpc("set_client_prospect_tag_v1", {
       p_client_id: id,
       p_tag_id: tagId,

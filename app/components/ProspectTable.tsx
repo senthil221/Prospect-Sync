@@ -439,7 +439,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   // The alternative - what this replaces - passed the search and filters to the
   // mutation and let it resolve its own ids at execution time, so an import
   // landing between choosing and running silently widened the action.
-  async function runAllMatching(action: string, targetClientId: string, requestId: string, dateContacted?: string | null) {
+  async function runAllMatching(action: string, targetClientId: string, requestId: string, dateContacted?: string | null, tagId?: string) {
     const wireFilters = filterPayload(effectiveFilters);
     const set = await buildResultSet(
       { entityType: "prospect", clientScope: clientId, search: search.trim(), filters: wireFilters, companyScope: activeCompanyScope },
@@ -455,22 +455,39 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
         filters: wireFilters,
         excludedIds: [...excludedIds],
         dateContacted,
+        tagId,
       },
       { onProgress: ({ done, total: items }) => setNotice(`Working… ${formatNumber(done)} of ${formatNumber(items)}.`) },
     );
   }
 
   // Tagging is its own call rather than another clientAction branch: it carries
-  // a tagId, and it is explicit-selection only, so it never needs the frozen
-  // all-matching path clientAction exists to drive.
+  // a tagId, and its notice names the ICP. Since 20260916120000 it takes the
+  // frozen all-matching path too - apply_batch_v1 now knows add_tag/remove_tag,
+  // so a 40,000-row ICP tag is a background job rather than a greyed-out button.
   async function clientTagAction(action: "add_tag" | "remove_tag") {
     if (!clientId || !bulkTagId || !selectedCount) return;
+    // The tag is part of the intent: retagging the same selection with a
+    // DIFFERENT ICP is a new operation, not a retry of the last one.
+    const key = intentKey({
+      action,
+      target: clientId,
+      selectionMode,
+      ids: selectionMode === "all_matching" ? [] : [...selectedIds],
+      extra: selectionMode === "all_matching"
+        ? { tagId: bulkTagId, search, filters: filterPayload(effectiveFilters), excluded: [...excludedIds] }
+        : bulkTagId,
+    });
+    const requestId = requestIdFor(key);
     setBulkBusy(true); setNotice("");
     try {
-      const result = await api<{ result?: { updated?: number; queued?: number } }>(`/api/clients/${encodeURIComponent(clientId)}/prospects`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, tagId: bulkTagId, prospectIds: [...selectedIds] }),
-      });
+      const result = selectionMode === "all_matching"
+        ? { result: (await runAllMatching(action, clientId, requestId, null, bulkTagId)).result ?? {} }
+        : await api<{ result?: { updated?: number; queued?: number } }>(`/api/clients/${encodeURIComponent(clientId)}/prospects`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action, tagId: bulkTagId, requestId, prospectIds: [...selectedIds] }),
+          });
+      settleIntent(key);
       const updated = result.result?.updated ?? 0;
       const queued = result.result?.queued ?? 0;
       const icp = clientIcps.find((item) => item.id === bulkTagId)?.name ?? "this ICP";
@@ -655,18 +672,18 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
           {/* Client prospect selections only update contact history. ICP
               verification is managed from the client Company DB. */}
           {clientId
-            ? <div className="bulk-action-group bulk-action-group-primary"><button disabled={bulkBusy} onClick={() => setDateContactedDialogOpen(true)}><AppIcon name="calendar" size={14}/> Set Date Contacted</button>{/* Explicit selections only. An all-matching lead mark would be
-                  frozen into a background job, and prospect_operations'
-                  apply_batch_v1 does not know set_lead yet - it would be
-                  accepted here and fail in the worker minutes later. */}
-              <button disabled={bulkBusy || selectionMode === "all_matching"} title={selectionMode === "all_matching" ? "Marking leads needs an explicit selection" : "Mark these prospects as leads for this client"} onClick={() => void clientAction("set_lead", clientId)}><AppIcon name="star" size={14}/> Mark as lead</button>
-              <button disabled={bulkBusy || selectionMode === "all_matching"} title={selectionMode === "all_matching" ? "Clearing leads needs an explicit selection" : "Remove the lead mark for this client"} onClick={() => void clientAction("clear_lead", clientId)}>Clear lead</button>
+            ? <div className="bulk-action-group bulk-action-group-primary"><button disabled={bulkBusy} onClick={() => setDateContactedDialogOpen(true)}><AppIcon name="calendar" size={14}/> Set Date Contacted</button>{/* All four of these work on "all matching" since 20260916120000
+                  taught apply_batch_v1 the lead and tag verbs. Before that an
+                  all-matching mark was accepted by the route and then failed
+                  inside the worker minutes later, so they were greyed out. */}
+              <button disabled={bulkBusy} title="Mark these prospects as leads for this client" onClick={() => void clientAction("set_lead", clientId)}><AppIcon name="star" size={14}/> Mark as lead</button>
+              <button disabled={bulkBusy} title="Remove the lead mark for this client" onClick={() => void clientAction("clear_lead", clientId)}>Clear lead</button>
               {/* Apply one of this client's ICPs to the selection. The list is
                   the client's ICPs, because an ICP owns its tag - there is no
                   separate tag vocabulary to keep in step. */}
               {clientIcps.length ? <><select aria-label="Client ICP to apply" value={bulkTagId} onChange={(event) => setBulkTagId(event.target.value)}><option value="">Apply ICP…</option>{clientIcps.map((icp) => <option key={icp.id} value={icp.id}>{icp.name}</option>)}</select>
-              <button disabled={bulkBusy || !bulkTagId || selectionMode === "all_matching"} title={selectionMode === "all_matching" ? "Tagging needs an explicit selection" : "Tag the selection with this ICP"} onClick={() => void clientTagAction("add_tag")}><AppIcon name="tag" size={14}/> Tag</button>
-              <button disabled={bulkBusy || !bulkTagId || selectionMode === "all_matching"} onClick={() => void clientTagAction("remove_tag")}>Untag</button></> : null}</div>
+              <button disabled={bulkBusy || !bulkTagId} title="Tag the selection with this ICP" onClick={() => void clientTagAction("add_tag")}><AppIcon name="tag" size={14}/> Tag</button>
+              <button disabled={bulkBusy || !bulkTagId} title="Remove this ICP from the selection" onClick={() => void clientTagAction("remove_tag")}>Untag</button></> : null}</div>
             : <div className="bulk-action-group bulk-action-group-primary"><select aria-label="Client to push these prospects into" value={pushClientId} onChange={(event) => setPushClientId(event.target.value)}><option value="">Push to client…</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><button className="bulk-push" disabled={bulkBusy || !pushClientId} onClick={() => void clientAction("push", pushClientId)}><AppIcon name="arrow" size={14}/> Push {selectionMode === "all_matching" ? selectedLabel : "selected"}</button></div>}
           {selectionMode === "all_matching" && !clientId ? <span className="selection-scope-note">Tagging and contact history need an explicit selection</span> : null}{canDeleteMaster ? <div className="bulk-action-group bulk-action-group-danger"><button className="row-danger bulk-delete" disabled={deletingProspects} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? selectedLabel : "selected"}</button></div> : null}<button className="bulk-clear" onClick={clearSelection}>Clear</button></div> : null}
         {effectiveFilters.length ? <div className="active-filter-strip">{effectiveFilters.flatMap((filter) => {

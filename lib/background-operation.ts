@@ -136,6 +136,8 @@ export async function runFrozenAction(
     filters: WireFilter[];
     excludedIds: string[];
     dateContacted?: string | null;
+    /** Only for add_tag / remove_tag. The worker has nobody to ask for it later. */
+    tagId?: string;
   },
   options: { signal?: AbortSignal; onProgress?: (progress: Progress) => void; deadlineMs?: number } = {},
 ): Promise<JobStatus> {
@@ -152,6 +154,9 @@ export async function runFrozenAction(
         filters: input.filters,
         excludedIds: input.excludedIds,
         ...(input.action === "set_date_contacted" ? { dateContacted: input.dateContacted ?? null } : {}),
+        // Carried only where it means something, so a push never travels with a
+        // tag id the route would have to decide whether to store.
+        ...(input.action === "add_tag" || input.action === "remove_tag" ? { tagId: input.tagId ?? "" } : {}),
       }),
       signal: options.signal,
     },
