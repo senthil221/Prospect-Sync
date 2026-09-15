@@ -160,6 +160,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return finish(data);
   }
 
+  // Leads are the same shape as ICP verification: a client-scoped mark on a
+  // shared prospect. The one difference is that nothing in prospect_index
+  // changes, so set_client_lead_v1 does no re-indexing and always reports
+  // queued: 0.
+  if (action === "set_lead" || action === "clear_lead") {
+    const { data, error } = await supabase.rpc("set_client_lead_v1", {
+      p_client_id: id,
+      p_is_lead: action === "set_lead",
+      ...selectionArgs(selection),
+      p_actor: actor,
+    });
+    if (error) return failure(error, "Lead marking");
+    return finish(data);
+  }
+
   if (action === "set_date_contacted") {
     const { data, error } = await supabase.rpc("set_client_date_contacted_v1", {
       p_client_id: id,

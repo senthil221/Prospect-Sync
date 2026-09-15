@@ -1554,3 +1554,9 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
   .client-icp-actions { flex-wrap: wrap; }
   .client-icp-panel .panel-head { flex-direction: column; align-items: stretch; }
 }
+
+/* Leads and Contactable sit in their own group beside ICP verification, and
+   are independent toggles rather than segments of it: "ICP verified AND
+   contactable" is the question asked before a send. */
+.status-quick-filters { margin-top: calc(var(--space-2) * -1); }
+.status-quick-filters button { display: inline-flex; align-items: center; gap: var(--space-1); }

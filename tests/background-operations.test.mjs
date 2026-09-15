@@ -81,7 +81,17 @@ test("all matching freezes; it does not fall through to a server-side resolve", 
   // Every action records what it answered. Without this the job stays open and
   // a retry re-runs the mutation instead of being answered from the first run.
   assert.doesNotMatch(code, /return Response\.json\(\{ result: data \}\);/);
-  assert.equal(code.match(/return finish\(data\);/g)?.length, 4);
+  //
+  // Asserted as the relationship rather than as a count, so adding an action
+  // cannot quietly add one that skips finish(). Every RPC branch has exactly
+  // one failure path and exactly one success path, and the two must stay
+  // paired: a branch with a failure return and no finish() is one that leaves
+  // its job open forever.
+  const finishes = code.match(/return finish\(data\);/g)?.length ?? 0;
+  const failures = code.match(/return failure\(error,/g)?.length ?? 0;
+  assert.ok(finishes >= 4, `expected the client action branches to record their results, found ${finishes}`);
+  assert.equal(finishes, failures,
+    `${failures} action branches can fail but only ${finishes} record what they answered`);
 
   // The worker has nobody to ask, so the parameters are validated and stored
   // before the job exists rather than inside the branch that runs it.
@@ -241,4 +251,74 @@ test("the worker runs operations without being able to decide what they are", as
   assert.doesNotMatch(code, /createClient|supabase/i);
   // Neither queue may starve the other.
   assert.match(code, /createFairScheduler\(\{ classes: \['search', 'operation', 'export'\]/);
+});
+
+// Leads and Contactable: client-scoped state, served by a semi-join rather
+// than a denormalized prospect_index column.
+test("leads and contactability are client-scoped without widening the index", async () => {
+  const [migration, route, table] = await Promise.all([
+    read("../supabase/migrations/20260915110000_client_leads_and_contactability.sql"),
+    read("../app/api/clients/[id]/prospects/route.ts"),
+    read("../app/components/ProspectTable.tsx"),
+  ]);
+
+  // Comments out first: this migration's header explains at length what it
+  // deliberately does NOT do, and every one of those explanations names the
+  // thing being asserted absent.
+  const sql = codeOnly(migration);
+
+  // The whole point: no new prospect_index column, so no 674k-row backfill and
+  // nothing to drain through reindex_backlog.
+  assert.doesNotMatch(sql, /alter table public\.prospect_index/);
+  assert.doesNotMatch(sql, /enqueue_reindex/);
+  // A lead mark changes nothing prospect_index carries, so the write path does
+  // not re-index either - unlike set_icp_verified_v1, which must.
+  assert.doesNotMatch(sql, /reindex_scope_v1/);
+
+  // Partial index, or it is the size of the whole 688k-row membership.
+  assert.match(migration, /on public\.client_prospects \(client_id, prospect_id\) where is_lead/);
+
+  // Contactable reads client_prospects.date_added, NOT contact_events:
+  // 20260908141654 moved the cooldown there, and lib/client-idle-age.ts renders
+  // the row badge from the same field. Reading contact_events here would make
+  // the tab disagree with the badge on the very same row.
+  assert.match(migration, /cp\.date_added is null or cp\.date_added <=/);
+  assert.doesNotMatch(sql, /from public\.contact_events/);
+  // Character-for-character the clock list_workspace and clientIdleAge use, or
+  // the two differ by a day west of UTC.
+  assert.match(migration, /\(now\(\) at time zone 'UTC'\)::date/);
+  // Blocked memberships are suppressed, not contactable.
+  assert.match(migration, /cp\.status = 'active'/);
+
+  // Every splice raises if its anchor moved. A silently skipped splice leaves
+  // the SQL builder and the row matcher disagreeing, which returns wrong rows
+  // rather than an error - so the migration also proves they agree on real
+  // data before it commits.
+  for (const guard of [
+    /raise exception 'Could not patch prospect_filter_sql_v1 for client state'/,
+    /raise exception 'Could not patch prospect_index_matches_v1 for client state'/,
+    /raise exception 'Could not close the wrapped CASE in prospect_index_matches_v1'/,
+  ]) assert.match(migration, guard);
+  assert.match(migration, /disagrees: builder % rows, row matcher % rows/);
+  // Contactable and its complement must cover the index exactly - catches an
+  // off-by-one on the boundary and a dropped "never contacted" branch.
+  assert.match(migration, /do not partition the index/);
+  // The agreement check runs against the biggest client; an arbitrary one had
+  // no membership and "agrees on 0 rows" proves nothing.
+  assert.match(migration, /order by count\(\*\) desc/);
+
+  // The write path exists and is locked down like every other client RPC.
+  assert.match(migration, /create or replace function public\.set_client_lead_v1/);
+  assert.match(migration, /revoke execute on function public\.set_client_lead_v1[^;]*from public, anon, authenticated/);
+  assert.match(route, /action === "set_lead" \|\| action === "clear_lead"/);
+
+  // Independent toggles, not two more segments of the exclusive ICP group:
+  // "ICP verified AND contactable" is the query asked before a send.
+  assert.match(table, /const leadOn = /);
+  assert.match(table, /const contactableOn = /);
+  assert.match(table, /toggleClientState\("__lead", leadOn\)/);
+  assert.match(table, /toggleClientState\("__contactable", contactableOn\)/);
+  // All-matching lead marking is refused rather than accepted and failed later
+  // in the worker: apply_batch_v1 does not know set_lead yet.
+  assert.match(table, /disabled=\{bulkBusy \|\| selectionMode === "all_matching"\}/);
 });

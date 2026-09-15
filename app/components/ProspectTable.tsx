@@ -151,6 +151,27 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     onPageChange(1);
     clearSelection();
   }
+  // Leads and Contactable are INDEPENDENT toggles, not two more segments of the
+  // ICP group. "ICP verified and contactable" is the query that actually gets
+  // asked before a send, and folding them into one exclusive group would make
+  // it unexpressible.
+  //
+  // Each is on or off rather than a three-way: the negative ("in cooldown",
+  // "not a lead") is reachable from the filter panel, and a tri-state toggle
+  // beside a tri-state toggle is a lot of state to read at a glance.
+  const leadOn = Boolean(clientId && filters.some((filter) => filter.field === "__lead" && filter.operator === "contains" && filter.values.includes(clientId)));
+  const contactableOn = Boolean(clientId && filters.some((filter) => filter.field === "__contactable" && filter.operator === "contains" && filter.values.includes(clientId)));
+  function toggleClientState(field: "__lead" | "__contactable", on: boolean) {
+    const remaining = filters.filter((filter) => filter.field !== field);
+    onFiltersChange(on ? remaining : [...remaining, {
+      id: `${field}:${clientId}`,
+      field,
+      operator: "contains",
+      values: [clientId],
+    }]);
+    onPageChange(1);
+    clearSelection();
+  }
   // companyScope belongs in here: it narrows what the listing counts and shows,
   // so a selection made under one pivot is not a selection under another.
   const selectionKey = JSON.stringify({ clientId, search: search.trim(), filters: filterPayload(effectiveFilters), companyScope });
@@ -436,7 +457,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     );
   }
 
-  async function clientAction(action: "push" | "set_date_contacted", targetClientId: string, dateContacted?: string | null) {
+  async function clientAction(action: "push" | "set_date_contacted" | "set_lead" | "clear_lead", targetClientId: string, dateContacted?: string | null) {
     if (!selectedCount || !targetClientId) return;
     // One id per intent, not per click. A click that fails and is tried again is
     // the same operation and must reuse this; a genuinely new push gets a new
@@ -553,6 +574,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
 
   return <section className="people-workspace">
     {clientId ? <div className="icp-quick-filters" role="group" aria-label="Filter people by ICP verification"><button className={icpStatus === "all" ? "active" : ""} aria-pressed={icpStatus === "all"} onClick={() => setIcpStatus("all")}>All</button><button className={icpStatus === "verified" ? "active" : ""} aria-pressed={icpStatus === "verified"} onClick={() => setIcpStatus("verified")}>ICP Verified</button><button className={icpStatus === "unverified" ? "active" : ""} aria-pressed={icpStatus === "unverified"} onClick={() => setIcpStatus("unverified")}>ICP Unverified</button></div> : null}
+    {clientId ? <div className="icp-quick-filters status-quick-filters" role="group" aria-label="Filter people by lead and contactability"><button className={leadOn ? "active" : ""} aria-pressed={leadOn} onClick={() => toggleClientState("__lead", leadOn)}><AppIcon name="star" size={14}/> Leads</button><button className={contactableOn ? "active" : ""} aria-pressed={contactableOn} onClick={() => toggleClientState("__contactable", contactableOn)} title="Past this client's contact cooldown, or never contacted"><AppIcon name="check" size={14}/> Contactable</button></div> : null}
     {integrationSelection && <IntegrationPreview ids={integrationSelection} clientId={clientId} fields={fields} onClose={()=>setIntegrationSelection(null)}/>}
     {selectedCount>0 && <div className="bulk-bar"><button disabled={selectionMode!=='explicit' || selectedCount>400} onClick={()=>setIntegrationSelection([...selectedIds])}>Preview Smartlead delivery</button>
       <span>Preview supports 1–400 checked prospects across pages. All-matching delivery is not enabled yet.</span></div>}
@@ -610,7 +632,12 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
           {/* Client prospect selections only update contact history. ICP
               verification is managed from the client Company DB. */}
           {clientId
-            ? <div className="bulk-action-group bulk-action-group-primary"><button disabled={bulkBusy} onClick={() => setDateContactedDialogOpen(true)}><AppIcon name="calendar" size={14}/> Set Date Contacted</button></div>
+            ? <div className="bulk-action-group bulk-action-group-primary"><button disabled={bulkBusy} onClick={() => setDateContactedDialogOpen(true)}><AppIcon name="calendar" size={14}/> Set Date Contacted</button>{/* Explicit selections only. An all-matching lead mark would be
+                  frozen into a background job, and prospect_operations'
+                  apply_batch_v1 does not know set_lead yet - it would be
+                  accepted here and fail in the worker minutes later. */}
+              <button disabled={bulkBusy || selectionMode === "all_matching"} title={selectionMode === "all_matching" ? "Marking leads needs an explicit selection" : "Mark these prospects as leads for this client"} onClick={() => void clientAction("set_lead", clientId)}><AppIcon name="star" size={14}/> Mark as lead</button>
+              <button disabled={bulkBusy || selectionMode === "all_matching"} title={selectionMode === "all_matching" ? "Clearing leads needs an explicit selection" : "Remove the lead mark for this client"} onClick={() => void clientAction("clear_lead", clientId)}>Clear lead</button></div>
             : <div className="bulk-action-group bulk-action-group-primary"><select aria-label="Client to push these prospects into" value={pushClientId} onChange={(event) => setPushClientId(event.target.value)}><option value="">Push to client…</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><button className="bulk-push" disabled={bulkBusy || !pushClientId} onClick={() => void clientAction("push", pushClientId)}><AppIcon name="arrow" size={14}/> Push {selectionMode === "all_matching" ? selectedLabel : "selected"}</button></div>}
           {selectionMode === "all_matching" && !clientId ? <span className="selection-scope-note">Tagging and contact history need an explicit selection</span> : null}{canDeleteMaster ? <div className="bulk-action-group bulk-action-group-danger"><button className="row-danger bulk-delete" disabled={deletingProspects} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? selectedLabel : "selected"}</button></div> : null}<button className="bulk-clear" onClick={clearSelection}>Clear</button></div> : null}
         {effectiveFilters.length ? <div className="active-filter-strip">{effectiveFilters.flatMap((filter) => {

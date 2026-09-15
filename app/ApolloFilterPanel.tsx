@@ -78,6 +78,8 @@ function activeCount(filters: ProspectFilter[]) {
 
 export function filterLabel(field: string, customFields: ProspectFieldDefinition[] = []) {
   if (field === "__icp_verified" || field === "__company_icp_verified") return "ICP verification";
+  if (field === "__lead") return "Lead";
+  if (field === "__contactable") return "Contactable";
   return [...mainFilters, ...classifierFilters, ...optionalFilters, ...customFields].find((definition) => definition.id === field)?.label ?? field;
 }
 
