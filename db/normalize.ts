@@ -33,6 +33,32 @@ export function normalizeText(value: string) {
   return clean(value).toLowerCase().replace(/\s+/g, " ");
 }
 
+/**
+ * Title-case a name, but only when nobody has already cased it.
+ *
+ * WHY THE GUARD. Blind title-casing is wrong on real names: McDonald becomes
+ * Mcdonald, DeShawn becomes Deshawn. Measured on production 2026-09-15, 889
+ * prospects carry a mixed-case first name - 98 of them Mc/Mac/De/Van/O style,
+ * most of the rest run-together spellings like SenthilKumar. Every one of those
+ * is somebody's casing decision, and a bulk rule has no standing to overrule it.
+ *
+ * So only a name that is entirely one case is touched: PRAKHAR and prakhar are
+ * unambiguously uncased, and become Prakhar.
+ *
+ * The word-boundary rule matches PostgreSQL's initcap() - any non-alphanumeric
+ * starts a new word - so this and the backfill in
+ * 20260915160000_first_and_last_names_are_title_case.sql cannot disagree about
+ * the same input. o'brien and jean-luc come out O'Brien and Jean-Luc in both.
+ */
+export function titleCaseName(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || !/\p{L}/u.test(trimmed)) return trimmed;
+  const lower = trimmed.toLocaleLowerCase();
+  // Mixed case already: leave it exactly as it arrived.
+  if (trimmed !== trimmed.toLocaleUpperCase() && trimmed !== lower) return trimmed;
+  return lower.replace(/(^|[^\p{L}\p{N}])(\p{L})/gu, (_match, boundary: string, letter: string) => boundary + letter.toLocaleUpperCase());
+}
+
 export function normalizeDomain(value: string) {
   const candidate = clean(value).toLowerCase();
   if (!candidate) return "";
@@ -97,8 +123,11 @@ export function mapProspect(headers: string[], values: string[]): CanonicalProsp
   const raw: Record<string, string> = {};
   headers.forEach((header, index) => { raw[header] = clean(values[index]); });
 
-  const firstName = findValue(raw, ["first name", "firstname", "given name"]);
-  const lastName = findValue(raw, ["last name", "lastname", "surname", "family name"]);
+  // Cased before the full name is derived, so a full name we build inherits the
+  // correction. A SUPPLIED full name is never rewritten - that column is left
+  // exactly as the file gave it.
+  const firstName = titleCaseName(findValue(raw, ["first name", "firstname", "given name"]));
+  const lastName = titleCaseName(findValue(raw, ["last name", "lastname", "surname", "family name"]));
   const suppliedFullName = findValue(raw, ["full name", "fullname", "name"]);
   const fullName = suppliedFullName || [firstName, lastName].filter(Boolean).join(" ");
   const workEmail = findWorkEmail(raw).toLowerCase();

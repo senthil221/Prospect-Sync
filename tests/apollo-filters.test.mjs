@@ -241,3 +241,59 @@ test("the master DB filters by client id, not by joined client names", async () 
   assert.match(companyPanel, /<ClientMembershipFilter field="__company_client_ids"/);
   assert.match(workspace, /<CompanyFilterPanel filters=\{filters\} clients=\{clients\}/);
 });
+
+// First and last names are title-cased on import and were backfilled once.
+test("names are title-cased only where nobody has already cased them", async () => {
+  const { titleCaseName, mapProspect } = await import("../db/normalize.ts");
+
+  // Entirely one case carries no decision, so it is corrected.
+  assert.equal(titleCaseName("PRAKHAR"), "Prakhar");
+  assert.equal(titleCaseName("prakhar"), "Prakhar");
+  assert.equal(titleCaseName("JEAN-LUC"), "Jean-Luc");
+  assert.equal(titleCaseName("o'brien"), "O'Brien");
+  assert.equal(titleCaseName("MARY ANN"), "Mary Ann");
+
+  // Mixed case is somebody's decision. Blind title-casing turns McDonald into
+  // Mcdonald; production carries 889 such names, 98 of them Mc/Mac/De/Van/O.
+  assert.equal(titleCaseName("McDonald"), "McDonald");
+  assert.equal(titleCaseName("DeShawn"), "DeShawn");
+  assert.equal(titleCaseName("SenthilKumar"), "SenthilKumar");
+  assert.equal(titleCaseName("Prakhar"), "Prakhar");
+
+  // Nothing to case.
+  assert.equal(titleCaseName(""), "");
+  assert.equal(titleCaseName("   "), "");
+  assert.equal(titleCaseName("123"), "123");
+
+  // Applied on import, to both columns.
+  const mapped = mapProspect(["First Name", "Last Name"], ["PRAKHAR", "KESHARIYA"]);
+  assert.equal(mapped.firstName, "Prakhar");
+  assert.equal(mapped.lastName, "Keshariya");
+  // A full name we DERIVE inherits the correction...
+  assert.equal(mapped.fullName, "Prakhar Keshariya");
+  // ...but a supplied one is never rewritten.
+  const supplied = mapProspect(["First Name", "Last Name", "Full Name"], ["PRAKHAR", "KESHARIYA", "PRAKHAR KESHARIYA"]);
+  assert.equal(supplied.firstName, "Prakhar");
+  assert.equal(supplied.fullName, "PRAKHAR KESHARIYA");
+});
+
+test("the name backfill cannot touch an already-cased name", async () => {
+  const migration = await readFile(new URL("../supabase/migrations/20260915160000_first_and_last_names_are_title_case.sql", import.meta.url), "utf8");
+
+  // The guard: only values equal to their own upper() or lower() are in range.
+  assert.match(migration, /\(first_name = upper\(first_name\) or first_name = lower\(first_name\)\)/);
+  assert.match(migration, /\(last_name = upper\(last_name\) or last_name = lower\(last_name\)\)/);
+  // Counted before and after, so a widened predicate is caught rather than
+  // discovered later in somebody's export.
+  assert.match(migration, /the backfill changed % names that were already cased/);
+  assert.match(migration, /names remain wrongly cased after the backfill/);
+
+  // prospect_index carries first_name and last_name, so it is corrected in the
+  // same statement - but search_text is built from full_name, which is not
+  // changing, so no re-index is queued.
+  assert.match(migration, /update public\.prospect_index pi/);
+  assert.doesNotMatch(migration.split("\n").filter((line) => !line.trimStart().startsWith("--")).join("\n"), /enqueue_reindex|reindex_scope_v1|reindex_prospects/);
+  assert.match(migration, /prospect_index still disagrees with prospects about a name/);
+  // full_name is deliberately untouched, and the file says what that costs.
+  assert.match(migration, /FULL NAME IS DELIBERATELY NOT TOUCHED/);
+});
