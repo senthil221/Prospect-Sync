@@ -1526,3 +1526,31 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
   /* Every remaining touch target reaches 44px. */
   .bulk-bar button, .table-footer button, .company-pagination button { min-height: 44px; }
 }
+
+/* ============================================================
+   Client ICP profiles
+   ============================================================ */
+
+.client-icp-list { display: grid; gap: var(--space-4); }
+.client-icp-card { padding: var(--space-5); border: 1px solid var(--ph-border); border-radius: var(--radius-xl); background: var(--surface); }
+.client-icp-card .form-field:last-of-type { margin-bottom: var(--space-3); }
+/* The brief is the point of the card, so it gets room and resists being
+   squashed; a one-line box invites a one-line ICP. */
+.client-icp-card textarea {
+  width: 100%; min-height: 160px; padding: var(--space-3);
+  border: 1px solid var(--ph-border-strong); border-radius: var(--radius-lg);
+  background: var(--accent-soft); outline: 0; color: var(--text-primary);
+  font-family: inherit; font-size: var(--text-sm); line-height: 1.6; resize: vertical;
+}
+.client-icp-card .form-field small { display: block; margin-top: var(--space-1); color: var(--ph-muted); font-size: var(--text-2xs); }
+.client-icp-actions { display: flex; align-items: center; gap: var(--space-3); }
+/* Save sits at the far right, Delete at the far left, with the dirty marker
+   between them - so the destructive control is never next to the one you reach
+   for after typing. */
+.client-icp-actions .client-icp-state { margin-left: auto; color: var(--ph-muted); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
+.client-icp-panel .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
+
+@media (max-width: 720px) {
+  .client-icp-actions { flex-wrap: wrap; }
+  .client-icp-panel .panel-head { flex-direction: column; align-items: stretch; }
+}

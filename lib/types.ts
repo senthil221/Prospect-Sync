@@ -37,6 +37,7 @@ export type SavedViewReview = { reason: string; limit: "filters" | "values" | "v
 export type SavedView = { id: string; name: string; definition: { filters: ProspectFilter[]; columns: string[]; sort: string; direction: "asc" | "desc" }; needsReview?: SavedViewReview };
 export type CoverageRow = { row: number; name: string; domain: string; status: "known" | "new"; matchedBy: string; matchedCompany: string; prospectCount: number; clientCount: number };
 export type QualitySummary = { total: number; missingEmail: number; missingTitle: number; missingLinkedin: number; missingCompany: number; missingDomain: number; staleRecords: number; potentialDuplicateGroups: number };
+export type ClientIcpProfile = { id: string; name: string; description: string; tag_id: string | null; sort_order: number; created_at: string; updated_at: string };
 export type BlocklistEntry = { id: string; kind: "domain" | "email"; value: string; reason: string; source: string; created_at: string };
 export type EnrichmentPreview = { companies: number; fields: number; sample: Array<{ companyId: string; company: string; domain: string; fields: number }> };
 export type PushResult = { added: number; alreadyPresent: number; blocked: number; queued: number };

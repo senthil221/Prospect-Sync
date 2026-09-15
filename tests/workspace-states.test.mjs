@@ -89,7 +89,16 @@ test("the client workspace stops using native dialogs and dangling tabs", async 
   assert.match(panel, /The People database record is preserved/);
 
   // CLIENT-03: the tab strip pointed aria-controls at ids that existed nowhere.
-  assert.equal(panel.match(/<TabPanel id="/g)?.length, 4);
+  //
+  // Asserted as the relationship rather than as a count. A hardcoded number
+  // says nothing about whether the ids line up - it fails on any new tab, and
+  // it would pass a strip whose four tabs pointed at four unrelated panels,
+  // which is the bug this test exists for.
+  const tabIds = [...panel.matchAll(/\{ id: "([a-z]+)" as const, label:/g)].map((match) => match[1]);
+  const panelIds = [...panel.matchAll(/<TabPanel id="([a-z]+)"/g)].map((match) => match[1]);
+  assert.ok(tabIds.length >= 4, `expected the client tab strip to have tabs, found ${tabIds.length}`);
+  assert.deepEqual(panelIds.slice().sort(), tabIds.slice().sort(),
+    "every client tab must have a panel with the same id, and vice versa");
   // These panels hold live tables with their own search, filters and page, so
   // they stay mounted while hidden rather than being thrown away per switch.
   assert.match(panel, /keepMounted/);
@@ -107,4 +116,48 @@ test("the client workspace stops using native dialogs and dangling tabs", async 
   for (const dead of [".clients-grid", ".client-card", ".client-stats"]) {
     assert.ok(!styles.split("\n").some((line) => line.startsWith(`${dead} `)), `${dead} has no component left`);
   }
+});
+
+// Client ICP profiles: several named briefs per client, not one text column.
+test("a client can hold several named ICP briefs", async () => {
+  const [migration, route, panel, clients] = await Promise.all([
+    read("../supabase/migrations/20260915100000_client_icp_profiles.sql"),
+    read("../app/api/clients/[id]/icp/route.ts"),
+    read("../app/components/ClientIcpPanel.tsx"),
+    read("../app/components/ClientsPanel.tsx"),
+  ]);
+
+  // A table, so a second ICP does not need a migration.
+  assert.match(migration, /create table if not exists public\.client_icp_profiles/);
+  // The tag link is already here and nullable: an ICP is the thing you describe
+  // and the thing you label with, so the profile can own its tag later without
+  // another migration. Nothing reads it yet.
+  assert.match(migration, /tag_id text references public\.prospect_tags\(id\) on delete set null/);
+  // Deleting a client removes its briefs; deleting a tag must not.
+  assert.match(migration, /confdeltype = 'c'/);
+  assert.match(migration, /confdeltype = 'n'/);
+  // Same deny-all posture as every other client-scoped table here.
+  assert.match(migration, /enable row level security/);
+  assert.match(migration, /must not be readable by anon or authenticated/);
+  // "position" is a SQL function name and would need quoting everywhere.
+  assert.doesNotMatch(migration, /\bposition integer\b/);
+
+  // The length cap lives in the API so going over it is a refusal with a number
+  // in it, never a silent truncation of somebody's brief.
+  assert.match(route, /const maxDescription = 20_000;/);
+  assert.match(route, /status: 413/);
+  // Edits and deletes are scoped by client as well as by id, so an ICP id from
+  // another client cannot be reached through this client's route.
+  assert.match(route, /\.eq\("id", profileId\)\s*\n\s*\.eq\("client_id", id\)/);
+
+  // Saving is explicit: these are long pasted documents, and autosave would be
+  // a request per keystroke with no way to abandon an edit.
+  assert.match(panel, /Unsaved changes/);
+  assert.match(panel, /disabled=\{!dirty \|\| over \|\| busyId === profile\.id\}/);
+  // Deleting a brief must not untag anything it was applied to.
+  assert.match(panel, /Nothing that has been tagged with it is untagged/);
+
+  // And it is reachable.
+  assert.match(clients, /id: "icp" as const, label: "ICPs"/);
+  assert.match(clients, /<ClientIcpPanel client=\{client\}\/>/);
 });

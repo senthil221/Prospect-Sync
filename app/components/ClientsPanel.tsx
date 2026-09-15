@@ -9,6 +9,7 @@ import type { ClientRecord, Company, ListRecord, Prospect, ProspectFilter } from
 import { AppIcon, ConfirmDialog, EmptyCompact, EmptyState, TabPanel } from "./DashboardUi";
 import { CompanyTable } from "./CompaniesWorkspace";
 import BlocklistPanel from "./BlocklistPanel";
+import ClientIcpPanel from "./ClientIcpPanel";
 import ListsPanel from "./ListsPanel";
 import ProspectTable from "./ProspectTable";
 import Tabs from "./Tabs";
@@ -58,7 +59,7 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
   const [cooldown, setCooldown] = useState(client.cooldown_days ?? 90);
   const [savedCooldown, setSavedCooldown] = useState(client.cooldown_days ?? 90);
   const [cooldownState, setCooldownState] = useState("");
-  const [tab, setTab] = useState<"lists" | "prospects" | "companies" | "blocklist">("lists");
+  const [tab, setTab] = useState<"lists" | "prospects" | "companies" | "icp" | "blocklist">("lists");
   const [companyPeopleScope, setCompanyPeopleScope] = useState<CompanyScope | null>(null);
   const [peopleCompanyScope, setPeopleCompanyScope] = useState<PeopleScope | null>(null);
   async function saveCooldown() {
@@ -76,12 +77,16 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
         { id: "lists" as const, label: "Uploaded lists", count: formatNumber(client.list_count), icon: <AppIcon name="upload" size={15}/> },
         { id: "prospects" as const, label: "People DB", count: formatNumber(client.prospect_count), icon: <AppIcon name="database" size={15}/> },
         { id: "companies" as const, label: "Company DB", icon: <AppIcon name="company" size={15}/> },
+        { id: "icp" as const, label: "ICPs", icon: <AppIcon name="target" size={15}/> },
         { id: "blocklist" as const, label: "Blocklist", count: client.blocked_count ? formatNumber(client.blocked_count) : undefined, icon: <AppIcon name="quality" size={15}/> },
       ]}
     />
     <TabPanel id="lists" active={tab === "lists"} keepMounted className="client-tab-panel"><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Open any list to search its original rows and inspect preserved fields.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Data source</th><th>Source file</th><th>Rows</th><th>Fields preserved</th><th>New to master</th><th>Cross-client duplicates</th><th>Imported</th><th>Actions</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><button className="list-open-button" onClick={() => onOpenList(list)}><strong>{list.name}</strong><span>Open</span></button></td><td><span className="data-source-badge">{list.data_source}</span></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="field-verified"><AppIcon name="check" size={14}/> {formatNumber(list.field_count)} fields</span></td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><button className="row-danger" onClick={() => onDeleteList(list)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></TabPanel>
     <TabPanel id="prospects" active={tab === "prospects"} keepMounted className="client-tab-panel"><ClientMasterDatabase key={`people:${client.prospect_count}:${client.blocked_count ?? 0}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients.map((item) => item.id === client.id ? { ...item, cooldown_days: savedCooldown } : item)} active={tab === "prospects"} companyScope={companyPeopleScope} onClearCompanyScope={() => setCompanyPeopleScope(null)} onSeeCompanies={(scope) => { if (companyPeopleScope) { setCompanyPeopleScope(null); setPeopleCompanyScope(null); } else setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/></TabPanel>
     <TabPanel id="companies" active={tab === "companies"} keepMounted className="client-tab-panel"><ClientCompanyDatabase key={`companies:${client.prospect_count}:${client.blocked_count ?? 0}`} client={client} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onSeePeople={(scope) => { if (peopleCompanyScope) { setPeopleCompanyScope(null); setCompanyPeopleScope(null); } else setCompanyPeopleScope(scope); setTab("prospects"); }} onImport={onImport}/></TabPanel>
+    {/* Mounted only while open, like the blocklist: the ICP list is its own
+        fetch and there is no reason to pay for it on every client screen. */}
+    <TabPanel id="icp" active={tab === "icp"} keepMounted className="client-tab-panel">{tab === "icp" ? <ClientIcpPanel client={client}/> : null}</TabPanel>
     <TabPanel id="blocklist" active={tab === "blocklist"} keepMounted className="client-tab-panel">{tab === "blocklist" ? <BlocklistPanel client={client} onChanged={onRefreshClients}/> : null}</TabPanel>
   </>;
 }
