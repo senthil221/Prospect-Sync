@@ -1,4 +1,5 @@
 import { configuredInteger, createAdmissionQueue } from './bounded-admission.ts';
+import { isClientDisconnect } from './api-errors.ts';
 import { recordRequest, routeOf } from './observability.ts';
 import { logServerEvent } from './server-log.ts';
 
@@ -57,6 +58,18 @@ async function withSlot(queue: { acquire: typeof acquireSlot }, request: Request
     headers.set('X-Request-Id', requestId);
     return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   } catch (error) {
+    // A client that went away is not a server failure, and must not be counted
+    // as one. Next.js throws ResponseAborted out of the handler when it writes
+    // to a connection the browser has already closed; recorded as a 500 it
+    // inflated both the error log and the server_error counter that the health
+    // report reads. 499 lands in the 4xx band, which outcomeFor() already calls
+    // client_error and recordRequest already declines to log - so the counters
+    // stay honest with no second special case, and the throw still propagates
+    // because there is nobody left to answer.
+    if (isClientDisconnect(error)) {
+      recordRequest(route, 499, performance.now() - startedAt, { requestId, admissionMs });
+      throw error;
+    }
     recordRequest(route, 500, performance.now() - startedAt, { requestId, admissionMs });
     // recordRequest stores the status and the admission wait, and nothing about
     // WHY. Five /api/companies 500s on 13-14 Sep 2026 left only
