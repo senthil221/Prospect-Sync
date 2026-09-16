@@ -48,26 +48,70 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       : [];
     return Response.json({ companyIds, matched: companyIds.length, submitted: parsed.submitted, truncated: parsed.truncated });
   }
-  // Applying a client ICP tag to companies. Explicit selections only for now:
-  // set_client_company_tag_v1 takes ids, and resolving an all-matching company
-  // scope is the expensive half of this product (it is what times out on the
-  // People pivot), so it is not done inline on a tagging request.
+  // Applying a client ICP tag to companies, to an explicit selection or to
+  // everything matching the current search.
+  //
+  // It used to be explicit ids only, on the grounds that resolving an
+  // all-matching company scope is the expensive half of this product. That is
+  // true, and it is also exactly what push and ICP verification below already
+  // do on every all-matching request, through the same
+  // resolve_company_action_selection_v1 under the same 120s ceiling and 250,000
+  // cap. Tagging was the only company action that had not been given the
+  // arguments to do it - see 20260916170000. Once the ids are resolved it is
+  // strictly the cheapest of the three: one insert or one delete.
   //
   // No re-index: prospect_index carries no company tags, so nothing it holds
-  // changes. The tag's ownership is checked against the client inside the RPC.
+  // changes. The tag's ownership is checked against the client inside the RPC,
+  // before anything is resolved, so a workspace cannot reach another client's
+  // tag by sending its id.
   if (action === "add_tag" || action === "remove_tag") {
     const tagId = String(payload.tagId ?? "").trim();
     const companyIds = Array.isArray(payload.companyIds)
       ? [...new Set(payload.companyIds.map((value) => String(value ?? "").trim()).filter(Boolean))].slice(0, 50000)
       : [];
+    const tagAllMatching = payload.allMatching === true;
     if (!tagId) return Response.json({ error: "Choose an ICP tag." }, { status: 400 });
-    if (!companyIds.length) return Response.json({ error: "Select companies to tag." }, { status: 400 });
-    const tagged = await createAdminClient().rpc("set_client_company_tag_v1", {
+    // Without ids and without "all matching", this would tag the whole client.
+    if (!companyIds.length && !tagAllMatching) {
+      return Response.json({ error: "Select companies to tag." }, { status: 400 });
+    }
+
+    let tagFilters;
+    let tagPeopleScope;
+    try {
+      tagFilters = parseFilters(JSON.stringify(payload.filters ?? []));
+      tagPeopleScope = payload.peopleScope ? parsePeopleScope(JSON.stringify(payload.peopleScope)) : null;
+    } catch (error) {
+      return filterErrorResponse(error, "Invalid company selection.");
+    }
+    const tagExcluded = Array.isArray(payload.excludedIds)
+      ? [...new Set(payload.excludedIds.map((value) => String(value ?? "").trim()).filter(Boolean))].slice(0, 50000)
+      : [];
+
+    const tagUser = await getAuthorizedUser();
+    const tagSupabase = createAdminClient();
+    // A saved filter set can only be spent by the person who owns it, and only
+    // in the scope it was built for - the same check push and ICP verification
+    // make. A tag applied through someone else's set would read another
+    // client's segment through this client's workspace.
+    if (tagAllMatching && !companyIds.length) {
+      const setDenial = await authorizeFilterSets(tagSupabase, tagFilters, tagUser?.id ?? '', 'company', clientId,
+        tagPeopleScope ? [{ entityType: 'prospect', clientScope: clientId, filters: tagPeopleScope.filters }] : []);
+      if (setDenial) return setDenial;
+    }
+
+    const tagged = await tagSupabase.rpc("set_client_company_tag_v2", {
       p_client_id: clientId,
       p_tag_id: tagId,
       p_apply: action === "add_tag",
-      p_company_ids: companyIds,
-      p_actor: (await getAuthorizedUser())?.email ?? "",
+      p_company_ids: companyIds.length ? companyIds : null,
+      // Empty unless this is an all-matching request, so an explicit selection
+      // can never be widened by a filter left in the payload.
+      p_search: tagAllMatching && !companyIds.length ? String(payload.search ?? "").trim().slice(0, 300) : "",
+      p_filters: tagAllMatching && !companyIds.length ? tagFilters : [],
+      p_people_scope: tagAllMatching && !companyIds.length ? tagPeopleScope : null,
+      p_excluded_ids: tagAllMatching && !companyIds.length && tagExcluded.length ? tagExcluded : null,
+      p_actor: tagUser?.email ?? "",
     });
     if (tagged.error) {
       const missing = Boolean(tagged.error.code && missingFunctionCodes.has(tagged.error.code));

@@ -220,17 +220,32 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
     finally { setDeleting(false); }
   }
 
-  // Explicit ids only, so this never goes near the all-matching resolve.
+  // Takes the same selection shape as ICP verification above, all-matching
+  // included. It used to be explicit ids only; 20260916170000 gave
+  // set_client_company_tag_v2 the arguments its two sibling company actions
+  // already had, so all three now resolve through one bounded resolver.
   async function companyTagAction(action: "add_tag" | "remove_tag") {
     if (!clientId || !bulkTagId || !selectedCount) return;
     setUpdatingIcp(true); setCompanyError(""); setCompanyNotice("");
     try {
-      const response = await api<{ result?: { updated?: number } }>(`/api/clients/${encodeURIComponent(clientId)}/companies`, {
+      const selection = selectionMode === "all_matching"
+        ? { allMatching: true, search: search.trim(), filters: filters.map(({ field, operator, values, scopes }) => ({ field, operator, values, ...(scopes?.length ? { scopes } : {}) })), peopleScope, excludedIds: [...excludedIds] }
+        : { companyIds: [...selectedIds] };
+      const response = await api<{ result?: { updated?: number; selected?: number } }>(`/api/clients/${encodeURIComponent(clientId)}/companies`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, tagId: bulkTagId, companyIds: [...selectedIds] }),
+        body: JSON.stringify({ action, tagId: bulkTagId, ...selection }),
       });
       const updated = response.result?.updated ?? 0;
+      const selected = response.result?.selected;
       const icp = clientIcps.find((item) => item.id === bulkTagId)?.name ?? "this ICP";
+      // "Tagged 0" on a re-tag is correct and reads as a failure, so when the
+      // resolver selected companies that already carried the tag, say that
+      // rather than leaving a bare zero on screen.
+      if (action === "add_tag" && updated === 0 && selected) {
+        setCompanyNotice(`All ${formatNumber(selected)} matching ${selected === 1 ? "company" : "companies"} already carried ${icp}.`);
+        onRefresh?.();
+        return;
+      }
       setCompanyNotice(`${action === "add_tag" ? "Tagged" : "Untagged"} ${formatNumber(updated)} ${updated === 1 ? "company" : "companies"} with ${icp}.`);
       // Optional: the Master workspace passes one, the client drawer may not.
       onRefresh?.();
@@ -449,12 +464,13 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
           <div className="bulk-action-group bulk-action-group-primary">
           <button className="bulk-verify" disabled={updatingIcp} onClick={() => void setCompanyIcpValidation(true)}><AppIcon name="check" size={14}/> Mark ICP verified</button>
           <button disabled={updatingIcp} onClick={() => void setCompanyIcpValidation(false)}><AppIcon name="close" size={14}/> Remove ICP verification</button>
-          {/* Apply one of this client's ICPs. Explicit selections only: the RPC
-              takes ids, and resolving an all-matching company scope is the
-              expensive half of this product. */}
+          {/* Apply one of this client's ICPs, to the selection or to everything
+              matching. Un-gated for all-matching since 20260916170000: the
+              resolve it was being kept away from is the same one Mark ICP
+              verified above already runs on every all-matching click. */}
           {clientIcps.length ? <><select aria-label="Client ICP to apply" value={bulkTagId} onChange={(event) => setBulkTagId(event.target.value)}><option value="">Apply ICP…</option>{clientIcps.map((icp) => <option key={icp.id} value={icp.id}>{icp.name}</option>)}</select>
-          <button disabled={updatingIcp || !bulkTagId || selectionMode === "all_matching"} title={selectionMode === "all_matching" ? "Tagging needs an explicit selection" : "Tag the selected companies with this ICP"} onClick={() => void companyTagAction("add_tag")}><AppIcon name="tag" size={14}/> Tag</button>
-          <button disabled={updatingIcp || !bulkTagId || selectionMode === "all_matching"} onClick={() => void companyTagAction("remove_tag")}>Untag</button></> : null}
+          <button disabled={updatingIcp || !bulkTagId} title={selectionMode === "all_matching" ? "Tag every matching company with this ICP" : "Tag the selected companies with this ICP"} onClick={() => void companyTagAction("add_tag")}><AppIcon name="tag" size={14}/> Tag</button>
+          <button disabled={updatingIcp || !bulkTagId} title={selectionMode === "all_matching" ? "Remove this ICP from every matching company" : "Remove this ICP from the selected companies"} onClick={() => void companyTagAction("remove_tag")}>Untag</button></> : null}
           </div>
         </>}
         <button className="bulk-clear" disabled={updatingIcp || deleting || pushing} onClick={clearSelection}>Clear</button>

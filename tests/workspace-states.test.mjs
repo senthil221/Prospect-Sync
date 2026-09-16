@@ -207,7 +207,9 @@ test("client ICP tags share one vocabulary and reindex only where they must", as
   // Both write paths are reachable.
   assert.match(peopleRoute, /action === "add_tag" \|\| action === "remove_tag"/);
   assert.match(peopleRoute, /set_client_prospect_tag_v1/);
-  assert.match(companyRoute, /set_client_company_tag_v1/);
+  // v2 since 20260916170000: same function, given the argument list its sibling
+  // company actions already had so it can reach every matching company.
+  assert.match(companyRoute, /set_client_company_tag_v2/);
 });
 
 // The ICP tag UI: one list, two entities, four surfaces.
@@ -234,17 +236,25 @@ test("client ICPs are the tag vocabulary everywhere they are offered", async () 
   assert.match(peoplePanel, /clientId && icps\.length/);
   assert.match(companyPanel, /clientId && icps\.length/);
 
-  // Apply/remove on both entities. The two halves differ on "all matching", and
-  // the difference is real rather than an oversight: 20260916120000 taught
-  // prospect_operations.apply_batch_v1 the add_tag/remove_tag verbs, so People
-  // tagging freezes a result set and runs in the background - but apply_batch_v1
-  // refuses any job whose entity_type is not 'prospect', and there is no company
-  // batch applier, so company tagging is still explicit-selection only.
+  // Apply/remove on both entities, and both now reach every matching record -
+  // by two different mechanisms, because the two entities genuinely differ.
+  //
+  // People: 20260916120000 taught prospect_operations.apply_batch_v1 the
+  // add_tag/remove_tag verbs, so a People tag freezes a result set and the
+  // worker applies it in bounded batches.
+  //
+  // Companies: 20260916170000 gave set_client_company_tag_v2 the argument list
+  // its two sibling company actions already had, so it resolves inline through
+  // resolve_company_action_selection_v1. That is NOT a shortcut - it is the
+  // same call push_companies_to_client_v1 and set_company_icp_verified_v2 make
+  // on every all-matching click, under the same ceiling and the same cap. The
+  // background route would have needed a company branch in apply_batch_v1, a
+  // company result-set builder and a worker that understands both.
   assert.match(peopleTable, /async function clientTagAction/);
   assert.match(companyTable, /async function companyTagAction/);
   assert.match(peopleTable, /runAllMatching\(action, clientId, requestId, null, bulkTagId\)/);
   assert.doesNotMatch(peopleTable, /Tagging needs an explicit selection/);
-  assert.match(companyTable, /Tagging needs an explicit selection/);
+  assert.doesNotMatch(companyTable, /Tagging needs an explicit selection/);
 
   // And the ICP panel says the two are one thing, which is the only place that
   // relationship is visible.
@@ -314,4 +324,55 @@ test("the ICP picker seeds the same filters the panel writes", async () => {
   assert.doesNotMatch(tabsBlock, /<select/);
   // The Tabs element self-closes before the picker is reached.
   assert.match(tabsBlock, /\]\}\s*\/>/);
+});
+
+// Company ICP tagging reaches every matching company, through the resolver its
+// sibling actions already use.
+//
+// The gate said "Tagging needs an explicit selection", and the stated reason was
+// that resolving an all-matching company scope is the expensive half of this
+// product. True - and it is the identical call push and ICP verification make on
+// every all-matching click, under the same 120s ceiling and 250,000 cap. Tagging
+// was simply the one company action that had never been given the arguments.
+test("a company ICP tag can be applied to everything matching, not just a page", async () => {
+  const [table, route, migration] = await Promise.all([
+    readFile(new URL("../app/components/CompaniesWorkspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/clients/[id]/companies/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260916170000_an_icp_tag_reaches_every_matching_company.sql", import.meta.url), "utf8"),
+  ]);
+
+  // One resolver for both shapes, so explicit ids and a filter cannot drift.
+  assert.match(migration, /resolve_company_action_selection_v1\(\s*\n?\s*p_client_id, p_company_ids, p_search, p_filters, p_people_scope, p_excluded_ids, 250000\)/);
+  // The tag is checked against the client BEFORE anything is resolved, so a
+  // workspace cannot reach another client's tag by sending its id. Compared
+  // inside the function body, with comment lines stripped: the header explains
+  // the resolver at length and would otherwise be found first.
+  const sql = migration.split(/\r?\n/).filter((line) => !line.trimStart().startsWith("--")).join("\n");
+  const fn = sql.slice(sql.indexOf("create or replace function public.set_client_company_tag_v2"), sql.indexOf("revoke execute"));
+  assert.ok(fn.indexOf("does not belong to this client") < fn.indexOf("resolve_company_action_selection_v1"),
+    "tag ownership must be checked before the selection is resolved");
+  // Bounded like every other app-called function, and not reachable from a
+  // browser role.
+  assert.match(migration, /set statement_timeout to '120s'/);
+  assert.match(migration, /revoke execute on function public\.set_client_company_tag_v2[^\n]*from public, anon, authenticated/);
+  // v1 survives, so an in-flight request from the outgoing image cannot 404
+  // mid blue/green release.
+  assert.match(migration, /set_client_company_tag_v1 is gone/);
+  // Company tagging must never claim to have queued a re-index: prospect_index
+  // carries a prospect's tags, never a company's.
+  assert.match(migration, /company tagging must never queue a re-index/);
+
+  // The route carries the selection, and refuses a bare request that would
+  // otherwise tag the client's whole company list.
+  assert.match(route, /set_client_company_tag_v2/);
+  assert.match(route, /if \(!companyIds\.length && !tagAllMatching\)/);
+  // A saved filter set is spendable only by its owner, in its own scope - the
+  // same check push and ICP verification make.
+  assert.match(route, /authorizeFilterSets\(tagSupabase, tagFilters/);
+  // An explicit selection must never be widened by a filter left in the payload.
+  assert.match(route, /p_filters: tagAllMatching && !companyIds\.length \? tagFilters : \[\]/);
+
+  // And the buttons are no longer gated on selection mode.
+  assert.match(table, /Tag every matching company with this ICP/);
+  assert.doesNotMatch(table, /disabled=\{updatingIcp \|\| !bulkTagId \|\| selectionMode === "all_matching"\}/);
 });
