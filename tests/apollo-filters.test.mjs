@@ -156,19 +156,33 @@ test("total funding filters by range and by not-known, not by substring", async 
   assert.match(migration, /a funding bound above the integer range did not compile/);
 });
 
-// Master-DB tagging must name the global tag explicitly.
+// Agency-wide tags are retired; nothing may create another one.
 //
-// prospect_tags stopped being globally unique in 20260825040000 - one name key
-// became two partial unique indexes, (client_id, lower(name)) and lower(name)
-// where client_id is null. An unqualified .eq("name", ...).maybeSingle() can
-// therefore match a global tag and a client tag of the same name and answer
-// PGRST116, turning a tag action into a 500. Client ICP tags are what populate
-// that table, so this guard goes in before them.
-test("the master tag action is scoped to agency-wide tags", async () => {
-  const route = await readFile(new URL("../app/api/operations/route.ts", import.meta.url), "utf8");
-  assert.match(route, /from\("prospect_tags"\)\.select\("id"\)\.eq\("name", tagName\)\.is\("client_id", null\)/);
-  // And the row it creates is explicitly global rather than global by omission.
-  assert.match(route, /insert\(\{ id: tagId, name: tagName, client_id: null \}\)/);
+// They were prospect_tags rows with client_id null, made from a window.prompt
+// in the Master People DB. That was a second tag vocabulary running beside the
+// client ICPs and indistinguishable from them once it reached
+// prospect_index.tags, so the only writer left is set_client_prospect_tag_v1,
+// which an ICP owns. What already carries an agency-wide tag keeps it.
+test("no path creates an agency-wide tag any more", async () => {
+  // Comment lines stripped: both files explain the retirement in prose that
+  // names the button and the table it used to write to.
+  const codeOnly = (source) => source.split(/\r?\n/).filter((line) => !line.trimStart().startsWith("//")).join("\n");
+  const route = codeOnly(await readFile(new URL("../app/api/operations/route.ts", import.meta.url), "utf8"));
+  const table = codeOnly(await readFile(new URL("../app/components/ProspectTable.tsx", import.meta.url), "utf8"));
+
+  // The route answers 410 rather than tagging, and rather than a bare 400 that
+  // would reach a stale tab as "Unsupported bulk action".
+  assert.match(route, /payload.action === "tag"/);
+  assert.match(route, /status: 410/);
+  // Nothing inserts into prospect_tags or links a prospect to one from here.
+  assert.doesNotMatch(route, /from\("prospect_tags"\)\.insert/);
+  assert.doesNotMatch(route, /prospect_tag_links/);
+
+  // And the button and its prompt are gone from the bulk bar.
+  assert.doesNotMatch(table, /Add tag/);
+  assert.doesNotMatch(table, /window\.prompt\("Tag name"\)/);
+  // The ICP path is what replaced it, and is still wired up.
+  assert.match(table, /clientTagAction\("add_tag"\)/);
 });
 
 // Client include/exclude in the Master DB, by id.
@@ -303,4 +317,37 @@ test("the name backfill cannot touch an already-cased name", async () => {
   assert.match(migration, /prospect_index still disagrees with prospects about a name/);
   // full_name is deliberately untouched, and the file says what that costs.
   assert.match(migration, /FULL NAME IS DELIBERATELY NOT TOUCHED/);
+});
+
+// The Tags filter offers the tags it can match.
+//
+// prospect_filter_values_v3's '__tags' branch joined prospect_tags with
+// "and pt.client_id is null" hard-coded, so the picker only ever listed
+// agency-wide tags - one of them exists - while the predicate it feeds matches
+// on pi.tag_text, which carries every tag a prospect has. Inside a client
+// workspace the list therefore opened empty even though every ICP the client
+// had applied was matchable by name.
+test("the tag value picker is scoped like the predicate it feeds", async () => {
+  const migration = await readFile(new URL("../supabase/migrations/20260916140000_the_tag_filter_offers_the_tags_it_can_match.sql", import.meta.url), "utf8");
+
+  // Spliced onto the live definition, and refusing to run if the line it
+  // replaces has moved - a restated copy of a 90-line field mapping is a copy
+  // that drifts.
+  assert.match(migration, /pg_get_functiondef\('public\.prospect_filter_values_v3/);
+  assert.match(migration, /raise exception 'prospect_filter_values_v3 no longer contains/);
+
+  // Client set: agency-wide plus that client's own. Client null (the Master
+  // DB): everything, because tag_text is not scoped by client either.
+  assert.match(migration, /pt\.client_id is null or pt\.client_id = %L/);
+  assert.match(migration, /case when p_client_id is null then ''/);
+
+  // Proved on rows rather than on the SQL text, because what was wrong was
+  // never the text - and the probe rows are removed inside the transaction.
+  assert.match(migration, /a client workspace still cannot see its own ICP tag/);
+  assert.match(migration, /one client is being offered another client''s ICP tag/);
+  assert.match(migration, /delete from public\.prospect_tag_links where tag_id = v_tag/);
+  assert.match(migration, /the migration probe tag was not removed/);
+
+  // And the agency-wide list the Master DB has always shown is unchanged.
+  assert.match(migration, /the master tag list lost agency-wide tags/);
 });

@@ -62,8 +62,15 @@ const classifierFilters: FilterDefinition[] = [
 // than imported, so they sit with the kept custom fields rather than the mandatory
 // person fields. The value picker lists the tags that actually exist, which is the
 // whole point of having tagged a selection.
+//
+// It matches on the tag NAME (pi.tag_text), which is why the picker had to be
+// taught to offer the names that can match: until 20260916140000 it listed only
+// agency-wide tags, so inside a client workspace it opened empty even though
+// every ICP tag the client had applied was matchable. Filtering by ICP exactly
+// - by id, rename-proof - is the Client ICP section further down, and the
+// picker beside the client tabs.
 const optionalFilters: FilterDefinition[] = [
-  { id: "__tags", label: "Tags", description: "Tags added from the bulk actions bar after selecting rows." },
+  { id: "__tags", label: "Tags", description: "Matches an ICP tag by name. Use the Client ICP filter to pick one exactly." },
 ];
 
 // The company profile, filterable from the People database.

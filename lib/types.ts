@@ -41,7 +41,11 @@ export type CoverageRow = { row: number; name: string; domain: string; status: "
 // are optional rather than required. 20260916100000 recomputes the stored
 // snapshot on the way in, so the window is the deploy, not a refresh cycle.
 export type QualitySummary = { total: number; missingEmail: number; missingTitle: number; missingLinkedin: number; missingCompany: number; missingDomain: number; staleRecords: number; potentialDuplicateGroups: number; missingEmployees?: number; missingCompanyKeywords?: number; missingCompanyDescription?: number };
-export type ClientIcpProfile = { id: string; name: string; description: string; tag_id: string | null; sort_order: number; created_at: string; updated_at: string };
+// prospect_count/company_count are what the ICP's tag has claimed. Optional,
+// and null rather than 0 when the count could not be taken - an older database
+// answers without them, and a slow count is dropped rather than failing the
+// screen, so "not counted" and "counted nothing" must stay tellable apart.
+export type ClientIcpProfile = { id: string; name: string; description: string; tag_id: string | null; sort_order: number; created_at: string; updated_at: string; prospect_count?: number | null; company_count?: number | null };
 export type BlocklistEntry = { id: string; kind: "domain" | "email"; value: string; reason: string; source: string; created_at: string };
 export type EnrichmentPreview = { companies: number; fields: number; sample: Array<{ companyId: string; company: string; domain: string; fields: number }> };
 export type PushResult = { added: number; alreadyPresent: number; blocked: number; queued: number };

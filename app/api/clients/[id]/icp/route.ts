@@ -80,7 +80,28 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     .order("sort_order", { ascending: true })
     .order("id", { ascending: true });
   if (error) return failure(error);
-  return Response.json({ profiles: data ?? [] });
+  const profiles = data ?? [];
+
+  // How much each ICP has actually claimed. Asked for in one call rather than
+  // one per profile, and treated as decoration: a client with fifty large ICPs
+  // is fifty index scans behind an 8s ceiling, and a screen that refuses to
+  // open because a count was slow is worse than a screen without counts. A
+  // database without the migration answers PGRST202 and lands here too.
+  const counts = new Map<string, { prospects: number; companies: number }>();
+  if (profiles.some((profile) => profile.tag_id)) {
+    const usage = await createAdminClient().rpc("client_icp_tag_counts_v1", { p_client_id: id });
+    for (const row of (usage.data ?? []) as Array<{ tag_id: string; prospect_count: number; company_count: number }>) {
+      counts.set(row.tag_id, { prospects: Number(row.prospect_count ?? 0), companies: Number(row.company_count ?? 0) });
+    }
+  }
+
+  return Response.json({
+    profiles: profiles.map((profile) => ({
+      ...profile,
+      prospect_count: profile.tag_id ? counts.get(profile.tag_id)?.prospects ?? null : 0,
+      company_count: profile.tag_id ? counts.get(profile.tag_id)?.companies ?? null : 0,
+    })),
+  });
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {

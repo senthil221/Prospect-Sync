@@ -153,7 +153,7 @@ test("a client can hold several named ICP briefs", async () => {
   // Saving is explicit: these are long pasted documents, and autosave would be
   // a request per keystroke with no way to abandon an edit.
   assert.match(panel, /Unsaved changes/);
-  assert.match(panel, /disabled=\{!dirty \|\| over \|\| busyId === profile\.id\}/);
+  assert.match(panel, /disabled=\{!dirty \|\| over \|\| busyId === selected\.id\}/);
   // Deleting a brief must not untag anything it was applied to.
   assert.match(panel, /Nothing that has been tagged with it is untagged/);
 
@@ -248,5 +248,70 @@ test("client ICPs are the tag vocabulary everywhere they are offered", async () 
 
   // And the ICP panel says the two are one thing, which is the only place that
   // relationship is visible.
-  assert.match(icpPanel, /Taggable as/);
+  assert.match(icpPanel, /Applied as/);
+  assert.match(icpPanel, /Name this ICP to tag prospects and companies with it/);
+});
+
+// The ICPs screen is a rail and one editor, and reports what each ICP claimed.
+//
+// It used to stack every brief as a card with its own 160px textarea and its
+// own Save, so a client running five ICPs got a page metres long with no way to
+// see the set, and no way to tell a brief in use from one somebody abandoned.
+test("the ICPs screen lists the set and says how much each one has claimed", async () => {
+  const [panel, route, migration] = await Promise.all([
+    readFile(new URL("../app/components/ClientIcpPanel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/clients/[id]/icp/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../supabase/migrations/20260916150000_an_icp_reports_how_much_it_has_claimed.sql", import.meta.url), "utf8"),
+  ]);
+
+  // One selection, one editor - not a card per brief.
+  assert.match(panel, /icp-workbench/);
+  assert.match(panel, /icp-rail/);
+  assert.match(panel, /const \[selectedId, setSelectedId\]/);
+  assert.doesNotMatch(panel, /client-icp-card/);
+
+  // The counts come from one call, not one per profile, and the route tolerates
+  // losing them: a screen that will not open because a count was slow is worse
+  // than a screen without counts.
+  assert.match(route, /client_icp_tag_counts_v1/);
+  assert.match(route, /counts\.get\(profile\.tag_id\)\?\.prospects \?\? null/);
+
+  // Null and zero are different answers and the panel keeps them apart.
+  assert.match(panel, /prospect_count == null/);
+
+  // An ICP that has never been applied still appears, with 0 - that is the one
+  // the screen most needs to show. The tag table drives; the counts hang off it.
+  assert.match(migration, /from public\.prospect_tags t/);
+  assert.match(migration, /where t\.client_id = p_client_id/);
+  // Bounded like every other app-called function.
+  assert.match(migration, /set statement_timeout to '8s'/);
+});
+
+// Choosing an ICP beside the client tabs filters that client's People DB, and
+// "Unassigned" is the complement of every ICP rather than "has no tags at all".
+test("the ICP picker seeds the same filters the panel writes", async () => {
+  const panel = await readFile(new URL("../app/components/ClientsPanel.tsx", import.meta.url), "utf8");
+
+  // By tag id, never by name: renaming an ICP must not change what a view
+  // returns - the bug 20260915130000 fixed for clients.
+  assert.match(panel, /field: "__client_tags", operator: "contains", values: \[choice\]/);
+  assert.match(panel, /field: "__client_tags", operator: "not_contains", values: icps\.map\(\(icp\) => icp\.id\)/);
+
+  // The same filter ids the Client ICP filter section writes, so what the
+  // picker seeds is editable and clearable there rather than being invisible.
+  assert.match(panel, /"__client_tags:include"/);
+  assert.match(panel, /"__client_tags:exclude"/);
+
+  // With no ICPs defined, Unassigned is everyone - so it seeds nothing rather
+  // than an empty filter that would read as "no filter applied".
+  assert.match(panel, /icps\.length \? \[\{ id: "__client_tags:exclude"/);
+
+  // A <select> inside role="tablist" is announced as a tab that does nothing,
+  // so the picker is a sibling of the tablist: it appears after the Tabs
+  // element closes, inside the row that wraps both.
+  assert.match(panel, /client-tab-row/);
+  const tabsBlock = panel.slice(panel.indexOf("<Tabs"), panel.indexOf("client-icp-picker"));
+  assert.doesNotMatch(tabsBlock, /<select/);
+  // The Tabs element self-closes before the picker is reached.
+  assert.match(tabsBlock, /\]\}\s*\/>/);
 });

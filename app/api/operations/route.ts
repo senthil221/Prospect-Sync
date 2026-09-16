@@ -60,40 +60,26 @@ export async function POST(request: Request) {
   if (unauthorized) return unauthorized;
   const decoded = await readBoundedJson(request);
   if (decoded.response) return decoded.response;
-  const payload = decoded.value as { action?: string; prospectIds?: string[]; tagName?: string; clientId?: string; contactedAt?: string; campaignName?: string } | null;
+  const payload = decoded.value as { action?: string; prospectIds?: string[]; clientId?: string; contactedAt?: string; campaignName?: string } | null;
   if (!payload || !Array.isArray(payload.prospectIds)) return Response.json({ error: 'Select at least one prospect.' }, { status: 400 });
   if (payload.prospectIds.length > 5000) return Response.json({ code: 'selection_too_large', error: 'This action supports up to 5,000 selected prospects per request.' }, { status: 413 });
   const prospectIds = [...new Set(payload.prospectIds.map(String))];
   if (!prospectIds.length) return Response.json({ error: "Select at least one prospect." }, { status: 400 });
   const supabase = createAdminClient();
+  // RETIRED: action "tag".
+  //
+  // This created an agency-wide tag - prospect_tags with client_id null -
+  // from a window.prompt in the Master People DB. It was a second tag
+  // vocabulary beside the client ICPs, indistinguishable from them in the
+  // grid and in prospect_index.tags, and nothing scoped it to anyone. A tag
+  // is now something an ICP owns, created by naming one, so the only writer
+  // is set_client_prospect_tag_v1.
+  //
+  // Refused rather than quietly dropped: a stale tab still holding the old
+  // button would otherwise get a 400 reading "Unsupported bulk action" and no
+  // idea why. The tags already applied are untouched and still filterable.
   if (payload.action === "tag") {
-    const tagName = String(payload.tagName ?? "").trim().slice(0, 60);
-    if (!tagName) return Response.json({ error: "Tag name is required." }, { status: 400 });
-    // This is the MASTER People DB, so it reads and writes agency-wide tags -
-    // the ones with no client_id. Both halves of that have to be said.
-    //
-    // prospect_tags stopped being globally unique in 20260825040000: the single
-    // name key became two partial unique indexes, (client_id, lower(name)) for
-    // client tags and lower(name) for global ones. An unqualified lookup on
-    // name can therefore match more than one row - a global "Hot" alongside one
-    // client's "Hot" - and .maybeSingle() answers PGRST116, so tagging failed
-    // with a 500 rather than tagging anything. Nothing has hit it yet because
-    // production carries exactly one tag and no client-scoped ones, but client
-    // ICP tags are precisely what would populate that table.
-    //
-    // The insert needs the same qualification: without client_id the new row is
-    // global by default, which is right here, but only because it is explicit.
-    const existing = await supabase.from("prospect_tags").select("id").eq("name", tagName).is("client_id", null).maybeSingle();
-    if (existing.error) return Response.json({ error: existing.error.message }, { status: 500 });
-    const tagId = existing.data?.id ?? crypto.randomUUID();
-    if (!existing.data) {
-      const created = await supabase.from("prospect_tags").insert({ id: tagId, name: tagName, client_id: null });
-      if (created.error) return Response.json({ error: created.error.message }, { status: 500 });
-    }
-    const result = await supabase.from("prospect_tag_links").upsert(prospectIds.map((prospectId) => ({ prospect_id: prospectId, tag_id: tagId })), { onConflict: "prospect_id,tag_id", ignoreDuplicates: true });
-    if (result.error) return Response.json({ error: result.error.message }, { status: 500 });
-    const tagged = await reindexProspects(supabase, prospectIds);
-    return Response.json({ updated: prospectIds.length, tagId, notice: indexNotice(tagged) });
+    return Response.json({ error: "Agency-wide tags are retired. Name an ICP in the client workspace and apply that instead." }, { status: 410 });
   }
   if (payload.action === "mark_contacted") {
     if (!payload.clientId) return Response.json({ error: "Choose a client." }, { status: 400 });

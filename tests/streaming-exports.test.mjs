@@ -402,7 +402,10 @@ test("both export pickers offer a fixed set, ticked by default, in the order the
 
   assert.deepEqual(prospectExportPickerFields.map((field) => field.label),
     ["First Name", "Last Name", "Job Title", "Email", "Mobile Number",
-     "Personal LinkedIn URL", "Company Name", "Website"]);
+     "Personal LinkedIn URL", "Company Name", "Website",
+     "# Employees", "Company City", "Company State", "Company Country",
+     "Company Industry", "Company Keywords", "Company Description",
+     "Company Founded Year", "Company Technologies", "Company Total Funding"]);
   assert.deepEqual(companyExportPickerFields.map((field) => field.label),
     ["Company Name", "Website", "Industry", "Keywords", "Short Description", "Founded Year",
      "# Employees", "Company City", "Company State", "Company Country", "Technologies", "Total Funding"]);
@@ -419,7 +422,27 @@ test("both export pickers offer a fixed set, ticked by default, in the order the
     companyExportColumns.map((column) => column.header));
   const peopleHeaders = standardExportColumns.filter((column) => peopleDefaults.includes(column.id)).map((column) => column.header);
   assert.deepEqual(peopleHeaders,
-    ["First Name", "Last Name", "Title", "Work Email", "Mobile Number", "LinkedIn", "Company", "Website"]);
+    ["First Name", "Last Name", "Title", "Work Email", "Mobile Number", "LinkedIn", "Company", "Website",
+     "# Employees", "Company City", "Company State", "Company Country",
+     "Company Industry", "Company Keywords", "Company Description",
+     "Company Founded Year", "Company Technologies", "Company Total Funding"]);
+
+  // The company half is exactly what the Companies picker offers, minus the two
+  // the person half already carries. A field added to one picker and not the
+  // other is the drift this catches.
+  const peopleCompanyLabels = prospectExportPickerFields
+    .filter((field) => field.id === "__employee_count" || field.id.startsWith("__company_"))
+    .map((field) => field.label.replace(/^Company /, ""));
+  assert.deepEqual(new Set(peopleCompanyLabels),
+    new Set(companyExportPickerFields
+      .filter((field) => !["__company_name", "__website"].includes(field.id))
+      .map((field) => field.label.replace(/^Company /, "").replace("Short Description", "Description"))));
+
+  // Ticking Company Description by default is what makes a People export heavy,
+  // so it has to be priced or planExport sends a gigabyte down the direct path.
+  const { estimatedBytesPerRow } = await import("../lib/export-plan.ts");
+  assert.ok(estimatedBytesPerRow([], peopleDefaults) > 1000,
+    "the fully-ticked People export must be priced above a kilobyte a row");
 
   // Every offered id must actually resolve to a column, or a ticked box writes
   // nothing.

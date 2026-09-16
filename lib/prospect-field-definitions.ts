@@ -46,8 +46,28 @@ export const standardProspectExportFields = [
 //
 // The picker used to list all 37 entries above plus every uploaded custom key,
 // which made choosing columns a job of its own and made two exports of "the
-// same" data rarely match. This is the agreed fixed set: eight fields, all
+// same" data rarely match. This is the agreed fixed set: eighteen fields, all
 // ticked, in this order.
+//
+// THE COMPANY HALF MIRRORS THE COMPANIES PICKER. The ten company fields below
+// are the same ten that lib/company-export.ts offers, minus Company Name and
+// Website, which the person half already carries. So "Industry" means the same
+// column and writes the same header whichever database the file came out of.
+//
+// __company_location is deliberately NOT offered even though standardExportColumns
+// resolves it: it is the same place as Company City/State/Country, all three of
+// which are ticked, so offering it would put the location in the file twice.
+//
+// ORDER MATTERS AND IS NOT FREE. buildExportColumns emits in standardExportColumns
+// order, not in the order the caller asked for, so this list has to follow that
+// order or the dialog and the file disagree about the columns. That is why
+// # Employees comes before the industry fields here.
+//
+// Company Description is about a kilobyte a row against twenty or thirty for
+// everything else, so a fully-ticked People export is roughly forty times heavier
+// than the eight-column one was. estimatedBytesPerRow prices every field below
+// (lib/export-plan.ts), so planExport sends a file that size down the background
+// path instead of building it in the browser's memory.
 //
 // standardProspectExportFields is deliberately NOT deleted. It still resolves
 // values and headers for saved views, result sets and background exports queued
@@ -66,6 +86,16 @@ export const prospectExportPickerFields = [
   { id: "__linkedin", label: "Personal LinkedIn URL" },
   { id: "__company", label: "Company Name" },
   { id: "__website", label: "Website" },
+  { id: "__employee_count", label: "# Employees" },
+  { id: "__company_city", label: "Company City" },
+  { id: "__company_state", label: "Company State" },
+  { id: "__company_country", label: "Company Country" },
+  { id: "__company_industry", label: "Company Industry" },
+  { id: "__company_keywords", label: "Company Keywords" },
+  { id: "__company_description", label: "Company Description" },
+  { id: "__company_founded_year", label: "Company Founded Year" },
+  { id: "__company_technologies", label: "Company Technologies" },
+  { id: "__company_total_funding", label: "Company Total Funding" },
 ];
 
 // Every offered field, ticked. "Recommended" and the initial state are now the

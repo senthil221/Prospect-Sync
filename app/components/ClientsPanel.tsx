@@ -13,6 +13,7 @@ import ClientIcpPanel from "./ClientIcpPanel";
 import ListsPanel from "./ListsPanel";
 import ProspectTable from "./ProspectTable";
 import Tabs from "./Tabs";
+import { useClientIcps } from "./use-client-icps";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { needsCompanyPreparation, type PreparationProgress } from "../../lib/prepared-search";
 import SearchPreparation from './SearchPreparation';
@@ -55,24 +56,61 @@ function ClientsView({ clients, onOpen, onImport, onRefresh }: { clients: Client
   </>;
 }
 
-function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectProspect, onImport, onDeleteClient, onDeleteList, onRefreshClients }: { client: ClientRecord; clients: ClientRecord[]; lists: ListRecord[]; onBack: () => void; onOpenList: (list: ListRecord) => void; onSelectProspect: (prospect: Prospect) => void; onImport: () => void; onDeleteClient: () => void; onDeleteList: (list: ListRecord) => void; onRefreshClients: () => void }) {
+// "Show me this ICP" and "show me the people no ICP has claimed", as seeds for
+// the People workspace.
+//
+// Both are ordinary __client_tags filters, the same ones the filter panel's
+// Client ICP section writes - same field, same operators, same filter ids - so
+// what the picker seeds is editable and clearable in the panel rather than
+// being a second, invisible kind of filter. __client_tags matches on tag id,
+// never on name, so renaming an ICP does not change what this returns.
+//
+// Unassigned is "not tagged with ANY of this client's ICPs", which is one
+// not_contains carrying every tag id. It is not the same as "untagged": a
+// prospect carrying another client's ICP, or one of the retired agency-wide
+// tags, is unassigned for THIS client, and that is the question being asked.
+export const unassignedIcp = "__unassigned";
+
+export function icpFilterFor(choice: string, icps: Array<{ id: string; name: string }>): ProspectFilter[] {
+  if (!choice) return [];
+  if (choice === unassignedIcp) {
+    // With no ICPs defined, every prospect is unassigned, and a filter with no
+    // values is dropped by the workspace anyway - so say nothing rather than
+    // seeding an empty filter that would read as "no filter applied".
+    return icps.length ? [{ id: "__client_tags:exclude", field: "__client_tags", operator: "not_contains", values: icps.map((icp) => icp.id) }] : [];
+  }
+  return [{ id: "__client_tags:include", field: "__client_tags", operator: "contains", values: [choice] }];
+}
+
+function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectProspect, onImport, onDeleteClient, onDeleteList, onRefreshClients }:{ client: ClientRecord; clients: ClientRecord[]; lists: ListRecord[]; onBack: () => void; onOpenList: (list: ListRecord) => void; onSelectProspect: (prospect: Prospect) => void; onImport: () => void; onDeleteClient: () => void; onDeleteList: (list: ListRecord) => void; onRefreshClients: () => void }) {
   const [cooldown, setCooldown] = useState(client.cooldown_days ?? 90);
   const [savedCooldown, setSavedCooldown] = useState(client.cooldown_days ?? 90);
   const [cooldownState, setCooldownState] = useState("");
-  const [tab, setTab] = useState<"lists" | "prospects" | "leads" | "contactable" | "companies" | "icp" | "blocklist">("lists");
+  const [tab, setTab] = useState<"lists" | "prospects" | "leads" | "contactable" | "by_icp" | "companies" | "icp" | "blocklist">("lists");
   const [companyPeopleScope, setCompanyPeopleScope] = useState<CompanyScope | null>(null);
   const [peopleCompanyScope, setPeopleCompanyScope] = useState<PeopleScope | null>(null);
+  // Which ICP the picker beside the tabs is on. "" is nothing chosen and
+  // unassignedIcp is "has none of this client's ICPs".
+  const [icpChoice, setIcpChoice] = useState("");
+  const icps = useClientIcps(client.id);
+  const icpFilters = icpFilterFor(icpChoice, icps);
   async function saveCooldown() {
     setCooldownState("Saving…");
     try { const result = await api<{ cooldownDays: number }>(`/api/clients/${encodeURIComponent(client.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cooldownDays: cooldown }) }); setCooldown(result.cooldownDays); setSavedCooldown(result.cooldownDays); setCooldownState("Saved"); onRefreshClients(); }
     catch (caught) { setCooldownState(caught instanceof Error ? caught.message : "Unable to save"); }
   }
   return <><button className="back" onClick={onBack}><AppIcon name="back" size={14}/> All clients</button><div className="client-hero"><span className="client-logo tone-0">{initials(client.name)}</span><div><p className="eyebrow">CLIENT WORKSPACE</p><h2>{client.name}</h2><p>{formatNumber(client.prospect_count)} prospects across {formatNumber(client.list_count)} lists{client.icp_verified_count !== undefined ? <> · <strong className="icp-count">{formatNumber(client.icp_verified_count)} ICP verified</strong></> : null}</p></div><div className="cooldown-setting"><label htmlFor="cooldown-days">Contact cooldown</label><div><input id="cooldown-days" type="number" min="0" max="730" value={cooldown} onChange={(event) => setCooldown(Number(event.target.value))}/><span>days</span><button onClick={() => void saveCooldown()}>Save</button></div><small role="status">{cooldownState || "Used when checking reuse eligibility"}</small></div><div className="client-actions"><button className="primary" onClick={onImport}><AppIcon name="plus" size={14}/> Import another list</button><button className="danger-button" onClick={onDeleteClient}>Delete client</button></div></div>
+    {/* The ICP picker sits BESIDE the tablist, not inside it: role="tablist"
+        may only contain tabs, and a <select> in there is announced as one more
+        tab that does nothing. Choosing an ICP is what activates its panel, and
+        moving to any other tab puts the picker back to "By ICP…" so it never
+        reads as active while something else is on screen. */}
+    <div className="client-tab-row">
     <Tabs
       label={`${client.name} databases`}
       variant="segmented"
       value={tab}
-      onChange={setTab}
+      onChange={(next) => { if (next !== "by_icp") setIcpChoice(""); setTab(next); }}
       items={[
         { id: "lists" as const, label: "Uploaded lists", count: formatNumber(client.list_count), icon: <AppIcon name="upload" size={15}/> },
         { id: "prospects" as const, label: "People DB", count: formatNumber(client.prospect_count), icon: <AppIcon name="database" size={15}/> },
@@ -83,6 +121,27 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
         { id: "blocklist" as const, label: "Blocklist", count: client.blocked_count ? formatNumber(client.blocked_count) : undefined, icon: <AppIcon name="quality" size={15}/> },
       ]}
     />
+      <label className={`client-icp-picker${tab === "by_icp" && icpChoice ? " is-active" : ""}`}>
+        <span className="sr-only">Filter {client.name} prospects by ICP</span>
+        <AppIcon name="target" size={14}/>
+        <select
+          aria-label={`Filter ${client.name} prospects by ICP`}
+          value={tab === "by_icp" ? icpChoice : ""}
+          onChange={(event) => {
+            const next = event.target.value;
+            setIcpChoice(next);
+            if (next) setTab("by_icp");
+          }}
+        >
+          <option value="">By ICP…</option>
+          {icps.map((icp) => <option key={icp.id} value={icp.id}>{icp.name}</option>)}
+          {/* Last and separated: it is the complement of everything above it,
+              not another ICP. Offered even with no ICPs defined, where it
+              answers "all of them" and says so in the panel. */}
+          <option value={unassignedIcp}>{icps.length ? "Unassigned" : "Unassigned (no ICPs yet)"}</option>
+        </select>
+      </label>
+    </div>
     <TabPanel id="lists" active={tab === "lists"} keepMounted className="client-tab-panel"><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Open any list to search its original rows and inspect preserved fields.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Data source</th><th>Source file</th><th>Rows</th><th>Fields preserved</th><th>New to master</th><th>Cross-client duplicates</th><th>Imported</th><th>Actions</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><button className="list-open-button" onClick={() => onOpenList(list)}><strong>{list.name}</strong><span>Open</span></button></td><td><span className="data-source-badge">{list.data_source}</span></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="field-verified"><AppIcon name="check" size={14}/> {formatNumber(list.field_count)} fields</span></td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><button className="row-danger" onClick={() => onDeleteList(list)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></TabPanel>
     <TabPanel id="prospects" active={tab === "prospects"} keepMounted className="client-tab-panel"><ClientMasterDatabase key={`people:${client.prospect_count}:${client.blocked_count ?? 0}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients.map((item) => item.id === client.id ? { ...item, cooldown_days: savedCooldown } : item)} active={tab === "prospects"} companyScope={companyPeopleScope} onClearCompanyScope={() => setCompanyPeopleScope(null)} onSeeCompanies={(scope) => { if (companyPeopleScope) { setCompanyPeopleScope(null); setPeopleCompanyScope(null); } else setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/></TabPanel>
     {/* Leads and Contactable are the People DB with a filter already applied,
@@ -92,6 +151,17 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
         extra client listings are not fetched on every client screen. */}
     <TabPanel id="leads" active={tab === "leads"} keepMounted className="client-tab-panel">{tab === "leads" ? <ClientMasterDatabase key={`leads:${client.id}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients} active initialFilters={[{ id: `__lead:${client.id}`, field: "__lead", operator: "contains", values: [client.id] }]} companyScope={null} onClearCompanyScope={() => {}} onSeeCompanies={(scope) => { setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/> : null}</TabPanel>
     <TabPanel id="contactable" active={tab === "contactable"} keepMounted className="client-tab-panel">{tab === "contactable" ? <ClientMasterDatabase key={`contactable:${client.id}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients} active initialFilters={[{ id: `__contactable:${client.id}`, field: "__contactable", operator: "contains", values: [client.id] }]} companyScope={null} onClearCompanyScope={() => {}} onSeeCompanies={(scope) => { setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/> : null}</TabPanel>
+    {/* Same shape as Leads and Contactable: the People DB with a filter already
+        applied, keyed on the choice so switching ICPs remounts with its own
+        seed rather than keeping the previous one's edits. */}
+    <TabPanel id="by_icp" active={tab === "by_icp"} keepMounted className="client-tab-panel">{tab === "by_icp" && icpChoice ? <>
+      <p className="client-icp-scope" role="status">{icpChoice === unassignedIcp
+        ? icps.length
+          ? <>Showing {client.name} prospects carrying <strong>none</strong> of its {icps.length} ICP{icps.length === 1 ? "" : "s"}.</>
+          : <>{client.name} has no named ICPs yet, so every prospect is unassigned. Name one on the ICPs tab to start sorting them.</>
+        : <>Showing {client.name} prospects tagged <strong>{icps.find((icp) => icp.id === icpChoice)?.name ?? "this ICP"}</strong>.</>}</p>
+      <ClientMasterDatabase key={`icp:${client.id}:${icpChoice}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients} active initialFilters={icpFilters} companyScope={null} onClearCompanyScope={() => {}} onSeeCompanies={(scope) => { setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/>
+    </> : null}</TabPanel>
     <TabPanel id="companies" active={tab === "companies"} keepMounted className="client-tab-panel"><ClientCompanyDatabase key={`companies:${client.prospect_count}:${client.blocked_count ?? 0}`} client={client} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onSeePeople={(scope) => { if (peopleCompanyScope) { setPeopleCompanyScope(null); setCompanyPeopleScope(null); } else setCompanyPeopleScope(scope); setTab("prospects"); }} onImport={onImport}/></TabPanel>
     {/* Mounted only while open, like the blocklist: the ICP list is its own
         fetch and there is no reason to pay for it on every client screen. */}
