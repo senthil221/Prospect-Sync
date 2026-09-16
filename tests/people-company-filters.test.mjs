@@ -241,3 +241,35 @@ test("the company keyword scopes reach both halves of the People pair", async ()
   // And the battery cannot pass by both sides being equally wrong.
   assert.match(code, /unticking Keywords changed nothing/);
 });
+
+// The People rail opens on keywords only, and the reason is measured.
+//
+// __company_keywords compiles to a correlated company lookup per prospect, so
+// searching descriptions by default means 683,784 fetches each matching a
+// roughly one-kilobyte description. Measured on production 2026-09-16: keywords
+// only 2.0s, all three 2.9s standalone and ~7.6s through the workspace function,
+// which straddles the 8s statement ceiling. The deployed rail returned a mixture
+// of 504 and 503 until the default was changed. The Companies rail filters
+// companies directly and keeps all three.
+test("the People keyword filter opens on keywords only; the Companies one keeps all three", async () => {
+  const [people, companies] = await Promise.all([
+    read("../app/ApolloFilterPanel.tsx"),
+    read("../app/CompanyFilterPanel.tsx"),
+  ]);
+
+  // One component, two defaults - not two components.
+  assert.match(people, /export function CompanyKeywordFilter\(\{ filters, defaultScopes = \["name", "keywords", "description"\], onChange \}/);
+  assert.match(people, /defaultScopes=\{\["keywords"\]\}/);
+  assert.doesNotMatch(companies, /defaultScopes=/);
+  assert.match(companies, /<CompanyKeywordFilter/);
+
+  // The SQL side agrees: a filter with no scopes key means keywords only, so a
+  // saved view made before the merge keeps returning what it always returned.
+  const migration = codeOnly(await read("../supabase/migrations/20260916190000_company_keywords_in_people_search_the_same_three_fields.sql"));
+  assert.match(migration, /else '\["keywords"\]'::jsonb/);
+
+  // And the explanatory sentence follows the rail, rather than telling one of
+  // them the opposite of what its tick boxes do.
+  assert.match(people, /defaultScopes\.includes\("description"\)/);
+  assert.match(people, /Tick Company description for wider coverage/);
+});

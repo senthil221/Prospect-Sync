@@ -244,7 +244,7 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
           : definition.kind === "funding"
           ? <RangeFilter field={definition.id} filters={fieldFilters} presets={fundingRanges} unknownLabel="Funding is not known" minPlaceholder="e.g. 1000000" maxPlaceholder="No maximum" onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "company_keywords"
-          ? <CompanyKeywordFilter key={fieldFilters.map((filter) => filter.scopes?.join("|") ?? "default").join(";") || "default"} filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
+          ? <CompanyKeywordFilter key={fieldFilters.map((filter) => filter.scopes?.join("|") ?? "default").join(";") || "default"} filters={fieldFilters} defaultScopes={["keywords"]} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "text" && definition.advanced
             ? <TextBooleanFilter key={fieldFilters.map((filter) => `${filter.id}:${filter.values.join("|")}`).join(";")} definition={definition} filters={fieldFilters} clientId={clientId} valuesEndpoint={definition.valuesEndpoint} onChange={(next) => replaceField(definition.id, next)} />
             : <IncludeExcludeFilter field={definition.id} filters={fieldFilters} clientId={clientId} valuesEndpoint={definition.valuesEndpoint} onChange={(next) => replaceField(definition.id, next)} />}
@@ -792,8 +792,32 @@ export const companyKeywordScopeOptions: Array<{ id: CompanyKeywordScope; label:
   { id: "description", label: "Company description", note: "Broader coverage" },
 ];
 
-export function CompanyKeywordFilter({ filters, onChange }: { filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void }) {
-  const initialScopes = filters.find((filter) => filter.scopes?.length)?.scopes ?? ["name", "keywords", "description"];
+// THE DEFAULT IS PER RAIL, AND THE REASON IS MEASURED.
+//
+// The Companies rail filters 418,000 companies directly and can afford to search
+// descriptions by default. The People rail cannot: __company_keywords compiles to
+// a correlated lookup per prospect, so searching descriptions by default means
+// 683,784 company fetches each matching against a roughly one-kilobyte
+// description.
+//
+// Measured on production 2026-09-16, same term, same data: keywords only 2.0s,
+// all three scopes 2.9s standalone and about 7.6s through the workspace function
+// - which straddles the 8s statement ceiling. The deployed People rail returned a
+// mixture of 504 (the database timing out) and 503 (admission refusing the
+// retries behind it), so the filter worked only sometimes.
+//
+// So People opens on keywords only, which is exactly what the field meant before
+// the two filters were merged and is the same default the SQL side applies to a
+// filter with no scopes key. Description is one tick away and is then a
+// deliberate choice, the same as the advanced Company Description filter it
+// replaced. Companies keeps all three.
+export function CompanyKeywordFilter({ filters, defaultScopes = ["name", "keywords", "description"], onChange }: {
+  filters: ProspectFilter[];
+  /** What the tick boxes open on when the filter carries no scopes of its own. */
+  defaultScopes?: CompanyKeywordScope[];
+  onChange: (filters: ProspectFilter[]) => void;
+}) {
+  const initialScopes = filters.find((filter) => filter.scopes?.length)?.scopes ?? defaultScopes;
   const [scopes, setScopes] = useState<CompanyKeywordScope[]>(initialScopes);
 
   function updateScopes(scope: CompanyKeywordScope) {
@@ -812,7 +836,11 @@ export function CompanyKeywordFilter({ filters, onChange }: { filters: ProspectF
         <span>{option.label}{option.note ? <small>{option.note}</small> : null}</span>
       </label>)}
     </fieldset>
-    <p className="company-keyword-scope-note">Selected fields are searched together. Description is on by default for wider coverage; untick it to return fewer, closer matches.</p>
+    {/* The sentence has to match the rail it is on, or it tells one of them the
+        opposite of what its tick boxes are doing. */}
+    <p className="company-keyword-scope-note">{defaultScopes.includes("description")
+      ? "Selected fields are searched together. Description is on by default for wider coverage; untick it to return fewer, closer matches."
+      : "Selected fields are searched together. Tick Company description for wider coverage - it searches every company's description, so it is slower."}</p>
     {/* Without an explicit endpoint TokenValuePicker falls back to the PEOPLE
         one, so typing here asked prospect_filter_values_v3 for a company field.
         It has no case for it, so every keystroke scanned 674k prospect_index
