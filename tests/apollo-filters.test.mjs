@@ -88,18 +88,25 @@ test("person geography is retired while company geography remains available", as
 });
 
 test("company keyword search defaults to name, keywords and description", async () => {
-  const [panel, transport, migration] = await Promise.all([
+  // The control itself moved to ApolloFilterPanel in 20260916190000 so the
+  // People rail could render the same one; CompanyFilterPanel now imports it.
+  // Both files are read, because the point of the move is that there is exactly
+  // one of it.
+  const [panel, companyPanel, transport, migration] = await Promise.all([
+    readFile(new URL("../app/ApolloFilterPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/CompanyFilterPanel.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/dashboard-api.ts", import.meta.url), "utf8"),
     readFile(new URL("../supabase/migrations/20260825124148_company_keyword_scope_search.sql", import.meta.url), "utf8"),
   ]);
 
-  assert.match(panel, /id: "__company_keywords", label: "Company keywords"/);
+  assert.match(companyPanel, /id: "__company_keywords", label: "Company keywords"/);
+  assert.match(companyPanel, /CompanyKeywordFilter/);
+  assert.doesNotMatch(companyPanel, /function CompanyKeywordFilter/);
   assert.match(panel, /\["name", "keywords", "description"\]/);
   assert.match(panel, /Company description/);
   assert.match(panel, /Broader coverage/);
   assert.match(panel, /Description is on by default/);
-  assert.match(panel, /Company name only/);
+  assert.match(companyPanel, /Company name only/);
   assert.match(transport, /scopes\?\.length/);
   assert.match(migration, /when '__company_keywords' then concat_ws/);
   assert.match(migration, /scope\.selected_scopes \? 'description'/);

@@ -3,8 +3,7 @@
 import { ChangeEvent, useRef, useState } from "react";
 import { describeBulkMerge, describeMatchMode, exactMatchThreshold, mergeBulkValues, splitPastedValues, switchesToExactMatch } from "../lib/bulk-values";
 import { isXlsxFile, readXlsxRows } from "../lib/spreadsheet";
-import { ClientMembershipFilter, employeeRanges, filterId, foundedYearRanges, fundingRanges, IncludeExcludeFilter, RangeFilter, TextBooleanFilter, type ProspectFilter, type ProspectFilterOperator } from "./ApolloFilterPanel";
-import type { CompanyKeywordScope } from "../lib/types";
+import { ClientMembershipFilter, CompanyKeywordFilter, employeeRanges, filterId, foundedYearRanges, fundingRanges, IncludeExcludeFilter, RangeFilter, TextBooleanFilter, type ProspectFilter, type ProspectFilterOperator } from "./ApolloFilterPanel";
 import { useDismiss } from "./use-dismiss";
 import { AppIcon } from "./components/DashboardUi";
 import { useClientIcps } from "./components/use-client-icps";
@@ -206,46 +205,6 @@ export default function CompanyFilterPanel({ filters, clients = [], clientId, on
         : <span>No filters applied</span>}
     </div>
   </aside>;
-}
-
-const companyKeywordScopeOptions: Array<{ id: CompanyKeywordScope; label: string; note?: string }> = [
-  { id: "name", label: "Name" },
-  { id: "keywords", label: "Keywords" },
-  { id: "description", label: "Company description", note: "Broader coverage" },
-];
-
-function CompanyKeywordFilter({ filters, onChange }: { filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void }) {
-  const initialScopes = filters.find((filter) => filter.scopes?.length)?.scopes ?? ["name", "keywords", "description"];
-  const [scopes, setScopes] = useState<CompanyKeywordScope[]>(initialScopes);
-
-  function updateScopes(scope: CompanyKeywordScope) {
-    const selected = scopes.includes(scope);
-    if (selected && scopes.length === 1) return;
-    const next = selected ? scopes.filter((item) => item !== scope) : [...scopes, scope];
-    setScopes(next);
-    if (filters.length) onChange(filters.map((filter) => ({ ...filter, scopes: next })));
-  }
-
-  return <div className="company-keyword-filter">
-    <fieldset className="company-keyword-scopes">
-      <legend>Search in</legend>
-      {companyKeywordScopeOptions.map((option) => <label key={option.id}>
-        <input type="checkbox" checked={scopes.includes(option.id)} disabled={scopes.includes(option.id) && scopes.length === 1} onChange={() => updateScopes(option.id)} />
-        <span>{option.label}{option.note ? <small>{option.note}</small> : null}</span>
-      </label>)}
-    </fieldset>
-    <p className="company-keyword-scope-note">Selected fields are searched together. Description is on by default for wider coverage; untick it to return fewer, closer matches.</p>
-    {/* Without an explicit endpoint TokenValuePicker falls back to the PEOPLE
-        one, so typing here asked prospect_filter_values_v3 for a company field.
-        It has no case for it, so every keystroke scanned 674k prospect_index
-        rows to return nothing -- 2.4s a time, and a statement timeout under load. */}
-    <TextBooleanFilter
-      definition={{ id: "__company_keywords", label: "Company keywords" }}
-      filters={filters}
-      valuesEndpoint={COMPANY_VALUES_ENDPOINT}
-      onChange={(next) => onChange(next.map((filter) => ({ ...filter, scopes })))}
-    />
-  </div>;
 }
 
 // Merge a list of (already-normalized) domains into the __website include filter,

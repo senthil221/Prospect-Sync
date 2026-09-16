@@ -30,9 +30,17 @@ test("the People filters and the People export name the company fields alike", (
 test("the People panel offers the company profile in its own group", async () => {
   const code = codeOnly(await read("../app/ApolloFilterPanel.tsx"));
 
-  for (const field of profileFields) {
+  // __company_description is the exception since 20260916190000: it became the
+  // third tick box of the Company Keywords control rather than a filter of its
+  // own. It still COMPILES and still matches - a saved view built on it keeps
+  // working - it is simply no longer offered, which is why this asserts the
+  // panel and the equivalence battery below still covers the field itself.
+  for (const field of profileFields.filter((field) => field !== "__company_description")) {
     assert.ok(code.includes(`id: "${field}"`), `${field} must be offered in the People panel`);
   }
+  assert.ok(!code.includes('id: "__company_description"'),
+    "Company Description is the Company Keywords description tick box now, not a separate filter");
+  assert.match(code, /kind: "company_keywords"/);
   // The two that prospect_index already carried belong in the same group, or
   // "company size" and "company industry" sit in different places for no reason.
   assert.ok(code.includes('id: "__employee_count"'));
@@ -43,7 +51,7 @@ test("the People panel offers the company profile in its own group", async () =>
   // People one scans prospect_index to return nothing, which is the mistake the
   // Companies panel already made once.
   assert.match(code, /const COMPANY_VALUES_ENDPOINT = "\/api\/companies\/filter-values"/);
-  for (const field of ["__company_industry", "__company_keywords", "__company_technologies", "__company_description"]) {
+  for (const field of ["__company_industry", "__company_keywords", "__company_technologies"]) {
     const line = code.split("\n").find((entry) => entry.includes(`id: "${field}"`));
     assert.match(line, /valuesEndpoint: COMPANY_VALUES_ENDPOINT/, `${field} must autocomplete against companies`);
   }
@@ -74,12 +82,13 @@ test("one range control serves both rails", async () => {
   }
 });
 
-test("a company keyword filter carries no scopes into the People compiler", () => {
-  // __company_keywords means two different things by surface: the Companies
-  // panel's scoped name+keywords+description bundle, and - here, and in the
-  // People export - the plain keyword array. parseFilters stamps the default
-  // scopes on either, and the People compiler ignores them; what must not
-  // happen is the value list changing shape.
+test("a company keyword filter carries its scopes through parseFilters intact", () => {
+  // __company_keywords used to mean two different things by surface: the
+  // Companies panel's scoped name+keywords+description bundle, and - here - the
+  // plain keyword array, whose scopes the People compiler ignored. Since
+  // 20260916190000 both rails render the same control and both compilers honour
+  // the same scopes, so the two surfaces can no longer answer the same question
+  // differently. What must still not happen is the value list changing shape.
   const [filter] = parseFilters(JSON.stringify([{ field: "__company_keywords", operator: "contains", values: ["fintech"] }]));
   assert.deepEqual(filter.values, ["fintech"]);
   assert.equal(filter.operator, "contains");
@@ -190,4 +199,45 @@ test("a database without the migration reports the new checks as clear, not as a
     assert.equal(byId[id].count, 0);
     assert.equal(byId[id].severity, "clear");
   }
+});
+
+// Company Keywords in the People rail is the Companies rail's control, and both
+// compilers honour its tick boxes.
+//
+// The risk this covers is the one 20260916090000 was written for: the compiler
+// builds SQL and the row matcher walks a row, so a scope handled by one and not
+// the other shows up as a grid that disagrees with its own bulk actions.
+test("the company keyword scopes reach both halves of the People pair", async () => {
+  const code = codeOnly(await read("../supabase/migrations/20260916190000_company_keywords_in_people_search_the_same_three_fields.sql"));
+
+  // One resolution function, called by both sides. Neither may decide for
+  // itself what an absent or empty scopes array means.
+  assert.match(code, /create or replace function public\.company_keyword_scopes_v1/);
+  assert.ok((code.match(/company_keyword_scopes_v1\(filter_item->''scopes''\)/g) ?? []).length >= 3,
+    "both the compiler and the row matcher must resolve scopes through the shared function");
+
+  // Absent scopes keep meaning keywords-only. Widening them would silently
+  // change what every saved view and frozen result set already returns.
+  assert.match(code, /else '\["keywords"\]'::jsonb/);
+
+  // Each splice refuses if its anchor moved, rather than patching blindly.
+  for (const guard of [
+    /prospect_filter_sql_v1 no longer contains the company keyword expression/,
+    /prospect_filter_sql_v1 no longer contains the keyword tag branch/,
+    /prospect_index_matches_v1 no longer contains the company keyword arm/,
+    /prospect_index_matches_v1 no longer contains the tag-array arm/,
+  ]) assert.match(code, guard);
+
+  // Unticking Keywords must also switch off the tag-array shortcut, or the box
+  // would still match through it and do nothing.
+  assert.match(code, /or public\.company_keyword_scopes_v1\(filter_item->''scopes''\) \? ''keywords''/);
+
+  // Proved equal rather than assumed, across every scope combination, and
+  // bounded: the row matcher is PL/pgSQL with a correlated subquery per row, so
+  // an unbounded sweep of 683,784 prospects is minutes inside a transaction.
+  assert.match(code, /the compiler matched % rows and the row matcher matched %/);
+  assert.match(code, /limit 3000/);
+  assert.match(code, /limit 2000/);
+  // And the battery cannot pass by both sides being equally wrong.
+  assert.match(code, /unticking Keywords changed nothing/);
 });

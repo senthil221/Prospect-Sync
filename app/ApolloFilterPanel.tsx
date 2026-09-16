@@ -3,7 +3,7 @@
 import { ClipboardEvent, KeyboardEvent, useEffect, useRef, useId, useState } from "react";
 import { bulkFieldKind, describeBulkMerge, describeMatchMode, mergeBulkValues, splitPastedValues, switchesToExactMatch } from "../lib/bulk-values";
 import type { ProspectFieldDefinition } from "../lib/prospect-fields";
-import type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
+import type { CompanyKeywordScope, ProspectFilter, ProspectFilterOperator } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
 import { AppIcon } from "./components/DashboardUi";
 import { emptyTaxonomy, orderedDepartments, orderedTiers, tierLabel, type TitleTaxonomy } from "../lib/title-taxonomy";
@@ -12,7 +12,7 @@ import { useClientIcps } from "./components/use-client-icps";
 export type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 
 type FilterDefinition = ProspectFieldDefinition & {
-  kind?: "text" | "employee" | "tiers" | "departments" | "year" | "funding";
+  kind?: "text" | "employee" | "tiers" | "departments" | "year" | "funding" | "company_keywords";
   advanced?: boolean;
   description?: string;
   /** Which value endpoint autocompletes this field. Company fields ask the company one. */
@@ -85,8 +85,16 @@ const optionalFilters: FilterDefinition[] = [
 // duplication the alternative would have added.
 const companyFilters: FilterDefinition[] = [
   { id: "__company_industry", label: "Industry", valuesEndpoint: COMPANY_VALUES_ENDPOINT },
-  { id: "__company_keywords", label: "Company Keywords", valuesEndpoint: COMPANY_VALUES_ENDPOINT, description: "The company's own keyword tags, not the person's." },
-  { id: "__company_description", label: "Company Description", kind: "text", advanced: true, valuesEndpoint: COMPANY_VALUES_ENDPOINT, description: "Search the company description. Boolean supported." },
+  // One control over name, keywords and description, with the tick boxes - the
+  // same one the Companies rail has had since 20260825124148, rendered from the
+  // same component so the two rails cannot answer the same question differently.
+  //
+  // __company_description is deliberately NOT offered any more: it was this
+  // filter's third tick box all along, and having both meant "companies that do
+  // X" was two filters that could not be OR-ed. It is not deleted - it still
+  // compiles and still matches, so a saved view built on it keeps working. Same
+  // treatment the retired export columns got.
+  { id: "__company_keywords", label: "Company Keywords", kind: "company_keywords", valuesEndpoint: COMPANY_VALUES_ENDPOINT, description: "Searches company names, keywords and descriptions together. Untick description to narrow it." },
   { id: "__employee_count", label: "# Employees", kind: "employee" },
   // Suggestions for this one come from the PEOPLE endpoint on purpose: the
   // predicate reads the company location carried on prospect_index, so the list
@@ -235,6 +243,8 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
           ? <RangeFilter field={definition.id} filters={fieldFilters} presets={foundedYearRanges} unknownLabel="Founded year is unknown" minPlaceholder="e.g. 2005" maxPlaceholder="e.g. 2015" onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "funding"
           ? <RangeFilter field={definition.id} filters={fieldFilters} presets={fundingRanges} unknownLabel="Funding is not known" minPlaceholder="e.g. 1000000" maxPlaceholder="No maximum" onChange={(next) => replaceField(definition.id, next)} />
+          : definition.kind === "company_keywords"
+          ? <CompanyKeywordFilter key={fieldFilters.map((filter) => filter.scopes?.join("|") ?? "default").join(";") || "default"} filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "text" && definition.advanced
             ? <TextBooleanFilter key={fieldFilters.map((filter) => `${filter.id}:${filter.values.join("|")}`).join(";")} definition={definition} filters={fieldFilters} clientId={clientId} valuesEndpoint={definition.valuesEndpoint} onChange={(next) => replaceField(definition.id, next)} />
             : <IncludeExcludeFilter field={definition.id} filters={fieldFilters} clientId={clientId} valuesEndpoint={definition.valuesEndpoint} onChange={(next) => replaceField(definition.id, next)} />}
@@ -774,4 +784,44 @@ export function ClientMembershipFilter({ field, title, noun, options, filters, e
         onClick={() => onChange(filters.filter((filter) => filter.field !== field))}>Clear {title.toLocaleLowerCase()} filter</button> : null}
     </div> : null}
   </section>;
+}
+
+export const companyKeywordScopeOptions: Array<{ id: CompanyKeywordScope; label: string; note?: string }> = [
+  { id: "name", label: "Name" },
+  { id: "keywords", label: "Keywords" },
+  { id: "description", label: "Company description", note: "Broader coverage" },
+];
+
+export function CompanyKeywordFilter({ filters, onChange }: { filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void }) {
+  const initialScopes = filters.find((filter) => filter.scopes?.length)?.scopes ?? ["name", "keywords", "description"];
+  const [scopes, setScopes] = useState<CompanyKeywordScope[]>(initialScopes);
+
+  function updateScopes(scope: CompanyKeywordScope) {
+    const selected = scopes.includes(scope);
+    if (selected && scopes.length === 1) return;
+    const next = selected ? scopes.filter((item) => item !== scope) : [...scopes, scope];
+    setScopes(next);
+    if (filters.length) onChange(filters.map((filter) => ({ ...filter, scopes: next })));
+  }
+
+  return <div className="company-keyword-filter">
+    <fieldset className="company-keyword-scopes">
+      <legend>Search in</legend>
+      {companyKeywordScopeOptions.map((option) => <label key={option.id}>
+        <input type="checkbox" checked={scopes.includes(option.id)} disabled={scopes.includes(option.id) && scopes.length === 1} onChange={() => updateScopes(option.id)} />
+        <span>{option.label}{option.note ? <small>{option.note}</small> : null}</span>
+      </label>)}
+    </fieldset>
+    <p className="company-keyword-scope-note">Selected fields are searched together. Description is on by default for wider coverage; untick it to return fewer, closer matches.</p>
+    {/* Without an explicit endpoint TokenValuePicker falls back to the PEOPLE
+        one, so typing here asked prospect_filter_values_v3 for a company field.
+        It has no case for it, so every keystroke scanned 674k prospect_index
+        rows to return nothing -- 2.4s a time, and a statement timeout under load. */}
+    <TextBooleanFilter
+      definition={{ id: "__company_keywords", label: "Company keywords" }}
+      filters={filters}
+      valuesEndpoint={COMPANY_VALUES_ENDPOINT}
+      onChange={(next) => onChange(next.map((filter) => ({ ...filter, scopes })))}
+    />
+  </div>;
 }
