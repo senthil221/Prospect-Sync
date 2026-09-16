@@ -81,7 +81,27 @@ if [[ -n "${RESTIC_REPOSITORY:-}" ]]; then
   log "Pushing to ${RESTIC_REPOSITORY}"
   restic snapshots >/dev/null 2>&1 || restic init
   restic backup "$DEST" --tag prospect-db --host prospect-vps
-  restic forget --tag prospect-db \
+
+  # A STALE LOCK MUST NOT MAKE A GOOD BACKUP LOOK LIKE A FAILED ONE. A run
+  # killed part-way through leaves a lock nothing clears, and every night after
+  # it the upload succeeded and then forget died on the lock - so the service
+  # exited 1 and the backup read as failed. Measured on 2026-09-16: five
+  # snapshots were sitting safely offsite while the job had reported failure
+  # every night since 8 September. `unlock` removes only locks whose process is
+  # gone, so it cannot interrupt a run that is genuinely in progress.
+  restic unlock
+
+  # --group-by IS LOAD-BEARING. restic groups snapshots by host+paths by
+  # default, and every backup here has a unique path
+  # (/var/backups/prospect/<TIMESTAMP>). So each snapshot landed in a group of
+  # its own, the policy kept "1 of 1" in each, and NOTHING was ever removed -
+  # retention was a no-op dressed up as a policy, and the repository grew by
+  # about a gigabyte a night forever. Grouping by tag puts every prospect-db
+  # snapshot in one group, which is what the daily/weekly/monthly counts were
+  # always meant to apply to. Verified with --dry-run against the live
+  # repository before this change: default grouping printed five groups of one,
+  # this grouping prints one group of five.
+  restic forget --tag prospect-db --group-by host,tags \
     --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --prune
   log "Offsite copy complete"
 else
