@@ -43,3 +43,42 @@ test('offsite retention is grouped so the policy can remove anything, and a stal
   assert.ok(source.indexOf('restic unlock') < source.indexOf('restic forget'),
     'unlock must come before the step the stale lock blocks');
 });
+
+// A transient read must not be mistaken for an absent repository.
+//
+// `restic snapshots >/dev/null 2>&1 || restic init` was the single most common
+// cause of a missing offsite copy. On 13 and 15 September the listing failed for
+// its own reasons, the fallback ran init against a repository that already
+// existed, and the script died on "config file already exists" with set -e
+// taking the upload down with it. Two nights with a healthy local archive and
+// nothing offsite, from a line written for first-run convenience.
+test('a failed repository probe never destroys the upload, and the remote is paced', async () => {
+  const source = await readFile(new URL('../deploy/scripts/backup.sh', import.meta.url), 'utf8');
+  // Comment lines stripped: the change is explained in prose that quotes the
+  // exact line being removed, which an absence check would otherwise trip over.
+  const code = source.split(/\r?\n/).filter((line) => !line.trimStart().startsWith('#')).join('\n');
+
+  // The old shape must not come back.
+  assert.doesNotMatch(code, /restic snapshots[^\n]*\|\|\s*restic init/);
+
+  // `cat config` is the probe: one small object, not a full listing, so it is
+  // cheaper and less likely to be what trips a quota.
+  assert.match(source, /restic cat config >\/dev\/null 2>&1/);
+
+  // And an init that reports the repository already exists is treated as
+  // success, because it means the probe was wrong rather than the repo missing.
+  assert.match(source, /grep -q 'config file already exists'/);
+  // Any other init failure is still fatal - this must not become "ignore
+  // everything init says".
+  assert.match(source, /echo "\$init_output" >&2\s*\n\s*exit 1/);
+
+  // Drive's per-minute quota is the binding constraint: 140 rejections over
+  // five nights. restic runs rclone as a subprocess, so RCLONE_* env is the
+  // only way to reach its flags.
+  for (const flag of ['RCLONE_TPSLIMIT', 'RCLONE_DRIVE_PACER_MIN_SLEEP', 'RCLONE_LOW_LEVEL_RETRIES']) {
+    // A plain substring rather than a built regex: the thing being asserted is
+    // shell ${VAR:-default} syntax, which is almost entirely regex metacharacters.
+    assert.ok(source.includes(`export ${flag}="${"$"}{${flag}:-`),
+      `${flag} must be exported with an overridable default`);
+  }
+});
