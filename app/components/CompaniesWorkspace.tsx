@@ -13,7 +13,7 @@ import { filterPayloadWithSets } from "../../lib/filter-set-client";
 import { emptyWorkspaceState } from "../../lib/workspace-states";
 import { colorTone, formatNumber, initials } from "../../lib/dashboard-helpers";
 import type { ClientRecord, Company, CompanyDetail, Prospect, ProspectFilter } from "../../lib/types";
-import { AppIcon, ExportDialogShell, WorkspaceEmpty } from "./DashboardUi";
+import { AppIcon, ConfirmDialog, ExportDialogShell, WorkspaceEmpty } from "./DashboardUi";
 import CompanyTableRow from "./CompanyTableRow";
 import MenuButton from "./MenuButton";
 import { useDebouncedValue } from "./useDebouncedValue";
@@ -164,6 +164,11 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   const [deleteRequest, setDeleteRequest] = useState<{ mode: "ids" | "all_matching"; count: number; ids?: string[] } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [updatingIcp, setUpdatingIcp] = useState(false);
+  // Removing companies from THIS client, with the people count the preview
+  // found. Held as the preview's answer rather than as a boolean, because the
+  // confirmation's whole job is to show those two numbers.
+  const [removeRequest, setRemoveRequest] = useState<{ companies: number; people: number } | null>(null);
+  const [removingFromClient, setRemovingFromClient] = useState(false);
   const [bulkTagId, setBulkTagId] = useState("");
   const clientIcps = useClientIcps(clientId);
   const [pushClientId, setPushClientId] = useState("");
@@ -218,6 +223,50 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
       setDeleteRequest(null); clearSelection(); onRefresh?.();
     } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to delete companies."); }
     finally { setDeleting(false); }
+  }
+
+  // Taking companies out of this client, and their people with them.
+  //
+  // The preview runs first and its numbers are what the confirmation shows. A
+  // company routinely carries hundreds of people - UPL alone is 416 in
+  // Krishify - so "remove 3 companies" can quietly mean "remove 700 people",
+  // and a confirmation that could not say so would be worthless. The preview
+  // RPC is STABLE, so asking cannot change anything.
+  async function requestCompanyRemoval() {
+    if (!clientId || !selectedCount) return;
+    setRemovingFromClient(true); setCompanyError(""); setCompanyNotice("");
+    try {
+      const response = await api<{ result?: { companies?: number; people?: number } }>(`/api/clients/${encodeURIComponent(clientId)}/companies`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "remove_preview", ...companySelectionPayload() }),
+      });
+      setRemoveRequest({ companies: Number(response.result?.companies ?? 0), people: Number(response.result?.people ?? 0) });
+    } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to check what this would remove."); }
+    finally { setRemovingFromClient(false); }
+  }
+
+  async function confirmCompanyRemoval() {
+    if (!clientId || !removeRequest) return;
+    setRemovingFromClient(true); setCompanyError(""); setCompanyNotice("");
+    try {
+      const response = await api<{ result?: { removedCompanies?: number; removedPeople?: number } }>(`/api/clients/${encodeURIComponent(clientId)}/companies`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "remove", ...companySelectionPayload() }),
+      });
+      const companies = Number(response.result?.removedCompanies ?? 0);
+      const people = Number(response.result?.removedPeople ?? 0);
+      setCompanyNotice(`Removed ${formatNumber(companies)} compan${companies === 1 ? "y" : "ies"} and ${formatNumber(people)} ${people === 1 ? "person" : "people"} from this client. The Company and People databases are unchanged.`);
+      setRemoveRequest(null); clearSelection(); onRefresh?.();
+    } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to remove these companies from the client."); }
+    finally { setRemovingFromClient(false); }
+  }
+
+  // One shape for the preview and the removal, so the two can never describe
+  // different sets.
+  function companySelectionPayload() {
+    return selectionMode === "all_matching"
+      ? { allMatching: true, search: search.trim(), filters: filters.map(({ field, operator, values, scopes }) => ({ field, operator, values, ...(scopes?.length ? { scopes } : {}) })), peopleScope, excludedIds: [...excludedIds] }
+      : { companyIds: [...selectedIds] };
   }
 
   // Takes the same selection shape as ICP verification above, all-matching
@@ -472,6 +521,12 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
           <button disabled={updatingIcp || !bulkTagId} title={selectionMode === "all_matching" ? "Tag every matching company with this ICP" : "Tag the selected companies with this ICP"} onClick={() => void companyTagAction("add_tag")}><AppIcon name="tag" size={14}/> Tag</button>
           <button disabled={updatingIcp || !bulkTagId} title={selectionMode === "all_matching" ? "Remove this ICP from every matching company" : "Remove this ICP from the selected companies"} onClick={() => void companyTagAction("remove_tag")}>Untag</button></> : null}
           </div>
+          {/* Its own danger group, away from the ICP controls, and worded as a
+              removal rather than a delete - it unlinks from this client and
+              leaves both master databases alone. */}
+          <div className="bulk-action-group bulk-action-group-danger">
+          <button className="row-danger" disabled={removingFromClient || updatingIcp} title="Take these companies out of this client, along with this client's people at them. Neither database is affected." onClick={() => void requestCompanyRemoval()}>{removingFromClient && !removeRequest ? "Checking…" : "Remove from client"}</button>
+          </div>
         </>}
         <button className="bulk-clear" disabled={updatingIcp || deleting || pushing} onClick={clearSelection}>Clear</button>
       </div> : null}
@@ -479,6 +534,17 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
     </article>
     {onFilters && filtersOpen ? <CompanyFilterPanel filters={filters} clients={clients} clientId={clientId} onChange={onFilters} /> : null}
     </div>
+    {removeRequest && clientId ? <ConfirmDialog
+      title={`Remove ${formatNumber(removeRequest.companies)} compan${removeRequest.companies === 1 ? "y" : "ies"} from this client?`}
+      body={removeRequest.people
+        ? `${formatNumber(removeRequest.people)} ${removeRequest.people === 1 ? "person" : "people"} at ${removeRequest.companies === 1 ? "this company" : "these companies"} will be taken out of this client too.`
+        : "No people at these companies are in this client, so only the companies are removed."}
+      scopeNote="Nothing is deleted. The Company and People databases keep every record, and other clients keep their own links. Push them back to undo this."
+      confirmLabel={`Remove ${formatNumber(removeRequest.companies)} and ${formatNumber(removeRequest.people)} ${removeRequest.people === 1 ? "person" : "people"}`}
+      busy={removingFromClient}
+      onCancel={() => setRemoveRequest(null)}
+      onConfirm={() => void confirmCompanyRemoval()}
+    /> : null}
     {selectedCompany ? <CompanyDrawer company={selectedCompany} detail={detailsByCompany[selectedCompany.id] ?? null} loadingDetail={loadingDetail === selectedCompany.id} prospects={prospectsByCompany[selectedCompany.id] ?? []} total={prospectTotalsByCompany[selectedCompany.id] ?? selectedCompany.prospect_count} loading={loadingCompany === selectedCompany.id} error={companyError} onLoadMore={() => void loadMoreProspects(selectedCompany)} onClose={() => { setSelectedCompany(null); setCompanyError(""); }} /> : null}
     {exportDialogOpen ? <ExportDialogShell titleId="company-export-title" busy={exportingCompanies} onClose={() => setExportDialogOpen(false)}>
       <div className="export-modal-head"><div><p className="eyebrow">CSV EXPORT</p><h2 id="company-export-title">Choose companies and fields</h2><p>Only the fields checked below will be included in the download.</p></div><button aria-label="Close export dialog" disabled={exportingCompanies} onClick={() => setExportDialogOpen(false)}><AppIcon name="close" size={14}/></button></div>

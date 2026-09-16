@@ -123,6 +123,76 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return Response.json({ result: tagged.data });
   }
 
+  // Taking companies out of this client, and their people with them.
+  //
+  // NOT A DELETE, and the vocabulary is kept separate from one on purpose:
+  // nothing in public.companies or public.prospects is touched and no other
+  // client's links are affected. The master Company DB's Delete is the
+  // destructive one and stays where it is.
+  //
+  // Two actions rather than one with a flag. "remove_preview" runs a STABLE
+  // function that cannot write, so the confirmation can say "3 companies and
+  // 416 people" before anything happens - and a company routinely carries
+  // hundreds of people, which is the whole reason the preview exists.
+  if (action === "remove" || action === "remove_preview") {
+    const removeIds = Array.isArray(payload.companyIds)
+      ? [...new Set(payload.companyIds.map((value) => String(value ?? "").trim()).filter(Boolean))].slice(0, 50000)
+      : [];
+    const removeAllMatching = payload.allMatching === true;
+    if (!removeIds.length && !removeAllMatching) {
+      return Response.json({ error: "Select companies to remove from this client." }, { status: 400 });
+    }
+
+    let removeFilters;
+    let removePeopleScope;
+    try {
+      removeFilters = parseFilters(JSON.stringify(payload.filters ?? []));
+      removePeopleScope = payload.peopleScope ? parsePeopleScope(JSON.stringify(payload.peopleScope)) : null;
+    } catch (error) {
+      return filterErrorResponse(error, "Invalid company selection.");
+    }
+    const removeExcluded = Array.isArray(payload.excludedIds)
+      ? [...new Set(payload.excludedIds.map((value) => String(value ?? "").trim()).filter(Boolean))].slice(0, 50000)
+      : [];
+
+    const removeUser = await getAuthorizedUser();
+    const removeSupabase = createAdminClient();
+    if (removeAllMatching && !removeIds.length) {
+      const setDenial = await authorizeFilterSets(removeSupabase, removeFilters, removeUser?.id ?? '', 'company', clientId,
+        removePeopleScope ? [{ entityType: 'prospect', clientScope: clientId, filters: removePeopleScope.filters }] : []);
+      if (setDenial) return setDenial;
+    }
+
+    // Identical selection arguments for both, so the preview cannot describe a
+    // different set from the one the removal acts on.
+    const selectionArgs = {
+      p_client_id: clientId,
+      p_company_ids: removeIds.length ? removeIds : null,
+      p_search: removeAllMatching && !removeIds.length ? String(payload.search ?? "").trim().slice(0, 300) : "",
+      p_filters: removeAllMatching && !removeIds.length ? removeFilters : [],
+      p_people_scope: removeAllMatching && !removeIds.length ? removePeopleScope : null,
+      p_excluded_ids: removeAllMatching && !removeIds.length && removeExcluded.length ? removeExcluded : null,
+    };
+
+    const removal = action === "remove_preview"
+      ? await removeSupabase.rpc("client_company_removal_preview_v1", selectionArgs)
+      : await removeSupabase.rpc("remove_companies_from_client_v1", { ...selectionArgs, p_actor: removeUser?.email ?? "" });
+
+    if (removal.error) {
+      const missing = Boolean(removal.error.code && missingFunctionCodes.has(removal.error.code));
+      // 54000 is the people ceiling refusing rather than truncating. It is the
+      // user's problem to narrow, not a server fault, so it must not read as one.
+      if (removal.error.code === "54000") {
+        return Response.json({ error: removal.error.message, code: "too_many_people" }, { status: 413 });
+      }
+      return Response.json(
+        { error: missing ? "Apply the latest database migration to enable removing companies from a client." : removal.error.message },
+        { status: missing ? 503 : removal.error.code === "P0002" ? 404 : 500 },
+      );
+    }
+    return Response.json({ result: removal.data });
+  }
+
   if (action !== "push" && action !== "set_icp_verified" && action !== "clear_icp_verified") {
     return Response.json({ error: "Unsupported client company action." }, { status: 400 });
   }
