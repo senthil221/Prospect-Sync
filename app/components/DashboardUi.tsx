@@ -197,6 +197,41 @@ export function ExportDialogShell({ titleId, busy = false, onClose, children }: 
 }
 
 /**
+ * A modal that asks for something rather than confirming something - one or two
+ * fields and a pair of actions.
+ *
+ * It exists for the same reason ExportDialogShell does. Declaring a panel modal
+ * promises a screen reader that Tab is trapped, Escape closes, the background
+ * is inert and focus returns on close - none of which the markup provides on
+ * its own. Every hand-rolled copy that skipped useDialogFocus made the promise
+ * and broke it. Rather than add another copy, anything needing the shape takes
+ * it from here.
+ *
+ * (The prose above deliberately does not quote the modal attribute:
+ * tests/dialog-primitives.test.mjs counts occurrences of it in this file and
+ * requires one focus lifecycle each, and a mention in a comment would inflate
+ * the count. The bluntness is the point - it cannot be fooled by a dialog that
+ * only claims the contract.)
+ *
+ * `busy` is a request in flight: Escape must not close the dialog out from
+ * under one, which is the rule the delete dialogs already follow.
+ */
+export function FormDialog({ titleId, busy = false, onClose, children }: {
+  titleId: string;
+  busy?: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const panel = useRef<HTMLElement>(null);
+  useDialogFocus(panel, { onClose, busy });
+  return <div className="modal-backdrop" role="presentation">
+    <section ref={panel} className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      {children}
+    </section>
+  </div>;
+}
+
+/**
  * The confirmation used for anything the shared DeleteConfirmation does not
  * already cover.
  *
