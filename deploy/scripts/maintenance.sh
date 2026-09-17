@@ -96,6 +96,26 @@ else
 fi
 
 echo
+echo "=== Client company prospect counts ==="
+# client_companies.prospect_count is denormalized from prospect_index by the
+# statement trigger on that table. The trigger recomputes rather than applying a
+# delta, so it cannot drift on any path it fires for - but a path that does not
+# fire it at all would go unnoticed, and a number on screen that is quietly
+# wrong is worse than a slow one.
+#
+# This recomputes every pair from prospect_index and reports how many disagreed,
+# correcting them on the way. The expected answer is 0, every run. Anything else
+# names a write path that bypasses the trigger and is worth finding.
+drift="$(psql_run -tAq -c "select public.reconcile_client_company_counts_v1();" 2>/dev/null || echo "")"
+if [[ -z "$drift" ]]; then
+  echo "  reconcile function not present - skipping (apply migrations)"
+elif [[ "$drift" == "0" ]]; then
+  echo "  0 pairs drifted - the stored counts match prospect_index"
+else
+  echo "  NOTE: ${drift} pair(s) drifted and were corrected - a write path is not reaching the trigger, worth investigating"
+fi
+
+echo
 echo "=== Fixed-field import payload audit ==="
 # Deployment does not delete historical source keys. The default is a dry run;
 # an operator reviews the counts and explicitly opts into checkpointed 1,000-row
