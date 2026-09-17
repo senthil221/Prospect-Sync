@@ -72,6 +72,30 @@ else
 fi
 
 echo
+echo "=== Client company membership visibility map ==="
+# client_companies is read by an index-only scan on its primary key for every
+# client Company DB page. An index-only scan is only actually index-only where
+# the visibility map says the page is all-visible, and the map is set by VACUUM.
+#
+# This table had never been vacuumed - autovacuum had not fired on it once,
+# because its churn is far below the default threshold against 160,543 live
+# rows. The result was Heap Fetches: 4322 on a 4,322-row scan: every "index
+# only" row went to the heap anyway. Measured 2026-09-18.
+#
+# Autovacuum will keep missing it for the same reason, so it is vacuumed here
+# rather than tuned per-table: this table is small, the vacuum is cheap, and a
+# scale factor low enough to catch it would be a surprise to the next person.
+before="$(psql_run -tAq -c "select coalesce(n_dead_tup, 0) from pg_stat_user_tables where relname = 'client_companies';" 2>/dev/null || echo "")"
+if [[ -z "$before" ]]; then
+  echo "  client_companies not present - skipping"
+else
+  echo "  ${before} dead tuple(s) before"
+  psql_run -q -c "vacuum (analyze) public.client_companies;" >/dev/null 2>&1 \
+    && echo "  vacuumed - visibility map refreshed, index-only scans stay index-only" \
+    || echo "  vacuum skipped"
+fi
+
+echo
 echo "=== Fixed-field import payload audit ==="
 # Deployment does not delete historical source keys. The default is a dry run;
 # an operator reviews the counts and explicitly opts into checkpointed 1,000-row
