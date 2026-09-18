@@ -8,7 +8,7 @@
 .primary, .secondary, .panel-head button, .empty button, .compact button,
 .outline-button, .workspace-actions select, .bulk-bar select, .bulk-bar button,
 .table-footer button, .filter-panel-head > button, .clear-section-filter,
-.apollo-mode-tabs button, .token-mode-tabs button, .token-bulk-actions button,
+.token-bulk-actions button,
 .company-filter-import, .company-filter-clear, .company-bulk-clear,
 .bulk-domain-actions button, .icp-toggle, .classifier-actions select,
 .form-field input, .form-field select, .import-source-fields input,
@@ -33,7 +33,6 @@
 }
 .topbar { height: auto; min-height: 76px; gap: var(--space-3); }
 .outline-button { height: auto; }
-.apollo-mode-tabs { height: auto; min-height: var(--control-dense); flex-wrap: wrap; }
 .apollo-filter-summary strong { font-size: var(--text-base); white-space: normal; line-height: var(--leading-snug); }
 .ds-menu-item { padding-block: var(--space-1); }
 .import-step button { font-size: var(--text-xs); line-height: var(--leading-snug); padding-block: var(--space-1); }
@@ -96,7 +95,7 @@ table th, .company-table th, .master-data-table th {
   line-height: var(--leading-snug);
 }
 .compact-person strong, .compact-person .row-open,
-.company-identity strong { font-size: var(--table-text-size); font-weight: var(--weight-medium); }
+.company-identity .row-open { font-size: var(--table-text-size); font-weight: var(--weight-medium); }
 [data-density="compact"] { --table-text-size: var(--text-xs); }
 [data-density="compact"] .compact-person > span { width: 24px; height: 24px; }
 

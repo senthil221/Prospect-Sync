@@ -6,6 +6,7 @@ import type { ProspectFieldDefinition } from "../lib/prospect-fields";
 import type { CompanyKeywordScope, ProspectFilter, ProspectFilterOperator } from "../lib/types";
 import { useDismiss } from "./use-dismiss";
 import { AppIcon } from "./components/DashboardUi";
+import Tabs from "./components/Tabs";
 import { emptyTaxonomy, orderedDepartments, orderedTiers, tierLabel, type TitleTaxonomy } from "../lib/title-taxonomy";
 import { useClientIcps } from "./components/use-client-icps";
 
@@ -308,11 +309,6 @@ export function TextBooleanFilter({ definition, filters, clientId, valuesEndpoin
   const [booleanQuery, setBooleanQuery] = useState(existingBoolean?.values[0] ?? "");
   const [message, setMessage] = useState("");
 
-  if (mode === "simple") return <>
-    <div className="apollo-mode-tabs"><button className="active" type="button">Simple</button><button type="button" onClick={() => setMode("advanced")}>Advanced</button></div>
-    <IncludeExcludeFilter field={definition.id} filters={filters.filter((filter) => filter.operator !== "boolean")} clientId={clientId} valuesEndpoint={valuesEndpoint} onChange={onChange} />
-  </>;
-
   function applyBoolean() {
     const query = booleanQuery.trim();
     if (!query) { setMessage("Enter a Boolean search first."); return; }
@@ -323,15 +319,17 @@ export function TextBooleanFilter({ definition, filters, clientId, valuesEndpoin
   }
 
   return <>
-    <div className="apollo-mode-tabs"><button type="button" onClick={() => setMode("simple")}>Simple</button><button className="active" type="button">Advanced</button></div>
-    <div className="boolean-search-box">
-      <div className="boolean-search-title"><span className="boolean-radio"/> Boolean Search</div>
-      <small>Search with Boolean operators</small>
-      <textarea aria-label={`Boolean search for ${definition.label}`} value={booleanQuery} onChange={(event) => setBooleanQuery(event.target.value)} placeholder={`Enter ${definition.label.toLocaleLowerCase()} separated by AND/OR/NOT and parentheses`}/>
-      <p>Examples: Sales AND “Product Design”; Sales OR Design; Sales AND NOT Design.</p>
-      {message ? <span className="boolean-message">{message}</span> : null}
-      <button type="button" onClick={applyBoolean}>Apply</button>
-    </div>
+    <Tabs variant="segmented" label={`${definition.label} search mode`} value={mode} onChange={setMode} items={[{ id: "simple", label: "Simple" }, { id: "advanced", label: "Advanced" }]}/>
+    {mode === "simple"
+      ? <IncludeExcludeFilter field={definition.id} filters={filters.filter((filter) => filter.operator !== "boolean")} clientId={clientId} valuesEndpoint={valuesEndpoint} onChange={onChange} />
+      : <div className="boolean-search-box">
+        <div className="boolean-search-title"><span className="boolean-radio"/> Boolean Search</div>
+        <small>Search with Boolean operators</small>
+        <textarea aria-label={`Boolean search for ${definition.label}`} value={booleanQuery} onChange={(event) => setBooleanQuery(event.target.value)} placeholder={`Enter ${definition.label.toLocaleLowerCase()} separated by AND/OR/NOT and parentheses`}/>
+        <p>Examples: Sales AND “Product Design”; Sales OR Design; Sales AND NOT Design.</p>
+        {message ? <span className="boolean-message">{message}</span> : null}
+        <button type="button" onClick={applyBoolean}>Apply</button>
+      </div>}
   </>;
 }
 
@@ -490,10 +488,13 @@ export function TokenValuePicker({ field, values, clientId, placeholder, valuesE
         : "One value per line, or comma-separated.\nPaste a whole spreadsheet column here.";
 
   return <div className="token-value-picker" ref={pickerRef}>
-    <div className="token-mode-tabs">
-      <button type="button" className={mode === "search" ? "active" : ""} onClick={() => setMode("search")}>Search</button>
-      <button type="button" className={mode === "bulk" ? "active" : ""} onClick={() => openBulk(false)}>Paste list</button>
-    </div>
+    <Tabs
+      variant="segmented"
+      label="Value entry method"
+      value={mode}
+      onChange={(next) => (next === "bulk" ? openBulk(false) : setMode("search"))}
+      items={[{ id: "search", label: "Search" }, { id: "bulk", label: "Paste list" }]}
+    />
 
     {mode === "bulk" ? <div className="token-bulk">
       <textarea

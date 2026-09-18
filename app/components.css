@@ -122,6 +122,9 @@
   flex: none;
   min-height: 56px;
   padding: var(--space-3) var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--space-3);
   border-bottom: 1px solid var(--border-subtle);
   background: var(--surface);
@@ -262,25 +265,6 @@
 }
 .clear-section-filter:hover { background: var(--danger-soft); color: var(--danger); }
 
-.apollo-mode-tabs {
-  display: inline-flex;
-  margin-bottom: var(--space-2);
-  padding: 2px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--surface-sunken);
-}
-.apollo-mode-tabs button {
-  padding: var(--space-1) var(--space-2);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-}
-.apollo-mode-tabs button.active { background: var(--surface); color: var(--text-primary); box-shadow: var(--elevation-1); }
-
 .filter-search-empty {
   margin: 0;
   padding: var(--space-6) var(--space-4);
@@ -314,6 +298,9 @@
 .results-toolbar {
   min-height: 56px;
   padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--space-3);
   border-bottom: 1px solid var(--border-subtle);
   background: var(--surface);
@@ -340,6 +327,7 @@
 .workspace-actions select { padding-right: var(--space-6); }
 .outline-button { display: inline-flex; align-items: center; gap: var(--space-2); }
 .outline-button:hover { border-color: var(--border-strong); background: var(--surface-hover); color: var(--text-primary); }
+.outline-button > span { color: var(--accent-text); }
 .outline-button > span:first-child { color: var(--text-tertiary); display: grid; place-items: center; }
 .outline-button.active,
 .outline-button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
@@ -356,24 +344,36 @@
    Row height is a token so the density toggle changes it without touching CSS.
    -------------------------------------------------------------------------- */
 .master-data-table th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-width: 180px;
   height: 36px;
+  padding: var(--space-3) var(--space-3);
   background: var(--surface-sunken);
   color: var(--text-tertiary);
   font-size: var(--text-2xs);
   font-weight: var(--weight-semibold);
   letter-spacing: var(--tracking-wide);
+  text-align: left;
+  text-transform: uppercase;
   border-bottom: 1px solid var(--border-default);
   border-right: 1px solid var(--border-subtle);
 }
 .master-data-table td {
+  max-width: 260px;
   height: var(--row-height);
-  padding-block: var(--row-padding-y);
+  padding: var(--row-padding-y) var(--space-3);
   border-right: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-secondary);
   font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.master-data-table tbody tr { transition: background-color var(--duration-instant) var(--ease); }
+.master-data-table th.select-column, .master-data-table td.select-column { width: 42px; min-width: 42px !important; padding: 0; text-align: center; }
+.master-data-table tbody tr { cursor: pointer; transition: background-color var(--duration-instant) var(--ease); }
 .master-data-table tbody tr:hover { background: var(--surface-hover); }
 .master-data-table tbody tr.selected { background: var(--surface-selected); }
 .master-data-table tbody tr.selected:hover { background: var(--surface-selected-hover); }
@@ -705,6 +705,35 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
   cursor: pointer;
 }
 .ds-menu-checks label:hover { background: var(--surface-hover); }
+
+/* A full value on hover and keyboard focus (TOOLTIP-01).
+   Replaces the native `title` attribute in table cells, which only ever
+   appeared on mouse hover and was invisible to keyboard users. */
+/* display: inline, not inline-flex - the wrapped content is often plain text
+   truncated by the table cell's own text-overflow: ellipsis, which only works
+   across nested plain-inline boxes, not atomic ones like inline-flex. Flexbox
+   auto-blockifies this back to a real flex item (with the same shrink
+   behaviour the wrapped element had) wherever the wrapper itself sits inside
+   an existing flex row, such as .compact-person. */
+.ds-tooltip-anchor { position: relative; display: inline; min-width: 0; max-width: 100%; }
+.ds-tooltip {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + var(--space-1));
+  left: 0;
+  max-width: 320px;
+  width: max-content;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-inverse, var(--text-primary));
+  color: var(--surface, var(--surface-raised));
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
+  white-space: pre-line;
+  box-shadow: var(--elevation-2);
+  pointer-events: none;
+}
 
 /* The active option in the filter combobox (PEOPLE-03).
    Keyboard focus stays on the input - that is what aria-activedescendant is

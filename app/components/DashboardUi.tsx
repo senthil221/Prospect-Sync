@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { cloneElement, isValidElement, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { useDialogFocus } from "./use-dialog";
 import Tabs from "./Tabs";
 import { api } from "../../lib/dashboard-api";
@@ -8,7 +8,7 @@ import { formatNumber, initials, parseAllData, prospectMembershipItems } from ".
 import type { DeleteRequest, Prospect } from "../../lib/types";
 
 export type IconName = "home" | "database" | "company" | "clients" | "coverage" | "quality" | "upload" | "search" | "plus" | "filter" | "columns" | "check" | "arrow"
-  | "chevron" | "close" | "star" | "download" | "tag" | "target" | "hash" | "alert" | "back" | "rows" | "refresh" | "warning" | "grid" | "calendar" | "sun" | "moon" | "monitor";
+  | "chevron" | "close" | "star" | "download" | "tag" | "target" | "hash" | "alert" | "back" | "rows" | "refresh" | "warning" | "grid" | "calendar" | "sun" | "moon" | "monitor" | "trash";
 
 export function AppIcon({ name, size = 18 }: { name: IconName; size?: number }) {
   const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
@@ -43,6 +43,7 @@ export function AppIcon({ name, size = 18 }: { name: IconName; size?: number }) 
   if (name === "sun") return <svg {...common}><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></svg>;
   if (name === "moon") return <svg {...common}><path d="M20 13.5A8.2 8.2 0 0 1 10.5 4a8.2 8.2 0 1 0 9.5 9.5z"/></svg>;
   if (name === "monitor") return <svg {...common}><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8.5 21h7M12 17v4"/></svg>;
+  if (name === "trash") return <svg {...common}><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>;
   return <svg {...common}><path d="M5 12h14M13 6l6 6-6 6"/></svg>;
 }
 export function LoadingState({ label = "Loading" }: { label?: string }) {
@@ -89,6 +90,36 @@ export function TabPanel({ id, active, keepMounted = false, className, children 
     hidden={!active}
     className={className}
   >{active || keepMounted ? children : null}</div>;
+}
+
+/**
+ * A full value shown on hover and keyboard focus, not hover alone.
+ *
+ * Replaces the native `title` attribute, which never reaches a keyboard user:
+ * it only ever appears on mouse hover. `children` must be a single element -
+ * it receives the association via `aria-describedby` so a screen reader
+ * announces the tooltip together with the trigger, not just the visible
+ * (possibly truncated) text.
+ */
+export function Tooltip({ content, children }: { content?: string; children: ReactElement }) {
+  const [visible, setVisible] = useState(false);
+  const id = useId();
+  if (!content) return children;
+  const trigger = isValidElement(children) ? cloneElement(children, { "aria-describedby": id } as Record<string, unknown>) : children;
+  // The anchor itself is not a control - it only watches for hover/focus on
+  // whatever interactive or focusable element it wraps, via bubbling.
+  // eslint-disable-next-line jsx-a11y/no-static-element-interactions
+  return <span
+    className="ds-tooltip-anchor"
+    onMouseEnter={() => setVisible(true)}
+    onMouseLeave={() => setVisible(false)}
+    onFocus={() => setVisible(true)}
+    onBlur={() => setVisible(false)}
+    onKeyDown={(event) => { if (event.key === "Escape") setVisible(false); }}
+  >
+    {trigger}
+    {visible ? <span role="tooltip" id={id} className="ds-tooltip">{content}</span> : null}
+  </span>;
 }
 
 /**

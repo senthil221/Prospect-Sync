@@ -44,17 +44,23 @@ test("narrow-screen inputs stay at least 16px and filtering labels may wrap", ()
   assert.match(typography, /@media \(max-width: 700px\)[\s\S]*font-size: var\(--text-md\)/);
   assert.match(typography, /\.apollo-filter-summary strong \{ font-size: var\(--text-base\); white-space: normal/);
   assert.match(typography, /\.outline-button \{ height: auto/);
-  assert.match(typography, /\.apollo-mode-tabs \{ height: auto/);
+  // TABS-01: the Simple/Advanced switch is the shared Tabs component now, not
+  // .apollo-mode-tabs - Tabs already scrolls instead of clipping at narrow
+  // widths (.ds-tabs { overflow-x: auto }), so there is no per-selector mobile
+  // override left to pin here.
   assert.match(typography, /\.metric-grid \{ grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 15rem\), 1fr\)\)/);
 });
 
 test("real table rows keep full identity text and mark numerical cells and headers consistently", async () => {
   const { renderTypographyPreview } = await import("./fixtures/typography-preview.tsx");
   const html = renderTypographyPreview();
-  assert.match(html, /title="Alexandria Krishnamurthy-Wilson"/);
-  assert.match(html, /class="email-cell" title="alexandria.krishnamurthy-wilson@example.org"/);
+  // TOOLTIP-01: full values are no longer hidden behind a hover-only `title` -
+  // they are the element's own text, and a keyboard-reachable Tooltip (an
+  // aria-describedby anchor, not a native title) carries the same value.
+  assert.match(html, /class="row-open" aria-describedby="[^"]+">Alexandria Krishnamurthy-Wilson<\/button>/);
+  assert.match(html, /class="email-cell" tabindex="0" aria-describedby="[^"]+">alexandria\.krishnamurthy-wilson@example\.org</);
   assert.match(html, /<th class="numeric-cell">Employees<\/th>/);
-  assert.match(html, /<td class="numeric-cell"><span title="1,001–5,000"/);
+  assert.match(html, /<td class="numeric-cell"><span class="ds-tooltip-anchor"><span tabindex="0" aria-describedby="[^"]+">1,001–5,000<\/span>/);
   assert.match(html, /<td class="numeric-cell"><span class="prospect-count-badge">6,81,085<\/span>/);
   const companies = await read("../app/components/CompaniesWorkspace.tsx");
   const prospects = await read("../app/components/ProspectTable.tsx");

@@ -116,9 +116,11 @@ test("row identity is a control, not a click handler on a table row", async () =
     // Opening must not also toggle the row's own click handler.
     assert.match(source, /className="row-open" onClick=\{\(event\) => \{ event\.stopPropagation\(\);/, `${path} must not double-fire the row click`);
   }
-  // Companies already had this shape; it is the pattern the other two now follow.
+  // ROW-01. Companies used to open only through a small trailing icon button,
+  // leaving the name itself inert - inconsistent with the pattern above, which
+  // makes the identity text the control. Companies now matches it exactly.
   const company = await read("../app/components/CompanyTableRow.tsx");
-  assert.match(company, /className="company-open" aria-label=/);
+  assert.match(company, /className="row-open" onClick=\{\(event\) => \{ event\.stopPropagation\(\);/);
 
   // Selection must never navigate - the checkbox cell stops the row click.
   const prospectRow = await read("../app/components/ProspectTableRow.tsx");
