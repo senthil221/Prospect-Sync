@@ -207,7 +207,12 @@ main { min-width: 0; grid-column: 2; }
 .master-data-table { width: max-content; min-width: 100%; border-collapse: collapse; table-layout: fixed; }
 .select-column input { width: 15px; height: 15px; accent-color: var(--ph-brand); }
 .compact-person { min-width: 0; display: flex; align-items: center; gap: var(--space-3); }
-.compact-person > span { width: 32px; height: 32px; display: grid; place-items: center; flex: none; border-radius: var(--radius-lg); background: var(--ph-brand-soft); color: var(--accent-text); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
+/* :not(.ds-tooltip-anchor) - this rule is the avatar's sizing, not every span
+   child's. The Tooltip wrapper around .row-open (TOOLTIP-01) is also a bare
+   <span> direct child of .compact-person, and without this exclusion it was
+   squashed to the same 32x32 box, overflowing the name text into the next
+   column instead of the button filling the remaining row width. */
+.compact-person > span:not(.ds-tooltip-anchor) { width: 32px; height: 32px; display: grid; place-items: center; flex: none; border-radius: var(--radius-lg); background: var(--ph-brand-soft); color: var(--accent-text); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
 .compact-person strong { overflow: hidden; color: var(--text-primary); font-size: var(--text-sm); font-weight: var(--weight-semibold); text-overflow: ellipsis; }
 .email-cell { color: var(--accent-text); }
 .row-detail-column { width: 42px; min-width: 42px !important; color: var(--text-disabled) !important; font-size: var(--text-lg) !important; text-align: center !important; }
@@ -823,7 +828,7 @@ main { min-width: 0; grid-column: 2; }
 .company-prospect-list table { width: 100%; min-width: 690px; border-collapse: separate; border-spacing: 0; border: 1px solid var(--accent-line); border-radius: var(--radius-lg); background: var(--surface); }
 .company-prospect-list th { position: sticky; top: 0; z-index: 1; padding: var(--space-2) var(--space-3); font-size: var(--text-2xs); }
 .company-prospect-list td { padding: var(--space-3) var(--space-3); font-size: var(--text-2xs); }
-.company-prospect-list .compact-person > span { width: 28px; height: 28px; }
+.company-prospect-list .compact-person > span:not(.ds-tooltip-anchor) { width: 28px; height: 28px; }
 .company-prospect-list .compact-person strong { font-size: var(--text-2xs); }
 .company-drawer { width: min(820px, 96vw); padding: 0; display: flex; flex-direction: column; overflow: hidden; }
 .company-drawer-header { padding: var(--space-6) var(--space-6) 0; flex: none; border-bottom: 1px solid var(--border-subtle); background: var(--surface); }
