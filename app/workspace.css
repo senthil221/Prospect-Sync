@@ -406,7 +406,13 @@ main { min-width: 0; grid-column: 2; }
 .client-database-heading { margin-bottom: var(--space-3); padding: var(--space-4) var(--space-4); display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: var(--surface); }
 .client-database-heading h3 { margin: var(--space-1) 0 var(--space-1); color: var(--text-primary); font-size: var(--text-md); }
 .client-database-heading p:not(.eyebrow) { margin: 0; color: var(--ph-muted); font-size: var(--text-2xs); }
-.client-database-workspace > .people-workspace .people-heading, .client-database-workspace > .companies-workspace .company-intro { display: none; }
+.client-database-workspace > .people-workspace .people-heading { display: none; }
+/* The client workspace prints its own heading above this one, so the duplicated
+   title goes - but only the title. Hiding the whole intro row also took the
+   Filters toggle, the Actions menu and Add from CSV with it, which are the only
+   way to reach company filters, bulk selection or an export inside a client. */
+.client-database-workspace > .companies-workspace .company-intro > div:first-child { display: none; }
+.client-database-workspace > .companies-workspace .company-intro { padding: 0 var(--space-1) var(--space-3); justify-content: flex-end; }
 .client-database-workspace > .people-workspace .ds-tabs { margin-top: 0; }
 .cooldown-setting { margin-left: auto; min-width: 220px; }
 .cooldown-setting > label { display: block; margin-bottom: var(--space-1); color: var(--ph-muted); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
