@@ -206,6 +206,16 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
     }
     setExcludedIds((current) => { const next = new Set(current); pageIds.forEach((id) => allSelected ? next.add(id) : next.delete(id)); return next; });
   }
+  // The people behind exactly the checked companies, not everything the current
+  // search/filters match: __company_ids narrows the company database to that
+  // exact id set (20260916110000), so the pivot opens onto the same rows the
+  // checkboxes picked, explicit selection or "select all matching" alike.
+  function seePeopleForSelection() {
+    if (!selectedCount) return;
+    onSeePeople(selectionMode === "all_matching"
+      ? { search: search.trim(), filters, limit: 250000 }
+      : { search: "", filters: [{ field: "__company_ids", operator: "equals", values: [...selectedIds] }], limit: 250000 });
+  }
   function requestDeleteSelected() {
     if (!selectedCount) return;
     if (selectionMode === "all_matching") setDeleteRequest({ mode: "all_matching", count: selectedCount });
@@ -505,6 +515,9 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
       {selectedCount ? <div className="bulk-bar company-bulk-bar">
         <div className="bulk-selection-summary"><strong>{formatNumber(selectedCount)} selected {selectionMode === "all_matching" ? "across all pages" : "across pages"}</strong>
         {selectionMode === "explicit" && selectedCount < total ? <button onClick={selectAllMatching}>Select all {formatNumber(total)}</button> : null}</div>
+        <div className="bulk-action-group">
+        <button title="Open the People database scoped to exactly the companies checked here" onClick={seePeopleForSelection}><AppIcon name="arrow" size={14}/> See People</button>
+        </div>
         {canDelete ? <>
           <div className="bulk-action-group bulk-action-group-primary"><select aria-label="Client to receive selected companies" value={pushClientId} disabled={pushing} onChange={(event) => setPushClientId(event.target.value)}><option value="">Choose client…</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>
           <button className="bulk-verify" disabled={pushing || !pushClientId} onClick={() => void pushCompaniesToClient()}><AppIcon name="arrow" size={14}/> {pushing ? "Pushing…" : "Push to Client"}</button>
