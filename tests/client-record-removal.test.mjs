@@ -135,6 +135,6 @@ test("removing from a client is never presented as deleting", async () => {
 
   // Companies: same, and the master Delete stays gated on being outside a client.
   assert.match(companies, /const canDelete = !clientId;/);
-  assert.match(companies, /Remove from client/);
+  assert.match(companies, /Remove company \+ its people from client/);
   assert.match(companies, /The Company and People databases are unchanged/);
 });

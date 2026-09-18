@@ -525,7 +525,7 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
               removal rather than a delete - it unlinks from this client and
               leaves both master databases alone. */}
           <div className="bulk-action-group bulk-action-group-danger">
-          <button className="row-danger" disabled={removingFromClient || updatingIcp} title="Take these companies out of this client, along with this client's people at them. Neither database is affected." onClick={() => void requestCompanyRemoval()}>{removingFromClient && !removeRequest ? "Checking…" : "Remove from client"}</button>
+          <button className="row-danger" disabled={removingFromClient || updatingIcp} title="Take these companies out of this client, along with this client's people at them. Neither database is affected." onClick={() => void requestCompanyRemoval()}>{removingFromClient && !removeRequest ? "Checking…" : "Remove company + its people from client"}</button>
           </div>
         </>}
         <button className="bulk-clear" disabled={updatingIcp || deleting || pushing} onClick={clearSelection}>Clear</button>
@@ -535,7 +535,9 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
     {onFilters && filtersOpen ? <CompanyFilterPanel filters={filters} clients={clients} clientId={clientId} onChange={onFilters} /> : null}
     </div>
     {removeRequest && clientId ? <ConfirmDialog
-      title={`Remove ${formatNumber(removeRequest.companies)} compan${removeRequest.companies === 1 ? "y" : "ies"} from this client?`}
+      title={removeRequest.people
+        ? `Remove ${formatNumber(removeRequest.companies)} compan${removeRequest.companies === 1 ? "y" : "ies"} and its people from this client?`
+        : `Remove ${formatNumber(removeRequest.companies)} compan${removeRequest.companies === 1 ? "y" : "ies"} from this client?`}
       body={removeRequest.people
         ? `${formatNumber(removeRequest.people)} ${removeRequest.people === 1 ? "person" : "people"} at ${removeRequest.companies === 1 ? "this company" : "these companies"} will be taken out of this client too.`
         : "No people at these companies are in this client, so only the companies are removed."}
