@@ -134,6 +134,11 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   const activeFilterCount = filters.reduce((count, filter) => count + (filter.operator === "empty" || filter.operator === "not_empty" ? 1 : filter.values.length), 0);
   const icpFilter = clientId ? filters.find((filter) => filter.field === "__company_icp_verified" && filter.values.includes(clientId)) : undefined;
   const icpStatus = !icpFilter ? "all" : icpFilter.operator === "contains" ? "verified" : "unverified";
+  // Deliberately scope-relative: inside a client this reads that client's people
+  // at the company, outside it reads every client's. The database applies the
+  // matching one, so the chip always agrees with the Prospects column beside it.
+  const coverageValue = filters.find((filter) => filter.field === "__company_coverage")?.values[0];
+  const coverageStatus = coverageValue === "with" || coverageValue === "without" ? coverageValue : "all";
   const domainFilterCount = filters.filter((filter) => filter.field === "__website" && (filter.operator === "contains" || filter.operator === "equals")).reduce((count, filter) => count + filter.values.length, 0);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   // A capped total is a floor, not an exact count -- say so rather than showing a
@@ -156,6 +161,17 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
       field: "__company_icp_verified",
       operator: status === "verified" ? "contains" : "not_contains",
       values: [clientId],
+    }]);
+    onPageChange(1); setSelectionMode("explicit"); setSelectedIds(new Set());
+  }
+  function setCoverageStatus(status: "all" | "with" | "without") {
+    if (!onFilters) return;
+    const remaining = filters.filter((filter) => filter.field !== "__company_coverage");
+    onFilters(status === "all" ? remaining : [...remaining, {
+      id: `__company_coverage:${status}`,
+      field: "__company_coverage",
+      operator: "equals",
+      values: [status],
     }]);
     onPageChange(1); setSelectionMode("explicit"); setSelectedIds(new Set());
   }
@@ -556,7 +572,10 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   }
 
   return <section className="companies-workspace">
-    {clientId ? <div className="icp-quick-filters" role="group" aria-label="Filter companies by ICP verification"><button className={icpStatus === "all" ? "active" : ""} aria-pressed={icpStatus === "all"} onClick={() => setIcpStatus("all")}>All</button><button className={icpStatus === "verified" ? "active" : ""} aria-pressed={icpStatus === "verified"} onClick={() => setIcpStatus("verified")}>ICP Verified</button><button className={icpStatus === "unverified" ? "active" : ""} aria-pressed={icpStatus === "unverified"} onClick={() => setIcpStatus("unverified")}>ICP Unverified</button></div> : null}
+    <div className="company-quick-filter-row">
+      {onFilters ? <div className="icp-quick-filters" role="group" aria-label={clientId ? "Filter companies by this client's prospect coverage" : "Filter companies by prospect coverage"}><button className={coverageStatus === "all" ? "active" : ""} aria-pressed={coverageStatus === "all"} onClick={() => setCoverageStatus("all")}>All</button><button className={coverageStatus === "with" ? "active" : ""} aria-pressed={coverageStatus === "with"} onClick={() => setCoverageStatus("with")}>With prospects</button><button className={coverageStatus === "without" ? "active" : ""} aria-pressed={coverageStatus === "without"} onClick={() => setCoverageStatus("without")}>Without prospects</button></div> : null}
+      {clientId ? <div className="icp-quick-filters" role="group" aria-label="Filter companies by ICP verification"><button className={icpStatus === "all" ? "active" : ""} aria-pressed={icpStatus === "all"} onClick={() => setIcpStatus("all")}>All</button><button className={icpStatus === "verified" ? "active" : ""} aria-pressed={icpStatus === "verified"} onClick={() => setIcpStatus("verified")}>ICP Verified</button><button className={icpStatus === "unverified" ? "active" : ""} aria-pressed={icpStatus === "unverified"} onClick={() => setIcpStatus("unverified")}>ICP Unverified</button></div> : null}
+    </div>
     <div className="section-intro company-intro"><div><p className="eyebrow">COMPANIES</p><h2>Companies already in your database.</h2><p>Open a company to see its prospects in a separate panel.</p></div><div className="company-intro-actions">{onFilters ? <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {activeFilterCount ? <span>{activeFilterCount}</span> : null}</button> : null}<MenuButton label="Actions" icon="grid" panelLabel="Company actions" align="end">{onFilters ? <button className="ds-menu-item" aria-pressed={bulkOpen} onClick={() => setBulkOpen((open) => !open)}><AppIcon name="search" size={14}/> Bulk domains{domainFilterCount ? ` (${domainFilterCount})` : ""}</button> : null}{clientId ? <button className="ds-menu-item" aria-pressed={bulkSelectOpen} onClick={() => setBulkSelectOpen((open) => !open)}><AppIcon name="check" size={14}/> Bulk select</button> : null}{!clientId ? <button className="ds-menu-item" disabled={exportingCompanies} title="Choose the company columns to export across every page" onClick={() => void openExportDialog()}><AppIcon name="download" size={14}/> {exportingCompanies ? "Exporting…" : "Export CSV"}</button> : null}{clientId ? <button className="ds-menu-item" disabled={exportingCompanies} title="Download Company Name, Website, Industry, Keywords and Short Description for the companies shown" onClick={() => void exportIcpValidation()}><AppIcon name="download" size={14}/> {exportingCompanies ? "Exporting…" : "Export for ICP validation"}</button> : null}<button className="ds-menu-item" title="Safely scope up to 250,000 matching companies" onClick={() => onSeePeople({ search: search.trim(), filters, limit: 250000 })}><AppIcon name="arrow" size={14}/> See these people</button></MenuButton><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div></div>
     <div className="company-summary"><div><span>Companies in database</span><strong>{totalLabel}</strong><small>{totalCapped ? "Counting stopped early to keep this fast" : "Complete company directory"}</small></div><div><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong><small>{total ? `${Math.round((covered / total) * 100)}% of companies` : "No companies yet"}</small></div><div><span>Total linked prospects</span><strong>{formatNumber(prospectTotal)}</strong><small>Across all matching companies</small></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div>
     {peopleScope ? <div className="cross-scope-banner" role="status"><span>Showing companies represented in your previous People DB search (safety limit: {formatNumber(peopleScope.limit)} matching people).</span><button onClick={onClearPeopleScope}>Clear people scope</button></div> : null}
