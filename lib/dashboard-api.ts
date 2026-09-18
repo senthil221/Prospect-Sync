@@ -142,7 +142,7 @@ function companyFilterParam(filters: ProspectFilter[], encodedFilters: string) {
   return encoded && encoded !== "[]" ? encoded : "";
 }
 
-export function companyApiPath({ search = "", page = 1, clientId = "", filters = [], encodedFilters = "", peopleScope = null, knownVersions = null }: { search?: string; page?: number; clientId?: string; filters?: ProspectFilter[]; encodedFilters?: string; peopleScope?: PeopleScope | null; knownVersions?: Record<string, number> | null }) {
+export function companyApiPath({ search = "", page = 1, clientId = "", filters = [], encodedFilters = "", peopleScope = null, knownVersions = null, sortAscending = false }: { search?: string; page?: number; clientId?: string; filters?: ProspectFilter[]; encodedFilters?: string; peopleScope?: PeopleScope | null; knownVersions?: Record<string, number> | null; sortAscending?: boolean }) {
   const params = new URLSearchParams({ search, page: String(page), pageSize: "50" });
   if (clientId) params.set("clientId", clientId);
   const encoded = companyFilterParam(filters, encodedFilters);
@@ -152,6 +152,9 @@ export function companyApiPath({ search = "", page = 1, clientId = "", filters =
   // the live vector and recounts only if they differ. Counting companies is now
   // exact rather than capped at 50,000, so it is worth not repeating.
   if (knownVersions) params.set("knownVersions", JSON.stringify(knownVersions));
+  // Only the client-scoped listing honors this - fewest-prospects-first, so a
+  // company sitting at zero prospects doesn't require paging to the end to find.
+  if (sortAscending) params.set("sort", "prospects_asc");
   return `/api/companies?${params.toString()}`;
 }
 
@@ -173,6 +176,7 @@ type CompanyQuery = {
   encodedFilters?: string;
   peopleScope?: PeopleScope | null;
   knownVersions?: Record<string, number> | null;
+  sortAscending?: boolean;
 };
 
 export async function fetchCompanies<T>(query: CompanyQuery, init?: RequestInit, onPreparation?: (progress: PreparationProgress | null) => void): Promise<T> {
@@ -200,6 +204,7 @@ export async function fetchCompanies<T>(query: CompanyQuery, init?: RequestInit,
       ...(encoded ? { filters: encoded } : {}),
       ...(query.peopleScope ? { peopleScope: JSON.stringify(query.peopleScope) } : {}),
       ...(query.knownVersions ? { knownVersions: JSON.stringify(query.knownVersions) } : {}),
+      ...(query.sortAscending ? { sort: "prospects_asc" } : {}),
     }),
   }, true);
   const response = prepared ? await awaitPreparedSearch(read, { signal: init?.signal, onProgress: onPreparation }) : await read();

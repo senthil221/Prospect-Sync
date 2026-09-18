@@ -272,6 +272,7 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
   const from = (page - 1) * pageSize;
   const exportCsv = url.searchParams.get("export") === "csv";
   const websitesOnly = url.searchParams.get("website") === "required";
+  const sortAscending = url.searchParams.get("sort") === "prospects_asc";
 
   let filters: ProspectFilter[];
   try { filters = parseFilters(url.searchParams.get("filters")); }
@@ -312,6 +313,7 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
       p_people_scope: peopleScope,
       p_limit: pageSize,
       p_offset: from,
+      p_sort_ascending: sortAscending,
     });
     if (error) return Response.json({ error: error.code === "PGRST202" || error.code === "42883" ? "Apply the latest database migration to enable client company memberships." : error.message }, { status: error.code === "PGRST202" || error.code === "42883" ? 503 : 500 });
     const summary = Array.isArray(data) ? data[0] : data;
