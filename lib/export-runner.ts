@@ -252,6 +252,8 @@ async function runDirectExport(options: ExportOptions, plan: ExportPlan): Promis
 export type CompanyExportOptions = {
   search: string;
   filters: ProspectFilter[];
+  /** Export only this client's companies. Null exports the master database. */
+  clientId?: string | null;
   peopleScope: PeopleScope | null;
   websitesOnly: boolean;
   fields: string[];
@@ -298,7 +300,19 @@ export function withWebsiteFilter(filters: ProspectFilter[], websitesOnly: boole
 // It POSTs rather than builds a query string because a bulk-domain filter can
 // carry thousands of values, which is more than a request line survives; the
 // companies route accepts the identical query either way.
+// "Only this client's companies", said as a filter - for the same reason
+// withWebsiteFilter exists just above. The streamed export and the background
+// one reach the database by different routes, and a scope carried as a separate
+// parameter would have to be threaded through both correctly. As a filter it is
+// resolved once, here, and every compiler already understands it
+// (__company_client_ids, 20260915140000).
+function withClientFilter(filters: ProspectFilter[], clientId: string | null | undefined): ProspectFilter[] {
+  if (!clientId) return filters;
+  return [...filters, { field: "__company_client_ids", operator: "contains", values: [clientId] }];
+}
+
 export async function runCompanyExport(options: CompanyExportOptions): Promise<ExportResult> {
+  const filters = withClientFilter(options.filters, options.clientId);
   // The choice companies never had. A company CSV was two narrow columns, so
   // the direct path was always right; once Description became a checkbox it
   // stopped being right - every field over 419,218 companies is about 1.36 GB,
@@ -314,7 +328,7 @@ export async function runCompanyExport(options: CompanyExportOptions): Promise<E
       requestId: options.requestId,
       clientScope: "",
       search: options.search,
-      filters: withWebsiteFilter(options.filters, options.websitesOnly),
+      filters: withWebsiteFilter(filters, options.websitesOnly),
       fields: options.fields,
       fileBaseName: options.fileBaseName,
       signal: options.signal,
@@ -330,7 +344,7 @@ export async function runCompanyExport(options: CompanyExportOptions): Promise<E
     body: JSON.stringify({
       export: "csv",
       search: options.search,
-      filters: options.filters,
+      filters,
       peopleScope: options.peopleScope,
       website: options.websitesOnly ? "required" : "",
       fields: options.fields,

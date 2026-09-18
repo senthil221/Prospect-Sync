@@ -297,7 +297,11 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
   if (setDenial) return setDenial;
 
   if (exportCsv) {
-    if (clientId) return Response.json({ error: "Client-scoped company export is not available." }, { status: 400 });
+    // A client-scoped company export carries its client as an ordinary
+    // __company_client_ids filter (20260915140000) rather than as this
+    // parameter, so that one filter list scopes the streamed export and the
+    // background one identically. See runCompanyExport.
+    if (clientId) return Response.json({ error: "Scope a company export with a client filter, not clientId." }, { status: 400 });
     const { response } = await streamCompanyExport(search, websitesOnly, filters, peopleScope, parseExportFields(url.searchParams.get("fields")), signal);
     return response;
   }

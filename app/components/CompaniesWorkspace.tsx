@@ -4,7 +4,7 @@ import { BoundedCache } from '../../lib/bounded-cache';
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import CompanyFilterPanel, { BulkDomainPaste, addDomainsToWebsiteFilter } from "../CompanyFilterPanel";
-import { companyAllData, companyExportPickerFields, defaultCompanyExportFields, estimatedCompanyBytesPerRow } from "../../lib/company-export";
+import { companyAllData, companyExportPickerFields, defaultCompanyExportFields, estimatedCompanyBytesPerRow, icpValidationExportFields } from "../../lib/company-export";
 import { backgroundExportNotice, fileSystemAccessSupported, runCompanyExport, type ExportProgress } from "../../lib/export-runner";
 import { megabytes, planExport } from "../../lib/export-plan";
 import { intentKey, requestIdFor, settleIntent } from "../../lib/request-intent";
@@ -517,12 +517,66 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
     }
   }
 
+  // The ICP validation file. No dialog: the column set is fixed, and the rows
+  // are whatever the grid is currently showing - so the ICP Verified/Unverified
+  // and coverage chips above are how you choose which companies go in it.
+  async function exportIcpValidation() {
+    if (!clientId) return;
+    const plan = planExport({ bytesPerRow: estimatedCompanyBytesPerRow([], icpValidationExportFields), rows: totalCapped ? null : total });
+    // Same refusal the picker makes, for the same reason: a people-scoped export
+    // cannot be frozen for the worker, and the direct path would wedge the tab.
+    if (peopleScope && plan.mode === "background") {
+      setCompanyError(`${plan.reason} A people-scoped export cannot be built in the background - clear the people scope, or narrow this view first.`);
+      return;
+    }
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+    const intent = intentKey({
+      action: "export-companies",
+      target: clientId,
+      selectionMode: "icp_validation",
+      ids: [],
+      extra: { search: search.trim(), filters: encodeFilters(filters), fields: icpValidationExportFields, peopleScope },
+    });
+    const requestId = requestIdFor(intent);
+    setExportingCompanies(true); setCompanyError(""); setCompanyNotice("");
+    setExportProgress({ exported: 0, files: 0, phase: "downloading" });
+    try {
+      const result = await runCompanyExport({
+        search: search.trim(),
+        filters,
+        clientId,
+        peopleScope,
+        websitesOnly: false,
+        fields: icpValidationExportFields,
+        customFieldNames: [],
+        format: "single",
+        rowsPerFile: exportRowsPerFile,
+        fileBaseName: `icp-validation-${new Date().toISOString().slice(0, 10)}`,
+        totalRows: totalCapped ? null : total,
+        requestId,
+        signal: controller.signal,
+        onProgress: setExportProgress,
+      });
+      if (result.canceled) { setCompanyNotice("Export canceled."); return; }
+      settleIntent(intent);
+      setCompanyNotice(result.handedOff && result.plan
+        ? `Built ${formatNumber(result.exported)} companies for ICP validation. ${backgroundExportNotice(result.plan, "single")}`
+        : `Exported ${formatNumber(result.exported)} companies for ICP validation${result.files > 1 ? ` across ${formatNumber(result.files)} files` : ""}.`);
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") setCompanyNotice("Export canceled.");
+      else setCompanyError(caught instanceof Error ? caught.message : "Unable to export companies for ICP validation.");
+    } finally {
+      setExportingCompanies(false); setExportProgress(null); exportAbortRef.current = null;
+    }
+  }
+
   return <section className="companies-workspace">
     <div className="company-quick-filter-row">
       {onFilters ? <div className="icp-quick-filters" role="group" aria-label={clientId ? "Filter companies by this client's prospect coverage" : "Filter companies by prospect coverage"}><button className={coverageStatus === "all" ? "active" : ""} aria-pressed={coverageStatus === "all"} onClick={() => setCoverageStatus("all")}>All</button><button className={coverageStatus === "with" ? "active" : ""} aria-pressed={coverageStatus === "with"} onClick={() => setCoverageStatus("with")}>With prospects</button><button className={coverageStatus === "without" ? "active" : ""} aria-pressed={coverageStatus === "without"} onClick={() => setCoverageStatus("without")}>Without prospects</button></div> : null}
       {clientId ? <div className="icp-quick-filters" role="group" aria-label="Filter companies by ICP verification"><button className={icpStatus === "all" ? "active" : ""} aria-pressed={icpStatus === "all"} onClick={() => setIcpStatus("all")}>All</button><button className={icpStatus === "verified" ? "active" : ""} aria-pressed={icpStatus === "verified"} onClick={() => setIcpStatus("verified")}>ICP Verified</button><button className={icpStatus === "unverified" ? "active" : ""} aria-pressed={icpStatus === "unverified"} onClick={() => setIcpStatus("unverified")}>ICP Unverified</button></div> : null}
     </div>
-    <div className="section-intro company-intro"><div><p className="eyebrow">COMPANIES</p><h2>Companies already in your database.</h2><p>Open a company to see its prospects in a separate panel.</p></div><div className="company-intro-actions">{onFilters ? <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {activeFilterCount ? <span>{activeFilterCount}</span> : null}</button> : null}<MenuButton label="Actions" icon="grid" panelLabel="Company actions" align="end">{onFilters ? <button className="ds-menu-item" aria-pressed={bulkOpen} onClick={() => setBulkOpen((open) => !open)}><AppIcon name="search" size={14}/> Bulk domains{domainFilterCount ? ` (${domainFilterCount})` : ""}</button> : null}{clientId ? <button className="ds-menu-item" aria-pressed={bulkSelectOpen} onClick={() => setBulkSelectOpen((open) => !open)}><AppIcon name="check" size={14}/> Bulk select</button> : null}{!clientId ? <button className="ds-menu-item" disabled={exportingCompanies} title="Choose the company columns to export across every page" onClick={() => void openExportDialog()}><AppIcon name="download" size={14}/> {exportingCompanies ? "Exporting…" : "Export CSV"}</button> : null}<button className="ds-menu-item" title="Safely scope up to 250,000 matching companies" onClick={() => onSeePeople({ search: search.trim(), filters, limit: 250000 })}><AppIcon name="arrow" size={14}/> See these people</button></MenuButton><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div></div>
+    <div className="section-intro company-intro"><div><p className="eyebrow">COMPANIES</p><h2>Companies already in your database.</h2><p>Open a company to see its prospects in a separate panel.</p></div><div className="company-intro-actions">{onFilters ? <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {activeFilterCount ? <span>{activeFilterCount}</span> : null}</button> : null}<MenuButton label="Actions" icon="grid" panelLabel="Company actions" align="end">{onFilters ? <button className="ds-menu-item" aria-pressed={bulkOpen} onClick={() => setBulkOpen((open) => !open)}><AppIcon name="search" size={14}/> Bulk domains{domainFilterCount ? ` (${domainFilterCount})` : ""}</button> : null}{clientId ? <button className="ds-menu-item" aria-pressed={bulkSelectOpen} onClick={() => setBulkSelectOpen((open) => !open)}><AppIcon name="check" size={14}/> Bulk select</button> : null}{!clientId ? <button className="ds-menu-item" disabled={exportingCompanies} title="Choose the company columns to export across every page" onClick={() => void openExportDialog()}><AppIcon name="download" size={14}/> {exportingCompanies ? "Exporting…" : "Export CSV"}</button> : null}{clientId ? <button className="ds-menu-item" disabled={exportingCompanies} title="Download Company Name, Website, Industry, Keywords and Short Description for the companies shown" onClick={() => void exportIcpValidation()}><AppIcon name="download" size={14}/> {exportingCompanies ? "Exporting…" : "Export for ICP validation"}</button> : null}<button className="ds-menu-item" title="Safely scope up to 250,000 matching companies" onClick={() => onSeePeople({ search: search.trim(), filters, limit: 250000 })}><AppIcon name="arrow" size={14}/> See these people</button></MenuButton><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div></div>
     <div className="company-summary"><div><span>Companies in database</span><strong>{totalLabel}</strong><small>{totalCapped ? "Counting stopped early to keep this fast" : "Complete company directory"}</small></div><div><span>With prospect coverage</span><strong>{formatNumber(covered)}</strong><small>{total ? `${Math.round((covered / total) * 100)}% of companies` : "No companies yet"}</small></div><div><span>Total linked prospects</span><strong>{formatNumber(prospectTotal)}</strong><small>Across all matching companies</small></div><p><AppIcon name="quality" size={17}/><span>Matched by normalized domain first, then company name.</span></p></div>
     {peopleScope ? <div className="cross-scope-banner" role="status"><span>Showing companies represented in your previous People DB search (safety limit: {formatNumber(peopleScope.limit)} matching people).</span><button onClick={onClearPeopleScope}>Clear people scope</button></div> : null}
     {companyError ? <div className="inline-error" role="alert">{companyError}</div> : null}

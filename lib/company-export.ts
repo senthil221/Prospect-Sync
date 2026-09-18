@@ -114,6 +114,23 @@ export const companyExportPickerFields = [
 // chose, so the fallback and the picker cannot drift apart.
 export const defaultCompanyExportFields = companyExportPickerFields.map((field) => field.id);
 
+// The ICP validation review file: the five columns somebody needs in front of
+// them to judge whether a company belongs in an ICP, and nothing else. It is a
+// fixed set rather than a picker preset because it is one button with one
+// answer - opening a twelve-checkbox dialog to untick seven of them every time
+// is the work this replaces.
+//
+// Column ORDER is companyExportFields' order, not this array's, the same as
+// every other export: Company Name, Website, Industry, Keywords, Short
+// Description.
+export const icpValidationExportFields = [
+  "__company_name",
+  "__website",
+  "__industry",
+  "__company_keywords",
+  "__short_description",
+];
+
 export const companyExportFieldIds = companyExportFields.map((field) => field.id);
 
 // Uploaded keys on companies.all_data that no column above already carries.
