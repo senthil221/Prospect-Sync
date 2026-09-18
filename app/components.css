@@ -676,7 +676,7 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
 }
 .ds-menu-item:hover:not(:disabled) { background: var(--surface-hover); }
 .ds-menu-item:disabled { opacity: .5; cursor: not-allowed; }
-.ds-menu-item[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); }
+.ds-menu-item[aria-pressed="true"], .ds-menu-item[aria-selected="true"] { background: var(--accent-soft); color: var(--accent-text); }
 
 .ds-menu-field { padding: var(--space-1) var(--space-2) var(--space-2); display: grid; gap: var(--space-1); }
 .ds-menu-field > span { color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-wide); text-transform: uppercase; }

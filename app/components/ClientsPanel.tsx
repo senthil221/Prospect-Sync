@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import { api, encodeFilters, fetchCompanies, fetchProspects, filterPayload, isAbortError } from "../../lib/dashboard-api";
 import { filterPayloadWithSets } from "../../lib/filter-set-client";
@@ -15,6 +15,7 @@ import ProspectTable from "./ProspectTable";
 import Tabs from "./Tabs";
 import { useClientIcps } from "./use-client-icps";
 import { useDebouncedValue } from "./useDebouncedValue";
+import { useDismiss } from "../use-dismiss";
 import { needsCompanyPreparation, type PreparationProgress } from "../../lib/prepared-search";
 import SearchPreparation from './SearchPreparation';
 
@@ -82,6 +83,105 @@ export function icpFilterFor(choice: string, icps: Array<{ id: string; name: str
   return [{ id: "__client_tags:include", field: "__client_tags", operator: "contains", values: [choice] }];
 }
 
+// Replaces a native <select> (TOOLTIP-01's sibling problem): the open list of
+// a <select> is drawn by the browser itself, and no CSS reaches its padding,
+// radius, hover colour or font - see the By-ICP dropdown polish attempt this
+// replaces. A button + role="listbox" popup, styled with the same .ds-menu
+// primitives as the View/Actions menus, is the only way to make this control
+// look like the rest of the product.
+function IcpPicker({ clientName, icps, value, onChange }: { clientName: string; icps: Array<{ id: string; name: string }>; value: string; onChange: (next: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const wrapper = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const listId = useId();
+
+  const options = useMemo(() => [
+    // Reselecting this clears the filter, the same as the native <select> this
+    // replaces let you pick its own placeholder to reset.
+    { value: "", label: "By ICP…" },
+    ...icps.map((icp) => ({ value: icp.id, label: icp.name })),
+    // Last and separated: it is the complement of everything above it, not
+    // another ICP. Offered even with no ICPs defined, where it answers "all
+    // of them" and says so in the panel.
+    { value: unassignedIcp, label: icps.length ? "Unassigned" : "Unassigned (no ICPs yet)" },
+  ], [icps]);
+  const selectedLabel = options.find((option) => option.value === value)?.label ?? "By ICP…";
+
+  const close = useCallback((returnFocus = true) => {
+    setOpen((wasOpen) => {
+      if (wasOpen && returnFocus) trigger.current?.focus();
+      return false;
+    });
+  }, []);
+  useDismiss(wrapper, () => close(), open);
+
+  const focusFirst = useRef(false);
+  useEffect(() => {
+    if (!open || !focusFirst.current) return;
+    focusFirst.current = false;
+    panel.current?.querySelector<HTMLElement>('[role="option"]')?.focus();
+  }, [open]);
+
+  function onTriggerKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    focusFirst.current = true;
+    setOpen(true);
+  }
+
+  function onPanelKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const stops = [...(panel.current?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])];
+    const at = stops.findIndex((node) => node === document.activeElement);
+    const next = event.key === "ArrowDown" ? (at + 1) % stops.length : (at - 1 + stops.length) % stops.length;
+    stops[next]?.focus();
+  }
+
+  return <div className={`client-icp-picker ds-menu ds-menu-end${value ? " is-active" : ""}`} ref={wrapper}>
+    <button
+      type="button"
+      ref={trigger}
+      className="client-icp-trigger"
+      aria-haspopup="listbox"
+      aria-expanded={open}
+      aria-controls={open ? listId : undefined}
+      aria-label={`Filter ${clientName} prospects by ICP, currently ${selectedLabel}`}
+      onClick={() => setOpen((current) => !current)}
+      onKeyDown={onTriggerKeyDown}
+    >
+      <AppIcon name="target" size={14}/>
+      <span>{selectedLabel}</span>
+      <AppIcon name="chevron" size={12}/>
+    </button>
+    {open ? <div
+      id={listId}
+      ref={panel}
+      role="listbox"
+      // Not itself a tab stop - the options are real, individually focusable
+      // buttons (the same roving-focus-by-real-elements pattern MenuButton
+      // uses for its role="group" panels), so the listbox container's own
+      // tabIndex only needs to exist, never to be reached.
+      tabIndex={-1}
+      aria-label={`Filter ${clientName} prospects by ICP`}
+      className="ds-menu-panel client-icp-panel"
+      onKeyDown={onPanelKeyDown}
+    >
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="option"
+          aria-selected={option.value === value}
+          className="ds-menu-item"
+          onClick={() => { onChange(option.value); close(); }}
+        >{option.label}</button>
+      ))}
+    </div> : null}
+  </div>;
+}
+
 function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectProspect, onImport, onDeleteClient, onDeleteList, onRefreshClients }:{ client: ClientRecord; clients: ClientRecord[]; lists: ListRecord[]; onBack: () => void; onOpenList: (list: ListRecord) => void; onSelectProspect: (prospect: Prospect) => void; onImport: () => void; onDeleteClient: () => void; onDeleteList: (list: ListRecord) => void; onRefreshClients: () => void }) {
   const [cooldown, setCooldown] = useState(client.cooldown_days ?? 90);
   const [savedCooldown, setSavedCooldown] = useState(client.cooldown_days ?? 90);
@@ -121,26 +221,15 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
         { id: "blocklist" as const, label: "Blocklist", count: client.blocked_count ? formatNumber(client.blocked_count) : undefined, icon: <AppIcon name="quality" size={15}/> },
       ]}
     />
-      <label className={`client-icp-picker${tab === "by_icp" && icpChoice ? " is-active" : ""}`}>
-        <span className="sr-only">Filter {client.name} prospects by ICP</span>
-        <AppIcon name="target" size={14}/>
-        <select
-          aria-label={`Filter ${client.name} prospects by ICP`}
-          value={tab === "by_icp" ? icpChoice : ""}
-          onChange={(event) => {
-            const next = event.target.value;
-            setIcpChoice(next);
-            if (next) setTab("by_icp");
-          }}
-        >
-          <option value="">By ICP…</option>
-          {icps.map((icp) => <option key={icp.id} value={icp.id}>{icp.name}</option>)}
-          {/* Last and separated: it is the complement of everything above it,
-              not another ICP. Offered even with no ICPs defined, where it
-              answers "all of them" and says so in the panel. */}
-          <option value={unassignedIcp}>{icps.length ? "Unassigned" : "Unassigned (no ICPs yet)"}</option>
-        </select>
-      </label>
+      <IcpPicker
+        clientName={client.name}
+        icps={icps}
+        value={tab === "by_icp" ? icpChoice : ""}
+        onChange={(next) => {
+          setIcpChoice(next);
+          if (next) setTab("by_icp");
+        }}
+      />
     </div>
     <TabPanel id="lists" active={tab === "lists"} keepMounted className="client-tab-panel"><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Open any list to search its original rows and inspect preserved fields.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Data source</th><th>Source file</th><th>Rows</th><th>Fields preserved</th><th>New to master</th><th>Cross-client duplicates</th><th>Imported</th><th>Actions</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><button className="list-open-button" onClick={() => onOpenList(list)}><strong>{list.name}</strong><span>Open</span></button></td><td><span className="data-source-badge">{list.data_source}</span></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="field-verified"><AppIcon name="check" size={14}/> {formatNumber(list.field_count)} fields</span></td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><button className="row-danger" onClick={() => onDeleteList(list)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></TabPanel>
     <TabPanel id="prospects" active={tab === "prospects"} keepMounted className="client-tab-panel"><ClientMasterDatabase key={`people:${client.prospect_count}:${client.blocked_count ?? 0}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients.map((item) => item.id === client.id ? { ...item, cooldown_days: savedCooldown } : item)} active={tab === "prospects"} companyScope={companyPeopleScope} onClearCompanyScope={() => setCompanyPeopleScope(null)} onSeeCompanies={(scope) => { if (companyPeopleScope) { setCompanyPeopleScope(null); setPeopleCompanyScope(null); } else setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/></TabPanel>

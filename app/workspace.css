@@ -1598,30 +1598,24 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
    never a child of it: role="tablist" may contain only tabs. */
 .client-tab-row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .client-tab-row .ds-tabs { flex: 1 1 auto; min-width: 0; }
-.client-icp-picker {
+/* A button + role="listbox" popup, not a <select> (see IcpPicker's own
+   comment in ClientsPanel.tsx): a native select's open list is browser
+   chrome, and no CSS reaches its padding, radius, hover colour or font. */
+.client-icp-picker { flex: none; }
+.client-icp-trigger {
   display: inline-flex; align-items: center; gap: var(--space-2);
   min-height: var(--control-dense);
-  padding: 0 var(--space-3); flex: none;
+  padding: 0 var(--space-3);
   border: 1px solid var(--ph-border-strong); border-radius: var(--radius-full);
   background: var(--surface); color: var(--ph-muted);
+  font-size: var(--text-sm); font-weight: var(--weight-bold); cursor: pointer;
 }
-.client-icp-picker.is-active { border-color: var(--ph-brand); background: var(--accent-soft); color: var(--accent-text); }
-.client-icp-picker select {
-  border: 0; background: transparent; outline: 0; color: inherit; cursor: pointer;
-  padding: var(--space-2) 0; font-family: inherit; font-size: var(--text-sm); font-weight: var(--weight-bold);
-}
-/* The open option list is native browser chrome and cannot take padding,
-   radius or hover-state CSS, but Chromium-based browsers do apply color,
-   background and font-family set directly on <option> - set them explicitly
-   rather than relying on inheritance through <select>, which some engines
-   substitute with a system font for the popup specifically. */
-.client-icp-picker select option {
-  font-family: "Inter Local", Inter, ui-sans-serif, system-ui, sans-serif;
-  font-size: var(--text-sm);
-  color: var(--text-primary);
-  background: var(--surface);
-}
-.client-icp-picker:focus-within { box-shadow: 0 0 0 3px var(--accent-soft); }
+.client-icp-trigger:hover { border-color: var(--border-strong); }
+.client-icp-trigger > span:last-child { color: var(--text-tertiary); }
+.client-icp-picker.is-active .client-icp-trigger { border-color: var(--ph-brand); background: var(--accent-soft); color: var(--accent-text); }
+.client-icp-picker.is-active .client-icp-trigger > span:last-child { color: var(--accent-text); }
+.client-icp-picker:focus-within .client-icp-trigger { box-shadow: 0 0 0 3px var(--accent-soft); }
+.client-icp-panel { min-width: 200px; }
 /* The sentence above the pre-filtered grid, saying which ICP is being shown -
    the picker alone cannot say "none of the five". */
 .client-icp-scope { margin: 0 0 var(--space-3); color: var(--ph-muted); font-size: var(--text-xs); }

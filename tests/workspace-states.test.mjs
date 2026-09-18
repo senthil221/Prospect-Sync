@@ -316,11 +316,13 @@ test("the ICP picker seeds the same filters the panel writes", async () => {
   // than an empty filter that would read as "no filter applied".
   assert.match(panel, /icps\.length \? \[\{ id: "__client_tags:exclude"/);
 
-  // A <select> inside role="tablist" is announced as a tab that does nothing,
-  // so the picker is a sibling of the tablist: it appears after the Tabs
-  // element closes, inside the row that wraps both.
+  // A <select> (or anything else) inside role="tablist" is announced as a tab
+  // that does nothing, so the picker is a sibling of the tablist: it appears
+  // after the Tabs element closes, inside the row that wraps both. ROW-01's
+  // sibling problem: a native <select>'s open list is unstyleable browser
+  // chrome, so the picker is a button + role="listbox" popup instead.
   assert.match(panel, /client-tab-row/);
-  const tabsBlock = panel.slice(panel.indexOf("<Tabs"), panel.indexOf("client-icp-picker"));
+  const tabsBlock = panel.slice(panel.indexOf("<Tabs"), panel.indexOf("<IcpPicker"));
   assert.doesNotMatch(tabsBlock, /<select/);
   // The Tabs element self-closes before the picker is reached.
   assert.match(tabsBlock, /\]\}\s*\/>/);
