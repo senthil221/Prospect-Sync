@@ -1596,7 +1596,16 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 
 /* The ICP picker beside the client tab strip. It is a sibling of the tablist,
    never a child of it: role="tablist" may contain only tabs. */
-.client-tab-row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.client-tab-row {
+  position: relative;
+  /* Own stacking context, above the opaque client-database-heading card that
+     follows it in the DOM: without this, that later sibling's normal-flow
+     background painted over the ICP picker's popup regardless of the popup's
+     own z-index, because z-index only competes within a shared stacking
+     context and this row was not establishing one of its own. */
+  z-index: 5;
+  display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+}
 .client-tab-row .ds-tabs { flex: 1 1 auto; min-width: 0; }
 /* A button + role="listbox" popup, not a <select> (see IcpPicker's own
    comment in ClientsPanel.tsx): a native select's open list is browser
