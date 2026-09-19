@@ -642,7 +642,12 @@ main { min-width: 0; grid-column: 2; }
 .contact-timeline strong { display: block; margin-top: var(--space-1); font-size: var(--text-xs); }
 .contact-timeline p { margin: var(--space-1) 0 0; color: var(--ph-muted); font-size: var(--text-2xs); }
 .drawer-empty { padding: var(--space-10) var(--space-4); color: var(--ph-muted); font-size: var(--text-xs); text-align: center; }
-.modal-backdrop { position: fixed; inset: 0; z-index: 70; padding: var(--space-5); display: grid; place-items: center; background: var(--overlay); backdrop-filter: blur(3px); }
+/* `safe center`, not `center`, plus its own scroll. Centring an item taller than
+   its container overflows it equally at BOTH ends, and the half above the top
+   edge cannot be reached by any scroll - the dialog is simply cut off. `safe`
+   falls back to start-alignment exactly when that would happen, and overflow
+   makes the remainder scrollable. */
+.modal-backdrop { position: fixed; inset: 0; z-index: 70; padding: var(--space-5); display: grid; align-items: safe center; justify-items: center; overflow: auto; background: var(--overlay); backdrop-filter: blur(3px); }
 .confirm-modal { width: min(480px, 100%); padding: var(--space-8); border: 1px solid var(--danger-line); border-radius: var(--radius-xl); background: var(--surface); box-shadow: 0 24px 70px rgba(var(--shadow-rgb), .2); }
 .create-client-modal { border-color: var(--accent-line); }
 .confirm-modal .form-field { margin-top: var(--space-4); }
@@ -1056,7 +1061,15 @@ main { min-width: 0; grid-column: 2; }
 
 /* Content entrance - one orchestrated, subtle reveal on each view
    so navigation feels responsive and composed, not janky. */
-.content > * { animation: ph-rise var(--duration-medium) var(--ph-ease-out) both; }
+/* `backwards`, never `both`. ph-rise carries a transform, and `both` keeps it
+   applied after the animation ends - a transformed element is the containing
+   block for its `position: fixed` descendants, so every panel here was silently
+   capturing .modal-backdrop's `inset: 0`. The backdrop then sized itself to a
+   very tall panel instead of the viewport and centred the dialog inside it,
+   putting the export dialog's header off-screen with no way to scroll to it.
+   `backwards` still applies the from-frame before the animation starts, so the
+   entrance is unchanged; it just stops holding the transform afterwards. */
+.content > * { animation: ph-rise var(--duration-medium) var(--ph-ease-out) backwards; }
 @keyframes ph-rise { from { opacity: 0; transform: translateY(8px); } }
 
 /* Counted numbers.
