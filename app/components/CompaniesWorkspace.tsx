@@ -179,6 +179,7 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   const [selectionQueryKey, setSelectionQueryKey] = useState("");
   const [deleteRequest, setDeleteRequest] = useState<{ mode: "ids" | "all_matching"; count: number; ids?: string[] } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [copyingDomains, setCopyingDomains] = useState(false);
   const [updatingIcp, setUpdatingIcp] = useState(false);
   // Removing companies from THIS client, with the people count the preview
   // found. Held as the preview's answer rather than as a boolean, because the
@@ -231,6 +232,30 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
     onSeePeople(selectionMode === "all_matching"
       ? { search: search.trim(), filters, limit: 250000 }
       : { search: "", filters: [{ field: "__company_ids", operator: "equals", values: [...selectedIds] }], limit: 250000 });
+  }
+  // The selected companies' websites, deduplicated and copied as one
+  // newline-separated block - the shape a spreadsheet or another tool's paste
+  // box expects. Resolved server-side through resolve_company_action_selection_v1
+  // (the same resolver push/tag/remove already use) rather than from whatever
+  // rows happen to be loaded on screen, so a selection spanning several pages -
+  // or "select all matching" - copies every domain it claims to, not just the
+  // one page currently rendered.
+  async function copyDomains() {
+    if (!selectedCount) return;
+    setCopyingDomains(true); setCompanyError(""); setCompanyNotice("");
+    try {
+      const body = selectionMode === "all_matching"
+        ? { allMatching: true, search: search.trim(), filters: filters.map(({ field, operator, values, scopes }) => ({ field, operator, values, ...(scopes?.length ? { scopes } : {}) })), excludedIds: [...excludedIds], peopleScope, clientId: clientId || undefined }
+        : { ids: [...selectedIds], clientId: clientId || undefined };
+      const result = await api<{ domains: string[]; matched: number; truncated: boolean }>("/api/companies/domains", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      if (!result.domains.length) { setCompanyNotice("None of the selected companies have a recorded website."); return; }
+      await navigator.clipboard.writeText(result.domains.join("\n"));
+      setCompanyNotice(`Copied ${formatNumber(result.domains.length)} domain${result.domains.length === 1 ? "" : "s"} to your clipboard.${result.truncated ? ` The selection has more than ${formatNumber(result.domains.length)} companies; only the first ${formatNumber(result.domains.length)} domains were copied.` : ""}`);
+    } catch (caught) {
+      setCompanyError(caught instanceof Error ? caught.message : "Unable to copy domains. Your browser may be blocking clipboard access.");
+    } finally { setCopyingDomains(false); }
   }
   function requestDeleteSelected() {
     if (!selectedCount) return;
@@ -591,6 +616,7 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
         {selectionMode === "explicit" && selectedCount < total ? <button onClick={selectAllMatching}>Select all {formatNumber(total)}</button> : null}</div>
         <div className="bulk-action-group">
         <button title="Open the People database scoped to exactly the companies checked here" onClick={seePeopleForSelection}><AppIcon name="arrow" size={14}/> See People</button>
+        <button disabled={copyingDomains} title="Copy the website of every selected company to your clipboard, one per line" onClick={() => void copyDomains()}><AppIcon name="download" size={14}/> {copyingDomains ? "Copying…" : "Copy Domains"}</button>
         </div>
         {canDelete ? <>
           <div className="bulk-action-group bulk-action-group-primary"><select aria-label="Client to receive selected companies" value={pushClientId} disabled={pushing} onChange={(event) => setPushClientId(event.target.value)}><option value="">Choose client…</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>
