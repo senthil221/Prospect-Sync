@@ -178,7 +178,8 @@ test("Data Quality counts the company profile and each tile opens onto it", asyn
   const issues = qualityIssues({
     total: 683_784, missingEmail: 23, missingTitle: 0, missingLinkedin: 0, missingCompany: 0,
     missingDomain: 0, staleRecords: 0, potentialDuplicateGroups: 0,
-    missingEmployees: 78_995, missingCompanyKeywords: 94_089, missingCompanyDescription: 94_444,
+    companiesTotal: 419_926,
+    companiesMissingEmployees: 78_995, companiesMissingKeywords: 94_089, companiesMissingDescription: 94_444,
   });
   const byId = Object.fromEntries(issues.map((issue) => [issue.id, issue]));
   assert.equal(byId.employees.severity, "medium");

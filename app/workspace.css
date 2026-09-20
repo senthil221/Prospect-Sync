@@ -520,11 +520,8 @@ main { min-width: 0; grid-column: 2; }
 /* QUALITY-01: severity, impact and the next action - the three things a tile
    of six identical numbers could not carry. */
 .quality-issue-list { margin: 0; padding: 0; list-style: none; }
-.quality-issue { padding: var(--space-4) var(--space-5); display: grid; grid-template-columns: 130px minmax(0, 1fr) 110px; gap: var(--space-4); align-items: start; border-bottom: 1px solid var(--border-default); }
+.quality-issue { padding: var(--space-4) var(--space-5); display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: var(--space-4); align-items: start; border-bottom: 1px solid var(--border-default); }
 .quality-issue:last-child { border-bottom: 0; }
-.quality-severity { padding: var(--space-1) var(--space-2); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-full); background: var(--surface-sunken); color: var(--text-secondary); font-size: var(--text-2xs); font-weight: var(--weight-bold); text-align: center; }
-.quality-severity.high { background: var(--ph-danger-soft); color: var(--ph-danger); }
-.quality-severity.medium { background: var(--ph-warning-soft); color: var(--ph-warning); }
 .quality-issue-body strong { display: block; margin-bottom: var(--space-1); color: var(--text-primary); font-size: var(--text-sm); }
 .quality-issue-body p { margin: 0; color: var(--ph-muted); font-size: var(--text-2xs); line-height: 1.55; }
 .quality-issue-action { margin-top: var(--space-2) !important; display: flex; align-items: baseline; gap: var(--space-1); color: var(--text-secondary) !important; font-weight: var(--weight-semibold); }
@@ -1506,7 +1503,6 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
   /* MOBILE-04, per page. */
   .quality-issue { grid-template-columns: 1fr; gap: var(--space-2); padding: var(--space-4); }
   .quality-issue-count { text-align: left; }
-  .quality-severity { justify-self: start; }
   .duplicate-pair-head { align-items: stretch; flex-direction: column; }
   .duplicate-actions { flex-direction: column; align-items: stretch; }
   .duplicate-actions button { max-width: none; min-height: 44px; }

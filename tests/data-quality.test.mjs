@@ -2,24 +2,26 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { compareProspects, conflictCount, describeMerge, describeProspect, matchCount } from "../lib/duplicate-compare.ts";
-import { formatShare, qualityIssues, severityLabel } from "../lib/quality-issues.ts";
+import { qualityIssues, formatShare } from "../lib/quality-issues.ts";
 
-// QUALITY-01..05 from the UI redesign plan.
+// QUALITY-01..05 from the UI redesign plan, plus the People/Company split
+// added when the four company-profile checks moved to counting companies.
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 const summary = (over) => ({
   total: 681_085, missingEmail: 0, missingTitle: 0, missingLinkedin: 0,
   missingCompany: 0, missingDomain: 0, staleRecords: 0, potentialDuplicateGroups: 0,
-  missingEmployees: 0, missingCompanyKeywords: 0, missingCompanyDescription: 0, ...over,
+  missingEmployees: 0, missingCompanyKeywords: 0, missingCompanyDescription: 0,
+  companiesTotal: 419_926, companiesMissingDomain: 0, companiesMissingEmployees: 0,
+  companiesMissingKeywords: 0, companiesMissingDescription: 0, ...over,
 });
 // A summary where every count is non-zero, so "all of them" is expressed as a
 // relationship rather than as a number that has to be edited each time a check
-// is added. The tab gained three company-profile checks in 20260916100000, and
-// the tests that carried literal 6 all had to be found by failing.
+// is added. The two totals are left alone - they are denominators, not gaps.
 const everyGap = () => {
   const seeded = summary({});
   for (const key of Object.keys(seeded)) {
-    if (key !== "total" && key !== "potentialDuplicateGroups") seeded[key] = 1;
+    if (key !== "total" && key !== "companiesTotal" && key !== "potentialDuplicateGroups") seeded[key] = 1;
   }
   return seeded;
 };
@@ -52,7 +54,7 @@ test("the checks are ranked by what they cost, not by declaration order", () => 
   assert.deepEqual(issues.filter((issue) => issue.severity !== "clear").map((issue) => issue.id), ["email", "stale", "linkedin"]);
 
   // Count only orders checks that are already equally severe.
-  const tied = qualityIssues(summary({ missingEmail: 10, missingDomain: 900, missingCompany: 50 }));
+  const tied = qualityIssues(summary({ missingEmail: 10, companiesMissingDomain: 900, missingCompany: 50 }));
   assert.deepEqual(tied.slice(0, 3).map((issue) => issue.id), ["domain", "company", "email"]);
 });
 
@@ -62,7 +64,7 @@ test("every issue explains its impact and names one next action", () => {
     assert.ok(issue.impact.length > 40, `${issue.id} must say what the gap breaks`);
     assert.ok(issue.action.length > 20, `${issue.id} must say what to do about it`);
     assert.notEqual(issue.severity, "clear");
-    assert.ok(severityLabel(issue.severity).length > 3);
+    assert.ok(issue.entity === "people" || issue.entity === "company", `${issue.id} must declare which database it counts`);
   }
   // The action has to be honest about what the product can actually do: title
   // is a person-level field, so "fill gaps from company records" cannot supply
@@ -165,12 +167,21 @@ test("the sample chips are folded away and the queue replaces the tiles", async 
   assert.match(source, /View affected companies/);
   assert.match(source, /\{showAffected \? <div className="enrichment-sample">/);
 
-  // QUALITY-01: the six identical tiles are gone; the master total survives as
-  // context on the panel head rather than as a seventh tile.
+  // QUALITY-01: the six identical tiles are gone; each section's own total
+  // survives as context on its panel head rather than as a seventh tile.
   assert.doesNotMatch(source, /<div className="quality-metrics">/);
-  assert.match(source, /master prospects/);
   assert.match(source, /className="quality-issue-list"/);
-  assert.match(source, /\{issue\.shareText\} of database/);
+  assert.match(source, /\{issue\.shareText\} of \{issue\.entity === "company" \? "companies" : "database"\}/);
+
+  // The People/Company split: two sections, one function rendering both so
+  // they cannot drift into different markup, and no severity tag text left on
+  // a row - the user asked for "Blocks outreach / Degrades targeting / Worth
+  // knowing" gone, not just hidden.
+  assert.match(source, /renderQualitySection\("People records"/);
+  assert.match(source, /renderQualitySection\("Company records"/);
+  assert.doesNotMatch(source, /severityLabel/);
+  assert.doesNotMatch(source, /Blocks outreach|Degrades targeting|Worth knowing/);
+  assert.doesNotMatch(source, /className="quality-severity/);
 
   // The old side-by-side cards, and their stylesheet, are gone with them.
   const duplicates = await read("../app/components/DuplicatesPanel.tsx");
@@ -195,33 +206,45 @@ test("the duplicate list is a list, and its rows are announced", async () => {
 
   const styles = await read("../app/workspace.css");
   assert.match(styles, /\.duplicate-list \{[^}]*list-style: none/);
-  assert.match(styles, /\.quality-severity\.high \{/);
+  // The severity tag's own styling went with the tag; nothing should still
+  // define color rules for a badge the panel no longer renders.
+  assert.doesNotMatch(styles, /\.quality-severity/);
 });
 
 test("each quality check can open the records it counted", async () => {
   const issues = qualityIssues(summary({
-    missingEmail: 23, missingDomain: 23_568, missingCompany: 113,
+    missingEmail: 23, missingCompany: 113,
     missingTitle: 2_115, missingLinkedin: 82_322, staleRecords: 90_000,
-    missingEmployees: 78_995, missingCompanyKeywords: 94_089, missingCompanyDescription: 94_444,
+    companiesMissingDomain: 100_448, companiesMissingEmployees: 21_057,
+    companiesMissingKeywords: 82_682, companiesMissingDescription: 98_465,
   }));
   const byId = Object.fromEntries(issues.map((issue) => [issue.id, issue]));
 
-  // The filter has to select exactly what the tile counted, or the button
-  // teaches you not to trust the number.
-  // __website is not a working prospect filter - it compiles to an empty literal
-  // and matches every row. __company_domain is the one that counts the 23,568.
-  assert.deepEqual(byId.domain.filters.map((filter) => filter.field), ["__company_domain"]);
+  // The People checks: unchanged, each opening the People database.
   assert.deepEqual(byId.title.filters.map((filter) => filter.field), ["__title"]);
   assert.deepEqual(byId.linkedin.filters.map((filter) => filter.field), ["__linkedin"]);
   assert.deepEqual(byId.company.filters.map((filter) => filter.field), ["__company"]);
   // Missing email counts people with neither address, so it takes both.
   assert.deepEqual(byId.email.filters.map((filter) => filter.field), ["__work_email", "__personal_email"]);
-  // The company profile. These three read public.companies through the People
-  // compiler (20260916090000), which is what let them have buttons at all - the
-  // tab's rule is that a tile without an exact filter gets no button.
-  assert.deepEqual(byId.company_keywords.filters.map((filter) => filter.field), ["__company_keywords"]);
-  assert.deepEqual(byId.company_description.filters.map((filter) => filter.field), ["__company_description"]);
+  for (const id of ["email", "title", "linkedin", "company", "stale"]) assert.equal(byId[id].entity, "people", id);
+
+  // The company profile: reclassified to count and open the Company database.
+  // __company_domain, __company_keywords and __company_description were the
+  // People-side spellings of the same gap, denormalized onto prospect_index -
+  // __website, __keywords and __short_description are what company_filter_sql_v3
+  // compiles against public.companies directly, which is the whole reason a
+  // company can be counted here even with zero prospects behind it.
+  assert.deepEqual(byId.domain.filters.map((filter) => filter.field), ["__website"]);
+  assert.deepEqual(byId.company_keywords.filters.map((filter) => filter.field), ["__keywords"]);
+  assert.deepEqual(byId.company_description.filters.map((filter) => filter.field), ["__short_description"]);
   assert.deepEqual(byId.employees.filters.map((filter) => filter.field), ["__employee_count"]);
+  for (const id of ["domain", "employees", "company_keywords", "company_description"]) assert.equal(byId[id].entity, "company", id);
+
+  // A company check's percentage is of companies, a person check's is of
+  // people - never the other population.
+  assert.equal(byId.domain.total, 419_926);
+  assert.equal(byId.email.total, 681_085);
+
   for (const issue of issues) {
     for (const filter of issue.filters ?? []) {
       // Two shapes, and only two. "No value at all" is `empty` for a text
@@ -241,10 +264,15 @@ test("each quality check can open the records it counted", async () => {
   assert.equal(byId.stale.filters, null);
 
   const panel = await read("../app/components/DataQualityPanel.tsx");
-  assert.match(panel, /onViewRecords && issue\.filters \? <button/);
+  assert.match(panel, /onView && issue\.filters \? <button/);
+  // The button itself is labelled by which database it opens.
+  assert.match(panel, /issue\.entity === "company" \? "View companies" : "View records"/);
   const dashboard = await read("../app/DashboardApp.tsx");
   // navigate() first, so the pivot scope and search cannot narrow the result
   // further than the tile said.
   assert.match(dashboard, /const viewQualityRecords = useCallback[\s\S]{0,200}navigate\("prospects"\);\s*setProspectFilters\(filters\);/);
   assert.match(dashboard, /onViewRecords=\{viewQualityRecords\}/);
+  // Company checks reuse the coverage checker's own company pivot rather than
+  // a second copy of the same navigate/setCompanyFilters/setCompanyPage move.
+  assert.match(dashboard, /onViewCompanies=\{viewCoverageCompanies\}/);
 });

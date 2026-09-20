@@ -62,9 +62,22 @@ export type QualitySeverity = "high" | "medium" | "low" | "clear";
 // because the tile and the button drift the moment either side is edited alone.
 const emptyFilter = (field: string): ProspectFilter => ({ id: `quality:${field}`, field, operator: "empty", values: [] });
 
+// Which database a check's number counts, and which one its button opens.
+// PEOPLE-side checks (email, title, LinkedIn, "missing company" itself, and
+// staleness) are gaps on the person record with no company row to redirect to
+// instead. COMPANY-side checks (website, employees, keywords, description) are
+// gaps on the company profile - counting them per person double-counted every
+// company with more than one prospect and, worse, silently excluded every
+// company with zero prospects. 20260920120000 is what makes that distinction
+// possible: it adds the company-counted equivalent of each company-side check
+// to data_quality_overview, verified there against the exact filter its button
+// applies, over every company - not the people who happen to sit behind one.
+export type QualityEntity = "people" | "company";
+
 export type QualityIssue = {
   id: string;
   label: string;
+  entity: QualityEntity;
   count: number;
   total: number;
   share: number;
@@ -95,34 +108,36 @@ export function formatShare(count: number, total: number) {
   return `${Math.round(percent)}%`;
 }
 
-const checks: Array<{ id: string; label: string; severity: Exclude<QualitySeverity, "clear">; read: (summary: QualitySummary) => number; impact: string; action: string; filters: ProspectFilter[] | null }> = [
+const checks: Array<{ id: string; label: string; entity: QualityEntity; severity: Exclude<QualitySeverity, "clear">; read: (summary: QualitySummary) => number; total: (summary: QualitySummary) => number; impact: string; action: string; filters: ProspectFilter[] | null }> = [
   {
-    id: "email", label: "Missing work email", severity: "high",
-    read: (summary) => summary.missingEmail,
+    id: "email", label: "Missing work email", entity: "people", severity: "high",
+    read: (summary) => summary.missingEmail, total: (summary) => summary.total,
     impact: "These people cannot be contacted at all, and they still take up room in every list you push to a client.",
     action: "Re-import the source list with an email column, or exclude them from client pushes until it has one.",
     // Both, because the count is people who have neither address.
     filters: [emptyFilter("__work_email"), emptyFilter("__personal_email")],
   },
   {
-    id: "domain", label: "Missing company website", severity: "high",
-    read: (summary) => summary.missingDomain,
-    impact: "The website is what companies are matched on. Without it these records duplicate against every future import, and the coverage checker cannot see them.",
-    action: "Fill gaps from company records above, which recovers the website from other people at the same company.",
-    filters: [emptyFilter("__company_domain")],
-  },
-  {
-    id: "company", label: "Missing company", severity: "high",
-    read: (summary) => summary.missingCompany,
+    id: "company", label: "Missing company", entity: "people", severity: "high",
+    read: (summary) => summary.missingCompany, total: (summary) => summary.total,
     impact: "With no company these people cannot be filtered by industry, size or location, and they never appear in the Company database.",
     action: "Re-import with a company column. If you have the website, filling gaps recovers the name from it.",
-    // Counted as a blank company name rather than a missing link, so the number
-    // and this filter select the same rows -- see the accompanying migration.
+    // Person-side on purpose: there is no company row to redirect to when the
+    // gap IS the missing link. Counted as a blank company name rather than a
+    // missing link, so the number and this filter select the same rows -- see
+    // 20260916090000.
     filters: [emptyFilter("__company")],
   },
   {
-    id: "stale", label: "Not touched in 180 days", severity: "medium",
-    read: (summary) => summary.staleRecords,
+    id: "title", label: "Missing title", entity: "people", severity: "medium",
+    read: (summary) => summary.missingTitle, total: (summary) => summary.total,
+    impact: "Seniority and department are derived from the title, so every filter built on either skips these records entirely.",
+    action: "Re-import with a title column - it is a person-level field, so filling gaps from company records cannot supply it.",
+    filters: [emptyFilter("__title")],
+  },
+  {
+    id: "stale", label: "Not touched in 180 days", entity: "people", severity: "medium",
+    read: (summary) => summary.staleRecords, total: (summary) => summary.total,
     impact: "Titles and emails decay faster than anything else on a record. A stale list is where bounce rates come from.",
     action: "Re-scrape these people and re-import before the next campaign; the import updates in place.",
     // prospects.updated_at has no filter field, and an approximate one would
@@ -130,45 +145,48 @@ const checks: Array<{ id: string; label: string; severity: Exclude<QualitySeveri
     filters: null,
   },
   {
-    id: "title", label: "Missing title", severity: "medium",
-    read: (summary) => summary.missingTitle,
-    impact: "Seniority and department are derived from the title, so every filter built on either skips these records entirely.",
-    action: "Re-import with a title column - it is a person-level field, so filling gaps from company records cannot supply it.",
-    filters: [emptyFilter("__title")],
+    id: "linkedin", label: "Missing LinkedIn", entity: "people", severity: "low",
+    read: (summary) => summary.missingLinkedin, total: (summary) => summary.total,
+    impact: "LinkedIn is the fallback identifier when name and email both fail to match, so gaps make future de-duplication less certain.",
+    action: "No action needed now. A later import that carries the profile fills it in place.",
+    filters: [emptyFilter("__linkedin")],
   },
-  // The company profile. None of these three stops an email going out, so none
-  // of them is "high" - they cost you targeting, which is the tier below. They
-  // are also the three biggest gaps in the database, which is why the tab was
-  // reporting a cleaner picture than the data supports until they were added.
+  // The company profile, counted and opened on the COMPANY side: how many
+  // companies carry the gap, out of every company, with the button opening the
+  // Company database rather than People. Counting people here double-counted
+  // any company with several prospects and silently dropped every company with
+  // none - measured on production, 100,448 companies have no recorded website
+  // against 23,568 people who happened to be at one. 20260920120000 is what
+  // makes the company-side number exist to read.
   {
-    id: "employees", label: "Missing # employees", severity: "medium",
-    read: (summary) => summary.missingEmployees ?? 0,
-    impact: "Company size is the first cut in almost every ICP, so these people are invisible to any search that sets a size band - including the client's own.",
-    action: "Import the company list with an employee count column; the People import reads it from the company row, so one company file fixes everyone at it.",
+    id: "domain", label: "Missing company website", entity: "company", severity: "high",
+    read: (summary) => summary.companiesMissingDomain ?? 0, total: (summary) => summary.companiesTotal ?? 0,
+    impact: "The website is what companies are matched on. Without it a company duplicates against every future import, and the coverage checker cannot see it.",
+    action: "Fill gaps from company records above, which recovers the website from another import of the same company.",
+    filters: [{ id: "quality:__website", field: "__website", operator: "empty", values: [] }],
+  },
+  {
+    id: "employees", label: "Missing # employees", entity: "company", severity: "medium",
+    read: (summary) => summary.companiesMissingEmployees ?? 0, total: (summary) => summary.companiesTotal ?? 0,
+    impact: "Company size is the first cut in almost every ICP, so these companies are invisible to any search that sets a size band - including a client's own.",
+    action: "Import the company list with an employee count column.",
     // Not an empty filter: employee count is two numeric columns, and the range
     // control expresses "no number at all" as the 'unknown' band.
     filters: [{ id: "quality:__employee_count", field: "__employee_count", operator: "number_ranges", values: ["unknown"] }],
   },
   {
-    id: "company_keywords", label: "Missing company keywords", severity: "medium",
-    read: (summary) => summary.missingCompanyKeywords ?? 0,
-    impact: "Keywords are what a keyword search matches. Without them a company can only be found by name, industry or description, so these people never appear in a keyword-built list.",
-    action: "Re-import the company file with a Keywords column. It is a company-level field, so it cannot be recovered from the person's record.",
-    filters: [emptyFilter("__company_keywords")],
+    id: "company_keywords", label: "Missing company keywords", entity: "company", severity: "medium",
+    read: (summary) => summary.companiesMissingKeywords ?? 0, total: (summary) => summary.companiesTotal ?? 0,
+    impact: "Keywords are what a keyword search matches. Without them a company can only be found by name, industry or description.",
+    action: "Re-import the company file with a Keywords column.",
+    filters: [{ id: "quality:__keywords", field: "__keywords", operator: "empty", values: [] }],
   },
   {
-    id: "company_description", label: "Missing company description", severity: "low",
-    read: (summary) => summary.missingCompanyDescription ?? 0,
-    impact: "The description is the widest of the keyword scopes - it is what finds a company that does the thing without using the word for it. Gaps narrow every keyword search that ticks it.",
+    id: "company_description", label: "Missing company description", entity: "company", severity: "low",
+    read: (summary) => summary.companiesMissingDescription ?? 0, total: (summary) => summary.companiesTotal ?? 0,
+    impact: "The description is the widest of the keyword scopes - it is what finds a company that does the thing without using the word for it.",
     action: "No action needed now. A later company import carrying descriptions fills them in place, and the narrower scopes still work meanwhile.",
-    filters: [emptyFilter("__company_description")],
-  },
-  {
-    id: "linkedin", label: "Missing LinkedIn", severity: "low",
-    read: (summary) => summary.missingLinkedin,
-    impact: "LinkedIn is the fallback identifier when name and email both fail to match, so gaps make future de-duplication less certain.",
-    action: "No action needed now. A later import that carries the profile fills it in place.",
-    filters: [emptyFilter("__linkedin")],
+    filters: [{ id: "quality:__short_description", field: "__short_description", operator: "empty", values: [] }],
   },
 ];
 
@@ -180,13 +198,16 @@ const rank: Record<QualitySeverity, number> = { high: 0, medium: 1, low: 2, clea
  * from the check not being on the list.
  */
 export function qualityIssues(summary: QualitySummary): QualityIssue[] {
-  const total = Number(summary.total ?? 0);
   return checks
     .map((check) => {
       const count = Math.max(0, Number(check.read(summary) ?? 0));
+      // Each check's own denominator: a company check divided by every person
+      // would report a percentage of the wrong population entirely.
+      const total = Math.max(0, Number(check.total(summary) ?? 0));
       return {
         id: check.id,
         label: check.label,
+        entity: check.entity,
         count,
         total,
         share: total ? count / total : 0,
@@ -198,11 +219,4 @@ export function qualityIssues(summary: QualitySummary): QualityIssue[] {
       };
     })
     .sort((left, right) => rank[left.severity] - rank[right.severity] || right.count - left.count);
-}
-
-export function severityLabel(severity: QualitySeverity) {
-  if (severity === "high") return "Blocks outreach";
-  if (severity === "medium") return "Degrades targeting";
-  if (severity === "low") return "Worth knowing";
-  return "Clear";
 }

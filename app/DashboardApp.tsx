@@ -379,7 +379,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
           }}
         />}
         {!loading && section === "coverage" && <CoveragePanel onViewCompanies={viewCoverageCompanies}/>}
-        {!loading && section === "quality" && <DataQualityPanel onMerged={() => void refreshDashboard()} onViewRecords={viewQualityRecords}/>}
+        {!loading && section === "quality" && <DataQualityPanel onMerged={() => void refreshDashboard()} onViewRecords={viewQualityRecords} onViewCompanies={viewCoverageCompanies}/>}
         {!loading && section === "imports" && <ImportsPanel
           clients={clients}
           onChanged={async () => { await refreshDashboard(); }}

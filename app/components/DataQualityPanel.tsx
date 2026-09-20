@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, clearApiCache } from "../../lib/dashboard-api";
 import { formatNumber } from "../../lib/dashboard-helpers";
 import { describeMerge, describeProspect } from "../../lib/duplicate-compare";
-import { qualityIssues, severityLabel } from "../../lib/quality-issues";
+import { qualityIssues, type QualityIssue } from "../../lib/quality-issues";
 import type { DuplicateCandidate, EnrichmentPreview, IndexDrift, Prospect, ProspectFilter, QualitySummary } from "../../lib/types";
 import DuplicatesPanel from "./DuplicatesPanel";
 import { AppIcon, ConfirmDialog, EmptyCompact, StatusMessage } from "./DashboardUi";
@@ -14,7 +14,49 @@ type RowState = { status: "busy" | "done" | "error"; message?: string };
 
 const pairKey = (candidate: DuplicateCandidate) => `${candidate.left.id}:${candidate.right.id}`;
 
-export default function DataQualityPanel({ onMerged, onViewRecords }: { onMerged: () => void; onViewRecords?: (filters: ProspectFilter[]) => void }) {
+// One section for People checks, one for Company checks - each against its own
+// total, since a People gap and a Company gap are percentages of different
+// populations (681,085 people is not 419,926 companies) and each opens a
+// different database. Severity still ranks the list - it just no longer prints
+// a text tag naming the tier on every row.
+function renderQualitySection(title: string, subtitle: string, sectionIssues: QualityIssue[], total: number, onView?: (filters: ProspectFilter[]) => void) {
+  const open = sectionIssues.filter((issue) => issue.severity !== "clear");
+  const clear = sectionIssues.filter((issue) => issue.severity === "clear");
+  if (!sectionIssues.length) return null;
+  return <article className="panel quality-queue">
+    <div className="panel-head">
+      <div>
+        <h3>{title}</h3>
+        <p>{subtitle} {open.length ? `${open.length} of ${sectionIssues.length} checks need work` : "Every check is clear"} · {formatNumber(total)} {total === 1 ? "record" : "records"}</p>
+      </div>
+    </div>
+    {open.length ? <ul className="quality-issue-list">
+      {open.map((issue) => <li key={issue.id} className="quality-issue">
+        <div className="quality-issue-body">
+          <strong>{issue.label}</strong>
+          <p>{issue.impact}</p>
+          <p className="quality-issue-action"><AppIcon name="arrow" size={12}/> {issue.action}</p>
+        </div>
+        <div className="quality-issue-count">
+          <strong>{formatNumber(issue.count)}</strong>
+          {/* QUALITY-03: 412 records are not "0% of database". */}
+          <small>{issue.shareText} of {issue.entity === "company" ? "companies" : "database"}</small>
+          {/* The count was never the point - the records are. This opens the
+              matching workspace filtered to exactly the rows behind the number,
+              where they can be edited, exported or pushed like any other
+              selection. Checks that cannot be expressed as a filter get no
+              button rather than an approximate one. */}
+          {onView && issue.filters ? <button type="button" className="quality-issue-view" onClick={() => onView(issue.filters!)}>
+            {issue.entity === "company" ? "View companies" : "View records"} <AppIcon name="arrow" size={12}/>
+          </button> : null}
+        </div>
+      </li>)}
+    </ul> : null}
+    {clear.length ? <p className="quality-clear">Clear: {clear.map((issue) => issue.label.toLowerCase()).join(", ")}.</p> : null}
+  </article>;
+}
+
+export default function DataQualityPanel({ onMerged, onViewRecords, onViewCompanies }: { onMerged: () => void; onViewRecords?: (filters: ProspectFilter[]) => void; onViewCompanies?: (filters: ProspectFilter[]) => void }) {
   const [quality, setQuality] = useState<QualitySummary | null>(null);
   const [candidates, setCandidates] = useState<DuplicateCandidate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,8 +145,8 @@ export default function DataQualityPanel({ onMerged, onViewRecords }: { onMerged
   }
 
   const issues = quality ? qualityIssues(quality) : [];
-  const openIssues = issues.filter((issue) => issue.severity !== "clear");
-  const clearIssues = issues.filter((issue) => issue.severity === "clear");
+  const peopleIssues = issues.filter((issue) => issue.entity === "people");
+  const companyIssues = issues.filter((issue) => issue.entity === "company");
   const reviewable = candidates.filter((candidate) => !skipped.includes(pairKey(candidate)));
 
   return <section className="operations-page">
@@ -151,40 +193,14 @@ export default function DataQualityPanel({ onMerged, onViewRecords }: { onMerged
         {enrichNotice ? <p className="index-health-note" role="status">{enrichNotice}</p> : null}
       </article> : null}
 
-      {/* QUALITY-01: the six counts, ranked by what they cost, with the master
-          total kept alongside rather than as a seventh identical tile. */}
-      <article className="panel quality-queue">
-        <div className="panel-head">
-          <div>
-            <h3>Record quality</h3>
-            <p>{openIssues.length ? `${openIssues.length} of ${issues.length} checks need work` : "Every check is clear"} · {formatNumber(quality.total)} master prospects</p>
-          </div>
-        </div>
-        {openIssues.length ? <ul className="quality-issue-list">
-          {openIssues.map((issue) => <li key={issue.id} className={`quality-issue ${issue.severity}`}>
-            <span className={`quality-severity ${issue.severity}`}>{severityLabel(issue.severity)}</span>
-            <div className="quality-issue-body">
-              <strong>{issue.label}</strong>
-              <p>{issue.impact}</p>
-              <p className="quality-issue-action"><AppIcon name="arrow" size={12}/> {issue.action}</p>
-            </div>
-            <div className="quality-issue-count">
-              <strong>{formatNumber(issue.count)}</strong>
-              {/* QUALITY-03: 412 records are not "0% of database". */}
-              <small>{issue.shareText} of database</small>
-              {/* The count was never the point - the records are. This opens the
-                  People workspace filtered to exactly the rows behind the number,
-                  where they can be edited, exported or pushed like any other
-                  selection. Checks that cannot be expressed as a filter get no
-                  button rather than an approximate one. */}
-              {onViewRecords && issue.filters ? <button type="button" className="quality-issue-view" onClick={() => onViewRecords(issue.filters!)}>
-                View records <AppIcon name="arrow" size={12}/>
-              </button> : null}
-            </div>
-          </li>)}
-        </ul> : null}
-        {clearIssues.length ? <p className="quality-clear">Clear: {clearIssues.map((issue) => issue.label.toLowerCase()).join(", ")}.</p> : null}
-      </article>
+      {/* QUALITY-01: ranked by what each gap costs, with the section's own
+          total kept alongside rather than as a seventh identical tile. Split
+          in two because a People gap and a Company gap answer to different
+          databases and different totals - a shared list mixed a percentage of
+          681,085 people with one of 419,926 companies under one "of database"
+          label, which was never a real denominator for either. */}
+      {renderQualitySection("People records", "What's missing on the person's own record. Opens the People database.", peopleIssues, quality.total, onViewRecords)}
+      {renderQualitySection("Company records", "What's missing on the company profile. Opens the Company database.", companyIssues, Number(quality.companiesTotal ?? 0), onViewCompanies)}
 
       <article className="panel duplicate-panel">
         <div className="panel-head"><div>

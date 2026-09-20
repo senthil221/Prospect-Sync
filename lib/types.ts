@@ -40,7 +40,10 @@ export type CoverageRow = { row: number; name: string; domain: string; status: "
 // as undefined, which qualityIssues reads as 0 and reports as "Clear" - so they
 // are optional rather than required. 20260916100000 recomputes the stored
 // snapshot on the way in, so the window is the deploy, not a refresh cycle.
-export type QualitySummary = { total: number; missingEmail: number; missingTitle: number; missingLinkedin: number; missingCompany: number; missingDomain: number; staleRecords: number; potentialDuplicateGroups: number; missingEmployees?: number; missingCompanyKeywords?: number; missingCompanyDescription?: number };
+// companiesTotal/companiesMissing* are optional for the same reason
+// missingEmployees was: an older database returns the overview without them,
+// and the checks that read them fall back to zero rather than failing the tab.
+export type QualitySummary = { total: number; missingEmail: number; missingTitle: number; missingLinkedin: number; missingCompany: number; missingDomain: number; staleRecords: number; potentialDuplicateGroups: number; missingEmployees?: number; missingCompanyKeywords?: number; missingCompanyDescription?: number; companiesTotal?: number; companiesMissingDomain?: number; companiesMissingEmployees?: number; companiesMissingKeywords?: number; companiesMissingDescription?: number };
 // prospect_count/company_count are what the ICP's tag has claimed. Optional,
 // and null rather than 0 when the count could not be taken - an older database
 // answers without them, and a slow count is dropped rather than failing the
