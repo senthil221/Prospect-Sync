@@ -71,7 +71,13 @@ export function suggestedPersonImportField(header: string) {
 }
 
 export function suggestedCompanyImportField(header: string) {
-  return companyAliases[normalizeImportHeader(header)] ?? "Not mapped";
+  const suggestion = companyAliases[normalizeImportHeader(header)] ?? "Not mapped";
+  // Auto-suggestion is limited to the two identity fields - the ones a row
+  // cannot exist without one of. Every optional detail field (Industry,
+  // Keywords, #employees, ...) defaults to "Not mapped" even when its header
+  // matches a known alias exactly, so nothing beyond the mandatory minimum is
+  // imported unless it is mapped by hand.
+  return (companyIdentityFields as readonly string[]).includes(suggestion) ? suggestion : "Not mapped";
 }
 
 // Sentinel a user can pick in the mapping UI to drop an unwanted column entirely

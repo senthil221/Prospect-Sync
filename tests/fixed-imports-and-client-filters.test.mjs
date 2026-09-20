@@ -35,6 +35,23 @@ test("fixed import contracts discard unsupported source columns", () => {
   assert.deepEqual(companies.map(({ field }) => field), ["Company Name", "Website"]);
 });
 
+test("a company import only auto-suggests the two identity fields", () => {
+  // Requested directly: nothing beyond Company Name/Website should be mapped
+  // without the person doing it choosing it, even when a header is an exact,
+  // unambiguous alias for a detail field.
+  assert.equal(suggestedCompanyImportField("Company Name"), "Company Name");
+  assert.equal(suggestedCompanyImportField("Website"), "Website");
+  assert.equal(suggestedCompanyImportField("Domain"), "Website");
+  for (const header of ["Industry", "Keywords", "Founded Year", "Employees", "City", "Technologies", "Total Funding", "Short Description"]) {
+    assert.equal(suggestedCompanyImportField(header), "Not mapped", header);
+  }
+
+  // The fixed-mapping boundary honors an explicit, hand-picked mapping for a
+  // detail field just the same - only the automatic suggestion is restricted.
+  const explicit = fixedImportColumns(["Industry"], { Industry: "Industry" }, suggestedCompanyImportField, companyImportFields);
+  assert.deepEqual(explicit.map(({ field }) => field), ["Industry"]);
+});
+
 test("People paste accepts email-only and LinkedIn-only identities", () => {
   const email = parsePastedPeopleTable("ana@example.com\nbea@example.com");
   assert.deepEqual(email.headers, ["Email"]);

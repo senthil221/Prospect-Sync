@@ -6,7 +6,7 @@ import { companyMergeModeLabels, companyMergeModes, defaultCompanyMergeMode, typ
 import { commonDataSources } from "../../lib/data-source";
 import { api } from "../../lib/dashboard-api";
 import { deriveListName, formatNumber, readCsvPreview, readImportTable } from "../../lib/dashboard-helpers";
-import { companyImportFields, fixedImportColumns, missingCompanyImportFields, personImportFields, resolvedImportFields, skipImportField, suggestedCompanyImportField, suggestedPersonImportField, unmappedCompanyDetailFields } from "../../lib/import-schema";
+import { companyImportFields, fixedImportColumns, missingCompanyImportFields, personImportFields, resolvedImportFields, suggestedCompanyImportField, suggestedPersonImportField, unmappedCompanyDetailFields } from "../../lib/import-schema";
 import { parsePastedCompanyTable, parsePastedPeopleTable } from "../../lib/paste-table";
 import { importHeadersMatch } from "../../lib/import-resume";
 import { unassignedClientId } from "../../lib/import-owner";
@@ -312,7 +312,7 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
         <RequiredFieldList title="Company columns" fields={companyImportFields}/>
       </> : step === "map" ? <>
         <h2>Check the columns before anything is written.</h2>
-        <p>Only a column mapped to one of the fields below is stored. Leave a column as “Not mapped” or set it to “{skipImportField}” - either way it is discarded, not added to the field catalog, and not stored anywhere on the company.</p>
+        <p>Only a column mapped to one of the fields below is stored. Leave a column as “Not mapped” to discard it - it is not added to the field catalog and not stored anywhere on the company.</p>
         <RequiredFieldList title="Company columns" fields={companyImportFields}/>
       </> : <>
         <h2>How matched companies are handled.</h2>
@@ -343,7 +343,7 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
       </> : null}
 
       {step === "map" && parsed ? <>
-        <div id="company-mapping" tabIndex={-1} className="mapping-list company-required-mapping">{parsed.headers.map((header) => <label key={header}><span title={header}>{header}</span><b><AppIcon name="arrow" size={14}/></b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Not mapped"} onChange={(event) => setFieldMap((current) => ({ ...current, [header]: event.target.value }))}><option>Not mapped</option><option>{skipImportField}</option>{companyImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div>
+        <div id="company-mapping" tabIndex={-1} className="mapping-list company-required-mapping">{parsed.headers.map((header) => <label key={header}><span title={header}>{header}</span><b><AppIcon name="arrow" size={14}/></b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Not mapped"} onChange={(event) => setFieldMap((current) => ({ ...current, [header]: event.target.value }))}><option>Not mapped</option>{companyImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div>
         {missingFields.length ? null : <p className="source-selected-note">{formatNumber(parsed.rows.length)} rows ready to import.</p>}
         {!missingFields.length && unmappedDetails.length ? <p className="import-partial-note">Detail columns this import does not carry: {unmappedDetails.join(", ")}. They are left exactly as stored - no merge mode can blank out a value this import has nothing to say about.</p> : null}
         <StepFooter backLabel="Back to upload" onBack={() => onStep("upload")} continueLabel="Continue to review" attempted={Boolean(attempted.map)} problems={stepIssues} onContinue={() => advance("review")}/>
