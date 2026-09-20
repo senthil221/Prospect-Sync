@@ -1,6 +1,7 @@
 "use client";
 
 import { cloneElement, isValidElement, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useDialogFocus } from "./use-dialog";
 import Tabs from "./Tabs";
 import { api } from "../../lib/dashboard-api";
@@ -205,6 +206,35 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
  * the dialog out from under it - the same rule the delete dialogs follow once
  * the delete is committed.
  */
+/**
+ * The backdrop every dialog here sits in, rendered into <body> rather than
+ * where it was written.
+ *
+ * `position: fixed` is only positioned against the viewport while NO ancestor
+ * carries a transform, filter or backdrop-filter; any of those make that
+ * ancestor the containing block instead. `.content > *` gives every workspace
+ * panel an entrance animation that carries a transform, so a backdrop left in
+ * the tree was sized and centred inside whichever panel happened to open it.
+ * For a short dialog that is invisible. For a tall one it is not: centring an
+ * item taller than its container overflows BOTH ends, and the half above the
+ * top edge cannot be scrolled to, so the export dialog opened with its header
+ * and scope controls off-screen and unreachable.
+ *
+ * Rendering into <body> puts the backdrop outside every transformed ancestor
+ * there is, which fixes it for good rather than per-transform. useDialogFocus
+ * inerts document.body's children, so this also lands it exactly where that
+ * expects to find it.
+ *
+ * Guarded on document rather than on a mounted flag: every dialog here is
+ * rendered by a click, so none of them is ever reached during SSR and there is
+ * no hydration pass to mismatch. The guard is only so the module stays safe to
+ * render on the server at all.
+ */
+function DialogBackdrop({ children }: { children: ReactNode }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(<div className="modal-backdrop" role="presentation">{children}</div>, document.body);
+}
+
 export function ExportDialogShell({ titleId, busy = false, onClose, children }: {
   titleId: string;
   busy?: boolean;
@@ -220,11 +250,11 @@ export function ExportDialogShell({ titleId, busy = false, onClose, children }: 
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = previous; };
   }, []);
-  return <div className="modal-backdrop" role="presentation">
+  return <DialogBackdrop>
     <section ref={panel} className="export-modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
       {children}
     </section>
-  </div>;
+  </DialogBackdrop>;
 }
 
 /**
@@ -255,11 +285,11 @@ export function FormDialog({ titleId, busy = false, onClose, children }: {
 }) {
   const panel = useRef<HTMLElement>(null);
   useDialogFocus(panel, { onClose, busy });
-  return <div className="modal-backdrop" role="presentation">
+  return <DialogBackdrop>
     <section ref={panel} className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby={titleId}>
       {children}
     </section>
-  </div>;
+  </DialogBackdrop>;
 }
 
 /**
@@ -284,7 +314,7 @@ export function ConfirmDialog({ title, body, scopeNote, confirmLabel, busy = fal
 }) {
   const panel = useRef<HTMLElement>(null);
   useDialogFocus(panel, { onClose: onCancel, busy });
-  return <div className="modal-backdrop" role="presentation">
+  return <DialogBackdrop>
     <section ref={panel} className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body">
       <span className="warning-mark">!</span>
       <h2 id="confirm-title">{title}</h2>
@@ -296,7 +326,7 @@ export function ConfirmDialog({ title, body, scopeNote, confirmLabel, busy = fal
         <button className="danger-button solid" disabled={busy} onClick={onConfirm}>{busy ? "Working…" : confirmLabel}</button>
       </div>
     </section>
-  </div>;
+  </DialogBackdrop>;
 }
 
 export function DeleteConfirmation({ target, busy, onCancel, onConfirm }: { target: DeleteRequest; busy: boolean; onCancel: () => void; onConfirm: () => Promise<void> }) {
@@ -310,7 +340,7 @@ export function DeleteConfirmation({ target, busy, onCancel, onConfirm }: { targ
     : target.kind === "list"
       ? "This removes the list and its import history - only the links between this list and the People database."
       : "This removes the client workspace, every list under it, and its import history - only the client-side links.";
-  return <div className="modal-backdrop" role="presentation"><section ref={panel} className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-explanation"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="delete-title">{action}?</h2><p id="delete-explanation">{explanation}</p><div className="delete-target"><strong>{target.name}</strong><span>{target.context}</span></div><p className="shared-safety">Your People and Company databases are never affected by this. Every prospect and company stays in place - only this client-side data is removed.</p><div className="modal-actions"><button className="secondary" data-autofocus disabled={busy} onClick={onCancel}>Cancel</button><button className="danger-button solid" disabled={busy} onClick={() => void onConfirm()}>{busy ? "Working…" : action}</button></div></section></div>;
+  return <DialogBackdrop><section ref={panel} className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-explanation"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="delete-title">{action}?</h2><p id="delete-explanation">{explanation}</p><div className="delete-target"><strong>{target.name}</strong><span>{target.context}</span></div><p className="shared-safety">Your People and Company databases are never affected by this. Every prospect and company stays in place - only this client-side data is removed.</p><div className="modal-actions"><button className="secondary" data-autofocus disabled={busy} onClick={onCancel}>Cancel</button><button className="danger-button solid" disabled={busy} onClick={() => void onConfirm()}>{busy ? "Working…" : action}</button></div></section></DialogBackdrop>;
 }
 
 
