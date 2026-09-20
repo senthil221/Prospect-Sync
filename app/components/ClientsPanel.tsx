@@ -12,6 +12,7 @@ import BlocklistPanel from "./BlocklistPanel";
 import ClientIcpPanel from "./ClientIcpPanel";
 import ListsPanel from "./ListsPanel";
 import ProspectTable from "./ProspectTable";
+import RecentlyAddedPanel from "./RecentlyAddedPanel";
 import Tabs from "./Tabs";
 import { useClientIcps } from "./use-client-icps";
 import { useDebouncedValue } from "./useDebouncedValue";
@@ -186,7 +187,7 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
   const [cooldown, setCooldown] = useState(client.cooldown_days ?? 90);
   const [savedCooldown, setSavedCooldown] = useState(client.cooldown_days ?? 90);
   const [cooldownState, setCooldownState] = useState("");
-  const [tab, setTab] = useState<"lists" | "prospects" | "leads" | "contactable" | "by_icp" | "companies" | "icp" | "blocklist">("lists");
+  const [tab, setTab] = useState<"lists" | "prospects" | "recent" | "leads" | "contactable" | "by_icp" | "companies" | "icp" | "blocklist">("lists");
   const [companyPeopleScope, setCompanyPeopleScope] = useState<CompanyScope | null>(null);
   const [peopleCompanyScope, setPeopleCompanyScope] = useState<PeopleScope | null>(null);
   // Which ICP the picker beside the tabs is on. "" is nothing chosen and
@@ -214,6 +215,7 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
       items={[
         { id: "lists" as const, label: "Uploaded lists", count: formatNumber(client.list_count), icon: <AppIcon name="upload" size={15}/> },
         { id: "prospects" as const, label: "People DB", count: formatNumber(client.prospect_count), icon: <AppIcon name="database" size={15}/> },
+        { id: "recent" as const, label: "Recently Added", icon: <AppIcon name="calendar" size={15}/> },
         { id: "leads" as const, label: "Leads", icon: <AppIcon name="star" size={15}/> },
         { id: "contactable" as const, label: "Contactable", icon: <AppIcon name="check" size={15}/> },
         { id: "companies" as const, label: "Company DB", icon: <AppIcon name="company" size={15}/> },
@@ -252,6 +254,9 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
       <ClientMasterDatabase key={`icp:${client.id}:${icpChoice}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients} active initialFilters={icpFilters} companyScope={null} onClearCompanyScope={() => {}} onSeeCompanies={(scope) => { setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/>
     </> : null}</TabPanel>
     <TabPanel id="companies" active={tab === "companies"} keepMounted className="client-tab-panel"><ClientCompanyDatabase key={`companies:${client.prospect_count}:${client.blocked_count ?? 0}`} client={client} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onSeePeople={(scope) => { if (peopleCompanyScope) { setPeopleCompanyScope(null); setCompanyPeopleScope(null); } else setCompanyPeopleScope(scope); setTab("prospects"); }} onImport={onImport}/></TabPanel>
+    {/* Its own fetch against a narrow time window, so it is mounted only while
+        open rather than on every client screen. */}
+    <TabPanel id="recent" active={tab === "recent"} keepMounted className="client-tab-panel">{tab === "recent" ? <RecentlyAddedPanel client={client} onChanged={onRefreshClients}/> : null}</TabPanel>
     {/* Mounted only while open, like the blocklist: the ICP list is its own
         fetch and there is no reason to pay for it on every client screen. */}
     <TabPanel id="icp" active={tab === "icp"} keepMounted className="client-tab-panel">{tab === "icp" ? <ClientIcpPanel client={client}/> : null}</TabPanel>
