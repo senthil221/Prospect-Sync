@@ -312,7 +312,7 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
         <RequiredFieldList title="Company columns" fields={companyImportFields}/>
       </> : step === "map" ? <>
         <h2>Check the columns before anything is written.</h2>
-        <p>Every column is kept as it was imported. Set one to “{skipImportField}” to drop it entirely - it is not stored and not added to the field catalog.</p>
+        <p>Only a column mapped to one of the fields below is stored. Leave a column as “Not mapped” or set it to “{skipImportField}” - either way it is discarded, not added to the field catalog, and not stored anywhere on the company.</p>
         <RequiredFieldList title="Company columns" fields={companyImportFields}/>
       </> : <>
         <h2>How matched companies are handled.</h2>
