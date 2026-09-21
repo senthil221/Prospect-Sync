@@ -83,17 +83,28 @@ export async function POST(request: Request) {
   const companyIds = (resolved ?? []).map((row: { company_id: string }) => row.company_id);
   if (!companyIds.length) return Response.json({ domains: [], matched: 0, truncated: false });
 
-  const { data: rows, error: domainsError } = await supabase
-    .from("companies")
-    .select("domain")
-    .in("id", companyIds);
-  if (domainsError) return Response.json({ error: domainsError.message }, { status: 500 });
-
-  // Deduplicated and blank-free: a company with no recorded website contributes
+  // Batched the same way prospect deletes already are (app/api/prospects/route.ts):
+  // an unbatched `.in("id", companyIds)` builds a GET request whose query string
+  // grows with every id - past a few hundred UUIDs it blows the URL/header size
+  // the proxy in front of PostgREST accepts, and the request fails before a
+  // response ever comes back (a raw "TypeError: fetch failed", not a clean
+  // error). 20,000 ids unbatched always hit this; 500 stays well under it.
+  const domainSet = new Set<string>();
+  for (let index = 0; index < companyIds.length; index += 500) {
+    const batch = companyIds.slice(index, index + 500);
+    const { data: rows, error: domainsError } = await supabase
+      .from("companies")
+      .select("domain")
+      .in("id", batch);
+    if (domainsError) return Response.json({ error: domainsError.message }, { status: 500 });
+    for (const row of (rows ?? []) as { domain: string | null }[]) {
+      const domain = String(row.domain ?? "").trim();
+      if (domain) domainSet.add(domain);
+    }
+  }
+  // Blank-free and deduplicated: a company with no recorded website contributes
   // nothing to paste, and two companies sharing a domain should not paste twice.
-  const domains = [...new Set((rows ?? [])
-    .map((row: { domain: string | null }) => String(row.domain ?? "").trim())
-    .filter(Boolean))].sort();
+  const domains = [...domainSet].sort();
 
   return Response.json({
     domains,

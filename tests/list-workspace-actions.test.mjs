@@ -50,8 +50,15 @@ test("a list pivot is threaded from DashboardApp through ClientsPanel and consum
   // people-side scope, so nothing downstream needs to know it came from one.
   assert.match(panel, /listPivot\?\.target === "companies"[\s\S]{0,200}field: "__list_ids"/);
   // See People seeds the People DB's own initialFilters, the same mechanism
-  // the Leads and Contactable tabs already use to open pre-filtered.
-  assert.match(panel, /initialFilters=\{listPivot\?\.target === "prospects" \? \[\{ id: `__list_ids:\$\{listPivot\.listId\}`, field: "__list_ids"/);
+  // the Leads and Contactable tabs already use to open pre-filtered - captured
+  // into state at mount (peopleListPivot), not read from the listPivot prop
+  // directly: that prop is cleared back to null by the one-shot effect above
+  // right after mount, and a key/prop that kept reading it would remount
+  // ClientMasterDatabase a tick later with initialFilters=[], silently dropping
+  // the list filter (see the Copy Domains-adjacent regression this test guards).
+  assert.match(panel, /const \[peopleListPivot\] = useState<\{ listId: string; filters: ProspectFilter\[\] \} \| null>\(\(\) =>\s*\n\s*listPivot\?\.target === "prospects"/);
+  assert.match(panel, /key=\{`people:\$\{client\.prospect_count\}:\$\{client\.blocked_count \?\? 0\}:\$\{peopleListPivot\?\.listId \?\? ""\}`\}/);
+  assert.match(panel, /initialFilters=\{peopleListPivot\?\.filters \?\? \[\]\}/);
 });
 
 // The persistent Lists filter, in both the client's People DB and its Company

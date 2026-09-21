@@ -201,6 +201,17 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
     listPivot?.target === "companies"
       ? { search: "", filters: [{ field: "__list_ids", operator: "contains", values: [listPivot.listId] }], limit: 250000 }
       : null);
+  // Captured the same way, for the same reason: the "prospects" TabPanel below
+  // used to read `listPivot` directly for both its key and initialFilters, but
+  // the one-shot useEffect a few lines down clears listPivot back to null right
+  // after this mount, which changed that key on the very next render and
+  // silently remounted ClientMasterDatabase with initialFilters=[] - the list
+  // filter vanished a tick after it appeared. Reading it from captured state
+  // instead means it survives listPivot resetting to null.
+  const [peopleListPivot] = useState<{ listId: string; filters: ProspectFilter[] } | null>(() =>
+    listPivot?.target === "prospects"
+      ? { listId: listPivot.listId, filters: [{ id: `__list_ids:${listPivot.listId}`, field: "__list_ids", operator: "contains", values: [listPivot.listId] }] }
+      : null);
   // A pivot is consumed exactly once, right after the mount that reads it into
   // the state above - otherwise a later ordinary remount of this same
   // component (switching clients and back, without going through ListsPanel)
@@ -253,7 +264,7 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
       />
     </div>
     <TabPanel id="lists" active={tab === "lists"} keepMounted className="client-tab-panel"><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Open any list to search its original rows and inspect preserved fields.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Data source</th><th>Source file</th><th>Rows</th><th>Fields preserved</th><th>New to master</th><th>Cross-client duplicates</th><th>Imported</th><th>Actions</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><button className="list-open-button" onClick={() => onOpenList(list)}><strong>{list.name}</strong><span>Open</span></button></td><td><span className="data-source-badge">{list.data_source}</span></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="field-verified"><AppIcon name="check" size={14}/> {formatNumber(list.field_count)} fields</span></td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><button className="row-danger" onClick={() => onDeleteList(list)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></TabPanel>
-    <TabPanel id="prospects" active={tab === "prospects"} keepMounted className="client-tab-panel"><ClientMasterDatabase key={`people:${client.prospect_count}:${client.blocked_count ?? 0}:${listPivot?.target === "prospects" ? listPivot.listId : ""}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients.map((item) => item.id === client.id ? { ...item, cooldown_days: savedCooldown } : item)} active={tab === "prospects"} initialFilters={listPivot?.target === "prospects" ? [{ id: `__list_ids:${listPivot.listId}`, field: "__list_ids", operator: "contains", values: [listPivot.listId] }] : []} companyScope={companyPeopleScope} onClearCompanyScope={() => setCompanyPeopleScope(null)} onSeeCompanies={(scope) => { if (companyPeopleScope) { setCompanyPeopleScope(null); setPeopleCompanyScope(null); } else setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/></TabPanel>
+    <TabPanel id="prospects" active={tab === "prospects"} keepMounted className="client-tab-panel"><ClientMasterDatabase key={`people:${client.prospect_count}:${client.blocked_count ?? 0}:${peopleListPivot?.listId ?? ""}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients.map((item) => item.id === client.id ? { ...item, cooldown_days: savedCooldown } : item)} active={tab === "prospects"} initialFilters={peopleListPivot?.filters ?? []} companyScope={companyPeopleScope} onClearCompanyScope={() => setCompanyPeopleScope(null)} onSeeCompanies={(scope) => { if (companyPeopleScope) { setCompanyPeopleScope(null); setPeopleCompanyScope(null); } else setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/></TabPanel>
     {/* Leads and Contactable are the People DB with a filter already applied,
         not separate grids. The workspace owns paging, selection, freezing,
         export and the company pivot; a second copy of it would be a second

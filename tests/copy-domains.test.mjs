@@ -21,8 +21,15 @@ test("Copy Domains resolves through the same selection resolver as push/tag/remo
 
   // Deduplicated and blank-free: two companies sharing a domain should not
   // paste twice, and a company with no recorded website contributes nothing.
-  assert.match(route, /new Set\(\(rows \?\? \[\]\)/);
-  assert.match(route, /\.filter\(Boolean\)/);
+  assert.match(route, /const domainSet = new Set<string>\(\);/);
+  assert.match(route, /if \(domain\) domainSet\.add\(domain\);/);
+
+  // Batched the same way prospects/route.ts already batches its `.in("id", ...)`
+  // deletes: an unbatched `.in()` with up to 20,000 ids builds a GET request
+  // that blows the proxy's URL/header size limit and fails with a raw
+  // "TypeError: fetch failed" instead of a clean response.
+  assert.match(route, /for \(let index = 0; index < companyIds\.length; index \+= 500\)/);
+  assert.match(route, /const batch = companyIds\.slice\(index, index \+ 500\);/);
 
   // A cap exists and is honest about being hit, rather than silently returning
   // fewer domains than the selection actually contains.

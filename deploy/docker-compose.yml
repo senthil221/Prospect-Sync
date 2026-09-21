@@ -357,7 +357,16 @@ services:
       SUPABASE_REST_URL: http://rest:3000
       SUPABASE_STORAGE_URL: http://storage:5000
       IMPORT_APP_URL: http://app-router:3000
-      IMPORT_BATCH_SIZE: "1000"
+      # 1000 was sized for a batch that mostly matches existing companies (a
+      # cheap indexed SELECT per row). A batch that instead creates hundreds of
+      # brand-new companies is far more expensive per row (insert + reindex +
+      # the company-count recompute trigger over every touched id), and one
+      # production import (a85db3b0, 2026-09-21) reliably blew the 120s batch
+      # timeout on row 0 across all 3 retries without committing a single row.
+      # 300 cuts the worst case to roughly a third with no schema change; the
+      # timeout also grows the same fraction to keep the existing margin.
+      IMPORT_BATCH_SIZE: "300"
+      IMPORT_BATCH_TIMEOUT: "180s"
       PGHOST: db
       PGPORT: "5432"
       PGDATABASE: ${POSTGRES_DB}
