@@ -163,3 +163,30 @@ test("a finished import says whether it can be undone", async () => {
   assert.match(source, /can be undone from Overview → Recent imports/);
   assert.match(source, /cannot be rolled back as a unit/);
 });
+
+// "Kept without a People DB link" never had anywhere to look further - the
+// rows only ever lived in list_rows (prospect_id null), invisible to the List
+// workspace, which only shows rows that resolved to a prospect.
+test("skipped rows are downloadable from the completion screen, not just counted", async () => {
+  const [panel, route] = await Promise.all([
+    read("../app/components/ImportsPanel.tsx"), read("../app/api/imports/[id]/skipped/route.ts"),
+  ]);
+
+  // Only offered when there is something to download, and only once an
+  // importId survives to the completion screen - the foreground path's own
+  // importId is a local, and the background poll clears activeBackgroundId
+  // the moment it reports done, so a dedicated completedImportId is kept.
+  assert.match(panel, /const \[completedImportId, setCompletedImportId\] = useState/);
+  assert.match(panel, /setCompletedImportId\(session\.importId\)/);
+  assert.match(panel, /setCompletedImportId\(activeBackgroundId\)/);
+  assert.match(panel, /outcome\.unlinked > 0 && completedImportId/);
+  assert.match(panel, /\/api\/imports\/\$\{encodeURIComponent\(completedImportId\)\}\/skipped/);
+
+  // The route reads the same list_rows(prospect_id is null) rows the skip
+  // count is derived from (prospectImportOutcome's processed - added - linked
+  // remainder), not a re-derived or approximate set.
+  assert.match(route, /from\("list_rows"\)/);
+  assert.match(route, /\.is\("prospect_id", null\)/);
+  assert.match(route, /\.eq\("import_id", id\)/);
+  assert.match(route, /csvDocument/);
+});

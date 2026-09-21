@@ -20,6 +20,22 @@ function normalizeLinkedin(value) {
   return clean(value).toLowerCase().split(/[?#]/)[0].replace(/\/$/, "");
 }
 
+// Kept in sync with db/normalize.ts's domainFromEmail/freeEmailDomains - see
+// that file for why only the work email, and why free providers are excluded.
+const freeEmailDomains = new Set([
+  "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.in", "yahoo.co.uk",
+  "outlook.com", "outlook.in", "hotmail.com", "hotmail.co.uk", "live.com", "msn.com",
+  "aol.com", "icloud.com", "me.com", "mac.com", "protonmail.com", "proton.me",
+  "zoho.com", "gmx.com", "mail.com", "yandex.com", "yandex.ru", "rediffmail.com", "rocketmail.com", "ymail.com",
+]);
+
+function domainFromEmail(email) {
+  const at = email.lastIndexOf("@");
+  if (at < 0) return "";
+  const domain = clean(email.slice(at + 1)).toLowerCase();
+  return domain && !freeEmailDomains.has(domain) ? domain : "";
+}
+
 function findValue(raw, aliases) {
   const aliasKeys = new Set(aliases.map(key));
   for (const [header, value] of Object.entries(raw)) {
@@ -68,7 +84,7 @@ export function mapProspect(headers, values) {
   const personalEmail = findValue(raw, ["personal email", "personalemail"]).toLowerCase();
   const linkedinUrl = normalizeLinkedin(findValue(raw, ["linkedin", "linkedin url", "linkedin profile", "linkedinurl", "personal linkedin url", "person linkedin url"]));
   const companyName = findValue(raw, ["casual company name", "company name", "company", "organization"]);
-  const companyDomain = normalizeDomain(findValue(raw, ["website", "company website", "company domain", "domain", "companywebsite"]));
+  const companyDomain = normalizeDomain(findValue(raw, ["website", "company website", "company domain", "domain", "companywebsite"])) || domainFromEmail(workEmail);
   const employeeCount = parseEmployeeCount(findValue(raw, ["# employees", "number of employees", "employee count", "employees count", "employees", "company employee count", "company employees", "company headcount", "headcount"]));
   const city = findValue(raw, ["city"]);
   const state = findValue(raw, ["state", "region"]);

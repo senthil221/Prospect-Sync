@@ -57,12 +57,11 @@ export async function POST(request: Request) {
       sourceRowNumber: Math.max(2, Math.round(Number(row.sourceRowNumber ?? rowOffset + index + 2))),
     };
   });
-  const rejected = rows.filter((row) => !row.name && !row.domain);
-  if (rejected.length) return Response.json({
-    error: `${rejected.length} company row${rejected.length === 1 ? " has" : "s have"} neither a company name nor website.`,
-    rejectedRows: rejected.slice(0, 20).map((row) => row.sourceRowNumber),
-    rejectedCount: rejected.length,
-  }, { status: 422 });
+  // A row with neither a name nor a website is not rejected here: doing so
+  // used to fail this whole chunk of up to 250 rows over one bad row, forcing
+  // the entire import to stop. import_company_batch_v3 already skips exactly
+  // this case per-row - it stores the raw data and counts it as skipped,
+  // without blocking the rows around it - so nothing needs re-deriving here.
   const supabase = createAdminClient();
   const isMissing = (candidate: { code?: string } | null) => candidate?.code === "PGRST202" || candidate?.code === "42883";
   const isTimeout = (candidate: { code?: string; message?: string } | null) => candidate?.code === "57014" || /statement timeout/i.test(candidate?.message ?? "");

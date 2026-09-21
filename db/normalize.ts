@@ -74,6 +74,28 @@ export function normalizeLinkedin(value: string) {
   return clean(value).toLowerCase().split(/[?#]/)[0].replace(/\/$/, "");
 }
 
+// A free/personal provider is never the employer's domain - falling back to it
+// would file "gmail.com" itself as a company shared by every Gmail user in the
+// import. Deliberately not exhaustive: it only needs to catch the handful of
+// providers common enough to show up as noise across many different companies.
+const freeEmailDomains = new Set([
+  "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.in", "yahoo.co.uk",
+  "outlook.com", "outlook.in", "hotmail.com", "hotmail.co.uk", "live.com", "msn.com",
+  "aol.com", "icloud.com", "me.com", "mac.com", "protonmail.com", "proton.me",
+  "zoho.com", "gmx.com", "mail.com", "yandex.com", "yandex.ru", "rediffmail.com", "rocketmail.com", "ymail.com",
+]);
+
+// A row with no explicit website often still carries a work email, and that
+// email's domain usually IS the company's website - just not spelled that way
+// in the file. Used only as a fallback, and only for the work email: a
+// personal email's domain says nothing about who the person works for.
+export function domainFromEmail(email: string) {
+  const at = email.lastIndexOf("@");
+  if (at < 0) return "";
+  const domain = clean(email.slice(at + 1)).toLowerCase();
+  return domain && !freeEmailDomains.has(domain) ? domain : "";
+}
+
 function findValue(raw: Record<string, string>, aliases: string[]) {
   const aliasKeys = new Set(aliases.map(key));
   for (const [header, value] of Object.entries(raw)) {
@@ -134,7 +156,9 @@ export function mapProspect(headers: string[], values: string[]): CanonicalProsp
   const personalEmail = findValue(raw, ["personal email", "personalemail"]).toLowerCase();
   const linkedinUrl = normalizeLinkedin(findValue(raw, ["linkedin", "linkedin url", "linkedin profile", "linkedinurl", "personal linkedin url", "person linkedin url"]));
   const companyName = findValue(raw, ["casual company name", "company name", "company", "organization"]);
-  const companyDomain = normalizeDomain(findValue(raw, ["website", "company website", "company domain", "domain", "companywebsite"]));
+  // A missing Website column falls back to the work email's domain - see
+  // domainFromEmail above for why only the work email, not the personal one.
+  const companyDomain = normalizeDomain(findValue(raw, ["website", "company website", "company domain", "domain", "companywebsite"])) || domainFromEmail(workEmail);
   const employeeCount = parseEmployeeCount(findValue(raw, ["# employees", "number of employees", "employee count", "employees count", "employees", "company employee count", "company employees", "company headcount", "headcount"]));
   const city = findValue(raw, ["city"]);
   const state = findValue(raw, ["state", "region"]);

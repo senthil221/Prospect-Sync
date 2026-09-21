@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { mapProspect } from "../db/normalize.ts";
+import { domainFromEmail, mapProspect } from "../db/normalize.ts";
 import { estimatedCompanyBytesPerRow } from "../lib/company-export.ts";
 import { planExport } from "../lib/export-plan.ts";
 import {
@@ -87,6 +87,24 @@ test("'Company Name for Emails' (an Apollo export header) auto-maps to Company N
   assert.equal(suggestedPersonImportField("Company Name for Emails"), "Company Name");
 });
 
+test("a missing Website column falls back to the work email's domain, never a free provider", () => {
+  assert.equal(domainFromEmail("ana@acme.com"), "acme.com");
+  assert.equal(domainFromEmail("ana@gmail.com"), "", "a free provider must never be filed as the company's own domain");
+  assert.equal(domainFromEmail("not-an-email"), "");
+
+  // Wired into mapProspect as a fallback, and only from the work email - a
+  // personal email's domain says nothing about who the person works for.
+  const withWorkEmail = mapProspect(["Email", "Full Name"], ["ana@acme.com", "Ana Diaz"]);
+  assert.equal(withWorkEmail.companyDomain, "acme.com");
+  assert.ok(withWorkEmail.identifiers.some((identifier) => identifier.type === "name_company" && identifier.value.endsWith("|acme.com")));
+
+  const explicitWebsiteWins = mapProspect(["Email", "Website"], ["ana@acme.com", "other-domain.com"]);
+  assert.equal(explicitWebsiteWins.companyDomain, "other-domain.com");
+
+  const personalEmailIsIgnored = mapProspect(["Personal Email", "Full Name"], ["ana@gmail.com", "Ana Diaz"]);
+  assert.equal(personalEmailIsIgnored.companyDomain, "");
+});
+
 test("People paste accepts email-only and LinkedIn-only identities", () => {
   const email = parsePastedPeopleTable("ana@example.com\nbea@example.com");
   assert.deepEqual(email.headers, ["Email"]);
@@ -128,8 +146,14 @@ test("import APIs sanitize raw payloads and report rows with no identity", async
     assert.match(source, /fixedImport|personImportFields/);
     assert.match(source, /identif/i);
   }
-  assert.match(companyChunk, /rejectedRows/);
-  assert.match(companyChunk, /company name nor website/);
+  // A row with neither name nor website is no longer rejected at the route -
+  // that used to fail an entire 250-row chunk over one bad row. It is left to
+  // import_company_batch_v3, which already skips exactly this case per-row
+  // without blocking the rows around it (see that migration's "importable
+  // with a name OR a website" comment).
+  assert.doesNotMatch(companyChunk, /rejectedRows/);
+  assert.doesNotMatch(companyChunk, /neither a company name nor website/);
+  assert.match(companyChunk, /import_company_batch_v3/);
   assert.match(migration, /p_apply boolean default false/);
   assert.match(migration, /p_entity not in \('prospect', 'company', 'list_row', 'membership', 'catalog'\)/);
   assert.match(migration, /public\.list_rows/);

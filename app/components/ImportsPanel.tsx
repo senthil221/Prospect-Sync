@@ -382,6 +382,10 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
   const [phase, setPhase] = useState<"idle" | "reading" | "uploading" | "queued" | "done">("idle");
   const [message, setMessage] = useState("");
   const [summary, setSummary] = useState<{ processed_rows: number; unique_added: number; duplicates_linked: number } | null>(null);
+  // Kept only so the completion screen can offer the skipped-rows download -
+  // uploadProspectRows's own importId is a local, and the background poll
+  // clears activeBackgroundId the moment it reports done.
+  const [completedImportId, setCompletedImportId] = useState("");
   const [fileAudit, setFileAudit] = useState<FileAudit | null>(null);
   const [fieldMap, setFieldMap] = useState<Record<string, string>>({});
   const [activeBackgroundId, setActiveBackgroundId] = useState("");
@@ -414,6 +418,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
           return;
         }
         if (detail.status === "completed") {
+          setCompletedImportId(activeBackgroundId);
           setActiveBackgroundId("");
           setSummary({ processed_rows: detail.processedRows ?? 0, unique_added: detail.uniqueAdded ?? 0, duplicates_linked: detail.duplicatesLinked ?? 0 });
           setProgress(100); setPhase("done"); setMessage("Import complete. Your list is ready and the people database is up to date.");
@@ -496,7 +501,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
       setProgress(Math.round(((index + chunk.length) / table.rows.length) * 100));
     }
     const completed = await api<{ summary: { processed_rows: number; unique_added: number; duplicates_linked: number } }>("/api/imports/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(session) });
-    setSummary(completed.summary); setPhase("done"); setMessage("Import complete. Your list is ready and the people database is up to date.");
+    setSummary(completed.summary); setCompletedImportId(session.importId); setPhase("done"); setMessage("Import complete. Your list is ready and the people database is up to date.");
   }
 
   async function startImport() {
@@ -588,6 +593,9 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
         <div><strong>{formatNumber(outcome.unlinked)}</strong><span>Kept without a People DB link</span></div>
       </div>
       <p className="import-rollback-note">Every row either became a new prospect, matched one already there, or was kept on the list without a People DB link. This import can be undone from Overview → Recent imports.</p>
+      {outcome.unlinked > 0 && completedImportId
+        ? <p className="import-rollback-note"><a href={`/api/imports/${encodeURIComponent(completedImportId)}/skipped`} download>Download the {formatNumber(outcome.unlinked)} skipped row{outcome.unlinked === 1 ? "" : "s"} (CSV)</a> - each had no email, LinkedIn URL, or name plus company/website to identify it by.</p>
+        : null}
       <button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
   }
 
