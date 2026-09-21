@@ -1,4 +1,4 @@
-import { normalizeDomain, normalizeText, parseEmployeeCount } from "../../../../db/normalize";
+import { normalizeDomain, normalizeText, parseEmployeeCount, stripUnstorableCharacters } from "../../../../db/normalize";
 import { authorizeApi } from "../../../../lib/auth";
 import { companyImportFields } from "../../../../lib/import-schema";
 import { createAdminClient } from "../../../../lib/supabase/admin";
@@ -6,8 +6,14 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 type CompanyImportRow = { name?: unknown; website?: unknown; employeeCount?: unknown; industry?: unknown; city?: unknown; state?: unknown; country?: unknown; keywords?: unknown; shortDescription?: unknown; foundedYear?: unknown; technologies?: unknown; totalFunding?: unknown; raw?: unknown; sourceRowNumber?: unknown };
 type ImportSummary = { processed: number; added: number; updated: number; skipped: number };
 
+// Every string this route sends onward goes through here. The whole chunk is
+// one statement, so a NUL in a single cell fails all 250 rows with it - which
+// is exactly what an Apollo export did on 2026-09-21, repeatedly, because each
+// retry re-sent the same byte. See stripUnstorableCharacters.
+const text = (value: unknown) => stripUnstorableCharacters(String(value ?? "")).trim();
+
 function listValue(value: unknown) {
-  return [...new Set(String(value ?? "").split(/[,;|]/).map((item) => item.trim()).filter(Boolean))].slice(0, 100);
+  return [...new Set(text(value).split(/[,;|]/).map((item) => item.trim()).filter(Boolean))].slice(0, 100);
 }
 
 const allowedCompanyRawFields = new Set<string>(companyImportFields);
@@ -16,7 +22,7 @@ function fixedCompanyRaw(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value as Record<string, unknown>)
     .filter(([field]) => allowedCompanyRawFields.has(field))
-    .map(([field, item]) => [field, String(item ?? "").trim()]));
+    .map(([field, item]) => [field, text(item)]));
 }
 
 export async function POST(request: Request) {
@@ -29,13 +35,13 @@ export async function POST(request: Request) {
   const rowOffset = Number(payload.rowOffset);
   if (!Number.isSafeInteger(rowOffset) || rowOffset < 0) return Response.json({ error: "A non-negative rowOffset is required." }, { status: 400 });
   const rows = payload.rows.map((row, index) => {
-    const name = String(row.name ?? "").trim().slice(0, 300);
-    const domain = normalizeDomain(String(row.website ?? ""));
-    const employeeCount = parseEmployeeCount(String(row.employeeCount ?? ""));
-    const foundedYear = Number(String(row.foundedYear ?? "").match(/\d{4}/)?.[0] ?? 0);
-    const city = String(row.city ?? "").trim().slice(0, 200);
-    const state = String(row.state ?? "").trim().slice(0, 200);
-    const country = String(row.country ?? "").trim().slice(0, 200);
+    const name = text(row.name).slice(0, 300);
+    const domain = normalizeDomain(text(row.website));
+    const employeeCount = parseEmployeeCount(text(row.employeeCount));
+    const foundedYear = Number(text(row.foundedYear).match(/\d{4}/)?.[0] ?? 0);
+    const city = text(row.city).slice(0, 200);
+    const state = text(row.state).slice(0, 200);
+    const country = text(row.country).slice(0, 200);
     return {
       name,
       normalizedName: normalizeText(name),
@@ -43,16 +49,16 @@ export async function POST(request: Request) {
       normalizedDomain: domain,
       employeeCountMin: employeeCount.min,
       employeeCountMax: employeeCount.max,
-      industry: String(row.industry ?? "").trim().slice(0, 300),
+      industry: text(row.industry).slice(0, 300),
       location: [city, state, country].filter(Boolean).join(", ").slice(0, 500),
       city,
       state,
       country,
       keywords: listValue(row.keywords),
-      shortDescription: String(row.shortDescription ?? "").trim().slice(0, 5000),
+      shortDescription: text(row.shortDescription).slice(0, 5000),
       foundedYear: foundedYear >= 1000 && foundedYear <= new Date().getFullYear() ? foundedYear : null,
       technologies: listValue(row.technologies),
-      totalFunding: String(row.totalFunding ?? "").trim().slice(0, 200),
+      totalFunding: text(row.totalFunding).slice(0, 200),
       raw: fixedCompanyRaw(row.raw),
       sourceRowNumber: Math.max(2, Math.round(Number(row.sourceRowNumber ?? rowOffset + index + 2))),
     };

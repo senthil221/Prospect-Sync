@@ -1,4 +1,4 @@
-import { mapProspect, normalizeText } from "../db/normalize.ts";
+import { mapProspect, normalizeText, stripUnstorableCharacters } from "../db/normalize.ts";
 import { fixedImportColumns, personImportFields, suggestedPersonImportField } from "./import-schema.ts";
 import { createAdminClient } from "./supabase/admin.ts";
 
@@ -28,7 +28,10 @@ export async function importProspectChunk(payload: ProspectChunkPayload) {
   const keptHeaders = keptColumns.map(({ field }) => field);
   if (!keptHeaders.length) return { response: Response.json({ error: "Every import column was skipped." }, { status: 400 }) };
   const mapped = rows.map((sourceValues, index) => {
-    const values = keptColumns.map(({ column }) => String(sourceValues[column] ?? ""));
+    // Sanitized before mapping rather than after, because prospect.raw below is
+    // rebuilt straight from these values and would otherwise carry a NUL into
+    // jsonb untouched by mapProspect's own cleaning.
+    const values = keptColumns.map(({ column }) => stripUnstorableCharacters(String(sourceValues[column] ?? "")));
     const prospect = mapProspect(keptHeaders, values);
     prospect.raw = Object.fromEntries(keptHeaders.map((field, valueIndex) => [field, String(values[valueIndex] ?? "").trim()]));
     const companyId = prospect.companyDomain

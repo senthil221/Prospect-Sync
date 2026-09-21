@@ -4,7 +4,7 @@ import { finished } from "node:stream/promises";
 import pg from "pg";
 import { from as copyFrom } from "pg-copy-streams";
 import { createServer } from "node:http";
-import { mapProspect, normalizeText } from "./prospect-map.mjs";
+import { mapProspect, normalizeText, stripUnstorableCharacters } from "./prospect-map.mjs";
 import { pgInterval } from "./pg-interval.mjs";
 
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -123,7 +123,10 @@ function mappedPayload(headers, sourceValues, fieldMap, rowOffset) {
     .filter(({ field }) => personImportFields.has(field));
   if (!keptColumns.length) throw new Error("FATAL: Every import column was skipped.");
   const keptHeaders = keptColumns.map(({ field }) => field);
-  const values = keptColumns.map(({ column }) => String(sourceValues[column] ?? ""));
+  // Sanitized before mapping: prospect.raw below is rebuilt from these values
+  // and would otherwise carry a NUL straight into jsonb. It also keeps the
+  // staging COPY free of a byte the later batch statement could not accept.
+  const values = keptColumns.map(({ column }) => stripUnstorableCharacters(String(sourceValues[column] ?? "")));
   const prospect = mapProspect(keptHeaders, values);
   prospect.raw = Object.fromEntries(keptHeaders.map((header, index) => [header, String(values[index] ?? "").trim()]));
   if (!prospect.identifiers.length) throw new Error(`FATAL: Source row ${rowOffset + 2} has no usable identity (email, LinkedIn, or name plus company/website).`);

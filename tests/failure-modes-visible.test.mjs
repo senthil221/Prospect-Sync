@@ -79,9 +79,11 @@ test("health reports load alongside readiness, and never caches it", async () =>
   const health = await readFile(new URL("../app/api/health/route.ts", import.meta.url), "utf8");
   assert.match(health, /observabilitySnapshot/);
   assert.match(health, /admissionState/);
-  // Both the healthy and unhealthy answers carry it, or it disappears exactly
-  // when it is most wanted.
-  assert.match(health, /status: "ok", checks: checkStatus, load/);
+  // Both the serving and unhealthy answers carry it, or it disappears exactly
+  // when it is most wanted. The serving answer says "degraded" rather than
+  // "ok" when a background worker is away - still a 200, because browsing does
+  // not need one, but not a clean bill of health either.
+  assert.match(health, /status: degraded\.length \? "degraded" : "ok", checks: checkStatus, load/);
   assert.match(health, /status: "unhealthy", checks: checkStatus, load/);
   assert.match(health, /no-store/);
 });

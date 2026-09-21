@@ -33,7 +33,14 @@ const repeatEveryMs = 5 * 60_000;
 
 let current: { signature: string; since: number; loggedAt: number; escalated: boolean } | null = null;
 
-export function readinessLogDecision(failed: string[], now: number = Date.now()): ReadinessDecision {
+// `logFirst` is how a caller says whether the first poll of an incident is
+// already news. A core check failing is: the container cannot serve. A
+// background worker being away is not, because every rollout restarts one -
+// that first row was written by every single deploy and never meant anything,
+// which is precisely the habit of skimming past the tab this module set out to
+// avoid. Escalation is unchanged either way: an outage that outlasts a restart
+// still becomes an error row on its own, with nobody watching.
+export function readinessLogDecision(failed: string[], now: number = Date.now(), logFirst = true): ReadinessDecision {
   if (failed.length === 0) {
     current = null;
     return { level: "warn", log: false };
@@ -45,7 +52,7 @@ export function readinessLogDecision(failed: string[], now: number = Date.now())
 
   if (!current || current.signature !== signature) {
     current = { signature, since: now, loggedAt: now, escalated: false };
-    return { level: "warn", log: true };
+    return { level: "warn", log: logFirst };
   }
 
   if (!current.escalated && now - current.since >= sustainedFailureMs) {
