@@ -237,7 +237,7 @@ test("the master DB filters by client id, not by joined client names", async () 
   assert.match(panel, /export function ClientMembershipFilter/);
   // Generalised to any id-and-name list, so the same control serves the client
   // filter and the client ICP tag filter on both entities.
-  assert.match(panel, /__client_ids, __company_client_ids, __client_tags or __company_tags/);
+  assert.match(panel, /__client_ids, __company_client_ids, __client_tags, __company_tags or __list_ids/);
   assert.match(panel, /options: Array<\{ id: string; name: string \}>/);
   // Shows names, sends ids, and never puts one client in both directions.
   assert.match(panel, /operator: "not_contains" as const, values: exclude/);

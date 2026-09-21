@@ -9,6 +9,7 @@ import { AppIcon } from "./components/DashboardUi";
 import Tabs from "./components/Tabs";
 import { emptyTaxonomy, orderedDepartments, orderedTiers, tierLabel, type TitleTaxonomy } from "../lib/title-taxonomy";
 import { useClientIcps } from "./components/use-client-icps";
+import { useClientLists } from "./components/use-client-lists";
 
 export type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 
@@ -153,6 +154,7 @@ export function filterLabel(field: string, customFields: ProspectFieldDefinition
   // opaque, so the label has to carry the whole meaning.
   if (field === "__company_ids") return "Selected companies";
   if (field === "__client_tags" || field === "__company_tags") return "Client ICP";
+  if (field === "__list_ids") return "Lists";
   if (field === "__lead") return "Lead";
   if (field === "__contactable") return "Contactable";
   return [...mainFilters, ...classifierFilters, ...companyFilters, ...optionalFilters, ...customFields].find((definition) => definition.id === field)?.label ?? field;
@@ -189,6 +191,7 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
   // migration yet answers with an empty taxonomy and the pickers say so rather
   // than rendering nothing.
   const icps = useClientIcps(clientId);
+  const lists = useClientLists(clientId);
   const [taxonomy, setTaxonomy] = useState<TitleTaxonomy>(emptyTaxonomy);
   useEffect(() => {
     let current = true;
@@ -284,6 +287,15 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
         <small>Client ICP</small>
         <ClientMembershipFilter field="__client_tags" title="Client ICP" noun="prospects" options={icps} filters={filters}
           expanded={expanded === "__client_tags"} onToggle={() => setExpanded(expanded === "__client_tags" ? "" : "__client_tags")}
+          onChange={onChange}/>
+      </div> : null}
+      {/* Lists only inside a client workspace, for the same reason Client ICP
+          is: it needs a client to have lists at all. pi.list_ids is the
+          identity array (20260921100000), same shape as __client_ids. */}
+      {clientId && lists.length && "lists".includes(normalizedSearch) ? <div className="apollo-filter-group">
+        <small>Lists</small>
+        <ClientMembershipFilter field="__list_ids" title="Lists" noun="prospects" options={lists} filters={filters}
+          expanded={expanded === "__list_ids"} onToggle={() => setExpanded(expanded === "__list_ids" ? "" : "__list_ids")}
           onChange={onChange}/>
       </div> : null}
       {!visibleMain.length && !visibleClassifier.length && !visibleCompany.length && !visibleOptional.length ? <p className="filter-search-empty">No filters match “{search}”.</p> : null}
@@ -723,7 +735,7 @@ function DepartmentFunctionFilter({ filters, taxonomy, onChange }: {
  * to a single predicate per direction however many clients are picked.
  */
 export function ClientMembershipFilter({ field, title, noun, options, filters, expanded, onToggle, onChange }: {
-  /** __client_ids, __company_client_ids, __client_tags or __company_tags. */
+  /** __client_ids, __company_client_ids, __client_tags, __company_tags or __list_ids. */
   field: string;
   title: string;
   noun: string;

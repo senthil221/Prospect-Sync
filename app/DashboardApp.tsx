@@ -77,6 +77,13 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
   const [lists, setLists] = useState<ListRecord[]>([]);
   const [selectedClient, setSelectedClient] = useState<ClientRecord | null>(null);
   const [selectedList, setSelectedList] = useState<ListRecord | null>(null);
+  // A pivot requested from the List workspace ("See People"/"See Companies"),
+  // consumed once by ClientDetail at the mount that follows closing the list -
+  // going through ListsPanel always unmounts ClientDetail and remounts it fresh,
+  // so a one-shot value read at mount and cleared immediately after is enough;
+  // no effect-driven sync is needed the way the scopes below need one at this
+  // level, since those persist across renders of the same workspace section.
+  const [clientListPivot, setClientListPivot] = useState<{ clientId: string; listId: string; listName: string; target: "prospects" | "companies" } | null>(null);
   const [selectedProspect, setSelectedProspect] = useState<Prospect | null>(null);
   const [companyPeopleScope, setCompanyPeopleScope] = useState<CompanyScope | null>(initial.companyPeopleScope);
   const [peopleCompanyScope, setPeopleCompanyScope] = useState<PeopleScope | null>(initial.peopleCompanyScope);
@@ -369,6 +376,9 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
           onCloseClient={() => setSelectedClient(null)}
           onOpenList={setSelectedList}
           onCloseList={() => setSelectedList(null)}
+          listPivot={clientListPivot}
+          onConsumeListPivot={() => setClientListPivot(null)}
+          onSeeListRecords={(clientId, list, target) => { setClientListPivot({ clientId, listId: list.id, listName: list.name, target }); setSelectedList(null); }}
           onSelectProspect={setSelectedProspect}
           onImport={() => navigate("imports")}
           onDeleteClient={(client) => setDeleteRequest({ kind: "client", id: client.id, name: client.name, context: `${client.list_count} lists · ${client.prospect_count} linked prospects` })}
