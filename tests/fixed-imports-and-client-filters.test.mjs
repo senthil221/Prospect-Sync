@@ -75,6 +75,18 @@ test("a People import defaults an unrecognized column to Skip column, not a vagu
   assert.doesNotMatch(importsPanel, /fieldMap\[header\] \|\| "Auto detect"/);
 });
 
+test("'Company Name for Emails' (an Apollo export header) auto-maps to Company Name", () => {
+  // Traced directly from production: import 136e9fe0 (5_4_part1.csv, 12,497
+  // rows, an Industry/Employees/Technologies/Funding export with no person
+  // columns at all) skipped every single row. Its raw_data carried only
+  // {"Website": "..."} - "Company Name for Emails" had been left on Auto
+  // detect and never mapped, so no row ever got a name_company_name
+  // identifier even where a company name was present. The file was still the
+  // wrong import type either way (no person names to import at all), but this
+  // header is common enough in Apollo-style company exports to recognize.
+  assert.equal(suggestedPersonImportField("Company Name for Emails"), "Company Name");
+});
+
 test("People paste accepts email-only and LinkedIn-only identities", () => {
   const email = parsePastedPeopleTable("ana@example.com\nbea@example.com");
   assert.deepEqual(email.headers, ["Email"]);

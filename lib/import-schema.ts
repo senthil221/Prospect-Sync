@@ -43,7 +43,7 @@ const personAliases: Record<string, string> = {
   mobile: "Mobile Number", mobilenumber: "Mobile Number", phone: "Mobile Number", phonenumber: "Mobile Number",
   linkedin: "Personal LinkedIn URL", linkedinurl: "Personal LinkedIn URL", personlinkedinurl: "Personal LinkedIn URL", personallinkedinurl: "Personal LinkedIn URL", linkedinprofile: "Personal LinkedIn URL",
   title: "Job Title", jobtitle: "Job Title",
-  company: "Company Name", companyname: "Company Name", casualcompanyname: "Company Name", organization: "Company Name",
+  company: "Company Name", companyname: "Company Name", casualcompanyname: "Company Name", organization: "Company Name", companynameforemails: "Company Name",
   companywebsite: "Website", website: "Website", domain: "Website", companydomain: "Website",
 };
 
