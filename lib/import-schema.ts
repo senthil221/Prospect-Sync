@@ -67,7 +67,11 @@ export function normalizeImportHeader(value: string) {
 }
 
 export function suggestedPersonImportField(header: string) {
-  return personAliases[normalizeImportHeader(header)] ?? "Auto detect";
+  // Same rule as suggestedCompanyImportField below: a column with no recognized
+  // alias defaults to Skip column, not a vague "Auto detect" that behaves
+  // identically (resolvedImportField drops anything outside personImportFields
+  // either way) but reads as if something will still happen to it.
+  return personAliases[normalizeImportHeader(header)] ?? skipImportField;
 }
 
 export function suggestedCompanyImportField(header: string) {
@@ -119,7 +123,7 @@ export function fixedImportColumns(
 }
 
 export function resolvedImportFields(headers: string[], fieldMap: Record<string, string> | undefined, suggest: (header: string) => string) {
-  return headers.map((header) => fieldMap?.[header] || suggest(header)).filter((field) => field !== "Auto detect" && field !== "Not mapped" && field !== skipImportField);
+  return headers.map((header) => fieldMap?.[header] || suggest(header)).filter((field) => field !== "Not mapped" && field !== skipImportField);
 }
 
 export function missingRequiredFields(required: readonly string[], mapped: string[]) {

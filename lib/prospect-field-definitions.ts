@@ -1,6 +1,10 @@
 import { personImportFields, skipImportField } from "./import-schema.ts";
 
-export const canonicalImportFields = ["Auto detect", skipImportField, ...personImportFields];
+// No separate "Auto detect" entry: a column with no recognized alias already
+// defaults to Skip column (suggestedPersonImportField), and the two behaved
+// identically once selected - keeping both was a redundant second name for
+// the same "nothing happens to this column" state.
+export const canonicalImportFields = [skipImportField, ...personImportFields];
 
 export const standardProspectFields = [
   { id: "__name", label: "Name" },

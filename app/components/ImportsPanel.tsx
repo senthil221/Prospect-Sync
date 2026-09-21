@@ -6,7 +6,7 @@ import { companyMergeModeLabels, companyMergeModes, defaultCompanyMergeMode, typ
 import { commonDataSources } from "../../lib/data-source";
 import { api } from "../../lib/dashboard-api";
 import { deriveListName, formatNumber, readCsvPreview, readImportTable } from "../../lib/dashboard-helpers";
-import { companyImportFields, fixedImportColumns, missingCompanyImportFields, personImportFields, resolvedImportFields, suggestedCompanyImportField, suggestedPersonImportField, unmappedCompanyDetailFields } from "../../lib/import-schema";
+import { companyImportFields, fixedImportColumns, missingCompanyImportFields, personImportFields, resolvedImportFields, skipImportField, suggestedCompanyImportField, suggestedPersonImportField, unmappedCompanyDetailFields } from "../../lib/import-schema";
 import { parsePastedCompanyTable, parsePastedPeopleTable } from "../../lib/paste-table";
 import { importHeadersMatch } from "../../lib/import-resume";
 import { unassignedClientId } from "../../lib/import-owner";
@@ -27,7 +27,7 @@ function localIsoDate() {
 }
 
 function ImportMappingPanel({ audit, fieldMap, onChange }: { audit: FileAudit; fieldMap: Record<string, string>; onChange: (header: string, value: string) => void }) {
-  return <div className="import-mapping"><div className="mapping-head"><div><strong>Field mapping</strong><small>Only the fixed People fields below can be imported</small></div><span>{audit.invalidRows ? `${audit.invalidRows} rows need identity data` : "All rows identifiable"}</span></div><div className="mapping-list">{audit.headers.map((header) => <label key={header}><span title={header}>{header}</span><b><AppIcon name="arrow" size={14}/></b><select aria-label={`Map ${header}`} value={fieldMap[header] || "Auto detect"} onChange={(event) => onChange(header, event.target.value)}>{canonicalImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p>Columns outside the fixed import fields are discarded. Mapped values are stored under their canonical field names; source-only headers are not retained.</p></div>;
+  return <div className="import-mapping"><div className="mapping-head"><div><strong>Field mapping</strong><small>Only the fixed People fields below can be imported</small></div><span>{audit.invalidRows ? `${audit.invalidRows} rows need identity data` : "All rows identifiable"}</span></div><div className="mapping-list">{audit.headers.map((header) => <label key={header}><span title={header}>{header}</span><b><AppIcon name="arrow" size={14}/></b><select aria-label={`Map ${header}`} value={fieldMap[header] || skipImportField} onChange={(event) => onChange(header, event.target.value)}>{canonicalImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p>Columns outside the fixed import fields are discarded. Mapped values are stored under their canonical field names; source-only headers are not retained.</p></div>;
 }
 export default function ImportsPanel({ clients, onComplete, onChanged }: { clients: ClientRecord[]; onComplete: () => Promise<void>; onChanged: () => Promise<void> }) {
   const [kind, setKind] = useState<"prospects" | "companies">("prospects");

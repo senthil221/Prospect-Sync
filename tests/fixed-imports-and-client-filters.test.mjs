@@ -52,6 +52,29 @@ test("a company import only auto-suggests the two identity fields", () => {
   assert.deepEqual(explicit.map(({ field }) => field), ["Industry"]);
 });
 
+test("a People import defaults an unrecognized column to Skip column, not a vague Auto detect", async () => {
+  // Requested directly: a column with no known alias used to preselect "Auto
+  // detect" in the mapping dropdown, which behaved identically to Skip column
+  // (fixedImportColumns drops anything outside personImportFields either way)
+  // but read as if something would still happen to it.
+  for (const header of ["Industry", "Country", "Employees Count", "Favorite color", "Secret note"]) {
+    assert.equal(suggestedPersonImportField(header), "Skip column", header);
+  }
+  // Recognized aliases still auto-map as before - only the no-match fallback changed.
+  assert.equal(suggestedPersonImportField("Email"), "Email");
+  assert.equal(suggestedPersonImportField("LinkedIn URL"), "Personal LinkedIn URL");
+
+  // "Auto detect" is gone as a concept, not just relabeled: it offered nothing
+  // Skip column didn't already do, so keeping both was a second name for the
+  // same no-op state. Checked as code, not prose - the file's own comments are
+  // free to still name the old behavior when explaining why it changed.
+  const [fieldDefinitions, importsPanel] = await Promise.all([
+    read("../lib/prospect-field-definitions.ts"), read("../app/components/ImportsPanel.tsx"),
+  ]);
+  assert.doesNotMatch(fieldDefinitions, /canonicalImportFields = \[[^\]]*"Auto detect"/);
+  assert.doesNotMatch(importsPanel, /fieldMap\[header\] \|\| "Auto detect"/);
+});
+
 test("People paste accepts email-only and LinkedIn-only identities", () => {
   const email = parsePastedPeopleTable("ana@example.com\nbea@example.com");
   assert.deepEqual(email.headers, ["Email"]);

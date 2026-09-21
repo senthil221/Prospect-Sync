@@ -1,5 +1,5 @@
 import { uniqueHeaders } from "./dashboard-helpers.ts";
-import { suggestedCompanyImportField, suggestedPersonImportField } from "./import-schema.ts";
+import { skipImportField, suggestedCompanyImportField, suggestedPersonImportField } from "./import-schema.ts";
 
 // Company lists are collected by copying, not by exporting: a column of domains out
 // of a spreadsheet, a list of names out of a doc, a two-column block out of Sheets.
@@ -93,7 +93,7 @@ function looksLikePeopleHeader(cells: string[]) {
   // Unsupported columns are valid input at the boundary: they are discarded
   // after mapping. One known label is enough to keep that header row out of the
   // data while still allowing headerless values to infer their own fields.
-  return named.some((cell) => suggestedPersonImportField(cell) !== "Auto detect");
+  return named.some((cell) => suggestedPersonImportField(cell) !== skipImportField);
 }
 
 function inferPeopleHeaders(rows: string[][], width: number) {
