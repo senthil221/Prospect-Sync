@@ -48,7 +48,11 @@ const personAliases: Record<string, string> = {
 };
 
 const companyAliases: Record<string, string> = {
-  company: "Company Name", companyname: "Company Name", name: "Company Name", organization: "Company Name", accountname: "Company Name",
+  // companynameforemails is the header an Apollo account export actually uses
+  // for the company's name. It was added to personAliases on 2026-09-21 and
+  // missed here, so a company import of the same file left its one mandatory
+  // name column unrecognized - see the test for what that cost.
+  company: "Company Name", companyname: "Company Name", name: "Company Name", organization: "Company Name", accountname: "Company Name", companynameforemails: "Company Name",
   employees: "#employees", employeecount: "#employees", employeescount: "#employees", numberofemployees: "#employees", companyemployeecount: "#employees", companyemployees: "#employees", headcount: "#employees",
   industry: "Industry", companyindustry: "Industry",
   website: "Website", domain: "Website", companywebsite: "Website", companydomain: "Website", url: "Website",
