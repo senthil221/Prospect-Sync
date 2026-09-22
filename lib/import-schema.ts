@@ -79,13 +79,16 @@ export function suggestedPersonImportField(header: string) {
 }
 
 export function suggestedCompanyImportField(header: string) {
-  const suggestion = companyAliases[normalizeImportHeader(header)] ?? "Not mapped";
-  // Auto-suggestion is limited to the two identity fields - the ones a row
-  // cannot exist without one of. Every optional detail field (Industry,
-  // Keywords, #employees, ...) defaults to "Not mapped" even when its header
-  // matches a known alias exactly, so nothing beyond the mandatory minimum is
-  // imported unless it is mapped by hand.
-  return (companyIdentityFields as readonly string[]).includes(suggestion) ? suggestion : "Not mapped";
+  // Every exact alias match is suggested, identity or detail. This was briefly
+  // narrowed to the two identity fields so nothing beyond the mandatory
+  // minimum imported without being chosen by hand - but on a real Apollo
+  // export that meant eleven dropdowns to set on every upload, with Industry,
+  // # Employees, the city/state/country trio, Keywords, Technologies, Total
+  // Funding, Short Description and Founded Year all reading "Not mapped"
+  // beside headers that name them exactly. A suggestion is still only a
+  // suggestion: any column can be set back to "Not mapped" before importing,
+  // and only the fixed company fields are ever offered at all.
+  return companyAliases[normalizeImportHeader(header)] ?? "Not mapped";
 }
 
 // Sentinel a user can pick in the mapping UI to drop an unwanted column entirely
