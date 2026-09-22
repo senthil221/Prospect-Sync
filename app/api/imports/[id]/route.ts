@@ -9,6 +9,7 @@ type ImportDetailRow = {
   processed_bytes?: number; file_size_bytes?: number | null; last_error?: string | null;
   field_headers: unknown; field_map: unknown; header_signature: string;
   prospect_date_added?: string | null;
+  merge_mode?: string | null;
 };
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
@@ -18,7 +19,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const supabase = createAdminClient();
   const prospectImport = await supabase
     .from("imports")
-    .select("id,list_id,file_name,data_source,status,ingestion_mode,committed_row_offset,total_rows,processed_rows,unique_added,duplicates_linked,processed_bytes,file_size_bytes,last_error,field_headers,field_map,header_signature,prospect_date_added")
+    .select("id,list_id,file_name,data_source,status,ingestion_mode,committed_row_offset,total_rows,processed_rows,unique_added,duplicates_linked,processed_bytes,file_size_bytes,last_error,field_headers,field_map,header_signature,prospect_date_added,merge_mode")
     .eq("id", id)
     .maybeSingle();
   if (prospectImport.error) return Response.json({ error: prospectImport.error.message }, { status: 500 });
@@ -58,8 +59,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     headerSignature: String(row.header_signature ?? ""),
     dateContacted: row.prospect_date_added ?? null,
     // Resuming must continue with the mode the import started under; changing it
-    // halfway would apply two different rules to one file.
-    mergeMode: kind === "companies" ? String((row as { merge_mode?: unknown }).merge_mode ?? "enrich") : null,
+    // halfway would apply two different rules to one file. Both kinds carry one
+    // now - people imports since 20260922060000.
+    mergeMode: String((row as { merge_mode?: unknown }).merge_mode ?? "enrich"),
   }, { headers: { "Cache-Control": "no-store" } });
 }
 

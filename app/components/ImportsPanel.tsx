@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { mapProspect } from "../../db/normalize";
-import { companyMergeModeLabels, companyMergeModes, defaultCompanyMergeMode, type CompanyMergeMode } from "../../lib/company-merge-mode";
+import { companyMergeModeLabels, companyMergeModes, defaultCompanyMergeMode, prospectMergeModeLabels, type CompanyMergeMode } from "../../lib/company-merge-mode";
 import { commonDataSources } from "../../lib/data-source";
 import { api } from "../../lib/dashboard-api";
 import { deriveListName, formatNumber, readCsvPreview, readImportTable } from "../../lib/dashboard-helpers";
@@ -143,14 +143,14 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
 // This is the single most consequential choice in a company upload -- "let this file
 // win" rewrites stored values -- so it is a visible set of radios with the
 // consequence spelled out, not a dropdown default nobody reads.
-function MergeModeChooser({ mode, disabled, onChange }: { mode: CompanyMergeMode; disabled: boolean; onChange: (mode: CompanyMergeMode) => void }) {
+function MergeModeChooser({ kind, legend, hint, labels, mode, disabled, onChange }: { kind: "company" | "prospect"; legend: string; hint: string; labels: Record<CompanyMergeMode, { label: string; description: string }>; mode: CompanyMergeMode; disabled: boolean; onChange: (mode: CompanyMergeMode) => void }) {
   return <fieldset className="merge-mode-chooser">
-    <legend>When a company is already in the database</legend>
-    <p className="merge-mode-hint">Matched by website first, then by company name when either side has no website.</p>
-    {companyMergeModes.map((option) => <label key={option} htmlFor={`company-merge-mode-${option}`} className={mode === option ? "active" : ""}>
-      <input id={`company-merge-mode-${option}`} type="radio" name="company-merge-mode" value={option} checked={mode === option} disabled={disabled} onChange={() => onChange(option)}/>
-      <strong>{companyMergeModeLabels[option].label}</strong>
-      <small>{companyMergeModeLabels[option].description}</small>
+    <legend>{legend}</legend>
+    <p className="merge-mode-hint">{hint}</p>
+    {companyMergeModes.map((option) => <label key={option} htmlFor={`${kind}-merge-mode-${option}`} className={mode === option ? "active" : ""}>
+      <input id={`${kind}-merge-mode-${option}`} type="radio" name={`${kind}-merge-mode`} value={option} checked={mode === option} disabled={disabled} onChange={() => onChange(option)}/>
+      <strong>{labels[option].label}</strong>
+      <small>{labels[option].description}</small>
     </label>)}
   </fieldset>;
 }
@@ -350,7 +350,9 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
       </> : null}
 
       {step === "review" && parsed ? <>
-        <MergeModeChooser mode={mergeMode} disabled={phase !== "idle"} onChange={setMergeMode}/>
+        <MergeModeChooser kind="company" legend="When a company is already in the database"
+          hint="Matched by website first, then by company name when either side has no website."
+          labels={companyMergeModeLabels} mode={mergeMode} disabled={phase !== "idle"} onChange={setMergeMode}/>
         {/* IMPORT-05: a known total, so the bar carries valuenow/valuemax and
             reads as progress rather than as decoration. */}
         {phase === "uploading" ? <ProgressBar label={message} value={progress} total={100}/> : null}
@@ -391,6 +393,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
   const [activeBackgroundId, setActiveBackgroundId] = useState("");
   const [dateContacted, setDateContacted] = useState(localIsoDate);
   const [noDateContacted, setNoDateContacted] = useState(false);
+  const [mergeMode, setMergeMode] = useState<CompanyMergeMode>(defaultCompanyMergeMode);
   const fixedColumns = fileAudit ? fixedImportColumns(fileAudit.headers, fieldMap, suggestedPersonImportField, personImportFields) : [];
   const hasSource = inputMode === "paste" ? Boolean(pastedText.trim() && pastedTable) : Boolean(file);
   const canSubmit = hasSource && fileAudit && fixedColumns.length > 0 && fileAudit.invalidRows === 0 && dataSource && (noDateContacted || dateContacted) && listName.trim() && (clientId || newClient.trim()) && phase === "idle";
@@ -512,7 +515,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
         const keptHeaders = keptColumns.map(({ header }) => header);
         const resolvedFieldMap = Object.fromEntries(keptColumns.map(({ header, field }) => [header, field]));
         const withoutClient = clientId === unassignedClientId;
-        const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: `Pasted people ${localIsoDate()}`, totalRows: pastedTable.rows.length, headers: keptHeaders, sourceHeaders: pastedTable.headers, fieldMap: resolvedFieldMap }) });
+        const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: `Pasted people ${localIsoDate()}`, totalRows: pastedTable.rows.length, headers: keptHeaders, sourceHeaders: pastedTable.headers, fieldMap: resolvedFieldMap, mergeMode }) });
         await uploadProspectRows(pastedTable, started, keptColumns, keptHeaders, resolvedFieldMap, 0);
         return;
       }
@@ -535,7 +538,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
             clientId: withoutClient ? undefined : clientId || undefined,
             clientName: newClient || undefined, withoutClient, listName, dataSource,
             fileName: file.name, headers: keptHeaders, sourceHeaders, fieldMap, dateContacted: noDateContacted ? null : dateContacted,
-            background: true,
+            mergeMode, background: true,
             storageObjectPath: upload.objectPath, fileSizeBytes: file.size,
           }),
         });
@@ -552,7 +555,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
       const keptHeaders = keptColumns.map(({ header }) => header);
       const resolvedFieldMap = Object.fromEntries(keptColumns.map(({ header, field }) => [header, field]));
       const withoutClient = clientId === unassignedClientId;
-      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, sourceHeaders: parsed.headers, fieldMap }) });
+      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, sourceHeaders: parsed.headers, fieldMap, mergeMode }) });
       await uploadProspectRows(parsed, started, keptColumns, keptHeaders, resolvedFieldMap, 0);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Import failed."); setPhase("idle"); }
   }
@@ -574,7 +577,10 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
       if (JSON.stringify(keptHeaders) !== JSON.stringify(detail.headers)) throw new Error("The selected file headers do not match the interrupted import. Re-select the original file or start a new import instead.");
       const resolvedFieldMap = Object.fromEntries(keptColumns.map(({ header, field }) => [header, field]));
       const populatedCells = table.rows.reduce((count, row) => count + row.filter((value) => value.trim()).length, 0);
-      setFile(selected); setFieldMap(detail.fieldMap); setFileAudit({ headers: table.headers, rows: table.rows.length, populatedCells, invalidRows: 0 });
+      // Resuming continues under the mode the import started with: applying two
+      // different rules to one file would be worse than either rule.
+      setFile(selected); setFieldMap(detail.fieldMap); if (detail.mergeMode) setMergeMode(detail.mergeMode);
+      setFileAudit({ headers: table.headers, rows: table.rows.length, populatedCells, invalidRows: 0 });
       await uploadProspectRows(table, { importId: detail.id, listId: detail.listId }, keptColumns, keptHeaders, resolvedFieldMap, detail.committedRowOffset);
       onResumed(detail.id);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Unable to resume the import."); setPhase("idle"); }
@@ -652,6 +658,9 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
         {!clientId && <div className="form-field"><label htmlFor="new-client-name">New client name</label><input id="new-client-name" value={newClient} onChange={(event) => setNewClient(event.target.value)} placeholder="e.g. Acme Recruitment" /></div>}
         <div className="form-field"><label htmlFor="list-name">List name</label><input id="list-name" value={listName} onChange={(event) => setListName(event.target.value)} placeholder="Auto-filled from the CSV filename" /></div>
         <div className="form-field"><label htmlFor="prospect-date-contacted">Date Contacted</label><input id="prospect-date-contacted" type="date" disabled={noDateContacted} required={!noDateContacted} value={dateContacted} max={localIsoDate()} onChange={(event) => setDateContacted(event.target.value)}/><label className="inline-checkbox" htmlFor="prospect-no-date-contacted"><input id="prospect-no-date-contacted" type="checkbox" checked={noDateContacted} onChange={(event) => setNoDateContacted(event.target.checked)}/> No contact date</label><small>Applied to these prospects for this client only. Choose “No contact date” to leave it blank.</small></div>
+        <MergeModeChooser kind="prospect" legend="When a person is already in the database"
+          hint="Matched by work email first, then personal email, then LinkedIn, then name plus company."
+          labels={prospectMergeModeLabels} mode={mergeMode} disabled={phase !== "idle"} onChange={setMergeMode}/>
         {/* IMPORT-05: a real progressbar. The background phase has no known
             total until the server reports one, and omitting valuenow is what
             marks it indeterminate rather than stuck at zero. */}

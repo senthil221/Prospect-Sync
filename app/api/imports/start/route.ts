@@ -1,4 +1,5 @@
 import { getAuthorizedUser } from "../../../../lib/auth";
+import { defaultCompanyMergeMode, normalizeCompanyMergeMode } from "../../../../lib/company-merge-mode";
 import { normalizeText } from "../../../../db/normalize";
 import { normalizeDataSource } from "../../../../lib/data-source";
 import { fixedImportColumns, personImportFields, suggestedPersonImportField } from "../../../../lib/import-schema";
@@ -27,10 +28,15 @@ export async function POST(request: Request) {
     return Response.json({ error: "Supabase is not configured." }, { status: 503 });
   }
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const payload = await request.json() as { clientId?: string; clientName?: string; withoutClient?: boolean; listName?: string; dateContacted?: string | null; fileName?: string; totalRows?: number; headers?: string[]; sourceHeaders?: string[]; fieldMap?: Record<string, string>; dataSource?: string; allowMissingFields?: boolean; background?: boolean; storageObjectPath?: string; fileSizeBytes?: number };
+  const payload = await request.json() as { clientId?: string; clientName?: string; withoutClient?: boolean; listName?: string; dateContacted?: string | null; fileName?: string; totalRows?: number; headers?: string[]; sourceHeaders?: string[]; fieldMap?: Record<string, string>; dataSource?: string; allowMissingFields?: boolean; background?: boolean; storageObjectPath?: string; fileSizeBytes?: number; mergeMode?: unknown };
   const supabase = createAdminClient();
   const dataSource = normalizeDataSource(payload.dataSource);
   if (!dataSource) return Response.json({ error: "Choose a data source before importing." }, { status: 400 });
+  // Absent means an older client, which predates the choice existing: fall back
+  // to the behaviour those clients already had rather than guessing, since the
+  // wrong choice silently rewrites stored people.
+  const mergeMode = payload.mergeMode === undefined ? defaultCompanyMergeMode : normalizeCompanyMergeMode(payload.mergeMode);
+  if (!mergeMode) return Response.json({ error: "Choose how duplicate people should be handled." }, { status: 400 });
   const dateContacted = validDateContacted(payload.dateContacted);
   if (dateContacted === undefined) return Response.json({ error: "Choose a valid Date Contacted between 1900-01-01 and today, or select no contact date." }, { status: 400 });
   const importHeaders = Array.isArray(payload.headers) ? payload.headers.map(String) : [];
@@ -78,7 +84,7 @@ export async function POST(request: Request) {
   const importResult = await supabase.from("imports").insert({
     id: importId, client_id: clientId, list_id: listId, data_source: dataSource,
     file_name: payload.fileName ?? "", total_rows: totalRows, field_headers: headers,
-    prospect_date_added: dateContacted,
+    prospect_date_added: dateContacted, merge_mode: mergeMode,
     field_map: fixedFieldMap, header_signature: importHeaderSignature(sourceHeaders),
     status: payload.background === true ? "queued" : "processing",
     ingestion_mode: payload.background === true ? "background" : "browser",
