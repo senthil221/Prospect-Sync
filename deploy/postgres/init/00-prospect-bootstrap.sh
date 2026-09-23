@@ -171,6 +171,18 @@ psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
 	alter role authenticator set idle_in_transaction_session_timeout = '60s';
 	alter role authenticator set lock_timeout = '10s';
 
+	-- Slow-plan logging for the interactive pool. auto_explain is already in
+	-- shared_preload_libraries, but the image sets log_min_duration=10s with
+	-- nested statements off - so it only ever explained the PostgREST wrapper,
+	-- and only past the 10s ceiling, where the statement is cancelled and no
+	-- plan is logged at all. The plans that matter are the dynamic queries the
+	-- search functions EXECUTE, so nested statements are on, and the threshold
+	-- is 2s: a query drifting towards its ceiling shows up in the db log with
+	-- its plan before it becomes a 504. No log_analyze, so no per-query timing
+	-- overhead. Role settings apply to new sessions, so this needs no restart.
+	alter role authenticator set auto_explain.log_min_duration = '2s';
+	alter role authenticator set auto_explain.log_nested_statements = on;
+
 	-- Studio and psql sessions get more rope, but not unlimited.
 	alter role postgres set idle_in_transaction_session_timeout = '300s';
 
