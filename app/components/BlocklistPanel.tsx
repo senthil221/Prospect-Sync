@@ -54,7 +54,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
         return await api<{
-          result: { added: number; suppressed: number; remaining: boolean; reindexed: number; queued: number };
+          result: { added: number; suppressed: number; remaining: boolean; reindexed: number; queued: number; companiesBlocked?: number };
         }>(`/api/clients/${encodeURIComponent(client.id)}/blocklist`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -82,6 +82,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
     let blockedRecords = 0;
     let addedEntries = 0;
     let queuedReindexes = 0;
+    let blockedCompanies = 0;
     try {
       const values = [...parsedPending.domains, ...parsedPending.emails];
       for (let offset = 0; offset < values.length; offset += BLOCKLIST_REQUEST_VALUES) {
@@ -94,6 +95,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
           addedEntries += Number(data.result.added ?? 0);
           blockedRecords += Number(data.result.suppressed ?? 0);
           queuedReindexes += Number(data.result.queued ?? 0);
+          blockedCompanies += Number(data.result.companiesBlocked ?? 0);
           remaining = Boolean(data.result.remaining);
           passes += 1;
           setProgress({ entries: Math.min(offset + chunk.length, values.length), total: values.length, records: blockedRecords });
@@ -106,6 +108,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
       if (parsedPending.emails.length) parts.push(`${formatNumber(parsedPending.emails.length)} emails`);
       if (parsedPending.duplicates) parts.push(`${formatNumber(parsedPending.duplicates)} duplicates ignored`);
       if (blockedRecords) parts.push(`${formatNumber(blockedRecords)} existing client records removed`);
+      if (blockedCompanies) parts.push(`${formatNumber(blockedCompanies)} compan${blockedCompanies === 1 ? "y" : "ies"} removed`);
       if (queuedReindexes) parts.push(`${formatNumber(queuedReindexes)} index updates queued safely`);
       if (parsedPending.invalidCount) parts.push(`${formatNumber(parsedPending.invalidCount)} unrecognised (${parsedPending.invalid.slice(0, 3).join(", ")})`);
       setNotice(`${parts.join(" · ")}.`);
@@ -125,13 +128,14 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
     if (!selected.size) return;
     setBusy(true); setNotice(""); setError("");
     try {
-      const data = await api<{ result: { removed: number; restored: number } }>(
+      const data = await api<{ result: { removed: number; restored: number; companiesRestored?: number } }>(
         `/api/clients/${encodeURIComponent(client.id)}/blocklist`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ids: [...selected] }),
         });
-      setNotice(`Removed ${formatNumber(data.result.removed)} entries · ${formatNumber(data.result.restored)} records restored to this client.`);
+      const companiesRestored = Number(data.result.companiesRestored ?? 0);
+      setNotice(`Removed ${formatNumber(data.result.removed)} entries · ${formatNumber(data.result.restored)} records${companiesRestored ? ` and ${formatNumber(companiesRestored)} compan${companiesRestored === 1 ? "y" : "ies"}` : ""} restored to this client.`);
       setSelected(new Set());
       setPage(1);
       await load(1);

@@ -384,13 +384,14 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
       const selection = selectionMode === "all_matching"
         ? { allMatching: true, search: search.trim(), filters: filters.map(({ field, operator, values, scopes }) => ({ field, operator, values, ...(scopes?.length ? { scopes } : {}) })), peopleScope, excludedIds: [...excludedIds] }
         : { companyIds: [...selectedIds] };
-      const response = await api<{ result: { selected?: number; added?: number; alreadyPresent?: number } }>(`/api/clients/${encodeURIComponent(pushClientId)}/companies`, {
+      const response = await api<{ result: { selected?: number; added?: number; alreadyPresent?: number; blocked?: number } }>(`/api/clients/${encodeURIComponent(pushClientId)}/companies`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "push", ...selection }),
       });
       const target = clients.find((client) => client.id === pushClientId)?.name ?? "the client";
       const added = Number(response.result.added ?? 0);
       const alreadyPresent = Number(response.result.alreadyPresent ?? 0);
-      setCompanyNotice(`${formatNumber(added)} compan${added === 1 ? "y" : "ies"} pushed to ${target}.${alreadyPresent ? ` ${formatNumber(alreadyPresent)} already present.` : ""}`);
+      const blocked = Number(response.result.blocked ?? 0);
+      setCompanyNotice(`${formatNumber(added)} compan${added === 1 ? "y" : "ies"} pushed to ${target}.${alreadyPresent ? ` ${formatNumber(alreadyPresent)} already present.` : ""}${blocked ? ` ${formatNumber(blocked)} skipped by ${target}'s blocklist.` : ""}`);
       clearSelection();
     } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to push companies to the client."); }
     finally { setPushing(false); }
