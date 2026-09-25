@@ -15,6 +15,8 @@ test("Incomplete Info People uses one linked-company predicate and no global piv
   assert.match(clients, /entity === "people" \? <ClientMasterDatabase[^\n]+active companyScope=\{null\}[^\n]+initialFilters=\{incompletePeopleFilters\}/);
 
   assert.match(migration, /field_key = '__incomplete_company_profile'/);
+  assert.match(migration, /conjuncts := array_append\(conjuncts, 'exists \(select 1 from public\.companies co'/);
+  assert.doesNotMatch(migration, /conjuncts := conjuncts \|\| 'exists \(select 1 from public\.companies co'/);
   assert.match(migration, /exists \(select 1 from public\.companies co/);
   assert.match(migration, /co\.id = pi\.company_id/);
   assert.match(migration, /array_to_string\(co\.keywords/);

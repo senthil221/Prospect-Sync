@@ -22,10 +22,10 @@ declare
   v_marker constant text := $m$    if field_key in ('__company_industry', '__company_keywords', '__company_description',
                      '__company_technologies', '__company_founded_year', '__company_total_funding') then$m$;
   v_replacement constant text := $r$    if field_key = '__incomplete_company_profile' then
-      conjuncts := conjuncts || 'exists (select 1 from public.companies co'
+      conjuncts := array_append(conjuncts, 'exists (select 1 from public.companies co'
         || ' where co.id = pi.company_id'
         || ' and btrim(coalesce(array_to_string(co.keywords, '' | ''), '''')) = '''''
-        || ' and btrim(coalesce(co.short_description, '''')) = '''')';
+        || ' and btrim(coalesce(co.short_description, '''')) = '''')');
       continue;
     end if;
 

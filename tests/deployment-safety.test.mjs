@@ -150,3 +150,10 @@ test("migration guard rejects changes to an existing migration", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("migration guard scopes the failed incomplete-info correction to its exact release", async () => {
+  const guard = await readFile(new URL("../.github/scripts/check-migrations.mjs", import.meta.url), "utf8");
+  assert.match(guard, /baseRevision === "ee7de5fe2c3a0188d40b959c21e93067e288f348"/);
+  assert.match(guard, /migrationPath === "supabase\/migrations\/20260925212546_incomplete_company_people_single_pass\.sql"/);
+  assert.match(guard, /status === "M"/);
+});
