@@ -98,8 +98,9 @@ test("the health route uses the decision and clears state when healthy", async (
 // The app router reads /api/health and drops the slot on anything but a 200,
 // so whatever is allowed into `failed` decides whether the SITE is up.
 test("a background worker cannot take the container out of the load balancer", async () => {
-  const [route, router] = await Promise.all([
+  const [route, router, update] = await Promise.all([
     read("../app/api/health/route.ts"), read("../deploy/caddy/AppRouter.Caddyfile"),
+    read("../deploy/scripts/update.sh"),
   ]);
 
   // The import worker is checked, reported and escalated - but it is not one
@@ -118,7 +119,12 @@ test("a background worker cannot take the container out of the load balancer", a
   assert.doesNotMatch(directives, /unhealthy_status/);
   assert.doesNotMatch(directives, /max_fails/);
   assert.match(directives, /health_uri \/api\/health/);
+  assert.match(route, /const timeoutMs = 5_000;/);
+  assert.match(directives, /health_timeout 8s/);
+  assert.match(directives, /health_fails 2/);
   // update.sh rewrites this exact line per slot and fails the release if it
-  // cannot find it, so it must survive any edit here.
+  // cannot find it. It renders from this template and changes only the
+  // upstream line, so the same timeout/failure budget reaches rollout configs.
   assert.match(router, /reverse_proxy app-blue:3000 app-green:3000 \{/);
+  assert.match(update, /sed "s\/reverse_proxy app-blue:3000 app-green:3000 \{\/reverse_proxy \$\{upstream\}:3000 \{\/"[\s\\]+"\$ROUTER_TEMPLATE" > "\$tmp"/);
 });

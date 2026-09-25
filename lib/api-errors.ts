@@ -20,9 +20,11 @@ export function isStatementTimeout(error: DatabaseError) {
 export function statementTimeoutResponse(subject: string, alternative: string): Response {
   return Response.json({
     error: `${subject} took longer than the database allows. ${alternative}`,
+    code: "statement_timeout",
+    retryable: false,
     limit: "statement_timeout",
     alternative,
-  }, { status: 504 });
+  }, { status: 504, headers: { "Cache-Control": "no-store" } });
 }
 
 // A browser that navigates away mid-request is not a server failure.

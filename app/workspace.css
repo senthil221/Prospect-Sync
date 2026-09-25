@@ -1325,7 +1325,7 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 }
 .list-detail-page { max-width: none; }
 @media (min-width: 1900px) {
-  .content:has(.client-tab-row), .content:has(.client-folders) { max-width: 2100px; }
+  .content:has(.client-tab-row), .content:has(.client-folder-workspace) { max-width: 2100px; }
 }
 .list-detail-intro { min-width: 0; align-items: flex-start; }
 .list-detail-intro > div:first-child { min-width: 0; flex: 1; }

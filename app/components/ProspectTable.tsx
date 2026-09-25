@@ -152,7 +152,11 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const visibleDefinitions = useMemo(() => configuredDefinitions.length ? configuredDefinitions : standardProspectFields.slice(0, 4), [configuredDefinitions]);
   const capFilter = filters.find((filter) => filter.field === "__max_people_per_company");
   const maxPeoplePerCompany = Number(capFilter?.values[0] ?? 0) || 0;
-  const displayFilters = filters.filter((filter) => filter.field !== "__max_people_per_company");
+  // Internal tab predicates still travel through every database operation, but
+  // are not editable filter chips. Incomplete Info already names the invariant
+  // above the table; showing a removable-looking chip that is immediately
+  // restored by the tab would be a broken control.
+  const displayFilters = filters.filter((filter) => filter.field !== "__max_people_per_company" && filter.field !== "__incomplete_company_profile");
   const effectiveFilters = filters.filter((filter) => filter.values.length || filter.operator === "empty" || filter.operator === "not_empty");
   function setMaxPeoplePerCompany(raw: number) {
     const remaining = filters.filter((filter) => filter.field !== "__max_people_per_company");
@@ -695,11 +699,11 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     </article> : <div className={`people-layout ${filtersOpen ? "" : "filters-collapsed"}`}>
       <article className="panel results-panel">
         <div className="results-toolbar">
-          <div className="results-count"><strong title={totalHint}>{displayedTotal} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `All ${displayedTotal} selected` : `Select all ${displayedTotal} across pages`}</button> : null}{totalCapped && countedExactly === null ? <button className="select-all-matching-button" disabled={countingAll} title="Counts every matching record in the background instead of stopping at 50,000." onClick={() => void countAllMatching()}>{countingAll ? "Counting…" : "Count them all"}</button> : null}</div>
+          <div className="results-count"><strong title={totalHint}>{displayedTotal} people</strong><span>{displayFilters.length ? `${displayFilters.length} active filter${displayFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `All ${displayedTotal} selected` : `Select all ${displayedTotal} across pages`}</button> : null}{totalCapped && countedExactly === null ? <button className="select-all-matching-button" disabled={countingAll} title="Counts every matching record in the background instead of stopping at 50,000." onClick={() => void countAllMatching()}>{countingAll ? "Counting…" : "Count them all"}</button> : null}</div>
           <div className="workspace-actions">
             <label><span>Max people / company</span><input aria-label="Max people per company" type="number" min="1" max="1000" value={maxPeoplePerCompany || ""} placeholder="No limit" onChange={(event) => setMaxPeoplePerCompany(event.target.value === "" ? 0 : Number(event.target.value))}/></label>
             <label><span className="sr-only">Sort prospects</span><select value={`${sort}:${direction}`} onChange={(event) => { const [nextSort, nextDirection] = event.target.value.split(":"); onSortChange(nextSort, nextDirection as "asc" | "desc"); }}><option value="created_at:desc">Newest first</option><option value="name:asc">Name A to Z</option><option value="company:asc">Company A to Z</option><option value="title:asc">Title A to Z</option><option value="last_contacted:desc">Recently contacted</option></select></label>
-            <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {effectiveFilters.length ? <span>{effectiveFilters.length}</span> : null}</button>
+            <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {displayFilters.length ? <span>{displayFilters.length}</span> : null}</button>
             <MenuButton label="View" icon="rows" panelLabel="View options" count={visibleDefinitions.length}>
               <label className="ds-menu-field"><span>Saved view</span><select defaultValue="" onChange={(event) => applyView(event.target.value)}><option value="">Choose a saved view</option>{savedViews.map((view) => <option key={view.id} value={view.id}>{view.needsReview ? `${view.name} (needs review)` : view.name}</option>)}</select></label>
               <button className="ds-menu-item" onClick={() => { setSaveViewName(""); setSaveViewOpen(true); }}><AppIcon name="star" size={14}/> Save this view</button>

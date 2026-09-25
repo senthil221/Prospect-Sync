@@ -799,6 +799,34 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
 .client-row-archive:hover { color: var(--danger); }
 .client-row-open { white-space: nowrap; }
 
+/* One folder navigator and one selected directory replaces the long stack of
+   folder tables. The selection, count and location now remain visible. */
+.client-folder-workspace { display: grid; grid-template-columns: minmax(13rem, 18%) minmax(0, 1fr); align-items: start; gap: var(--space-4); }
+.client-folder-navigator { position: sticky; top: var(--space-4); overflow: hidden; padding: var(--space-3); }
+.client-folder-navigator-head { padding: var(--space-2) var(--space-2) var(--space-3); display: grid; gap: var(--space-1); }
+.client-folder-navigator-head p { margin: 0; }
+.client-folder-navigator-head strong { color: var(--text-primary); font-size: var(--text-md); }
+.client-folder-navigator nav, .client-folder-nav-group { display: grid; gap: var(--space-1); }
+.client-folder-nav-group { margin-block: var(--space-2); padding-block: var(--space-2); border-block: 1px solid var(--border-subtle); }
+.client-folder-nav-group > small { padding: var(--space-1) var(--space-2); color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-wide); text-transform: uppercase; }
+.client-folder-nav-group > p { margin: 0; padding: var(--space-2); color: var(--text-tertiary); font-size: var(--text-xs); }
+.client-folder-navigator nav button { width: 100%; min-height: var(--control-standard); padding: var(--space-2); display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-secondary); text-align: left; }
+.client-folder-navigator nav button:hover { background: var(--surface-hover); color: var(--text-primary); }
+.client-folder-navigator nav button.active { background: var(--accent-soft); color: var(--accent-text); font-weight: var(--weight-semibold); }
+.client-folder-navigator nav button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.client-folder-navigator nav button b, .client-folder-total { min-width: var(--space-6); color: inherit; font-size: var(--text-xs); font-variant-numeric: tabular-nums; text-align: right; }
+.client-folder-contents { min-width: 0; }
+.client-folder-breadcrumbs { padding: var(--space-3) var(--space-4) 0; display: flex; align-items: center; gap: var(--space-2); color: var(--text-tertiary); font-size: var(--text-xs); }
+.client-folder-breadcrumbs button { padding: 0; border: 0; background: transparent; color: var(--accent-text); font: inherit; }
+.client-folder-breadcrumbs button:hover { text-decoration: underline; text-underline-offset: var(--space-1); }
+.client-folder-total { padding: var(--space-1) var(--space-2); border-radius: var(--radius-full); background: var(--surface-sunken); color: var(--text-secondary); white-space: nowrap; }
+.client-folder-heading-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); flex-wrap: wrap; }
+.client-folder-error button { min-height: var(--control-dense); padding-inline: var(--space-3); border: 1px solid currentColor; border-radius: var(--radius-md); background: transparent; color: inherit; font-weight: var(--weight-semibold); }
+@media (max-width: 900px) {
+  .client-folder-workspace { grid-template-columns: minmax(0, 1fr); }
+  .client-folder-navigator { position: static; }
+}
+
 @media (max-width: 1100px) {
   .client-row { grid-template-columns: 34px minmax(0, 1fr) auto; row-gap: var(--space-2); }
   .client-row-stats { grid-column: 2; grid-row: 2; justify-content: flex-start; gap: var(--space-3); flex-wrap: wrap; }

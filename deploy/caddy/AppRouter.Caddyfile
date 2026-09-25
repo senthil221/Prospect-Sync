@@ -14,9 +14,12 @@
 
 		health_uri /api/health
 		health_interval 10s
-		health_timeout 5s
+		# The handler gives each dependency up to 5s. Leave transport headroom
+		# for scheduling/JSON and require two consecutive failed probes, so one
+		# slow data-api sample cannot eject the sole active application slot.
+		health_timeout 8s
 		health_status 200
-		health_fails 1
+		health_fails 2
 		health_passes 1
 
 		# Deliberately no passive `unhealthy_status 5xx` / `max_fails` /
@@ -28,7 +31,7 @@
 		# got Caddy's own "no upstreams available" 503 with no JSON body ("Request
 		# failed (503)."). An application error means that request failed, not
 		# that the process is unfit to serve - which is what /api/health above
-		# is for, and it removes a genuinely dead slot within ~10s anyway.
+		# is for. Two active probes remove a persistently dead slot in ~20s.
 		# Connection-level failures still fail over through lb_try_duration.
 
 		header_up X-Forwarded-Proto https

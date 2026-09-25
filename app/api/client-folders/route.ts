@@ -22,6 +22,17 @@ export async function POST(request: Request) {
   if (existing.data) return Response.json({ folder: existing.data });
   const { data, error } = await supabase.from("client_folders")
     .insert({ name, normalized_name: normalizedName }).select("id,name,created_at").single();
+  // The pre-read is for the common idempotent case, not concurrency control:
+  // two tabs can both see no row and race the unique normalized_name index.
+  // The loser resolves the winner instead of turning a harmless duplicate
+  // create into a 500.
+  if (error?.code === "23505") {
+    const winner = await supabase.from("client_folders")
+      .select("id,name,created_at").eq("normalized_name", normalizedName).maybeSingle();
+    if (winner.error) return Response.json({ error: winner.error.message }, { status: 500 });
+    if (winner.data) return Response.json({ folder: winner.data });
+    return Response.json({ error: "A folder with that name already exists.", code: "folder_name_conflict" }, { status: 409 });
+  }
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ folder: data }, { status: 201 });
 }

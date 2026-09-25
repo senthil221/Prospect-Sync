@@ -27,32 +27,53 @@ function distinctSourceFile(list: ListRecord) {
 }
 
 export default function ClientsPanel({ clients, selectedClient, selectedList, lists, onOpenClient, onCloseClient, onOpenList, onCloseList, listPivot, onConsumeListPivot, onSeeListRecords, onSelectProspect, onImport, onDeleteClient, onDeleteList, onRefreshClients }: { clients: ClientRecord[]; selectedClient: ClientRecord | null; selectedList: ListRecord | null; lists: ListRecord[]; onOpenClient: (client: ClientRecord) => void; onCloseClient: () => void; onOpenList: (list: ListRecord) => void; onCloseList: () => void; listPivot: { clientId: string; listId: string; listName: string; target: "prospects" | "companies" } | null; onConsumeListPivot: () => void; onSeeListRecords: (clientId: string, list: ListRecord, target: "prospects" | "companies") => void; onSelectProspect: (prospect: Prospect) => void; onImport: () => void; onDeleteClient: (client: ClientRecord) => void; onDeleteList: (list: ListRecord) => void; onRefreshClients: () => void }) {
-  if (!selectedClient) return <ClientsView clients={clients} onOpen={onOpenClient} onImport={onImport} onRefresh={onRefreshClients}/>;
+  // Keep the directory context above the list/detail switch. Opening a client
+  // unmounts ClientsView, but returning should land in the folder the user was
+  // working from rather than silently resetting to All clients.
+  const [folders, setFolders] = useState<ClientFolder[]>([]);
+  const [folderSelection, setFolderSelection] = useState("all");
+  const [folderError, setFolderError] = useState("");
+  const [folderRefresh, setFolderRefresh] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    void api<{ folders: ClientFolder[] }>("/api/client-folders", { cache: "no-store", signal: controller.signal })
+      .then((data) => setFolders(data.folders ?? []))
+      .catch((caught) => {
+        if (!isAbortError(caught)) setFolderError(caught instanceof Error ? caught.message : "Unable to load client folders.");
+      });
+    return () => controller.abort();
+  }, [folderRefresh]);
+
+  if (!selectedClient) return <ClientsView clients={clients} folders={folders} folderSelection={folderSelection} folderError={folderError} onFolderSelection={setFolderSelection} onFolderCreated={(folder) => setFolders((current) => current.some((item) => item.id === folder.id) ? current : [...current, folder].sort((a, b) => a.name.localeCompare(b.name)))} onFolderRenamed={(folder) => setFolders((current) => current.map((item) => item.id === folder.id ? folder : item).sort((a, b) => a.name.localeCompare(b.name)))} onRetryFolders={() => { setFolderError(""); setFolderRefresh((value) => value + 1); }} onOpen={onOpenClient} onImport={onImport} onRefresh={onRefreshClients}/>;
   if (selectedList) return <ListsPanel client={selectedClient} list={selectedList} onBack={onCloseList} onSelect={onSelectProspect}
     onSeePeople={() => onSeeListRecords(selectedClient.id, selectedList, "prospects")}
     onSeeCompanies={() => onSeeListRecords(selectedClient.id, selectedList, "companies")}/>;
   return <ClientDetail client={selectedClient} clients={clients} lists={lists} onBack={onCloseClient} onOpenList={onOpenList} onSelectProspect={onSelectProspect} onImport={onImport} onDeleteClient={() => onDeleteClient(selectedClient)} onDeleteList={onDeleteList} onRefreshClients={onRefreshClients}
     listPivot={listPivot && listPivot.clientId === selectedClient.id ? listPivot : null} onConsumeListPivot={onConsumeListPivot}/>;
 }
-function ClientsView({ clients, onOpen, onImport, onRefresh }: { clients: ClientRecord[]; onOpen: (client: ClientRecord) => void; onImport: () => void; onRefresh: () => void }) {
+function ClientsView({ clients, folders, folderSelection, folderError, onFolderSelection, onFolderCreated, onFolderRenamed, onRetryFolders, onOpen, onImport, onRefresh }: { clients: ClientRecord[]; folders: ClientFolder[]; folderSelection: string; folderError: string; onFolderSelection: (selection: string) => void; onFolderCreated: (folder: ClientFolder) => void; onFolderRenamed: (folder: ClientFolder) => void; onRetryFolders: () => void; onOpen: (client: ClientRecord) => void; onImport: () => void; onRefresh: () => void }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
   const [clientName, setClientName] = useState("");
   const [folderName, setFolderName] = useState("");
-  const [folders, setFolders] = useState<ClientFolder[]>([]);
+  const [renameName, setRenameName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [renameError, setRenameError] = useState("");
 
   const activeClients = clients.filter((client) => !client.archived_at);
   const archivedClients = clients.filter((client) => Boolean(client.archived_at));
-
-  useEffect(() => {
-    let active = true;
-    void api<{ folders: ClientFolder[] }>("/api/client-folders", { cache: "no-store" })
-      .then((data) => { if (active) setFolders(data.folders ?? []); })
-      .catch(() => { if (active) setFolders([]); });
-    return () => { active = false; };
-  }, [clients]);
+  const unfiledClients = activeClients.filter((client) => !client.folder_id);
+  const selectedFolder = folders.find((folder) => folder.id === folderSelection) ?? null;
+  const visibleClients = folderSelection === "archived" ? archivedClients
+    : folderSelection === "unfiled" ? unfiledClients
+    : selectedFolder ? activeClients.filter((client) => client.folder_id === selectedFolder.id)
+    : activeClients;
+  const selectedLabel = folderSelection === "archived" ? "Archived"
+    : folderSelection === "unfiled" ? "Unfiled"
+    : selectedFolder?.name ?? "All clients";
 
   async function createClient() {
     const name = clientName.trim();
@@ -76,7 +97,8 @@ function ClientsView({ clients, onOpen, onImport, onRefresh }: { clients: Client
       const result = await api<{ folder: ClientFolder }>("/api/client-folders", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
       });
-      setFolders((current) => current.some((folder) => folder.id === result.folder.id) ? current : [...current, result.folder].sort((a, b) => a.name.localeCompare(b.name)));
+      onFolderCreated(result.folder);
+      onFolderSelection(result.folder.id);
       setFolderOpen(false); setFolderName("");
     } catch (caught) { setCreateError(caught instanceof Error ? caught.message : "Unable to create the folder."); }
     finally { setCreating(false); }
@@ -89,6 +111,20 @@ function ClientsView({ clients, onOpen, onImport, onRefresh }: { clients: Client
       });
       onRefresh();
     } catch (caught) { setCreateError(caught instanceof Error ? caught.message : "Unable to move the client."); }
+  }
+
+  async function renameFolder() {
+    const name = renameName.trim();
+    if (!selectedFolder || !name) return;
+    setRenaming(true); setRenameError("");
+    try {
+      const result = await api<{ folder: ClientFolder }>(`/api/client-folders/${encodeURIComponent(selectedFolder.id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
+      });
+      onFolderRenamed(result.folder);
+      setRenameOpen(false); setRenameName("");
+    } catch (caught) { setRenameError(caught instanceof Error ? caught.message : "Unable to rename the folder."); }
+    finally { setRenaming(false); }
   }
 
   async function setArchived(client: ClientRecord, archived: boolean) {
@@ -115,14 +151,35 @@ function ClientsView({ clients, onOpen, onImport, onRefresh }: { clients: Client
 
   return <>
     <div className="section-intro"><div><p className="eyebrow">CLIENT WORKSPACES</p><h2>Keep every ICP list organized.</h2><p>Group clients by account manager, or archive a workspace without deleting its data.</p></div><div className="section-intro-actions"><button className="secondary" onClick={() => setFolderOpen(true)}><AppIcon name="plus" size={14}/> New folder</button><button className="secondary" onClick={() => setCreateOpen(true)}><AppIcon name="plus" size={14}/> New client</button><button className="primary" onClick={onImport}><AppIcon name="upload" size={14}/> Import client list</button></div></div>
+    {folderError ? <div className="inline-error client-folder-error" role="alert"><span>Folders could not be loaded: {folderError}</span><button type="button" onClick={onRetryFolders}>Retry</button></div> : null}
     {createError ? <div className="inline-error" role="alert">{createError}</div> : null}
-    {activeClients.length || folders.length ? <div className="client-folders">
-      {folders.map((folder) => { const members = activeClients.filter((client) => client.folder_id === folder.id); return <section className="panel table-panel" key={folder.id}><div className="panel-head"><div><h3>{folder.name}</h3><p>{formatNumber(members.length)} client{members.length === 1 ? "" : "s"}</p></div></div>{members.length ? <div className="client-directory" role="list">{members.map((client, index) => clientRow(client, index))}</div> : <EmptyCompact text="No clients in this folder yet."/>}</section>; })}
-      {activeClients.some((client) => !client.folder_id) ? <section className="panel table-panel"><div className="panel-head"><div><h3>Unfiled clients</h3><p>Clients not assigned to an account-manager folder.</p></div></div><div className="client-directory" role="list">{activeClients.filter((client) => !client.folder_id).map((client, index) => clientRow(client, index))}</div></section> : null}
+    {activeClients.length || archivedClients.length || folders.length ? <div className="client-folder-workspace">
+      <aside className="panel client-folder-navigator" aria-label="Client folders">
+        <div className="client-folder-navigator-head"><p className="eyebrow">FOLDERS</p><strong>Client directory</strong></div>
+        <nav>
+          <button type="button" className={folderSelection === "all" ? "active" : ""} aria-current={folderSelection === "all" ? "page" : undefined} onClick={() => onFolderSelection("all")}><span>All clients</span><b>{formatNumber(activeClients.length)}</b></button>
+          <div className="client-folder-nav-group" aria-label="Named folders">
+            <small>Named folders</small>
+            {folders.map((folder) => { const count = activeClients.filter((client) => client.folder_id === folder.id).length; return <button type="button" key={folder.id} className={folderSelection === folder.id ? "active" : ""} aria-current={folderSelection === folder.id ? "page" : undefined} onClick={() => onFolderSelection(folder.id)}><span>{folder.name}</span><b>{formatNumber(count)}</b></button>; })}
+            {!folders.length ? <p>No named folders yet.</p> : null}
+          </div>
+          <button type="button" className={folderSelection === "unfiled" ? "active" : ""} aria-current={folderSelection === "unfiled" ? "page" : undefined} onClick={() => onFolderSelection("unfiled")}><span>Unfiled</span><b>{formatNumber(unfiledClients.length)}</b></button>
+          <button type="button" className={folderSelection === "archived" ? "active" : ""} aria-current={folderSelection === "archived" ? "page" : undefined} onClick={() => onFolderSelection("archived")}><span>Archived</span><b>{formatNumber(archivedClients.length)}</b></button>
+        </nav>
+      </aside>
+      <section className="panel table-panel client-folder-contents" aria-labelledby="selected-folder-title">
+        <nav className="client-folder-breadcrumbs" aria-label="Folder breadcrumb"><button type="button" onClick={() => onFolderSelection("all")}>Clients</button><span aria-hidden="true">/</span><span aria-current="page">{selectedLabel}</span></nav>
+        <div className="panel-head"><div><h3 id="selected-folder-title">{selectedLabel}</h3><p>{folderSelection === "archived" ? "Archived workspaces are hidden from active folders but keep all of their data." : selectedFolder ? `Clients assigned to ${selectedFolder.name}.` : folderSelection === "unfiled" ? "Active clients that have not been assigned to a folder." : "Every active client workspace, across all folders."}</p></div><div className="client-folder-heading-actions"><strong className="client-folder-total">{formatNumber(visibleClients.length)} client{visibleClients.length === 1 ? "" : "s"}</strong>{selectedFolder ? <button type="button" className="outline-button" onClick={() => { setRenameName(selectedFolder.name); setRenameError(""); setRenameOpen(true); }}>Rename folder</button> : null}</div></div>
+        {visibleClients.length
+          ? <div className="client-directory" role="list">{visibleClients.map((client, index) => clientRow(client, index, folderSelection === "archived"))}</div>
+          : <EmptyCompact
+              text={folderSelection === "archived" ? "No archived clients." : selectedFolder ? "No clients in this folder yet. Use the folder picker on a client row to move one here." : folderSelection === "unfiled" ? "Every active client is filed." : "No active clients."}
+            />}
+      </section>
     </div> : <EmptyState title="Create your first client" text="Create a client first, add its blocklist, then import prospect lists." action="Create client" onAction={() => setCreateOpen(true)} />}
-    {archivedClients.length ? <details className="panel archived-clients"><summary>Archived <span>{formatNumber(archivedClients.length)}</span></summary><div className="client-directory" role="list">{archivedClients.map((client, index) => clientRow(client, index, true))}</div></details> : null}
     {createOpen ? <div className="modal-backdrop" role="presentation"><section className="confirm-modal create-client-modal" role="dialog" aria-modal="true" aria-labelledby="create-client-title"><p className="eyebrow">NEW CLIENT WORKSPACE</p><h2 id="create-client-title">Create a client</h2><p>You can add the blocklist before importing any prospects.</p><div className="form-field"><label htmlFor="standalone-client-name">Client name</label><input id="standalone-client-name" value={clientName} onChange={(event) => { setClientName(event.target.value); setCreateError(""); }} onKeyDown={(event) => { if (event.key === "Enter") void createClient(); }} placeholder="e.g. Acme Recruitment" /></div>{createError ? <p className="form-error" role="alert">{createError}</p> : null}<div className="modal-actions"><button className="secondary" disabled={creating} onClick={() => { setCreateOpen(false); setClientName(""); setCreateError(""); }}>Cancel</button><button className="primary" disabled={creating || !clientName.trim()} onClick={() => void createClient()}>{creating ? "Creating…" : "Create client"}</button></div></section></div> : null}
     {folderOpen ? <div className="modal-backdrop" role="presentation"><section className="confirm-modal create-client-modal" role="dialog" aria-modal="true" aria-labelledby="create-folder-title"><p className="eyebrow">CLIENT FOLDER</p><h2 id="create-folder-title">Create a folder</h2><p>Use folders for account managers, teams, or any other client grouping.</p><div className="form-field"><label htmlFor="client-folder-name">Folder name</label><input id="client-folder-name" value={folderName} onChange={(event) => { setFolderName(event.target.value); setCreateError(""); }} onKeyDown={(event) => { if (event.key === "Enter") void createFolder(); }} placeholder="e.g. Priya's accounts" /></div>{createError ? <p className="form-error" role="alert">{createError}</p> : null}<div className="modal-actions"><button className="secondary" disabled={creating} onClick={() => { setFolderOpen(false); setFolderName(""); setCreateError(""); }}>Cancel</button><button className="primary" disabled={creating || !folderName.trim()} onClick={() => void createFolder()}>{creating ? "Creating…" : "Create folder"}</button></div></section></div> : null}
+    {renameOpen && selectedFolder ? <div className="modal-backdrop" role="presentation"><section className="confirm-modal create-client-modal" role="dialog" aria-modal="true" aria-labelledby="rename-folder-title"><p className="eyebrow">CLIENT FOLDER</p><h2 id="rename-folder-title">Rename folder</h2><p>Client assignments stay unchanged.</p><div className="form-field"><label htmlFor="rename-folder-name">Folder name</label><input id="rename-folder-name" maxLength={120} value={renameName} onChange={(event) => { setRenameName(event.target.value); setRenameError(""); }} onKeyDown={(event) => { if (event.key === "Enter") void renameFolder(); }}/></div>{renameError ? <p className="form-error" role="alert">{renameError}</p> : null}<div className="modal-actions"><button className="secondary" disabled={renaming} onClick={() => { setRenameOpen(false); setRenameName(""); setRenameError(""); }}>Cancel</button><button className="primary" disabled={renaming || !renameName.trim() || renameName.trim() === selectedFolder.name} onClick={() => void renameFolder()}>{renaming ? "Renaming…" : "Rename folder"}</button></div></section></div> : null}
   </>;
 }
 
@@ -374,17 +431,15 @@ const incompleteCompanyFilters: ProspectFilter[] = [
   { id: "incomplete:description", field: "__short_description", operator: "empty", values: [] },
 ];
 const incompletePeopleFilters: ProspectFilter[] = [
-  { id: "incomplete:keywords", field: "__company_keywords", operator: "empty", values: [], scopes: ["keywords"] },
-  { id: "incomplete:description", field: "__company_description", operator: "empty", values: [] },
+  { id: "incomplete:company-profile", field: "__incomplete_company_profile", operator: "equals", values: ["true"] },
 ];
-const incompleteCompanyScope: CompanyScope = { search: "", filters: incompleteCompanyFilters, limit: 250000 };
 
 function IncompleteInfoPanel({ client, clients, onSelect, onImport }: { client: ClientRecord; clients: ClientRecord[]; onSelect: (prospect: Prospect) => void; onImport: () => void }) {
   const [entity, setEntity] = useState<"people" | "companies">("companies");
   return <section className="incomplete-info-panel">
     <p className="incomplete-scope">Companies missing both keywords and a short description. Linked people appear in the People view.</p>
     <div className="icp-quick-filters" role="group" aria-label="Choose incomplete information record type"><button className={entity === "companies" ? "active" : ""} aria-pressed={entity === "companies"} onClick={() => setEntity("companies")}>Companies</button><button className={entity === "people" ? "active" : ""} aria-pressed={entity === "people"} onClick={() => setEntity("people")}>People</button></div>
-    {entity === "people" ? <ClientMasterDatabase client={client} clients={clients} active companyScope={incompleteCompanyScope} onClearCompanyScope={() => {}} onSeeCompanies={() => {}} onSelect={onSelect} onImport={onImport} initialFilters={incompletePeopleFilters} forcedFilters={incompletePeopleFilters} allowEntityPivot={false} lockedCompanyScope/> : <ClientCompanyDatabase client={client} clients={clients} peopleScope={null} onClearPeopleScope={() => {}} onSelectListScope={() => {}} onSeePeople={() => {}} onImport={onImport} initialFilters={incompleteCompanyFilters} forcedFilters={incompleteCompanyFilters} allowEntityPivot={false}/>}
+    {entity === "people" ? <ClientMasterDatabase client={client} clients={clients} active companyScope={null} onClearCompanyScope={() => {}} onSeeCompanies={() => {}} onSelect={onSelect} onImport={onImport} initialFilters={incompletePeopleFilters} forcedFilters={incompletePeopleFilters} allowEntityPivot={false}/> : <ClientCompanyDatabase client={client} clients={clients} peopleScope={null} onClearPeopleScope={() => {}} onSelectListScope={() => {}} onSeePeople={() => {}} onImport={onImport} initialFilters={incompleteCompanyFilters} forcedFilters={incompleteCompanyFilters} allowEntityPivot={false}/>}
   </section>;
 }
 

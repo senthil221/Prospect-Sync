@@ -100,6 +100,8 @@ test("deployments retry transport failures and switch blue/green traffic only af
   assert.match(caddy, /reverse_proxy app-router:3000/);
   assert.match(router, /reverse_proxy app-blue:3000 app-green:3000/);
   assert.match(router, /health_uri \/api\/health/);
+  assert.match(router, /health_timeout 8s/);
+  assert.match(router, /health_fails 2/);
   assert.match(router, /lb_try_duration 5s/);
   assert.match(migrate, /set local lock_timeout = '5s'/);
 
