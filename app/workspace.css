@@ -1312,6 +1312,17 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 .blocklist-add .selection-scope code { overflow-wrap: anywhere; }
 .blocklist-add .table-wrap { overflow-x: auto; }
 .blocklist-add .table-wrap table { min-width: 540px; }
+.blocklist-entries-panel .table-wrap { width: 100%; }
+.blocklist-entries-panel .table-wrap table { width: 100%; min-width: 680px; table-layout: fixed; }
+.blocklist-entries-panel th:nth-child(1) { width: 48px; }
+.blocklist-entries-panel th:nth-child(2) { width: 34%; }
+.blocklist-entries-panel th:nth-child(3) { width: 13%; }
+.blocklist-entries-panel th:nth-child(4) { width: 28%; }
+.blocklist-entries-panel td { overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .blocklist-entries-panel .table-wrap table { min-width: 0; table-layout: auto; }
+  .blocklist-entries-panel th:not(:first-child) { width: auto; }
+}
 .list-detail-page { max-width: none; }
 @media (min-width: 1900px) {
   .content:has(.client-tab-row), .content:has(.client-folders) { max-width: 2100px; }

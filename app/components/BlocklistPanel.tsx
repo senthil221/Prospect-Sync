@@ -303,7 +303,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
       {shares.length ? <div className="table-wrap"><table><thead><tr><th>Label</th><th>Created</th><th>Last submission</th><th>Status</th><th>Action</th></tr></thead><tbody>{shares.map((share) => <tr key={share.id}><td>{share.label}</td><td>{new Date(share.created_at).toLocaleDateString("en-IN")}</td><td>{share.last_submitted_at ? new Date(share.last_submitted_at).toLocaleString("en-IN") : "—"}</td><td>{share.revoked_at ? "Revoked" : "Active"}</td><td>{share.revoked_at ? "—" : <button className="row-danger" disabled={busy} onClick={() => void revokeShare(share.id)}>Revoke</button>}</td></tr>)}</tbody></table></div> : <p className="blocklist-note">No client submission links created yet.</p>}
     </article>
 
-    <article className="panel table-panel">
+    <article className="panel table-panel blocklist-entries-panel">
       <div className="panel-head">
         <div><h3>Blocked entries</h3><p>{formatNumber(total)} total{client.blocked_count ? ` · ${formatNumber(client.blocked_count)} client records currently removed` : ""}</p></div>
         {selectedCount ? <div className="blocklist-add-actions"><select aria-label="New reason for selected entries" value={bulkReason} onChange={(event) => setBulkReason(event.target.value as (typeof blocklistReasons)[number])}>{blocklistReasons.map((option) => <option key={option} value={option}>{option}</option>)}</select><button disabled={busy} onClick={() => void updateSelectedReason()}>Update reason</button><button className="row-danger" disabled={busy} onClick={() => void removeSelected()}>Remove {formatNumber(selectedCount)} selected</button></div> : null}
