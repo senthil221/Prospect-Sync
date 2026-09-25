@@ -7,6 +7,11 @@ import type { ClientRecord, ListRecord, Prospect } from "../../lib/types";
 import { EmptyCompact } from "./DashboardUi";
 import { AppIcon } from "./DashboardUi";
 
+function distinctSourceFile(list: ListRecord) {
+  const filename = list.source_file_name?.trim() ?? "";
+  return filename && filename.replace(/\.[^.]+$/, "").toLocaleLowerCase() !== list.name.trim().toLocaleLowerCase() ? filename : "";
+}
+
 export default function ListsPanel({ client, list, onBack, onSelect, onSeePeople, onSeeCompanies }: { client: ClientRecord; list: ListRecord; onBack: () => void; onSelect: (prospect: Prospect) => void; onSeePeople: () => void; onSeeCompanies: () => void }) {
   const [rows, setRows] = useState<Prospect[]>([]);
   const [total, setTotal] = useState(0);
@@ -46,7 +51,7 @@ export default function ListsPanel({ client, list, onBack, onSelect, onSeePeople
     } finally { setCopying(false); }
   }
 
-  return <section className="operations-page"><button className="back" onClick={onBack}><AppIcon name="back" size={14}/> {client.name} lists</button><div className="section-intro compact-intro"><div><p className="eyebrow">LIST WORKSPACE</p><h2>{list.name}</h2><p>{formatNumber(total)} linked prospects · {formatNumber(list.field_count)} preserved fields · {list.source_file_name}</p></div>
+  return <section className="operations-page list-detail-page"><button className="back" onClick={onBack}><AppIcon name="back" size={14}/> {client.name} lists</button><div className="section-intro compact-intro list-detail-intro"><div><p className="eyebrow">LIST WORKSPACE</p><h2 title={`${list.name}${list.source_file_name ? ` · ${list.source_file_name}` : ""}`}>{list.name}</h2><p>{formatNumber(total)} linked prospects · {formatNumber(list.field_count)} preserved fields</p>{distinctSourceFile(list) ? <small className="list-source-file" title={list.source_file_name}>Source: {distinctSourceFile(list)}</small> : null}</div>
     {/* Every action here pivots the whole list into the real client
         databases (or, for domains, resolves it there and copies the result) -
         not a second, smaller copy of their bulk actions built on this table. */}

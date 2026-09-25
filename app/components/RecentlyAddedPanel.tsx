@@ -8,9 +8,9 @@ import { AppIcon, EmptyCompact } from "./DashboardUi";
 import { useDebouncedValue } from "./useDebouncedValue";
 
 function sourceLabel(batch: ClientAdditionBatch) {
-  if (batch.source_kind === "import") return batch.source_label ? `Import · ${batch.source_label}` : "Import";
+  if (batch.source_kind === "import") return batch.source_label || "Imported file";
   if (batch.source_kind === "client") return `Pushed from ${batch.source_label || batch.source_client_name || "Client DB"}`;
-  return batch.source_label || "Pushed from Master DB";
+  return batch.source_label || "Master DB push";
 }
 
 type BatchRecord = {
@@ -81,22 +81,22 @@ export default function RecentlyAddedPanel({ client }: { client: ClientRecord; o
       <div><p className="eyebrow">RECENTLY ADDED</p><h3>Batches added to {client.name}</h3><p>Each import or push is kept together with its source and time.</p></div>
       <label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label="Search recently added records or sources" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search records, files or sources…"/></label>
     </div>
-    <div className="icp-quick-filters" role="group" aria-label="Filter recent batches by record type">
+    <div className="recent-filter-bar"><div className="icp-quick-filters" role="group" aria-label="Filter recent batches by record type">
       {([{"id":"","label":"All"},{"id":"people","label":"People"},{"id":"companies","label":"Companies"}] as const).map((option) => <button key={option.id} className={entity === option.id ? "active" : ""} aria-pressed={entity === option.id} onClick={() => { setEntity(option.id); setPage(1); }}>{option.label}</button>)}
     </div>
     <div className="icp-quick-filters" role="group" aria-label="Filter recent batches by time">
       {([{"id":"24h","label":"24 hours"},{"id":"7d","label":"7 days"},{"id":"30d","label":"30 days"},{"id":"all","label":"All time"}] as const).map((option) => <button key={option.id} className={windowKey === option.id ? "active" : ""} aria-pressed={windowKey === option.id} onClick={() => { setWindowKey(option.id); setPage(1); setExpanded(null); }}>{option.label}</button>)}
-    </div>
+    </div></div>
     {error ? <div className="inline-error" role="alert">{error}</div> : null}
     <article className="panel table-panel">
       {loading ? <div className="workspace-loading">Loading recent batches…</div> : batches.length ? <div className="table-wrap"><table>
-        <thead><tr><th>Batch</th><th>Type</th><th>Records</th><th>Source</th><th>Time</th></tr></thead>
+        <thead><tr><th>Source</th><th>Type</th><th>Records</th><th>Added</th><th>Action</th></tr></thead>
         <tbody>{batches.map((batch) => <tr key={batch.id}>
-          <td><button className="list-open-button" aria-expanded={expanded === batch.id} onClick={() => { const opening = expanded !== batch.id; setExpanded(opening ? batch.id : null); setRecordPage(1); setRecordsLoading(opening); if (!opening) { setRecords([]); setRecordTotal(0); setRecordsError(""); } }}><strong>{batch.source_label || (batch.source_kind === "master" ? "Master DB push" : "Client DB push")}</strong><span>{expanded === batch.id ? "Hide records" : "View records"}</span></button></td>
+          <td className="recent-source-cell"><strong title={sourceLabel(batch)}>{sourceLabel(batch)}</strong><small>{batch.source_kind === "import" ? "Import" : batch.source_kind === "client" ? "Client push" : "Master push"}</small></td>
           <td><span className="data-source-badge">{batch.entity_type === "people" ? "People" : "Companies"}</span></td>
           <td>{formatNumber(Number(batch.record_count ?? 0))}</td>
-          <td>{sourceLabel(batch)}</td>
           <td><time dateTime={batch.created_at}>{new Date(batch.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</time></td>
+          <td><button className="outline-button" aria-expanded={expanded === batch.id} onClick={() => { const opening = expanded !== batch.id; setExpanded(opening ? batch.id : null); setRecordPage(1); setRecordsLoading(opening); if (!opening) { setRecords([]); setRecordTotal(0); setRecordsError(""); } }}>{expanded === batch.id ? "Hide records" : "View records"}</button></td>
         </tr>)}</tbody>
       </table></div> : <EmptyCompact text={search ? `No recent batch contains “${search}”.` : "No import or push batches have been recorded for this client yet."}/>}
       {totalPages > 1 ? <div className="company-pagination"><span>Page {page} of {totalPages} · {formatNumber(total)} batches</span><div><button disabled={loading || page <= 1} onClick={() => setPage((value) => value - 1)}><AppIcon name="back" size={14}/> Previous</button><button disabled={loading || page >= totalPages} onClick={() => setPage((value) => value + 1)}>Next</button></div></div> : null}

@@ -37,6 +37,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
   const [shareQueue, setShareQueue] = useState({ pending: 0, failed: 0 });
   const [shareLabel, setShareLabel] = useState("Client blocklist form");
   const [shareUrl, setShareUrl] = useState("");
+  const [activeTool, setActiveTool] = useState<"add" | "links" | null>(null);
 
   const parsedPending = useMemo(() => partitionBlocklistValues(text), [text]);
   const pending = parsedPending.submitted;
@@ -256,24 +257,27 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
   }
 
   return <section className="client-database-workspace">
-    <div className="client-database-heading">
-      <div>
-        <p className="eyebrow">CLIENT BLOCKLIST</p>
-        <h3>Never contact for {client.name}</h3>
-        <p>Domains and emails this client is off-limits for. Matching records are removed from this client&apos;s People and Company databases immediately, while the shared master records and original list history stay safe. Other clients are unaffected.</p>
-      </div>
+    <div className="client-database-heading blocklist-heading">
+      <div><p className="eyebrow">CLIENT BLOCKLIST</p><h3>Blocked for {client.name}</h3><p>Blocked domains and emails are excluded from this client&apos;s People and Company databases.</p></div>
       <label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label="Search the blocklist" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); setSelected(new Set()); setAllMatching(false); }} placeholder="Search blocked domains and emails…"/></label>
     </div>
-    <div className="blocklist-add-actions">
+    <div className="blocklist-toolbar">
+      <div className="blocklist-filters">
       <select aria-label="Filter blocklist type" value={kind} onChange={(event) => { setKind(event.target.value); setPage(1); setSelected(new Set()); setAllMatching(false); }}><option value="">All types</option><option value="domain">Domains</option><option value="email">Emails</option></select>
       <label>Date added from <input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setPage(1); setSelected(new Set()); setAllMatching(false); }}/></label>
       <label>Date added to <input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setPage(1); setSelected(new Set()); setAllMatching(false); }}/></label>
+      </div><div className="blocklist-toolbar-actions">
       <button className="secondary" disabled={busy || total === 0 || (hasSelection && selectedCount === 0)} onClick={() => void exportEntries()}>{hasSelection ? `Export ${formatNumber(selectedCount)} selected` : "Export CSV"}</button>
+      <button className="secondary" aria-expanded={activeTool === "links"} aria-controls="client-blocklist-links" disabled={busy} onClick={() => setActiveTool(activeTool === "links" ? null : "links")}>Client links{shares.filter((share) => !share.revoked_at).length ? ` (${shares.filter((share) => !share.revoked_at).length})` : ""}</button>
+      <button className="primary" aria-expanded={activeTool === "add"} aria-controls="client-blocklist-add" disabled={busy} onClick={() => setActiveTool(activeTool === "add" ? null : "add")}><AppIcon name="plus" size={14}/> Add entries</button>
+      </div>
     </div>
 
     {error ? <div className="inline-error" role="alert">{error}</div> : null}
+    {notice ? <p className="blocklist-note" role="status">{notice}</p> : null}
+    {shareQueue.failed ? <div className="inline-error" role="alert"><span>{formatNumber(shareQueue.failed)} client submission{shareQueue.failed === 1 ? "" : "s"} failed after retries.</span><button disabled={busy} onClick={() => void retryFailedShares()}>Retry failed</button></div> : shareQueue.pending ? <p className="blocklist-note" role="status">{formatNumber(shareQueue.pending)} client submission{shareQueue.pending === 1 ? " is" : "s are"} queued for secure processing.</p> : null}
 
-    <article className="panel blocklist-add">
+    <article id="client-blocklist-add" className="panel blocklist-add" aria-label="Add blocklist entries" hidden={activeTool !== "add"}>
       <div className="panel-head"><div><h3>Add to the blocklist</h3><p>Paste domains and email addresses together - they are sorted by shape. URLs are trimmed to the domain, so a pasted link matches the stored company.</p></div></div>
       <textarea
         value={text}
@@ -290,14 +294,12 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
       </div>
       {pasteTooLarge ? <p className="form-error" role="alert">Maximum {formatNumber(MAX_BLOCKLIST_PASTE_VALUES)} entries per operation. Split this paste into smaller groups.</p> : null}
       {progress ? <p className="blocklist-note" role="status">Processing {formatNumber(progress.entries)} of {formatNumber(progress.total)} valid entries · {formatNumber(progress.records)} client records removed so far.</p> : null}
-      {notice ? <p className="blocklist-note" role="status">{notice}</p> : null}
     </article>
 
-    <article className="panel blocklist-add">
+    <article id="client-blocklist-links" className="panel blocklist-add" aria-label="Client submission links" hidden={activeTool !== "links"}>
       <div className="panel-head"><div><h3>Client submission links</h3><p>Create a revocable link clients can use only to submit new blocklist entries. Existing entries are never exposed.</p></div></div>
-      {shareQueue.failed ? <div className="inline-error" role="alert"><span>{formatNumber(shareQueue.failed)} client submission{shareQueue.failed === 1 ? "" : "s"} failed after retries.</span><button disabled={busy} onClick={() => void retryFailedShares()}>Retry failed</button></div> : shareQueue.pending ? <p className="blocklist-note" role="status">{formatNumber(shareQueue.pending)} client submission{shareQueue.pending === 1 ? " is" : "s are"} queued for secure processing.</p> : null}
       <div className="blocklist-add-actions"><input aria-label="Submission link label" value={shareLabel} onChange={(event) => setShareLabel(event.target.value)} maxLength={120}/><button disabled={busy || !shareLabel.trim()} onClick={() => void createShare()}>Create &amp; copy link</button></div>
-      {shareUrl ? <div className="selection-scope"><code>{shareUrl}</code><button onClick={() => void navigator.clipboard.writeText(shareUrl)}>Copy</button></div> : null}
+      {shareUrl ? <div className="selection-scope"><span>Link ready for sharing</span><button aria-label="Copy new client submission link" onClick={() => void navigator.clipboard.writeText(shareUrl)}>Copy link</button></div> : null}
       {shares.length ? <div className="table-wrap"><table><thead><tr><th>Label</th><th>Created</th><th>Last submission</th><th>Status</th><th>Action</th></tr></thead><tbody>{shares.map((share) => <tr key={share.id}><td>{share.label}</td><td>{new Date(share.created_at).toLocaleDateString("en-IN")}</td><td>{share.last_submitted_at ? new Date(share.last_submitted_at).toLocaleString("en-IN") : "—"}</td><td>{share.revoked_at ? "Revoked" : "Active"}</td><td>{share.revoked_at ? "—" : <button className="row-danger" disabled={busy} onClick={() => void revokeShare(share.id)}>Revoke</button>}</td></tr>)}</tbody></table></div> : <p className="blocklist-note">No client submission links created yet.</p>}
     </article>
 

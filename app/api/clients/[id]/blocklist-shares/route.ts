@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { authorizeApi, getAuthorizedUser } from "../../../../../lib/auth.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
+import { blocklistShareOrigin } from "./public-origin";
 
 function tokenHash(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -29,12 +30,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const payload = await request.json().catch(() => null) as { label?: unknown; expiresAt?: unknown } | null;
   const label = String(payload?.label ?? "Client blocklist form").trim().slice(0, 120) || "Client blocklist form";
   const expiresAt = payload?.expiresAt && !Number.isNaN(Date.parse(String(payload.expiresAt))) ? new Date(String(payload.expiresAt)).toISOString() : null;
+  let origin: string;
+  try { origin = blocklistShareOrigin(process.env.APP_PUBLIC_URL, request.url, process.env.NODE_ENV === "production"); }
+  catch (caught) { return Response.json({ error: caught instanceof Error ? caught.message : "Unable to create a public link." }, { status: 500 }); }
   const token = randomBytes(32).toString("base64url");
   const { data, error } = await createAdminClient().from("client_blocklist_shares").insert({
     client_id: id, token_hash: tokenHash(token), label, expires_at: expiresAt, created_by: user?.email ?? "",
   }).select("id,label,created_at,expires_at,revoked_at,last_submitted_at").single();
   if (error) return Response.json({ error: error.message }, { status: error.code === "23503" ? 404 : 500 });
-  return Response.json({ share: data, url: `${new URL(request.url).origin}/blocklist#token=${token}` }, { status: 201 });
+  return Response.json({ share: data, url: `${origin}/blocklist#token=${token}` }, { status: 201 });
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
