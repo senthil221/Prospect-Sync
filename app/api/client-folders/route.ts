@@ -9,7 +9,6 @@ export async function GET() {
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ folders: data ?? [] });
 }
-
 export async function POST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
@@ -26,4 +25,3 @@ export async function POST(request: Request) {
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ folder: data }, { status: 201 });
 }
-

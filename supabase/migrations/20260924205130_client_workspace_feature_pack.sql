@@ -424,6 +424,8 @@ begin
   return null;
 end;
 $function$;
+revoke execute on function public.sync_client_prospects_from_lists()
+  from public, anon, authenticated;
 
 create or replace function public.record_new_import_people_v1()
 returns trigger
@@ -493,6 +495,8 @@ begin
   return new;
 end;
 $function$;
+revoke execute on function public.sync_client_company_membership_v1()
+  from public, anon, authenticated;
 
 -- Completion performs O(1) updates. All item capture happened transactionally
 -- in bounded import chunks; no completion-time array aggregation can roll a
