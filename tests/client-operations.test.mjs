@@ -124,6 +124,26 @@ test("large client blocklists are bounded, resumable, and paginated without trun
   assert.match(panel, /Progress was saved/);
 });
 
+test("blocklist export uses the same frozen explicit or all-matching selection as bulk actions", async () => {
+  const [migration, route, panel] = await Promise.all([
+    readFile(new URL("../supabase/migrations/20260924205130_client_workspace_feature_pack.sql", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/clients/[id]/blocklist/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/BlocklistPanel.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(migration, /client_blocklist_selection_count_v1/);
+  assert.match(migration, /client_blocklist_export_page_v1/);
+  assert.match(migration, /p_selected_before/);
+  assert.match(migration, /250001/);
+  assert.match(route, /payload\.action === "export"/);
+  assert.match(route, /client_blocklist_selection_count_v1/);
+  assert.match(route, /client_blocklist_export_page_v1/);
+  assert.match(route, /p_after_created_at/);
+  assert.doesNotMatch(route, /searchParams\.get\("export"\)/);
+  assert.match(panel, /action: "export"/);
+  assert.match(panel, /selectedBefore: new Date\(\)\.toISOString\(\)/);
+});
+
 test("clients can be created before any list is imported", async () => {
   const [panel, route] = await Promise.all([
     readFile(new URL("../app/components/ClientsPanel.tsx", import.meta.url), "utf8"),

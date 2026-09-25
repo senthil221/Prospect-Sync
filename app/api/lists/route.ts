@@ -6,9 +6,16 @@ export async function GET(request: Request) {
   if (unauthorized) return unauthorized;
   const clientId = new URL(request.url).searchParams.get("clientId");
   if (!clientId) return Response.json({ lists: [] });
-  const { data, error } = await createAdminClient().from("list_summaries").select("*").eq("client_id", clientId).order("created_at", { ascending: false });
+  const params = new URL(request.url).searchParams;
+  const query = (params.get("q") ?? "").trim().slice(0, 200);
+  const requestedPage = Number(params.get("page") ?? "1");
+  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const limit = 50;
+  let selection = createAdminClient().from("list_summaries").select("*", { count: "exact" }).eq("client_id", clientId);
+  if (query) selection = selection.ilike("name", `%${query.replace(/[\\%_]/g, "\\$&")}%`);
+  const { data, error, count } = await selection.order("created_at", { ascending: false }).range((page - 1) * limit, page * limit - 1);
   if (error) return Response.json({ error: error.message }, { status: 500 });
-  return Response.json({ lists: data ?? [] });
+  return Response.json({ lists: data ?? [], total: count ?? 0, page, limit });
 }
 
 // Create an empty list for a client. Until now a list could only come into

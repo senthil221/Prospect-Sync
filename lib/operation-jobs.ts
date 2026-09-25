@@ -31,6 +31,7 @@ export function selectionContentHash(input: {
   filters: unknown;
   prospectIds: string[] | null;
   excludedIds: string[] | null;
+  sourceClientId?: string | null;
 }) {
   const canonical = JSON.stringify({
     action: input.action,
@@ -40,6 +41,7 @@ export function selectionContentHash(input: {
     // Sorted, so the hash does not depend on the order rows were ticked.
     ids: [...(input.prospectIds ?? [])].sort(),
     excluded: [...(input.excludedIds ?? [])].sort(),
+    sourceClientId: input.sourceClientId ?? null,
   });
   return createHash("sha256").update(canonical).digest("hex");
 }

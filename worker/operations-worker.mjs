@@ -56,7 +56,9 @@ async function runUnit(kind) {
   activeWork = kind;
   const started = performance.now();
   const batch = kind === 'operation' ? applyBatchSize : kind === 'export' ? exportBatchSize : batchSize;
-  const { rows } = await client.query('select * from prospect_operations.run_queue_unit_v1($1,$2,$3)', [kind, workerId, batch]);
+  const { rows } = kind === 'blocklist'
+    ? await client.query('select * from public.run_blocklist_share_submission_unit_v1($1,$2)', [workerId, Math.min(batch, 5000)])
+    : await client.query('select * from prospect_operations.run_queue_unit_v1($1,$2,$3)', [kind, workerId, batch]);
   markProgress();
   const result = rows[0];
   if (result?.job_id) console.log(JSON.stringify({ event: 'background_unit', kind, jobId: result.job_id,
@@ -176,7 +178,7 @@ async function main() {
   }
   connected = true;
   console.log(JSON.stringify({ event: 'worker_started', scheduler: 'atomic-round-v1', statementTimeout, batchSize, applyBatchSize, exportBatchSize }));
-  const round = createFairScheduler({ classes: ['search', 'operation', 'export'], runUnit,
+  const round = createFairScheduler({ classes: ['search', 'operation', 'export', 'blocklist'], runUnit,
     stopping: () => stopping,
     onError: async (kind, error) => {
       console.error(JSON.stringify({ event: 'background_unit_transport_error', kind, code: error.code ?? 'unknown' }));

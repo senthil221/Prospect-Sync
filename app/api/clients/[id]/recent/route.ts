@@ -4,12 +4,6 @@ import { createAdminClient } from "../../../../../lib/supabase/admin";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883", "42P01"]);
 
-// The windows the tab offers, and the only ones it will answer. A free-form
-// hours value would let a hand-built URL ask for the whole table through a
-// listing that has no cap of its own; the function bounds it too, but the set
-// of real answers is this short.
-const windows: Record<string, number> = { "24h": 24, "7d": 24 * 7, "30d": 24 * 30 };
-
 const pageSize = 50;
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -20,34 +14,50 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!clientId) return Response.json({ error: "No client." }, { status: 400 });
 
   const url = new URL(request.url);
-  const entity = url.searchParams.get("entity") === "companies" ? "companies" : "people";
-  const windowKey = url.searchParams.get("window") ?? "24h";
-  const hours = windows[windowKey];
-  if (!hours) return Response.json({ error: "Unknown window." }, { status: 400 });
-  const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
-
+  const rawPage = Number(url.searchParams.get("page") ?? 1);
+  const page = Number.isSafeInteger(rawPage) ? Math.max(1, Math.min(rawPage, 100_000)) : 1;
+  const batchId = (url.searchParams.get("batchId") ?? "").trim();
   const supabase = createAdminClient();
-  const { data, error } = await supabase.rpc("client_recently_added_v1", {
+  if (batchId) {
+    if (!/^[0-9a-f-]{36}$/i.test(batchId)) return Response.json({ error: "Invalid batch." }, { status: 400 });
+    const { data, error } = await supabase.rpc("client_addition_batch_records_v1", {
+      p_client_id: clientId, p_batch_id: batchId, p_limit: pageSize, p_offset: (page - 1) * pageSize,
+    }).abortSignal(request.signal ?? AbortSignal.timeout(30_000));
+    if (error) return error.code === "P0002"
+      ? Response.json({ error: "Batch not found." }, { status: 404 })
+      : databaseErrorResponse("The batch records", error);
+    const summary = Array.isArray(data) ? data[0] : data;
+    return Response.json({ records: summary?.result_rows ?? [], total: Number(summary?.total_count ?? 0), page, pageSize });
+  }
+  const rawEntity = url.searchParams.get("entity") ?? "";
+  const entity = rawEntity === "people" || rawEntity === "companies" ? rawEntity : "";
+  const search = (url.searchParams.get("search") ?? "").trim().slice(0, 200);
+  const windowKey = url.searchParams.get("window") ?? "30d";
+  const windows: Record<string, number | null> = { "24h": 24, "7d": 168, "30d": 720, all: null };
+  if (!(windowKey in windows)) return Response.json({ error: "Unknown time window." }, { status: 400 });
+
+  const { data, error } = await supabase.rpc("client_recent_batches_v1", {
     p_client_id: clientId,
+    p_search: search,
     p_entity: entity,
-    p_hours: hours,
+    p_hours: windows[windowKey],
     p_limit: pageSize,
     p_offset: (page - 1) * pageSize,
   }).abortSignal(request.signal ?? AbortSignal.timeout(30_000));
 
   if (error) {
     if (missingFunctionCodes.has(error.code ?? "")) {
-      return Response.json({ error: "Apply the latest database migration to enable the Recently Added tab." }, { status: 503 });
+      return Response.json({ error: "Apply the latest database migration to enable recent batches." }, { status: 503 });
     }
     if (isStatementTimeout(error)) {
-      return statementTimeoutResponse("This window", "Choose a shorter window.");
+      return statementTimeoutResponse("This recent-batch search", "Use a more specific record or source search.");
     }
     return databaseErrorResponse("The recently added listing", error);
   }
 
   const summary = Array.isArray(data) ? data[0] : data;
   return Response.json({
-    records: summary?.result_rows ?? [],
+    batches: summary?.result_rows ?? [],
     total: Number(summary?.total_count ?? 0),
     entity,
     window: windowKey,

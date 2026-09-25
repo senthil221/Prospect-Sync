@@ -250,7 +250,7 @@ test("the worker runs operations without being able to decide what they are", as
   // Still no PostgREST client: everything goes down its own connection.
   assert.doesNotMatch(code, /createClient|supabase/i);
   // Neither queue may starve the other.
-  assert.match(code, /createFairScheduler\(\{ classes: \['search', 'operation', 'export'\]/);
+  assert.match(code, /createFairScheduler\(\{ classes: \['search', 'operation', 'export', 'blocklist'\]/);
 });
 
 // Leads and Contactable: client-scoped state, served by a semi-join rather
@@ -312,12 +312,13 @@ test("leads and contactability are client-scoped without widening the index", as
   assert.match(migration, /revoke execute on function public\.set_client_lead_v1[^;]*from public, anon, authenticated/);
   assert.match(route, /action === "set_lead" \|\| action === "clear_lead"/);
 
-  // Independent toggles, not two more segments of the exclusive ICP group:
-  // "ICP verified AND contactable" is the query asked before a send.
+  // The client-level status views are one exclusive All / Leads / Contactable
+  // group. ICP verification remains its own independent group.
   assert.match(table, /const leadOn = /);
   assert.match(table, /const contactableOn = /);
-  assert.match(table, /toggleClientState\("__lead", leadOn\)/);
-  assert.match(table, /toggleClientState\("__contactable", contactableOn\)/);
+  assert.match(table, /function setClientView\(view: "all" \| "leads" \| "contactable"\)/);
+  assert.match(table, /filter\.field !== "__lead" && filter\.field !== "__contactable"/);
+  assert.match(table, /Choose a client people view/);
   // All-matching lead marking works, and the reason it can is that
   // apply_batch_v1 learned the verb. Before 20260916120000 the route accepted
   // the job and the worker failed it minutes later, so the buttons were greyed
@@ -329,16 +330,11 @@ test("leads and contactability are client-scoped without widening the index", as
   assert.doesNotMatch(table, /Marking leads needs an explicit selection/);
   assert.doesNotMatch(table, /Clearing leads needs an explicit selection/);
 
-  // Both are also reachable as tabs, which are the People DB opened
-  // pre-filtered rather than a second grid. A separate grid would be a second
-  // copy of paging, selection, freezing, export and the company pivot.
+  // The duplicate client-level tabs are retired: there is one implementation
+  // inside People DB, not a second grid with its own state.
   const clientsPanel = await read("../app/components/ClientsPanel.tsx");
-  assert.match(clientsPanel, /id: "leads" as const, label: "Leads"/);
-  assert.match(clientsPanel, /id: "contactable" as const, label: "Contactable"/);
-  assert.match(clientsPanel, /field: "__lead", operator: "contains", values: \[client\.id\]/);
-  assert.match(clientsPanel, /field: "__contactable", operator: "contains", values: \[client\.id\]/);
-  // Seeded, not forced: the filter is ordinary state the user can then clear.
-  assert.match(clientsPanel, /useState<ProspectFilter\[\]>\(initialFilters\)/);
+  assert.doesNotMatch(clientsPanel, /id: "leads" as const, label: "Leads"/);
+  assert.doesNotMatch(clientsPanel, /id: "contactable" as const, label: "Contactable"/);
 });
 
 // The cooldown clock was stamped, not set.
@@ -429,8 +425,9 @@ function routeActions(source) {
 
 // The nine superseded search functions, and why dropping them is safe
 // (20260916130000).
-test("the retired search functions are dropped, and the live three are not", async () => {
+test("the retired search functions are dropped, and the live search entrypoints are not", async () => {
   const migration = await read("../supabase/migrations/20260916130000_drop_the_superseded_search_functions.sql");
+  const featurePack = await read("../supabase/migrations/20260924205130_client_workspace_feature_pack.sql");
   const code = codeOnly(migration);
 
   // Every drop names a full signature. DROP FUNCTION by bare name is ambiguous
@@ -457,6 +454,9 @@ test("the retired search functions are dropped, and the live three are not", asy
   for (const live of ["filter_companies_v4", "search_prospect_export_v5", "search_prospect_workspace_v12"]) {
     assert.ok(code.includes(live), `${live} must be asserted to survive`);
   }
+  for (const live of ["search_prospect_export_v6", "search_prospect_workspace_v13"]) {
+    assert.match(featurePack, new RegExp(`create or replace function public\\.${live}`));
+  }
   assert.match(code, /this migration dropped the wrong one/);
 
   // And the report the file exists to clean is checked in the file's own terms.
@@ -471,5 +471,5 @@ test("the retired search functions are dropped, and the live three are not", asy
   ]);
   const calls = new Set(sources.flatMap((source) =>
     [...codeOnly(source).matchAll(/rpc\("(search_prospect_[a-z_0-9]+|filter_companies[a-z_0-9]*)"/g)].map((match) => match[1])));
-  assert.deepEqual([...calls].sort(), ["filter_companies_v4", "search_prospect_export_v5", "search_prospect_workspace_v12"]);
+  assert.deepEqual([...calls].sort(), ["filter_companies_v4", "search_prospect_export_v6", "search_prospect_workspace_v13"]);
 });

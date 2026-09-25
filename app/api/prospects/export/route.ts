@@ -113,7 +113,7 @@ async function runExport(request: Request) {
     }
     if (!release) throw new Error("The database stayed busy for too long, so this export stopped rather than queueing behind it.");
     try {
-      return await supabase.rpc("search_prospect_export_v5", {
+      return await supabase.rpc("search_prospect_export_v6", {
         p_search: search,
         p_filters: filters,
         p_client_id: clientId,

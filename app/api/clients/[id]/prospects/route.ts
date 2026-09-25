@@ -73,6 +73,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   // result set the user already built and owns, so the ids are the ones that
   // matched when they looked - not whatever matches when the mutation runs.
   const resultSetId = String(payload.resultSetId ?? "").trim();
+  const hasCompanyCap = selection.filters.some((filter) => filter.field === "__max_people_per_company");
+  if (hasCompanyCap && !selection.prospectIds?.length && !resultSetId) {
+    return Response.json({ error: "Build the frozen selection before applying an action with a per-company limit." }, { status: 409 });
+  }
 
   // Without ids and without filters, these would act on the entire database.
   if (isEmptySelection(selection)) {
@@ -104,6 +108,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     contentHash: selectionContentHash({
       action, clientScope: id, search: selection.search, filters: selection.filters,
       prospectIds: selection.prospectIds, excludedIds: selection.excludedIds,
+      sourceClientId: selection.sourceClientId,
     }),
     versionVector: null,
     payload: jobPayload,
@@ -145,11 +150,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   };
 
   if (action === "push") {
-    const { data, error } = await supabase.rpc("push_prospects_to_client_v1", {
+    const { data, error } = await supabase.rpc("push_prospects_to_client_v2", {
       p_client_id: id,
       ...selectionArgs(selection),
       p_source_client_id: selection.sourceClientId,
       p_actor: actor,
+      p_request_id: requestId,
     });
     if (error) return failure(error, "pushing records into a client");
     return finish(data);

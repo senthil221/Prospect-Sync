@@ -12,7 +12,13 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL || "http://127.0.0.1:3000",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
-    video: "retain-on-failure",
+    video: process.env.E2E_USE_SYSTEM_CHROME === "1" ? "off" : "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [{
+    name: "chromium",
+    use: {
+      ...devices["Desktop Chrome"],
+      ...(process.env.E2E_USE_SYSTEM_CHROME === "1" ? { channel: "chrome" as const } : {}),
+    },
+  }],
 });

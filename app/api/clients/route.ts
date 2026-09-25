@@ -6,10 +6,19 @@ export async function GET() {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const supabase = createAdminClient();
-  const [summaries, settings] = await Promise.all([supabase.from("client_summaries").select("*").order("name"), supabase.from("client_settings").select("client_id,cooldown_days")]);
-  if (summaries.error) return Response.json({ error: summaries.error.message }, { status: 500 });
+  const [summaries, settings, folders] = await Promise.all([
+    supabase.from("client_summaries").select("*").order("name"),
+    supabase.from("client_settings").select("client_id,cooldown_days"),
+    supabase.from("client_folders").select("id,name,created_at").order("name"),
+  ]);
+  const error = summaries.error ?? settings.error ?? folders.error;
+  if (error) return Response.json({ error: error.message }, { status: 500 });
   const cooldowns = new Map((settings.data ?? []).map((setting) => [setting.client_id, setting.cooldown_days]));
-  return Response.json({ clients: (summaries.data ?? []).map((client) => ({ ...client, cooldown_days: cooldowns.get(client.id) ?? 90 })) });
+  const folderNames = new Map((folders.data ?? []).map((folder) => [folder.id, folder.name]));
+  return Response.json({
+    clients: (summaries.data ?? []).map((client) => ({ ...client, folder_name: client.folder_id ? folderNames.get(client.folder_id) ?? null : null, cooldown_days: cooldowns.get(client.id) ?? 90 })),
+    folders: folders.data ?? [],
+  });
 }
 
 export async function POST(request: Request) {

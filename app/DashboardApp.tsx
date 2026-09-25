@@ -12,7 +12,7 @@ import CompaniesWorkspace, { useCompaniesWorkspaceController } from "./component
 import CoveragePanel from "./components/CoveragePanel";
 import DataQualityPanel from "./components/DataQualityPanel";
 import { AppIcon, DeleteConfirmation, LoadingState, ProspectDrawer, type IconName } from "./components/DashboardUi";
-import ImportsPanel from "./components/ImportsPanel";
+import ImportsPanel, { type ImportDestination } from "./components/ImportsPanel";
 import IntegrationsPanel from "./components/IntegrationsPanel";
 import LogsPanel from "./components/LogsPanel";
 import ThemeToggle from "./components/ThemeToggle";
@@ -246,6 +246,21 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
     if (next !== "clients") setSelectedClient(null);
   }, [setCompanyPage, setProspectPage]);
 
+  const openImportedDestination = useCallback(async (destination?: ImportDestination) => {
+    const refreshed = await refreshDashboard();
+    if (!destination) { navigate("overview"); return; }
+    if (destination.kind === "companies") {
+      navigate("companies");
+      setCompanyFilters([{ id: `__company_import_id:${destination.importId}`, field: "__company_import_id", operator: "equals", values: [destination.importId] }]);
+      return;
+    }
+    const client = refreshed.find((item) => item.id === destination.clientId)
+      ?? (await api<{ client: ClientRecord }>(`/api/clients/${encodeURIComponent(destination.clientId)}`, { cache: "no-store" })).client;
+    const list = (await api<{ list: ListRecord }>(`/api/lists/${encodeURIComponent(destination.listId)}?clientId=${encodeURIComponent(client.id)}`, { cache: "no-store" })).list;
+    navigate("clients");
+    setSelectedClient(client); setLists((current) => current.some((item) => item.id === list.id) ? current : [list, ...current]); setSelectedList(list);
+  }, [navigate, refreshDashboard]);
+
   // Open the People workspace on exactly the records a quality check counted.
   //
   // navigate() is deliberate rather than a bare setSection: it clears the search,
@@ -393,7 +408,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
         {!loading && section === "imports" && <ImportsPanel
           clients={clients}
           onChanged={async () => { await refreshDashboard(); }}
-          onComplete={async () => { await refreshDashboard(); navigate("overview"); }}
+          onComplete={openImportedDestination}
         />}
       </section>
     </main>

@@ -21,6 +21,10 @@ import { AppIcon, ProgressBar, StatusMessage } from "./DashboardUi";
 import { ImportStepper, StepFooter, focusProblem } from "./ImportStepper";
 import Tabs from "./Tabs";
 
+export type ImportDestination =
+  | { kind: "prospects"; clientId: string; listId: string; listName: string }
+  | { kind: "companies"; importId: string; listName: string };
+
 function localIsoDate() {
   const now = new Date();
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
@@ -29,7 +33,7 @@ function localIsoDate() {
 function ImportMappingPanel({ audit, fieldMap, onChange }: { audit: FileAudit; fieldMap: Record<string, string>; onChange: (header: string, value: string) => void }) {
   return <div className="import-mapping"><div className="mapping-head"><div><strong>Field mapping</strong><small>Only the fixed People fields below can be imported</small></div><span>{audit.invalidRows ? `${audit.invalidRows} rows need identity data` : "All rows identifiable"}</span></div><div className="mapping-list">{audit.headers.map((header) => <label key={header}><span title={header}>{header}</span><b><AppIcon name="arrow" size={14}/></b><select aria-label={`Map ${header}`} value={fieldMap[header] || skipImportField} onChange={(event) => onChange(header, event.target.value)}>{canonicalImportFields.map((field) => <option key={field}>{field}</option>)}</select></label>)}</div><p>Columns outside the fixed import fields are discarded. Mapped values are stored under their canonical field names; source-only headers are not retained.</p></div>;
 }
-export default function ImportsPanel({ clients, onComplete, onChanged }: { clients: ClientRecord[]; onComplete: () => Promise<void>; onChanged: () => Promise<void> }) {
+export default function ImportsPanel({ clients, onComplete, onChanged }: { clients: ClientRecord[]; onComplete: (destination?: ImportDestination) => Promise<void>; onChanged: () => Promise<void> }) {
   const [kind, setKind] = useState<"prospects" | "companies">("prospects");
   const [sourceChoice, setSourceChoice] = useState("");
   const [customSource, setCustomSource] = useState("");
@@ -159,7 +163,7 @@ function RequiredFieldList({ title, fields }: { title: string; fields: readonly 
   return <div className="required-field-list"><strong>{title}</strong><div>{fields.map((field) => <span key={field}><AppIcon name="check" size={14}/> {field}</span>)}</div></div>;
 }
 
-function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport, onCancelResume, onResumed, onActiveImportChange }: { dataSource: string; step: ImportStepId; onStep: (step: ImportStepId) => void; onComplete: () => Promise<void>; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void; onActiveImportChange: (id: string) => void }) {
+function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport, onCancelResume, onResumed, onActiveImportChange }: { dataSource: string; step: ImportStepId; onStep: (step: ImportStepId) => void; onComplete: (destination?: ImportDestination) => Promise<void>; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void; onActiveImportChange: (id: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   // A paste has no File behind it, so the import needs a name of its own for the
   // audit trail. Everything downstream -- mapping, merge mode, chunked upload,
@@ -173,6 +177,7 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
   const [summary, setSummary] = useState<{ processed_rows: number; added_count: number; updated_count: number; skipped_count: number } | null>(null);
+  const [completedDestination, setCompletedDestination] = useState<ImportDestination | null>(null);
   // What to do when an uploaded row matches a company already in the Company DB.
   // A resumed import keeps whatever mode it started under -- see the note in the route.
   const [mergeMode, setMergeMode] = useState<CompanyMergeMode>(defaultCompanyMergeMode);
@@ -260,6 +265,7 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
     }
     const completed = await api<{ summary: { processed_rows: number; added_count: number; updated_count: number; skipped_count: number } }>("/api/company-imports/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId }) });
     setSummary(completed.summary); setPhase("done");
+    setCompletedDestination({ kind: "companies", importId, listName: sourceName || resumeImport?.fileName || "Imported companies" });
     setMessage(`Company import complete. Companies already in the database were handled with “${companyMergeModeLabels[mergeMode].label}”.`);
   }
 
@@ -297,7 +303,7 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
     await resumeCompanyTable(selected.name, () => readImportTable(selected));
   }
 
-  if (phase === "done" && summary) return <div className="import-success"><span className="success-mark"><AppIcon name="check" size={14}/></span><p className="eyebrow">COMPANY IMPORT COMPLETE</p><h2>Your Company DB is updated.</h2><p>{message}</p><div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(summary.added_count)}</strong><span>Companies added</span></div><div><strong>{formatNumber(summary.updated_count)}</strong><span>Companies matched</span></div><div><strong>{formatNumber(summary.skipped_count)}</strong><span>Rows skipped</span></div></div><p className="import-rollback-note">A company import updates the Company DB in place, so it cannot be rolled back as a unit. Matched companies were handled with “{companyMergeModeLabels[mergeMode].label}”.</p><button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
+  if (phase === "done" && summary) return <div className="import-success"><span className="success-mark"><AppIcon name="check" size={14}/></span><p className="eyebrow">COMPANY IMPORT COMPLETE</p><h2>Your Company DB is updated.</h2><p>{message}</p>{completedDestination ? <p className="import-rollback-note">Imported collection: <strong>{completedDestination.listName}</strong></p> : null}<div className="result-grid four"><div><strong>{formatNumber(summary.processed_rows)}</strong><span>Rows processed</span></div><div><strong>{formatNumber(summary.added_count)}</strong><span>Companies added</span></div><div><strong>{formatNumber(summary.updated_count)}</strong><span>Companies matched</span></div><div><strong>{formatNumber(summary.skipped_count)}</strong><span>Rows skipped</span></div></div><p className="import-rollback-note">A company import updates the Company DB in place, so it cannot be rolled back as a unit. Matched companies were handled with “{companyMergeModeLabels[mergeMode].label}”.</p><button className="primary" onClick={() => onComplete(completedDestination ?? undefined)}>{completedDestination ? `Open “${completedDestination.listName}”` : "Go to dashboard"}</button></div>;
 
   if (resumeImport) return <div className="resume-import-card panel"><p className="eyebrow">RESUME COMPANY IMPORT</p><h3>{resumeImport.fileName}</h3><p>Interrupted - resume from row {formatNumber(resumeImport.resumeFromRow)} of {formatNumber(resumeImport.totalRows)}.</p><label className="dropzone"><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={phase !== "idle"} onChange={(event) => void resumeCompanyFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span><strong>Re-select the same file</strong><small>Its headers and row count will be verified before upload resumes.</small></label><div className="resume-paste"><label><span>…or paste the same rows again</span><textarea aria-label="Paste the same company rows to resume" rows={4} disabled={phase !== "idle"} value={pastedText} onChange={(event) => setPastedText(event.target.value)} placeholder="Paste the original block to resume a pasted import"/></label><button className="secondary" disabled={phase !== "idle" || !pastedText.trim()} onClick={() => void resumeCompanyTable("the pasted rows", async () => parsePastedCompanyTable(pastedText))}>Resume from paste</button></div>{phase === "uploading" ? <ProgressBar label={message} value={progress} total={100}/> : null}{message && phase === "idle" ? <StatusMessage tone="alert">{message}</StatusMessage> : null}<button className="secondary" disabled={phase !== "idle"} onClick={onCancelResume}>Start a new import instead</button></div>;
 
@@ -371,7 +377,7 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
   </div>;
 }
 
-function ProspectImportView({ clients, onComplete, dataSource, step, onStep, resumeImport, onCancelResume, onResumed }: { clients: ClientRecord[]; onComplete: () => Promise<void>; dataSource: string; step: ImportStepId; onStep: (step: ImportStepId) => void; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void }) {
+function ProspectImportView({ clients, onComplete, dataSource, step, onStep, resumeImport, onCancelResume, onResumed }: { clients: ClientRecord[]; onComplete: (destination?: ImportDestination) => Promise<void>; dataSource: string; step: ImportStepId; onStep: (step: ImportStepId) => void; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [inputMode, setInputMode] = useState<"file" | "paste">("file");
   const [pastedText, setPastedText] = useState("");
@@ -388,6 +394,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
   // uploadProspectRows's own importId is a local, and the background poll
   // clears activeBackgroundId the moment it reports done.
   const [completedImportId, setCompletedImportId] = useState("");
+  const [completedDestination, setCompletedDestination] = useState<ImportDestination | null>(null);
   const [fileAudit, setFileAudit] = useState<FileAudit | null>(null);
   const [fieldMap, setFieldMap] = useState<Record<string, string>>({});
   const [activeBackgroundId, setActiveBackgroundId] = useState("");
@@ -422,6 +429,9 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
         }
         if (detail.status === "completed") {
           setCompletedImportId(activeBackgroundId);
+          if (detail.clientId && detail.listId) {
+            setCompletedDestination({ kind: "prospects", clientId: detail.clientId, listId: detail.listId, listName: detail.listName || detail.fileName || "Imported people" });
+          }
           setActiveBackgroundId("");
           setSummary({ processed_rows: detail.processedRows ?? 0, unique_added: detail.uniqueAdded ?? 0, duplicates_linked: detail.duplicatesLinked ?? 0 });
           setProgress(100); setPhase("done"); setMessage("Import complete. Your list is ready and the people database is up to date.");
@@ -493,7 +503,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
     setFileAudit(null); setFieldMap({}); setMessage(""); setSummary(null); setProgress(0); setPasteNotice("");
   }
 
-  async function uploadProspectRows(table: { headers: string[]; rows: string[][] }, session: { importId: string; listId: string }, keptColumns: Array<{ header: string; column: number }>, keptHeaders: string[], resolvedFieldMap: Record<string, string>, rowOffset: number) {
+  async function uploadProspectRows(table: { headers: string[]; rows: string[][] }, session: { importId: string; listId: string; clientId?: string; listName?: string }, keptColumns: Array<{ header: string; column: number }>, keptHeaders: string[], resolvedFieldMap: Record<string, string>, rowOffset: number) {
     setPhase("uploading");
     setProgress(Math.round((rowOffset / table.rows.length) * 100));
     setMessage(rowOffset ? `Resuming from row ${formatNumber(rowOffset + 1)}…` : `Synchronizing ${formatNumber(table.rows.length)} rows with the people database…`);
@@ -504,7 +514,9 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
       setProgress(Math.round(((index + chunk.length) / table.rows.length) * 100));
     }
     const completed = await api<{ summary: { processed_rows: number; unique_added: number; duplicates_linked: number } }>("/api/imports/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(session) });
-    setSummary(completed.summary); setCompletedImportId(session.importId); setPhase("done"); setMessage("Import complete. Your list is ready and the people database is up to date.");
+    setSummary(completed.summary); setCompletedImportId(session.importId);
+    if (session.clientId) setCompletedDestination({ kind: "prospects", clientId: session.clientId, listId: session.listId, listName: session.listName || listName });
+    setPhase("done"); setMessage("Import complete. Your list is ready and the people database is up to date.");
   }
 
   async function startImport() {
@@ -515,8 +527,8 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
         const keptHeaders = keptColumns.map(({ header }) => header);
         const resolvedFieldMap = Object.fromEntries(keptColumns.map(({ header, field }) => [header, field]));
         const withoutClient = clientId === unassignedClientId;
-        const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: `Pasted people ${localIsoDate()}`, totalRows: pastedTable.rows.length, headers: keptHeaders, sourceHeaders: pastedTable.headers, fieldMap: resolvedFieldMap, mergeMode }) });
-        await uploadProspectRows(pastedTable, started, keptColumns, keptHeaders, resolvedFieldMap, 0);
+        const started = await api<{ importId: string; listId: string; clientId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: `Pasted people ${localIsoDate()}`, totalRows: pastedTable.rows.length, headers: keptHeaders, sourceHeaders: pastedTable.headers, fieldMap: resolvedFieldMap, mergeMode }) });
+        await uploadProspectRows(pastedTable, { ...started, listName }, keptColumns, keptHeaders, resolvedFieldMap, 0);
         return;
       }
       if (!file) return;
@@ -533,7 +545,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
         const sourceHeaders = fileAudit?.headers ?? [];
         const keptHeaders = fixedImportColumns(sourceHeaders, fieldMap, suggestedPersonImportField, personImportFields).map(({ header }) => header);
         const withoutClient = clientId === unassignedClientId;
-        const started = await api<{ importId: string; listId: string }>("/api/imports/start", {
+        const started = await api<{ importId: string; listId: string; clientId: string }>("/api/imports/start", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
             clientId: withoutClient ? undefined : clientId || undefined,
             clientName: newClient || undefined, withoutClient, listName, dataSource,
@@ -542,6 +554,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
             storageObjectPath: upload.objectPath, fileSizeBytes: file.size,
           }),
         });
+        setCompletedDestination({ kind: "prospects", clientId: started.clientId, listId: started.listId, listName });
         setActiveBackgroundId(started.importId);
         setPhase("queued"); setProgress(0); setMessage("Upload complete. The server is processing this list in the background; you can close this tab safely.");
         return;
@@ -555,8 +568,8 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
       const keptHeaders = keptColumns.map(({ header }) => header);
       const resolvedFieldMap = Object.fromEntries(keptColumns.map(({ header, field }) => [header, field]));
       const withoutClient = clientId === unassignedClientId;
-      const started = await api<{ importId: string; listId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, sourceHeaders: parsed.headers, fieldMap, mergeMode }) });
-      await uploadProspectRows(parsed, started, keptColumns, keptHeaders, resolvedFieldMap, 0);
+      const started = await api<{ importId: string; listId: string; clientId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, sourceHeaders: parsed.headers, fieldMap, mergeMode }) });
+      await uploadProspectRows(parsed, { ...started, listName }, keptColumns, keptHeaders, resolvedFieldMap, 0);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Import failed."); setPhase("idle"); }
   }
 
@@ -581,7 +594,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
       // different rules to one file would be worse than either rule.
       setFile(selected); setFieldMap(detail.fieldMap); if (detail.mergeMode) setMergeMode(detail.mergeMode);
       setFileAudit({ headers: table.headers, rows: table.rows.length, populatedCells, invalidRows: 0 });
-      await uploadProspectRows(table, { importId: detail.id, listId: detail.listId }, keptColumns, keptHeaders, resolvedFieldMap, detail.committedRowOffset);
+      await uploadProspectRows(table, { importId: detail.id, listId: detail.listId, clientId: detail.clientId ?? undefined, listName: detail.listName || resumeImport.fileName }, keptColumns, keptHeaders, resolvedFieldMap, detail.committedRowOffset);
       onResumed(detail.id);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Unable to resume the import."); setPhase("idle"); }
   }
@@ -591,7 +604,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
   // import, described a sample of the file rather than the import.
   if (phase === "done" && summary) {
     const outcome = prospectImportOutcome(summary);
-    return <div className="import-success"><span className="success-mark"><AppIcon name="check" size={14}/></span><p className="eyebrow">IMPORT COMPLETE</p><h2>Your list is ready.</h2><p>{message}</p>
+    return <div className="import-success"><span className="success-mark"><AppIcon name="check" size={14}/></span><p className="eyebrow">IMPORT COMPLETE</p><h2>Your list is ready.</h2><p>{message}</p>{completedDestination ? <p className="import-rollback-note">Imported list: <strong>{completedDestination.listName}</strong></p> : null}
       <div className="result-grid four">
         <div><strong>{formatNumber(outcome.processed)}</strong><span>Rows processed</span></div>
         <div><strong>{formatNumber(outcome.added)}</strong><span>Added to master</span></div>
@@ -602,7 +615,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
       {outcome.unlinked > 0 && completedImportId
         ? <p className="import-rollback-note"><a href={`/api/imports/${encodeURIComponent(completedImportId)}/skipped`} download>Download the {formatNumber(outcome.unlinked)} skipped row{outcome.unlinked === 1 ? "" : "s"} (CSV)</a> - each had no email, LinkedIn URL, or name plus company/website to identify it by.</p>
         : null}
-      <button className="primary" onClick={onComplete}>Go to dashboard</button></div>;
+      <button className="primary" onClick={() => onComplete(completedDestination ?? undefined)}>{completedDestination ? `Open “${completedDestination.listName}”` : "Go to dashboard"}</button></div>;
   }
 
   if (resumeImport) return <div className="resume-import-card panel"><p className="eyebrow">RESUME PROSPECT IMPORT</p><h3>{resumeImport.fileName}</h3><p>Interrupted - resume from row {formatNumber(resumeImport.resumeFromRow)} of {formatNumber(resumeImport.totalRows)}.</p><label className="dropzone"><input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={phase !== "idle"} onChange={(event) => void resumeProspectFile(event)}/><span className="upload-mark"><AppIcon name="upload" size={14}/></span><strong>Re-select the same file</strong><small>Its headers and row count will be verified before upload resumes.</small></label>{phase !== "idle" ? <ProgressBar label={message} value={progress ? progress : undefined} total={progress ? 100 : undefined}/> : null}{message && phase === "idle" ? <StatusMessage tone="alert">{message}</StatusMessage> : null}<button className="secondary" disabled={phase !== "idle"} onClick={onCancelResume}>Start a new import instead</button></div>;

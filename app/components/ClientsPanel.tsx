@@ -5,7 +5,7 @@ import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import { api, encodeFilters, fetchCompanies, fetchProspects, filterPayload, isAbortError } from "../../lib/dashboard-api";
 import { filterPayloadWithSets } from "../../lib/filter-set-client";
 import { formatNumber, initials } from "../../lib/dashboard-helpers";
-import type { ClientRecord, Company, ListRecord, Prospect, ProspectFilter } from "../../lib/types";
+import type { ClientFolder, ClientRecord, Company, ListRecord, Prospect, ProspectFilter } from "../../lib/types";
 import { AppIcon, ConfirmDialog, EmptyCompact, EmptyState, TabPanel } from "./DashboardUi";
 import { CompanyTable } from "./CompaniesWorkspace";
 import BlocklistPanel from "./BlocklistPanel";
@@ -31,9 +31,23 @@ export default function ClientsPanel({ clients, selectedClient, selectedList, li
 }
 function ClientsView({ clients, onOpen, onImport, onRefresh }: { clients: ClientRecord[]; onOpen: (client: ClientRecord) => void; onImport: () => void; onRefresh: () => void }) {
   const [createOpen, setCreateOpen] = useState(false);
+  const [folderOpen, setFolderOpen] = useState(false);
   const [clientName, setClientName] = useState("");
+  const [folderName, setFolderName] = useState("");
+  const [folders, setFolders] = useState<ClientFolder[]>([]);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+
+  const activeClients = clients.filter((client) => !client.archived_at);
+  const archivedClients = clients.filter((client) => Boolean(client.archived_at));
+
+  useEffect(() => {
+    let active = true;
+    void api<{ folders: ClientFolder[] }>("/api/client-folders", { cache: "no-store" })
+      .then((data) => { if (active) setFolders(data.folders ?? []); })
+      .catch(() => { if (active) setFolders([]); });
+    return () => { active = false; };
+  }, [clients]);
 
   async function createClient() {
     const name = clientName.trim();
@@ -49,16 +63,61 @@ function ClientsView({ clients, onOpen, onImport, onRefresh }: { clients: Client
     finally { setCreating(false); }
   }
 
-  return <>
-    <div className="section-intro"><div><p className="eyebrow">CLIENT WORKSPACES</p><h2>Keep every ICP list organized.</h2><p>Create the client, prepare its blocklist, then import lists when you are ready.</p></div><div className="section-intro-actions"><button className="secondary" onClick={() => setCreateOpen(true)}><AppIcon name="plus" size={14}/> New client</button><button className="primary" onClick={onImport}><AppIcon name="upload" size={14}/> Import client list</button></div></div>
-    {clients.length ? <div className="client-directory" role="list">{clients.map((client, index) => <div className="client-row" role="listitem" key={client.id}>
+  async function createFolder() {
+    const name = folderName.trim();
+    if (!name) return;
+    setCreating(true); setCreateError("");
+    try {
+      const result = await api<{ folder: ClientFolder }>("/api/client-folders", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
+      });
+      setFolders((current) => current.some((folder) => folder.id === result.folder.id) ? current : [...current, result.folder].sort((a, b) => a.name.localeCompare(b.name)));
+      setFolderOpen(false); setFolderName("");
+    } catch (caught) { setCreateError(caught instanceof Error ? caught.message : "Unable to create the folder."); }
+    finally { setCreating(false); }
+  }
+
+  async function moveClient(client: ClientRecord, folderId: string | null) {
+    try {
+      await api(`/api/clients/${encodeURIComponent(client.id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ folderId }),
+      });
+      onRefresh();
+    } catch (caught) { setCreateError(caught instanceof Error ? caught.message : "Unable to move the client."); }
+  }
+
+  async function setArchived(client: ClientRecord, archived: boolean) {
+    try {
+      await api(`/api/clients/${encodeURIComponent(client.id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived }),
+      });
+      onRefresh();
+    } catch (caught) { setCreateError(caught instanceof Error ? caught.message : "Unable to update the client."); }
+  }
+
+  function clientRow(client: ClientRecord, index: number, archived = false) {
+    return <div className="client-row" role="listitem" key={client.id}>
       <span className={`client-logo tone-${index % 4}`} aria-hidden="true">{initials(client.name)}</span>
-      <div className="client-row-identity"><button type="button" className="row-open" onClick={() => onOpen(client)}>{client.name}</button><small>{client.blocked_count ? `${formatNumber(client.blocked_count)} blocked` : "Active workspace"}</small></div>
+      <div className="client-row-identity"><button type="button" className="row-open" onClick={() => onOpen(client)}>{client.name}</button><small>{archived ? "Archived" : client.blocked_count ? `${formatNumber(client.blocked_count)} blocked` : "Active workspace"}</small></div>
       <span className="client-row-metric"><b>{formatNumber(client.prospect_count)}</b> prospects</span>
+      <span className="client-row-metric"><b>{formatNumber(client.company_count ?? 0)}</b> companies</span>
       <span className="client-row-metric"><b>{formatNumber(client.list_count)}</b> {client.list_count === 1 ? "list" : "lists"}</span>
+      {!archived ? <select aria-label={`Folder for ${client.name}`} value={client.folder_id ?? ""} onChange={(event) => void moveClient(client, event.target.value || null)}><option value="">No folder</option>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select> : null}
+      <button type="button" className="outline-button" onClick={() => void setArchived(client, !archived)}>{archived ? "Restore" : "Archive"}</button>
       <button type="button" className="outline-button" onClick={() => onOpen(client)}>Open <AppIcon name="arrow" size={14}/></button>
-    </div>)}</div> : <EmptyState title="Create your first client" text="Create a client first, add its blocklist, then import prospect lists." action="Create client" onAction={() => setCreateOpen(true)} />}
+    </div>;
+  }
+
+  return <>
+    <div className="section-intro"><div><p className="eyebrow">CLIENT WORKSPACES</p><h2>Keep every ICP list organized.</h2><p>Group clients by account manager, or archive a workspace without deleting its data.</p></div><div className="section-intro-actions"><button className="secondary" onClick={() => setFolderOpen(true)}><AppIcon name="plus" size={14}/> New folder</button><button className="secondary" onClick={() => setCreateOpen(true)}><AppIcon name="plus" size={14}/> New client</button><button className="primary" onClick={onImport}><AppIcon name="upload" size={14}/> Import client list</button></div></div>
+    {createError ? <div className="inline-error" role="alert">{createError}</div> : null}
+    {activeClients.length || folders.length ? <div className="client-folders">
+      {folders.map((folder) => { const members = activeClients.filter((client) => client.folder_id === folder.id); return <section className="panel table-panel" key={folder.id}><div className="panel-head"><div><h3>{folder.name}</h3><p>{formatNumber(members.length)} client{members.length === 1 ? "" : "s"}</p></div></div>{members.length ? <div className="client-directory" role="list">{members.map((client, index) => clientRow(client, index))}</div> : <EmptyCompact text="No clients in this folder yet."/>}</section>; })}
+      {activeClients.some((client) => !client.folder_id) ? <section className="panel table-panel"><div className="panel-head"><div><h3>Unfiled clients</h3><p>Clients not assigned to an account-manager folder.</p></div></div><div className="client-directory" role="list">{activeClients.filter((client) => !client.folder_id).map((client, index) => clientRow(client, index))}</div></section> : null}
+    </div> : <EmptyState title="Create your first client" text="Create a client first, add its blocklist, then import prospect lists." action="Create client" onAction={() => setCreateOpen(true)} />}
+    {archivedClients.length ? <details className="panel archived-clients"><summary>Archived <span>{formatNumber(archivedClients.length)}</span></summary><div className="client-directory" role="list">{archivedClients.map((client, index) => clientRow(client, index, true))}</div></details> : null}
     {createOpen ? <div className="modal-backdrop" role="presentation"><section className="confirm-modal create-client-modal" role="dialog" aria-modal="true" aria-labelledby="create-client-title"><p className="eyebrow">NEW CLIENT WORKSPACE</p><h2 id="create-client-title">Create a client</h2><p>You can add the blocklist before importing any prospects.</p><div className="form-field"><label htmlFor="standalone-client-name">Client name</label><input id="standalone-client-name" value={clientName} onChange={(event) => { setClientName(event.target.value); setCreateError(""); }} onKeyDown={(event) => { if (event.key === "Enter") void createClient(); }} placeholder="e.g. Acme Recruitment" /></div>{createError ? <p className="form-error" role="alert">{createError}</p> : null}<div className="modal-actions"><button className="secondary" disabled={creating} onClick={() => { setCreateOpen(false); setClientName(""); setCreateError(""); }}>Cancel</button><button className="primary" disabled={creating || !clientName.trim()} onClick={() => void createClient()}>{creating ? "Creating…" : "Create client"}</button></div></section></div> : null}
+    {folderOpen ? <div className="modal-backdrop" role="presentation"><section className="confirm-modal create-client-modal" role="dialog" aria-modal="true" aria-labelledby="create-folder-title"><p className="eyebrow">CLIENT FOLDER</p><h2 id="create-folder-title">Create a folder</h2><p>Use folders for account managers, teams, or any other client grouping.</p><div className="form-field"><label htmlFor="client-folder-name">Folder name</label><input id="client-folder-name" value={folderName} onChange={(event) => { setFolderName(event.target.value); setCreateError(""); }} onKeyDown={(event) => { if (event.key === "Enter") void createFolder(); }} placeholder="e.g. Priya's accounts" /></div>{createError ? <p className="form-error" role="alert">{createError}</p> : null}<div className="modal-actions"><button className="secondary" disabled={creating} onClick={() => { setFolderOpen(false); setFolderName(""); setCreateError(""); }}>Cancel</button><button className="primary" disabled={creating || !folderName.trim()} onClick={() => void createFolder()}>{creating ? "Creating…" : "Create folder"}</button></div></section></div> : null}
   </>;
 }
 
@@ -191,7 +250,25 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
   const [cooldown, setCooldown] = useState(client.cooldown_days ?? 90);
   const [savedCooldown, setSavedCooldown] = useState(client.cooldown_days ?? 90);
   const [cooldownState, setCooldownState] = useState("");
-  const [tab, setTab] = useState<"lists" | "prospects" | "recent" | "leads" | "contactable" | "by_icp" | "companies" | "icp" | "blocklist">(() => listPivot?.target ?? "lists");
+  const [tab, setTab] = useState<"lists" | "prospects" | "recent" | "by_icp" | "companies" | "incomplete" | "icp" | "blocklist">(() => listPivot?.target ?? "lists");
+  const [listSearch, setListSearch] = useState("");
+  const deferredListSearch = useDeferredValue(listSearch);
+  const [searchedLists, setSearchedLists] = useState<ListRecord[]>([]);
+  const [listSearchPage, setListSearchPage] = useState(1);
+  const [listSearchTotal, setListSearchTotal] = useState(0);
+  const [listSearchLoading, setListSearchLoading] = useState(false);
+  const [listSearchError, setListSearchError] = useState("");
+  const listSearchQuery = deferredListSearch.trim();
+  const visibleLists = listSearchQuery ? searchedLists : lists;
+  useEffect(() => {
+    if (!listSearchQuery) return;
+    const controller = new AbortController();
+    void api<{ lists: ListRecord[]; total: number }>(`/api/lists?clientId=${encodeURIComponent(client.id)}&q=${encodeURIComponent(listSearchQuery)}&page=${listSearchPage}`, { cache: "no-store", signal: controller.signal })
+      .then((data) => { setSearchedLists(data.lists ?? []); setListSearchTotal(data.total ?? 0); })
+      .catch((caught) => { if (!isAbortError(caught)) setListSearchError(caught instanceof Error ? caught.message : "Unable to search lists."); })
+      .finally(() => { if (!controller.signal.aborted) setListSearchLoading(false); });
+    return () => controller.abort();
+  }, [client.id, listSearchPage, listSearchQuery]);
   const [companyPeopleScope, setCompanyPeopleScope] = useState<CompanyScope | null>(null);
   // Seeded once from a "See Companies" pivot out of the List workspace, using
   // the exact mechanism a People→Company pivot inside this workspace already
@@ -230,7 +307,7 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
     try { const result = await api<{ cooldownDays: number }>(`/api/clients/${encodeURIComponent(client.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cooldownDays: cooldown }) }); setCooldown(result.cooldownDays); setSavedCooldown(result.cooldownDays); setCooldownState("Saved"); onRefreshClients(); }
     catch (caught) { setCooldownState(caught instanceof Error ? caught.message : "Unable to save"); }
   }
-  return <><button className="back" onClick={onBack}><AppIcon name="back" size={14}/> All clients</button><div className="client-hero"><span className="client-logo tone-0">{initials(client.name)}</span><div><p className="eyebrow">CLIENT WORKSPACE</p><h2>{client.name}</h2><p>{formatNumber(client.prospect_count)} prospects across {formatNumber(client.list_count)} lists{client.icp_verified_count !== undefined ? <> · <strong className="icp-count">{formatNumber(client.icp_verified_count)} ICP verified</strong></> : null}</p></div><div className="cooldown-setting"><label htmlFor="cooldown-days">Contact cooldown</label><div><input id="cooldown-days" type="number" min="0" max="730" value={cooldown} onChange={(event) => setCooldown(Number(event.target.value))}/><span>days</span><button onClick={() => void saveCooldown()}>Save</button></div><small role="status">{cooldownState || "Used when checking reuse eligibility"}</small></div><div className="client-actions"><button className="primary" onClick={onImport}><AppIcon name="plus" size={14}/> Import another list</button><button className="danger-button" onClick={onDeleteClient}>Delete client</button></div></div>
+  return <><button className="back" onClick={onBack}><AppIcon name="back" size={14}/> All clients</button><div className="client-hero"><span className="client-logo tone-0">{initials(client.name)}</span><div><p className="eyebrow">CLIENT WORKSPACE</p><h2>{client.name}</h2><p>{formatNumber(client.prospect_count)} prospects · {formatNumber(client.company_count ?? 0)} companies · {formatNumber(client.list_count)} lists{client.icp_verified_count !== undefined ? <> · <strong className="icp-count">{formatNumber(client.icp_verified_count)} ICP verified</strong></> : null}</p></div><div className="cooldown-setting"><label htmlFor="cooldown-days">Contact cooldown</label><div><input id="cooldown-days" type="number" min="0" max="730" value={cooldown} onChange={(event) => setCooldown(Number(event.target.value))}/><span>days</span><button onClick={() => void saveCooldown()}>Save</button></div><small role="status">{cooldownState || "Used when checking reuse eligibility"}</small></div><div className="client-actions"><button className="primary" onClick={onImport}><AppIcon name="plus" size={14}/> Import another list</button><button className="danger-button" onClick={onDeleteClient}>Delete client</button></div></div>
     {/* The ICP picker sits BESIDE the tablist, not inside it: role="tablist"
         may only contain tabs, and a <select> in there is announced as one more
         tab that does nothing. Choosing an ICP is what activates its panel, and
@@ -246,9 +323,8 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
         { id: "lists" as const, label: "Uploaded lists", count: formatNumber(client.list_count), icon: <AppIcon name="upload" size={15}/> },
         { id: "prospects" as const, label: "People DB", count: formatNumber(client.prospect_count), icon: <AppIcon name="database" size={15}/> },
         { id: "recent" as const, label: "Recently Added", icon: <AppIcon name="calendar" size={15}/> },
-        { id: "leads" as const, label: "Leads", icon: <AppIcon name="star" size={15}/> },
-        { id: "contactable" as const, label: "Contactable", icon: <AppIcon name="check" size={15}/> },
-        { id: "companies" as const, label: "Company DB", icon: <AppIcon name="company" size={15}/> },
+        { id: "companies" as const, label: "Company DB", count: formatNumber(client.company_count ?? 0), icon: <AppIcon name="company" size={15}/> },
+        { id: "incomplete" as const, label: "Incomplete Info", icon: <AppIcon name="quality" size={15}/> },
         { id: "icp" as const, label: "ICPs", icon: <AppIcon name="target" size={15}/> },
         { id: "blocklist" as const, label: "Blocklist", count: client.blocked_count ? formatNumber(client.blocked_count) : undefined, icon: <AppIcon name="quality" size={15}/> },
       ]}
@@ -263,15 +339,8 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
         }}
       />
     </div>
-    <TabPanel id="lists" active={tab === "lists"} keepMounted className="client-tab-panel"><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Open any list to search its original rows and inspect preserved fields.</p></div></div>{lists.length ? <div className="table-wrap"><table><thead><tr><th>List</th><th>Data source</th><th>Source file</th><th>Rows</th><th>Fields preserved</th><th>New to master</th><th>Cross-client duplicates</th><th>Imported</th><th>Actions</th></tr></thead><tbody>{lists.map((list) => <tr key={list.id}><td><button className="list-open-button" onClick={() => onOpenList(list)}><strong>{list.name}</strong><span>Open</span></button></td><td><span className="data-source-badge">{list.data_source}</span></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="field-verified"><AppIcon name="check" size={14}/> {formatNumber(list.field_count)} fields</span></td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><button className="row-danger" onClick={() => onDeleteList(list)}>Delete</button></td></tr>)}</tbody></table></div> : <EmptyCompact text="No lists have been imported for this client." action="Import list" onAction={onImport} />}</article></TabPanel>
+    <TabPanel id="lists" active={tab === "lists"} keepMounted className="client-tab-panel"><article className="panel table-panel"><div className="panel-head"><div><h3>Uploaded lists</h3><p>Open any list to search its original rows and inspect preserved fields.</p></div><label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label="Search uploaded list names" value={listSearch} onChange={(event) => { const value = event.target.value; setListSearch(value); setListSearchPage(1); setListSearchLoading(Boolean(value.trim())); setListSearchError(""); }} placeholder="Search list names…"/></label></div>{listSearchQuery && listSearchError ? <div className="inline-error" role="alert">{listSearchError}</div> : null}{listSearchQuery && listSearchLoading ? <p className="muted-copy" role="status">Searching lists…</p> : visibleLists.length ? <><div className="table-wrap"><table><thead><tr><th>List</th><th>Data source</th><th>Source file</th><th>Rows</th><th>Fields preserved</th><th>New to master</th><th>Cross-client duplicates</th><th>Imported</th><th>Actions</th></tr></thead><tbody>{visibleLists.map((list) => <tr key={list.id}><td><button className="list-open-button" onClick={() => onOpenList(list)}><strong>{list.name}</strong><span>Open</span></button></td><td><span className="data-source-badge">{list.data_source}</span></td><td>{list.source_file_name}</td><td>{formatNumber(list.uploaded_rows)}</td><td><span className="field-verified"><AppIcon name="check" size={14}/> {formatNumber(list.field_count)} fields</span></td><td><span className="data-pill green">+{formatNumber(list.unique_added)}</span></td><td>{formatNumber(list.duplicates_linked)}</td><td>{new Date(list.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td><td><button className="row-danger" onClick={() => onDeleteList(list)}>Delete</button></td></tr>)}</tbody></table></div>{listSearchQuery && listSearchTotal > 50 ? <div className="pagination"><button disabled={listSearchPage <= 1} onClick={() => { setListSearchLoading(true); setListSearchPage((page) => Math.max(1, page - 1)); }}>Previous</button><span>Page {listSearchPage} of {Math.ceil(listSearchTotal / 50)}</span><button disabled={listSearchPage * 50 >= listSearchTotal} onClick={() => { setListSearchLoading(true); setListSearchPage((page) => page + 1); }}>Next</button></div> : null}</> : <EmptyCompact text={listSearchQuery ? `No list matches “${listSearch}”.` : "No lists have been imported for this client."} action={listSearchQuery ? undefined : "Import list"} onAction={listSearchQuery ? undefined : onImport} />}</article></TabPanel>
     <TabPanel id="prospects" active={tab === "prospects"} keepMounted className="client-tab-panel"><ClientMasterDatabase key={`people:${client.prospect_count}:${client.blocked_count ?? 0}:${peopleListPivot?.listId ?? ""}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients.map((item) => item.id === client.id ? { ...item, cooldown_days: savedCooldown } : item)} active={tab === "prospects"} initialFilters={peopleListPivot?.filters ?? []} companyScope={companyPeopleScope} onClearCompanyScope={() => setCompanyPeopleScope(null)} onSeeCompanies={(scope) => { if (companyPeopleScope) { setCompanyPeopleScope(null); setPeopleCompanyScope(null); } else setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/></TabPanel>
-    {/* Leads and Contactable are the People DB with a filter already applied,
-        not separate grids. The workspace owns paging, selection, freezing,
-        export and the company pivot; a second copy of it would be a second
-        copy of all of that, and would drift. Mounted only while open so two
-        extra client listings are not fetched on every client screen. */}
-    <TabPanel id="leads" active={tab === "leads"} keepMounted className="client-tab-panel">{tab === "leads" ? <ClientMasterDatabase key={`leads:${client.id}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients} active initialFilters={[{ id: `__lead:${client.id}`, field: "__lead", operator: "contains", values: [client.id] }]} companyScope={null} onClearCompanyScope={() => {}} onSeeCompanies={(scope) => { setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/> : null}</TabPanel>
-    <TabPanel id="contactable" active={tab === "contactable"} keepMounted className="client-tab-panel">{tab === "contactable" ? <ClientMasterDatabase key={`contactable:${client.id}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients} active initialFilters={[{ id: `__contactable:${client.id}`, field: "__contactable", operator: "contains", values: [client.id] }]} companyScope={null} onClearCompanyScope={() => {}} onSeeCompanies={(scope) => { setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/> : null}</TabPanel>
     {/* Same shape as Leads and Contactable: the People DB with a filter already
         applied, keyed on the choice so switching ICPs remounts with its own
         seed rather than keeping the previous one's edits. */}
@@ -283,7 +352,8 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
         : <>Showing {client.name} prospects tagged <strong>{icps.find((icp) => icp.id === icpChoice)?.name ?? "this ICP"}</strong>.</>}</p>
       <ClientMasterDatabase key={`icp:${client.id}:${icpChoice}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients} active initialFilters={icpFilters} companyScope={null} onClearCompanyScope={() => {}} onSeeCompanies={(scope) => { setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/>
     </> : null}</TabPanel>
-    <TabPanel id="companies" active={tab === "companies"} keepMounted className="client-tab-panel"><ClientCompanyDatabase key={`companies:${client.prospect_count}:${client.blocked_count ?? 0}`} client={client} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onSelectListScope={(listId) => setPeopleCompanyScope(listId ? { search: "", filters: [{ field: "__list_ids", operator: "contains", values: [listId] }], limit: 250000 } : null)} onSeePeople={(scope) => { if (peopleCompanyScope) { setPeopleCompanyScope(null); setCompanyPeopleScope(null); } else setCompanyPeopleScope(scope); setTab("prospects"); }} onImport={onImport}/></TabPanel>
+    <TabPanel id="companies" active={tab === "companies"} keepMounted className="client-tab-panel"><ClientCompanyDatabase key={`companies:${client.prospect_count}:${client.blocked_count ?? 0}`} client={client} clients={clients} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onSelectListScope={(listId) => setPeopleCompanyScope(listId ? { search: "", filters: [{ field: "__list_ids", operator: "contains", values: [listId] }], limit: 250000 } : null)} onSeePeople={(scope) => { if (peopleCompanyScope) { setPeopleCompanyScope(null); setCompanyPeopleScope(null); } else setCompanyPeopleScope(scope); setTab("prospects"); }} onImport={onImport}/></TabPanel>
+    <TabPanel id="incomplete" active={tab === "incomplete"} keepMounted className="client-tab-panel">{tab === "incomplete" ? <IncompleteInfoPanel client={client} clients={clients} onSelect={onSelectProspect} onImport={onImport}/> : null}</TabPanel>
     {/* Its own fetch against a narrow time window, so it is mounted only while
         open rather than on every client screen. */}
     <TabPanel id="recent" active={tab === "recent"} keepMounted className="client-tab-panel">{tab === "recent" ? <RecentlyAddedPanel client={client} onChanged={onRefreshClients}/> : null}</TabPanel>
@@ -294,7 +364,26 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
   </>;
 }
 
-function ClientMasterDatabase({ client, clients, active, companyScope, onClearCompanyScope, onSeeCompanies, onSelect, onImport, initialFilters = [] }: { client: ClientRecord; clients: ClientRecord[]; active: boolean; companyScope: CompanyScope | null; onClearCompanyScope: () => void; onSeeCompanies: (scope: PeopleScope) => void; onSelect: (prospect: Prospect) => void; onImport: () => void; initialFilters?: ProspectFilter[] }) {
+const incompleteCompanyFilters: ProspectFilter[] = [
+  { id: "incomplete:keywords", field: "__keywords", operator: "empty", values: [] },
+  { id: "incomplete:description", field: "__short_description", operator: "empty", values: [] },
+];
+const incompletePeopleFilters: ProspectFilter[] = [
+  { id: "incomplete:keywords", field: "__company_keywords", operator: "empty", values: [], scopes: ["keywords"] },
+  { id: "incomplete:description", field: "__company_description", operator: "empty", values: [] },
+];
+const incompleteCompanyScope: CompanyScope = { search: "", filters: incompleteCompanyFilters, limit: 250000 };
+
+function IncompleteInfoPanel({ client, clients, onSelect, onImport }: { client: ClientRecord; clients: ClientRecord[]; onSelect: (prospect: Prospect) => void; onImport: () => void }) {
+  const [entity, setEntity] = useState<"people" | "companies">("companies");
+  return <section>
+    <div className="client-database-heading"><div><p className="eyebrow">INCOMPLETE INFO</p><h3>Missing company context</h3><p>Only records whose company has both no keywords and no short description.</p></div></div>
+    <div className="icp-quick-filters" role="group" aria-label="Choose incomplete information record type"><button className={entity === "companies" ? "active" : ""} aria-pressed={entity === "companies"} onClick={() => setEntity("companies")}>Companies</button><button className={entity === "people" ? "active" : ""} aria-pressed={entity === "people"} onClick={() => setEntity("people")}>People</button></div>
+    {entity === "people" ? <ClientMasterDatabase client={client} clients={clients} active companyScope={incompleteCompanyScope} onClearCompanyScope={() => {}} onSeeCompanies={() => {}} onSelect={onSelect} onImport={onImport} initialFilters={incompletePeopleFilters} forcedFilters={incompletePeopleFilters} allowEntityPivot={false} lockedCompanyScope/> : <ClientCompanyDatabase client={client} clients={clients} peopleScope={null} onClearPeopleScope={() => {}} onSelectListScope={() => {}} onSeePeople={() => {}} onImport={onImport} initialFilters={incompleteCompanyFilters} forcedFilters={incompleteCompanyFilters} allowEntityPivot={false}/>}
+  </section>;
+}
+
+function ClientMasterDatabase({ client, clients, active, companyScope, onClearCompanyScope, onSeeCompanies, onSelect, onImport, initialFilters = [], forcedFilters = [], allowEntityPivot = true, lockedCompanyScope = false }: { client: ClientRecord; clients: ClientRecord[]; active: boolean; companyScope: CompanyScope | null; onClearCompanyScope: () => void; onSeeCompanies: (scope: PeopleScope) => void; onSelect: (prospect: Prospect) => void; onImport: () => void; initialFilters?: ProspectFilter[]; forcedFilters?: ProspectFilter[]; allowEntityPivot?: boolean; lockedCompanyScope?: boolean }) {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [preparation, setPreparation] = useState<PreparationProgress | null>(null);
   const [preparationError, setPreparationError] = useState('');
@@ -306,6 +395,9 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
   // distinct key so switching remounts with its own seed rather than inheriting
   // whatever the previous tab was left showing.
   const [filters, setFilters] = useState<ProspectFilter[]>(initialFilters);
+  const enforceForcedFilters = useCallback((next: ProspectFilter[]) => forcedFilters.length
+    ? [...next.filter((candidate) => !forcedFilters.some((forced) => forced.field === candidate.field)), ...forcedFilters]
+    : next, [forcedFilters]);
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState("created_at");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
@@ -371,10 +463,10 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to remove this prospect from the client."); }
     finally { setRemoving(false); }
   }, [client.id, pendingRemoval]);
-  return <><SearchPreparation progress={preparation} error={preparationError} onRetry={() => setRefresh(value => value + 1)} onClear={onClearCompanyScope} clearLabel="Clear company scope"/><section hidden={Boolean(preparation || preparationError)} className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT MASTER DB</p><h3>{client.name} prospects</h3><p>Every master prospect connected to this client, across all uploaded lists.</p></div><button className="secondary" title="Safely scope up to 250,000 matching people" onClick={() => onSeeCompanies({ search: deferredSearch.trim(), filters: filterPayload(filters), limit: 250000 })}>See Companies <AppIcon name="arrow" size={14}/></button><label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label={`Search ${client.name} prospects`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this client database…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client prospects…</div> : null}{loading ? <div className="workspace-loading">Preparing client database…</div> : <ProspectTable prospects={prospects} total={total} totalCapped={totalCapped} fields={fields} filters={filters} page={page} clients={clients} search={deferredSearch} sort={sort} direction={direction} clientId={client.id} companyScope={companyScope} onClearCompanyScope={onClearCompanyScope} onSeeCompanies={onSeeCompanies} onRemoveFromClient={removeFromClient} onSortChange={(nextSort, nextDirection) => { setSort(nextSort); setDirection(nextDirection); setPage(1); }} onFiltersChange={(next) => { setFilters(next); setPage(1); }} onPageChange={setPage} onSelect={onSelect} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} active={active}/>}{pendingRemoval ? <ConfirmDialog title={`Remove ${pendingRemoval.full_name || "this prospect"} from ${client.name}?`} body="This removes the link between this prospect and this client, along with its list membership for this client." scopeNote="The People database record is preserved. Every other client keeps its own link to this person." confirmLabel="Remove from client" busy={removing} onCancel={() => setPendingRemoval(null)} onConfirm={() => void confirmRemoval()} /> : null}</section></>;
+  return <><SearchPreparation progress={preparation} error={preparationError} onRetry={() => setRefresh(value => value + 1)} onClear={onClearCompanyScope} clearLabel="Clear company scope"/><section hidden={Boolean(preparation || preparationError)} className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT MASTER DB</p><h3>{client.name} prospects</h3><p>Every master prospect connected to this client, across all uploaded lists.</p></div>{allowEntityPivot ? <button className="secondary" title="Safely scope up to 250,000 matching people" onClick={() => onSeeCompanies({ search: deferredSearch.trim(), filters: filterPayload(filters), limit: 250000 })}>See Companies <AppIcon name="arrow" size={14}/></button> : null}<label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label={`Search ${client.name} prospects`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this client database…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client prospects…</div> : null}{loading ? <div className="workspace-loading">Preparing client database…</div> : <ProspectTable prospects={prospects} total={total} totalCapped={totalCapped} fields={fields} filters={filters} page={page} clients={clients} search={deferredSearch} sort={sort} direction={direction} clientId={client.id} companyScope={companyScope} onClearCompanyScope={onClearCompanyScope} onSeeCompanies={onSeeCompanies} onRemoveFromClient={removeFromClient} onSortChange={(nextSort, nextDirection) => { setSort(nextSort); setDirection(nextDirection); setPage(1); }} onFiltersChange={(next) => { setFilters(enforceForcedFilters(next)); setPage(1); }} onPageChange={setPage} onSelect={onSelect} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} active={active} allowEntityPivot={allowEntityPivot} lockedCompanyScope={lockedCompanyScope}/>}{pendingRemoval ? <ConfirmDialog title={`Remove ${pendingRemoval.full_name || "this prospect"} from ${client.name}?`} body="This removes the link between this prospect and this client, along with its list membership for this client." scopeNote="The People database record is preserved. Every other client keeps its own link to this person." confirmLabel="Remove from client" busy={removing} onCancel={() => setPendingRemoval(null)} onConfirm={() => void confirmRemoval()} /> : null}</section></>;
 }
 
-function ClientCompanyDatabase({ client, peopleScope, onClearPeopleScope, onSelectListScope, onSeePeople, onImport }: { client: ClientRecord; peopleScope: PeopleScope | null; onClearPeopleScope: () => void; onSelectListScope: (listId: string) => void; onSeePeople: (scope: CompanyScope) => void; onImport: () => void }) {
+function ClientCompanyDatabase({ client, clients, peopleScope, onClearPeopleScope, onSelectListScope, onSeePeople, onImport, initialFilters = [], forcedFilters = [], allowEntityPivot = true }: { client: ClientRecord; clients: ClientRecord[]; peopleScope: PeopleScope | null; onClearPeopleScope: () => void; onSelectListScope: (listId: string) => void; onSeePeople: (scope: CompanyScope) => void; onImport: () => void; initialFilters?: ProspectFilter[]; forcedFilters?: ProspectFilter[]; allowEntityPivot?: boolean }) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summary, setSummary] = useState({ total: 0, covered: 0, prospectTotal: 0, pageSize: 50 });
   const [page, setPage] = useState(1);
@@ -382,7 +474,10 @@ function ClientCompanyDatabase({ client, peopleScope, onClearPeopleScope, onSele
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [filters, setFilters] = useState<ProspectFilter[]>([]);
+  const [filters, setFilters] = useState<ProspectFilter[]>(initialFilters);
+  const enforceForcedFilters = useCallback((next: ProspectFilter[]) => forcedFilters.length
+    ? [...next.filter((candidate) => !forcedFilters.some((forced) => forced.field === candidate.field)), ...forcedFilters]
+    : next, [forcedFilters]);
   const [refresh, setRefresh] = useState(0);
   const deferredSearch = useDeferredValue(search);
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);
@@ -413,5 +508,5 @@ function ClientCompanyDatabase({ client, peopleScope, onClearPeopleScope, onSele
     })();
     return () => { current = false; controller.abort(); };
   }, [client.id, client.prospect_count, deferredSearch, debouncedSearch, page, encodedFilters, peopleScope, refresh]);
-  return <section className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT COMPANY DB</p><h3>{client.name} companies</h3><p>Companies pushed to this client or represented by its prospects.</p></div><button className="secondary" title="Safely scope up to 250,000 matching companies" onClick={() => onSeePeople({ search: deferredSearch.trim(), filters, limit: 250000 })}>See People <AppIcon name="arrow" size={14}/></button>{lists.length ? <select aria-label="Filter companies by list" title="Show only companies represented by one uploaded list" value={selectedListScope} onChange={(event) => { onSelectListScope(event.target.value); setPage(1); }}><option value="">Filter by list…</option>{lists.map((list) => <option key={list.id} value={list.id}>{list.name}</option>)}</select> : null}<label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label={`Search ${client.name} companies`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search client companies…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client companies…</div> : null}{loading ? <div className="workspace-loading">Preparing company database…</div> : <CompanyTable companies={companies} total={summary.total} covered={summary.covered} prospectTotal={summary.prospectTotal} page={page} pageSize={summary.pageSize} clientId={client.id} search={deferredSearch} filters={filters} peopleScope={peopleScope} onClearPeopleScope={onClearPeopleScope} onSeePeople={onSeePeople} onFilters={(next) => { setFilters(next); setPage(1); }} onPageChange={setPage} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)}/>}</section>;
+  return <section className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT COMPANY DB</p><h3>{client.name} companies</h3><p>Companies pushed to this client or represented by its prospects.</p></div>{allowEntityPivot ? <button className="secondary" title="Safely scope up to 250,000 matching companies" onClick={() => onSeePeople({ search: deferredSearch.trim(), filters, limit: 250000 })}>See People <AppIcon name="arrow" size={14}/></button> : null}{allowEntityPivot && lists.length ? <select aria-label="Filter companies by list" title="Show only companies represented by one uploaded list" value={selectedListScope} onChange={(event) => { onSelectListScope(event.target.value); setPage(1); }}><option value="">Filter by list…</option>{lists.map((list) => <option key={list.id} value={list.id}>{list.name}</option>)}</select> : null}<label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label={`Search ${client.name} companies`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search client companies…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client companies…</div> : null}{loading ? <div className="workspace-loading">Preparing company database…</div> : <CompanyTable companies={companies} clients={clients} total={summary.total} covered={summary.covered} prospectTotal={summary.prospectTotal} page={page} pageSize={summary.pageSize} clientId={client.id} search={deferredSearch} filters={filters} peopleScope={peopleScope} onClearPeopleScope={onClearPeopleScope} onSeePeople={onSeePeople} onFilters={(next) => { setFilters(enforceForcedFilters(next)); setPage(1); }} onPageChange={setPage} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} allowEntityPivot={allowEntityPivot}/>}</section>;
 }

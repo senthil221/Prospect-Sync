@@ -49,7 +49,7 @@ test("Copy Domains is available in both the master and a client's Company DB", a
   // canDelete-only branch that Push to Client and the master Delete button
   // live in - so it renders for both scopes, not just the unscoped one.
   const bulkBarStart = source.indexOf('<div className="bulk-bar company-bulk-bar">');
-  const canDeleteBranchStart = source.indexOf("{canDelete ? <>", bulkBarStart);
+  const canDeleteBranchStart = source.indexOf("{canDelete ? <div", bulkBarStart);
   const copyButton = source.indexOf("Copy Domains", bulkBarStart);
   assert.ok(bulkBarStart > -1 && canDeleteBranchStart > -1 && copyButton > -1, "expected markers not found");
   assert.ok(copyButton < canDeleteBranchStart, "Copy Domains must render before the canDelete-only branch, not inside it");

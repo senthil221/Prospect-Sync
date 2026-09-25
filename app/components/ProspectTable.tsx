@@ -12,6 +12,7 @@ import { filterChipValue, formatNumber } from "../../lib/dashboard-helpers";
 import { defaultProspectColumns, defaultProspectExportFields, prospectExportPickerFields, standardProspectFields } from "../../lib/prospect-field-definitions";
 import type { ClientRecord, Prospect, ProspectFilter, SavedView } from "../../lib/types";
 import { intentKey, requestIdFor, settleIntent } from "../../lib/request-intent";
+import { capSelectedRows } from "../../lib/prospect-cap";
 import { AppIcon, ConfirmDialog, ExportDialogShell, FormDialog, WorkspaceEmpty } from "./DashboardUi";
 import ProspectTableRow from "./ProspectTableRow";
 import MenuButton from "./MenuButton";
@@ -30,7 +31,7 @@ function localIsoDate() {
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
 }
 
-export default function ProspectTable({ prospects, total, totalEstimated = false, totalCapped = false, scopeCapped = false, fields, filters, page, clients, search = "", sort, direction, clientId = "", active = true, companyScope = null, onClearCompanyScope, onClearSearch, onSeeCompanies, onRemoveFromClient, onSortChange, onFiltersChange, onPageChange, onSelect, onImport, onRefresh }: { prospects: Prospect[]; total: number; totalEstimated?: boolean; totalCapped?: boolean; scopeCapped?: boolean; fields: string[]; filters: ProspectFilter[]; page: number; clients: ClientRecord[]; search?: string; sort: string; direction: "asc" | "desc"; clientId?: string; active?: boolean; companyScope?: CompanyScope | null; onClearCompanyScope?: () => void; onClearSearch?: () => void; onSeeCompanies: (scope: PeopleScope) => void; onRemoveFromClient?: (prospect: Prospect) => Promise<void>; onSortChange: (sort: string, direction: "asc" | "desc") => void; onFiltersChange: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onSelect: (row: Prospect) => void; onImport: () => void; onRefresh: () => void }) {
+export default function ProspectTable({ prospects, total, totalEstimated = false, totalCapped = false, scopeCapped = false, fields, filters, page, clients, search = "", sort, direction, clientId = "", active = true, companyScope = null, onClearCompanyScope, onClearSearch, onSeeCompanies, onRemoveFromClient, onSortChange, onFiltersChange, onPageChange, onSelect, onImport, onRefresh, allowEntityPivot = true, lockedCompanyScope = false }: { prospects: Prospect[]; total: number; totalEstimated?: boolean; totalCapped?: boolean; scopeCapped?: boolean; fields: string[]; filters: ProspectFilter[]; page: number; clients: ClientRecord[]; search?: string; sort: string; direction: "asc" | "desc"; clientId?: string; active?: boolean; companyScope?: CompanyScope | null; onClearCompanyScope?: () => void; onClearSearch?: () => void; onSeeCompanies: (scope: PeopleScope) => void; onRemoveFromClient?: (prospect: Prospect) => Promise<void>; onSortChange: (sort: string, direction: "asc" | "desc") => void; onFiltersChange: (filters: ProspectFilter[]) => void; onPageChange: (page: number) => void; onSelect: (row: Prospect) => void; onImport: () => void; onRefresh: () => void; allowEntityPivot?: boolean; lockedCompanyScope?: boolean }) {
   const [visibleColumns, setVisibleColumns] = useState<string[]>(defaultProspectColumns);
   const [tab, setTab] = useState<"records" | "coverage" | "titles">("records");
   const [classifierGaps, setClassifierGaps] = useState<number | null>(null);
@@ -66,6 +67,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const [exportFields, setExportFields] = useState<string[]>(defaultProspectExportFields);
   const [exportFormat, setExportFormat] = useState<ExportFormat>("single");
   const [exportRowsPerFile, setExportRowsPerFile] = useState(50000);
+  const [exportMaxPeoplePerCompany, setExportMaxPeoplePerCompany] = useState(0);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const exportAbortRef = useRef<AbortController | null>(null);
   const [espScanning, setEspScanning] = useState(false);
@@ -148,7 +150,16 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
 
   const configuredDefinitions = useMemo(() => visibleColumns.map((id) => allColumns.find((column) => column.id === id)).filter((column): column is { id: string; label: string } => Boolean(column)), [allColumns, visibleColumns]);
   const visibleDefinitions = useMemo(() => configuredDefinitions.length ? configuredDefinitions : standardProspectFields.slice(0, 4), [configuredDefinitions]);
+  const capFilter = filters.find((filter) => filter.field === "__max_people_per_company");
+  const maxPeoplePerCompany = Number(capFilter?.values[0] ?? 0) || 0;
+  const displayFilters = filters.filter((filter) => filter.field !== "__max_people_per_company");
   const effectiveFilters = filters.filter((filter) => filter.values.length || filter.operator === "empty" || filter.operator === "not_empty");
+  function setMaxPeoplePerCompany(raw: number) {
+    const remaining = filters.filter((filter) => filter.field !== "__max_people_per_company");
+    const value = Number.isSafeInteger(raw) ? Math.max(0, Math.min(raw, 1000)) : 0;
+    onFiltersChange(value ? [...remaining, { id: "__max_people_per_company", field: "__max_people_per_company", operator: "equals", values: [String(value)] }] : remaining);
+    onPageChange(1); clearSelection();
+  }
   const icpFilter = clientId ? filters.find((filter) => filter.field === "__icp_verified" && filter.values.includes(clientId)) : undefined;
   const icpStatus = !icpFilter ? "all" : icpFilter.operator === "contains" ? "verified" : "unverified";
   function setIcpStatus(status: "all" | "verified" | "unverified") {
@@ -162,19 +173,13 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     onPageChange(1);
     clearSelection();
   }
-  // Leads and Contactable are INDEPENDENT toggles, not two more segments of the
-  // ICP group. "ICP verified and contactable" is the query that actually gets
-  // asked before a send, and folding them into one exclusive group would make
-  // it unexpressible.
-  //
-  // Each is on or off rather than a three-way: the negative ("in cooldown",
-  // "not a lead") is reachable from the filter panel, and a tri-state toggle
-  // beside a tri-state toggle is a lot of state to read at a glance.
   const leadOn = Boolean(clientId && filters.some((filter) => filter.field === "__lead" && filter.operator === "contains" && filter.values.includes(clientId)));
   const contactableOn = Boolean(clientId && filters.some((filter) => filter.field === "__contactable" && filter.operator === "contains" && filter.values.includes(clientId)));
-  function toggleClientState(field: "__lead" | "__contactable", on: boolean) {
-    const remaining = filters.filter((filter) => filter.field !== field);
-    onFiltersChange(on ? remaining : [...remaining, {
+  const clientView = leadOn ? "leads" : contactableOn ? "contactable" : "all";
+  function setClientView(view: "all" | "leads" | "contactable") {
+    const remaining = filters.filter((filter) => filter.field !== "__lead" && filter.field !== "__contactable");
+    const field = view === "leads" ? "__lead" : "__contactable";
+    onFiltersChange(view === "all" ? remaining : [...remaining, {
       id: `${field}:${clientId}`,
       field,
       operator: "contains",
@@ -320,6 +325,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     // happened to be visible, so the same export gave different files depending
     // on how the grid was configured at the time.
     setExportFields(defaultProspectExportFields);
+    setExportMaxPeoplePerCompany(maxPeoplePerCompany);
     setExportScope(scope);
     setExportDialogOpen(true);
   }
@@ -337,6 +343,13 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     if (exportScope === "selected" && !selectedCount) { setNotice("Select at least one prospect to export."); return; }
     // Explicit row picks are already in memory - export them without any server round-trip.
     const useSelectedRows = exportScope === "selected" && selectionMode === "explicit";
+    const exportFilters = [
+      ...effectiveFilters.filter((filter) => filter.field !== "__max_people_per_company"),
+      ...(exportMaxPeoplePerCompany ? [{ id: "__max_people_per_company", field: "__max_people_per_company", operator: "equals" as const, values: [String(exportMaxPeoplePerCompany)] }] : []),
+    ];
+    const selectedForExport = useSelectedRows
+      ? capSelectedRows([...selectedRows.values()], exportMaxPeoplePerCompany)
+      : undefined;
     const controller = new AbortController();
     exportAbortRef.current = controller;
     // How many rows this is about to be, as far as anything knows. A capped or
@@ -345,7 +358,9 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     // being attempted in one download.
     const knownTotal = countedExactly ?? (totalCapped || totalEstimated ? null : total);
     const excluded = exportScope === "selected" && selectionMode === "all_matching" ? [...excludedIds] : [];
-    const totalRows = useSelectedRows ? selectedCount : knownTotal === null ? null : Math.max(0, knownTotal - excluded.length);
+    const totalRows = useSelectedRows ? selectedForExport?.length ?? 0
+      : exportMaxPeoplePerCompany !== maxPeoplePerCompany ? null
+      : knownTotal === null ? null : Math.max(0, knownTotal - excluded.length);
     // One id per intent, as the bulk actions use: a retry after a dropped
     // connection collects the file already being written rather than starting a
     // second identical one.
@@ -354,20 +369,20 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
       target: clientId || "master",
       selectionMode: exportScope,
       ids: [],
-      extra: { search: search.trim(), filters: filterPayload(effectiveFilters), fields: exportFields, excluded },
+      extra: { search: search.trim(), filters: filterPayload(exportFilters), fields: exportFields, excluded },
     });
     const requestId = requestIdFor(intent);
     setExportingProspects(true); setNotice(""); setExportProgress({ exported: 0, files: 0, phase: "downloading" });
     try {
       const result = await runProspectExport({
         search: search.trim(),
-        filters: filterPayload(effectiveFilters),
+        filters: filterPayload(exportFilters),
         clientId: clientId || null,
         companyScope,
         fields: exportFields,
         customFieldNames: fields,
         mode: useSelectedRows ? "selected" : "all_matching",
-        selectedRows: useSelectedRows ? [...selectedRows.values()] : undefined,
+        selectedRows: selectedForExport,
         excludedIds: excluded,
         format: exportFormat,
         rowsPerFile: exportRowsPerFile,
@@ -468,6 +483,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
         filters: wireFilters,
         excludedIds: [...excludedIds],
         dateContacted,
+        ...(action === "push" && clientId ? { sourceClientId: clientId } : {}),
         tagId,
       },
       { onProgress: ({ done, total: items }) => setNotice(`Working… ${formatNumber(done)} of ${formatNumber(items)}.`) },
@@ -532,7 +548,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
         ? (await runAllMatching(action, targetClientId, requestId, dateContacted)).result ?? {}
         : (await api<{ result: { added?: number; alreadyPresent?: number; blocked?: number; updated?: number; queued?: number; removed?: number }; replayed?: boolean }>(
             `/api/clients/${encodeURIComponent(targetClientId)}/prospects`,
-            { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, requestId, ...selectionPayload(), ...(action === "set_date_contacted" ? { dateContacted } : {}) }) },
+            { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, requestId, ...selectionPayload(), ...(action === "push" && clientId ? { sourceClientId: clientId } : {}), ...(action === "set_date_contacted" ? { dateContacted } : {}) }) },
           )).result ?? {};
       // Settled: the next deliberate action of this shape is a new operation.
       // Deliberately not cleared on failure, so a retry reuses the id.
@@ -641,17 +657,19 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
 
   return <section className="people-workspace">
     {clientId ? <div className="icp-quick-filters" role="group" aria-label="Filter people by ICP verification"><button className={icpStatus === "all" ? "active" : ""} aria-pressed={icpStatus === "all"} onClick={() => setIcpStatus("all")}>All</button><button className={icpStatus === "verified" ? "active" : ""} aria-pressed={icpStatus === "verified"} onClick={() => setIcpStatus("verified")}>ICP Verified</button><button className={icpStatus === "unverified" ? "active" : ""} aria-pressed={icpStatus === "unverified"} onClick={() => setIcpStatus("unverified")}>ICP Unverified</button></div> : null}
-    {clientId ? <div className="icp-quick-filters status-quick-filters" role="group" aria-label="Filter people by lead and contactability"><button className={leadOn ? "active" : ""} aria-pressed={leadOn} onClick={() => toggleClientState("__lead", leadOn)}><AppIcon name="star" size={14}/> Leads</button><button className={contactableOn ? "active" : ""} aria-pressed={contactableOn} onClick={() => toggleClientState("__contactable", contactableOn)} title="Past this client's contact cooldown, or never contacted"><AppIcon name="check" size={14}/> Contactable</button></div> : null}
+    {clientId ? <div className="icp-quick-filters status-quick-filters" role="group" aria-label="Choose a client people view"><button className={clientView === "all" ? "active" : ""} aria-pressed={clientView === "all"} onClick={() => setClientView("all")}>All</button><button className={clientView === "leads" ? "active" : ""} aria-pressed={clientView === "leads"} onClick={() => setClientView("leads")}><AppIcon name="star" size={14}/> Leads</button><button className={clientView === "contactable" ? "active" : ""} aria-pressed={clientView === "contactable"} onClick={() => setClientView("contactable")} title="Past this client's contact cooldown, or never contacted"><AppIcon name="check" size={14}/> Contactable</button></div> : null}
     {integrationSelection && <IntegrationPreview ids={integrationSelection} clientId={clientId} fields={fields} onClose={()=>setIntegrationSelection(null)}/>}
     {selectedCount>0 && <div className="bulk-bar"><button disabled={selectionMode!=='explicit' || selectedCount>400} onClick={()=>setIntegrationSelection([...selectedIds])}>Preview Smartlead delivery</button>
       <span>Preview supports 1–400 checked prospects across pages. All-matching delivery is not enabled yet.</span></div>}
     <div className="people-heading">
       <div><p className="eyebrow">PROSPECTS</p><h2>Find people</h2><p>Search and filter every prospect saved in your people database.</p></div>
-      <div className="entity-pivot-actions"><button className="secondary" title="Safely scope up to 250,000 matching people" onClick={() => onSeeCompanies({ search: search.trim(), filters: filterPayload(effectiveFilters), limit: 250000 })}>See Companies <AppIcon name="arrow" size={14}/></button><button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import prospects</button></div>
+      <div className="entity-pivot-actions">{allowEntityPivot ? <button className="secondary" title="Safely scope up to 250,000 matching people" onClick={() => onSeeCompanies({ search: search.trim(), filters: filterPayload(effectiveFilters), limit: 250000 })}>See Companies <AppIcon name="arrow" size={14}/></button> : null}<button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import prospects</button></div>
     </div>
-    {companyScope ? <div className={`cross-scope-banner ${scopeCapped ? "capped" : ""}`} role="status"><span>{scopeCapped
+    {companyScope ? <div className={`cross-scope-banner ${scopeCapped ? "capped" : ""}`} role="status"><span>{lockedCompanyScope
+      ? <>Showing only people associated with companies that have no keywords and no short description.</>
+      : scopeCapped
       ? <>Your Company DB search matched more than {formatNumber(companyScope.limit)} companies, so these people come from the first {formatNumber(companyScope.limit)} only. Narrow the company filters to see everyone.</>
-      : <>Showing people inside the companies from your previous Company DB search (safety limit: {formatNumber(companyScope.limit)} matching companies).</>}</span><button onClick={onClearCompanyScope}>Clear company scope</button></div> : null}
+      : <>Showing people inside the companies from your previous Company DB search (safety limit: {formatNumber(companyScope.limit)} matching companies).</>}</span>{lockedCompanyScope ? null : <button onClick={onClearCompanyScope}>Clear company scope</button>}</div> : null}
     <Tabs
       label="Prospect views"
       value={tab}
@@ -679,6 +697,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
         <div className="results-toolbar">
           <div className="results-count"><strong title={totalHint}>{displayedTotal} people</strong><span>{effectiveFilters.length ? `${effectiveFilters.length} active filter${effectiveFilters.length === 1 ? "" : "s"} · all matching records` : "People database"}</span>{total ? <button className="select-all-matching-button" onClick={selectAllMatching}>{selectionMode === "all_matching" && selectionMatchesQuery && !excludedIds.size ? `All ${displayedTotal} selected` : `Select all ${displayedTotal} across pages`}</button> : null}{totalCapped && countedExactly === null ? <button className="select-all-matching-button" disabled={countingAll} title="Counts every matching record in the background instead of stopping at 50,000." onClick={() => void countAllMatching()}>{countingAll ? "Counting…" : "Count them all"}</button> : null}</div>
           <div className="workspace-actions">
+            <label><span>Max people / company</span><input aria-label="Max people per company" type="number" min="1" max="1000" value={maxPeoplePerCompany || ""} placeholder="No limit" onChange={(event) => setMaxPeoplePerCompany(event.target.value === "" ? 0 : Number(event.target.value))}/></label>
             <label><span className="sr-only">Sort prospects</span><select value={`${sort}:${direction}`} onChange={(event) => { const [nextSort, nextDirection] = event.target.value.split(":"); onSortChange(nextSort, nextDirection as "asc" | "desc"); }}><option value="created_at:desc">Newest first</option><option value="name:asc">Name A to Z</option><option value="company:asc">Company A to Z</option><option value="title:asc">Title A to Z</option><option value="last_contacted:desc">Recently contacted</option></select></label>
             <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {effectiveFilters.length ? <span>{effectiveFilters.length}</span> : null}</button>
             <MenuButton label="View" icon="rows" panelLabel="View options" count={visibleDefinitions.length}>
@@ -699,7 +718,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
           {/* Client prospect selections only update contact history. ICP
               verification is managed from the client Company DB. */}
           {clientId
-            ? <div className="bulk-action-group bulk-action-group-primary"><button disabled={bulkBusy} onClick={() => setDateContactedDialogOpen(true)}><AppIcon name="calendar" size={14}/> Set Date Contacted</button>{/* All four of these work on "all matching" since 20260916120000
+            ? <><div className="bulk-action-group bulk-action-group-primary"><select aria-label="Client to receive selected prospects" value={pushClientId} onChange={(event) => setPushClientId(event.target.value)}><option value="">Push to client…</option>{clients.filter((candidate) => candidate.id !== clientId && !candidate.archived_at).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select><button className="bulk-push" disabled={bulkBusy || !pushClientId} onClick={() => void clientAction("push", pushClientId)}><AppIcon name="arrow" size={14}/> Push selected</button></div><div className="bulk-action-group bulk-action-group-primary"><button disabled={bulkBusy} onClick={() => setDateContactedDialogOpen(true)}><AppIcon name="calendar" size={14}/> Set Date Contacted</button>{/* All four of these work on "all matching" since 20260916120000
                   taught apply_batch_v1 the lead and tag verbs. Before that an
                   all-matching mark was accepted by the route and then failed
                   inside the worker minutes later, so they were greyed out. */}
@@ -710,20 +729,20 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
                   separate tag vocabulary to keep in step. */}
               {clientIcps.length ? <><select aria-label="Client ICP to apply" value={bulkTagId} onChange={(event) => setBulkTagId(event.target.value)}><option value="">Apply ICP…</option>{clientIcps.map((icp) => <option key={icp.id} value={icp.id}>{icp.name}</option>)}</select>
               <button disabled={bulkBusy || !bulkTagId} title="Tag the selection with this ICP" onClick={() => void clientTagAction("add_tag")}><AppIcon name="tag" size={14}/> Tag</button>
-              <button disabled={bulkBusy || !bulkTagId} title="Remove this ICP from the selection" onClick={() => void clientTagAction("remove_tag")}>Untag</button></> : null}</div>
+              <button disabled={bulkBusy || !bulkTagId} title="Remove this ICP from the selection" onClick={() => void clientTagAction("remove_tag")}>Untag</button></> : null}</div></>
             : <div className="bulk-action-group bulk-action-group-primary"><select aria-label="Client to push these prospects into" value={pushClientId} onChange={(event) => setPushClientId(event.target.value)}><option value="">Push to client…</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><button className="bulk-push" disabled={bulkBusy || !pushClientId} onClick={() => void clientAction("push", pushClientId)}><AppIcon name="arrow" size={14}/> Push {selectionMode === "all_matching" ? selectedLabel : "selected"}</button></div>}
           {selectionMode === "all_matching" && !clientId ? <span className="selection-scope-note">Tagging and contact history need an explicit selection</span> : null}{canDeleteMaster ? <div className="bulk-action-group bulk-action-group-danger"><button className="row-danger bulk-delete" disabled={deletingProspects} onClick={requestDeleteSelected}><AppIcon name="trash" size={14}/> Delete {selectionMode === "all_matching" ? selectedLabel : "selected"}</button></div> : null}{clientId ? <div className="bulk-action-group bulk-action-group-danger"><button className="row-danger" disabled={bulkBusy} title="Take these prospects out of this client. The People database records are not affected." onClick={() => setRemoveRequest({ count: selectedCount })}>Remove from client</button></div> : null}<button className="bulk-clear" onClick={clearSelection}>Clear</button></div> : null}
-        {effectiveFilters.length ? <div className="active-filter-strip">{effectiveFilters.flatMap((filter) => {
+        {displayFilters.length ? <div className="active-filter-strip">{displayFilters.flatMap((filter) => {
           const label = filterLabel(filter.field, allCustomFields);
           if (filter.operator === "empty" || filter.operator === "not_empty") return [<button key={filter.id} className="filter-chip" onClick={() => onFiltersChange(filters.filter((item) => item.id !== filter.id))}><span className="filter-chip-label">{label}</span><span className="filter-chip-value">{filter.operator === "empty" ? "Empty" : "Not empty"}</span><span className="filter-chip-close"><AppIcon name="close" size={12}/></span></button>];
           const prefix = filter.operator === "not_contains" || filter.operator === "not_equals" ? "Exclude " : filter.operator === "boolean" ? "Boolean " : "";
           return filter.values.map((value) => <button key={`${filter.id}-${value}`} className="filter-chip" onClick={() => updateFilter(filter.id, { values: filter.values.filter((item) => item !== value) })}><span className="filter-chip-label">{prefix}{label}</span><span className="filter-chip-value">{filterChipValue(filter.field, value)}</span><span className="filter-chip-close"><AppIcon name="close" size={12}/></span></button>);
-        })}<button className="clear-filter-chip" onClick={() => onFiltersChange([])}>Clear all</button></div> : null}
+        })}<button className="clear-filter-chip" onClick={() => onFiltersChange(capFilter ? [capFilter] : [])}>Clear filters</button></div> : null}
         {prospects.length ? <><div className="master-scroll-top" ref={topScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, tableScrollRef.current)} aria-label="Horizontal table scroll"><div style={{ width: tableScrollWidth }}/></div><div className="master-table-wrap" data-density={density} ref={tableScrollRef} onScroll={(event) => syncHorizontalScroll(event.currentTarget, topScrollRef.current)}><table className="master-data-table"><thead><tr><th className="select-column"><input aria-label="Select all prospects on this page" title="Select all prospects on this page" type="checkbox" checked={prospects.length > 0 && prospects.every((prospect) => isProspectSelected(prospect.id))} onChange={togglePageSelection}/></th>{visibleDefinitions.map((field) => <th key={field.id} className={field.id === "__employee_count" ? "numeric-cell" : undefined}>{field.label}</th>)}{clientId ? <><th className="date-added-column">Date Contacted / cooldown</th><th className="icp-column">ICP verified</th></> : null}<th className="row-detail-column">{onRemoveFromClient || canDeleteMaster ? "Actions" : ""}</th></tr></thead><tbody>{prospects.map((person) => <ProspectTableRow key={person.id} prospect={person} visibleDefinitions={visibleDefinitions} selected={isProspectSelected(person.id)} includeClient={!clientId} canDeleteMaster={canDeleteMaster} clientId={clientId} clientCooldownDays={clientCooldownDays} onSelect={onSelect} onToggleSelected={toggleSelected} onRemoveFromClient={onRemoveFromClient} onDelete={deleteProspect}/>)}</tbody></table></div><div className="table-footer"><span>Showing {formatNumber(firstRecord)} to {formatNumber(lastRecord)} of {displayedTotal} matching records</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}><AppIcon name="back" size={14}/> Previous</button><span>Page {page} of {formatNumber(totalPages)}{totalCapped ? "+" : ""}</span><button disabled={boundedTotal ? prospects.length < 50 : page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button></div></div></> : <WorkspaceEmpty state={emptyWorkspaceState({ entity: "people", search, filterCount: effectiveFilters.length, scoped: scopeRestricts(companyScope), clientScoped: Boolean(clientId) })} onClearSearch={onClearSearch} onClearFilters={() => onFiltersChange([])} onClearScope={onClearCompanyScope} onImport={onImport} />}
       </article>
-      {filtersOpen ? <ApolloFilterPanel filters={filters} customFields={customFields} clientId={clientId} clients={clients} onChange={onFiltersChange}/> : null}
+      {filtersOpen ? <ApolloFilterPanel filters={displayFilters} customFields={customFields} clientId={clientId} clients={clients} onChange={(next) => onFiltersChange(capFilter ? [...next, capFilter] : next)}/> : null}
     </div>}
-    {exportDialogOpen ? <ExportDialogShell titleId="prospect-export-title" busy={exportingProspects} onClose={() => setExportDialogOpen(false)}><div className="export-modal-head"><div><p className="eyebrow">CSV EXPORT</p><h2 id="prospect-export-title">Choose prospects and fields</h2><p>Only the fields checked below will be included in the download.</p></div><button aria-label="Close export dialog" disabled={exportingProspects} onClick={() => setExportDialogOpen(false)}><AppIcon name="close" size={14}/></button></div><fieldset className="export-scope"><legend>Prospects to export</legend><label htmlFor="export-all-matching"><span className="sr-only">All matching prospects</span><input id="export-all-matching" type="radio" name="export-scope" checked={exportScope === "all_matching"} onChange={() => setExportScope("all_matching")}/><span><strong>All {search.trim() || effectiveFilters.length ? "matching " : ""}prospects</strong><small>{displayedTotal} records across every page</small></span></label><label htmlFor="export-selected" className={!selectedCount ? "disabled" : ""}><span className="sr-only">Selected prospects</span><input id="export-selected" type="radio" name="export-scope" disabled={!selectedCount} checked={exportScope === "selected"} onChange={() => setExportScope("selected")}/><span><strong>Selected prospects</strong><small>{selectedLabel} currently selected</small></span></label></fieldset><div className="export-fields-head"><div><strong>Fields to include</strong><span>{formatNumber(exportFields.length)} selected</span></div><div><button onClick={() => setExportFields(defaultProspectExportFields)}>Select all</button><button onClick={() => setExportFields([])}>Clear</button></div></div><div className="export-field-grid">{exportFieldCatalog.map((field) => <label key={field.id}><input type="checkbox" checked={exportFields.includes(field.id)} onChange={() => toggleExportField(field.id)}/><span>{field.label}</span></label>)}</div><fieldset className="export-scope export-format"><legend>Output</legend><label htmlFor="export-single"><span className="sr-only">Single CSV file</span><input id="export-single" type="radio" name="export-format" checked={exportFormat === "single"} disabled={exportingProspects} onChange={() => setExportFormat("single")}/><span><strong>One CSV file</strong><small>Everything in a single download, any size</small></span></label><label htmlFor="export-parts"><span className="sr-only">Split into multiple files</span><input id="export-parts" type="radio" name="export-format" checked={exportFormat === "parts"} disabled={exportingProspects} onChange={() => setExportFormat("parts")}/><span><strong>Split into parts</strong><small>Multiple CSVs of <select aria-label="Rows per file" disabled={exportingProspects || exportFormat !== "parts"} value={exportRowsPerFile} onClick={(event) => event.stopPropagation()} onChange={(event) => setExportRowsPerFile(Number(event.target.value))}>{[10000, 25000, 50000, 100000].map((size) => <option key={size} value={size}>{formatNumber(size)}</option>)}</select> rows each</small></span></label></fieldset>{!fileSystemAccessSupported() ? <p className="export-hint">Your browser will download the file{exportFormat === "parts" ? "s" : ""} when the export finishes. For very large exports, a Chromium browser streams straight to disk.</p> : null}{exportProgress ? <div className="export-progress" role="status"><span className="export-progress-bar"><i style={{ width: `${exportProgress.total ? Math.min(100, Math.round((exportProgress.exported / Math.max(1, exportProgress.total)) * 100)) : 100}%` }}/></span><span>{exportProgress.phase === "listing" ? "Finding" : exportProgress.phase === "writing" ? "Writing" : "Exported"} {formatNumber(exportProgress.exported)}{exportProgress.total ? ` of ${formatNumber(exportProgress.total)}` : ""} rows{exportProgress.files > 1 ? ` · ${formatNumber(exportProgress.files)} files` : ""}{exportProgress.phase === "listing" ? " · building the list first, so nothing is missed if the data changes" : ""}</span></div> : null}<div className="modal-actions">{exportingProspects ? <button className="secondary" onClick={cancelExport}>Cancel export</button> : <button className="secondary" data-autofocus onClick={() => setExportDialogOpen(false)}>Close</button>}<button className="primary" disabled={exportingProspects || !exportFields.length || (exportScope === "selected" && !selectedCount)} onClick={() => void exportProspectsCsv()}>{exportingProspects ? "Exporting…" : `Export ${exportScope === "selected" ? selectedLabel : displayedTotal} prospects`}</button></div></ExportDialogShell> : null}
+    {exportDialogOpen ? <ExportDialogShell titleId="prospect-export-title" busy={exportingProspects} onClose={() => setExportDialogOpen(false)}><div className="export-modal-head"><div><p className="eyebrow">CSV EXPORT</p><h2 id="prospect-export-title">Choose prospects and fields</h2><p>Only the fields checked below will be included in the download.</p></div><button aria-label="Close export dialog" disabled={exportingProspects} onClick={() => setExportDialogOpen(false)}><AppIcon name="close" size={14}/></button></div><fieldset className="export-scope"><legend>Prospects to export</legend><label htmlFor="export-all-matching"><span className="sr-only">All matching prospects</span><input id="export-all-matching" type="radio" name="export-scope" checked={exportScope === "all_matching"} onChange={() => setExportScope("all_matching")}/><span><strong>All {search.trim() || effectiveFilters.length ? "matching " : ""}prospects</strong><small>{displayedTotal} records across every page</small></span></label><label htmlFor="export-selected" className={!selectedCount ? "disabled" : ""}><span className="sr-only">Selected prospects</span><input id="export-selected" type="radio" name="export-scope" disabled={!selectedCount} checked={exportScope === "selected"} onChange={() => setExportScope("selected")}/><span><strong>Selected prospects</strong><small>{selectedLabel} currently selected</small></span></label></fieldset><label className="ds-menu-field"><span>Max people per company for this export</span><input aria-label="Export max people per company" type="number" min="1" max="1000" value={exportMaxPeoplePerCompany || ""} placeholder="No limit" disabled={exportingProspects} onChange={(event) => { const raw = event.target.value === "" ? 0 : Number(event.target.value); setExportMaxPeoplePerCompany(Number.isSafeInteger(raw) ? Math.max(0, Math.min(raw, 1000)) : 0); }}/><small>Leave blank for no limit. This can override the current search limit.</small></label><div className="export-fields-head"><div><strong>Fields to include</strong><span>{formatNumber(exportFields.length)} selected</span></div><div><button onClick={() => setExportFields(defaultProspectExportFields)}>Select all</button><button onClick={() => setExportFields([])}>Clear</button></div></div><div className="export-field-grid">{exportFieldCatalog.map((field) => <label key={field.id}><input type="checkbox" checked={exportFields.includes(field.id)} onChange={() => toggleExportField(field.id)}/><span>{field.label}</span></label>)}</div><fieldset className="export-scope export-format"><legend>Output</legend><label htmlFor="export-single"><span className="sr-only">Single CSV file</span><input id="export-single" type="radio" name="export-format" checked={exportFormat === "single"} disabled={exportingProspects} onChange={() => setExportFormat("single")}/><span><strong>One CSV file</strong><small>Everything in a single download, any size</small></span></label><label htmlFor="export-parts"><span className="sr-only">Split into multiple files</span><input id="export-parts" type="radio" name="export-format" checked={exportFormat === "parts"} disabled={exportingProspects} onChange={() => setExportFormat("parts")}/><span><strong>Split into parts</strong><small>Multiple CSVs of <select aria-label="Rows per file" disabled={exportingProspects || exportFormat !== "parts"} value={exportRowsPerFile} onClick={(event) => event.stopPropagation()} onChange={(event) => setExportRowsPerFile(Number(event.target.value))}>{[10000, 25000, 50000, 100000].map((size) => <option key={size} value={size}>{formatNumber(size)}</option>)}</select> rows each</small></span></label></fieldset>{!fileSystemAccessSupported() ? <p className="export-hint">Your browser will download the file{exportFormat === "parts" ? "s" : ""} when the export finishes. For very large exports, a Chromium browser streams straight to disk.</p> : null}{exportProgress ? <div className="export-progress" role="status"><span className="export-progress-bar"><i style={{ width: `${exportProgress.total ? Math.min(100, Math.round((exportProgress.exported / Math.max(1, exportProgress.total)) * 100)) : 100}%` }}/></span><span>{exportProgress.phase === "listing" ? "Finding" : exportProgress.phase === "writing" ? "Writing" : "Exported"} {formatNumber(exportProgress.exported)}{exportProgress.total ? ` of ${formatNumber(exportProgress.total)}` : ""} rows{exportProgress.files > 1 ? ` · ${formatNumber(exportProgress.files)} files` : ""}{exportProgress.phase === "listing" ? " · building the list first, so nothing is missed if the data changes" : ""}</span></div> : null}<div className="modal-actions">{exportingProspects ? <button className="secondary" onClick={cancelExport}>Cancel export</button> : <button className="secondary" data-autofocus onClick={() => setExportDialogOpen(false)}>Close</button>}<button className="primary" disabled={exportingProspects || !exportFields.length || (exportScope === "selected" && !selectedCount)} onClick={() => void exportProspectsCsv()}>{exportingProspects ? "Exporting…" : `Export ${exportScope === "selected" ? selectedLabel : displayedTotal} prospects`}</button></div></ExportDialogShell> : null}
     {removeRequest && clientId ? <ConfirmDialog
       title={`Remove ${selectedLabel} from ${clients.find((client) => client.id === clientId)?.name ?? "this client"}?`}
       body="This takes them out of this client workspace, along with their list membership for it."

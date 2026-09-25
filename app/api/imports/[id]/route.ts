@@ -3,7 +3,7 @@ import { deleteAndReindex, queuedNotice } from "../../../../lib/delete-cleanup.t
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
 type ImportDetailRow = {
-  id: string; list_id: string | null; file_name: string; data_source: string; status: string;
+  id: string; client_id?: string | null; list_id: string | null; file_name: string; data_source: string; status: string;
   ingestion_mode?: string; committed_row_offset: number; total_rows: number | null;
   processed_rows?: number; unique_added?: number; duplicates_linked?: number;
   processed_bytes?: number; file_size_bytes?: number | null; last_error?: string | null;
@@ -19,7 +19,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const supabase = createAdminClient();
   const prospectImport = await supabase
     .from("imports")
-    .select("id,list_id,file_name,data_source,status,ingestion_mode,committed_row_offset,total_rows,processed_rows,unique_added,duplicates_linked,processed_bytes,file_size_bytes,last_error,field_headers,field_map,header_signature,prospect_date_added,merge_mode")
+    .select("id,client_id,list_id,file_name,data_source,status,ingestion_mode,committed_row_offset,total_rows,processed_rows,unique_added,duplicates_linked,processed_bytes,file_size_bytes,last_error,field_headers,field_map,header_signature,prospect_date_added,merge_mode")
     .eq("id", id)
     .maybeSingle();
   if (prospectImport.error) return Response.json({ error: prospectImport.error.message }, { status: 500 });
@@ -37,11 +37,15 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     row = companyImport.data ? { ...companyImport.data, list_id: null } as ImportDetailRow : null;
   }
   if (!row) return Response.json({ error: "Import not found." }, { status: 404 });
+  const list = row.list_id ? await supabase.from("lists").select("name").eq("id", row.list_id).maybeSingle() : null;
+  if (list?.error) return Response.json({ error: list.error.message }, { status: 500 });
 
   return Response.json({
     id: row.id,
     kind,
     listId: row.list_id,
+    clientId: row.client_id ?? null,
+    listName: String(list?.data?.name ?? ""),
     fileName: row.file_name,
     dataSource: row.data_source,
     status: row.status,

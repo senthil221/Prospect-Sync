@@ -29,7 +29,7 @@ test("every prospect export runs the same predicate as the grid above it", async
 
   // One function, chosen unconditionally. The scope is always passed, empty or
   // not, so there is no second code path to keep in step.
-  assert.match(route, /supabase\.rpc\("search_prospect_export_v5"/);
+  assert.match(route, /supabase\.rpc\("search_prospect_export_v6"/);
   assert.doesNotMatch(route, /search_prospect_export_v1/);
   assert.match(route, /p_company_scope: companyScope \?\? \{\}/);
 

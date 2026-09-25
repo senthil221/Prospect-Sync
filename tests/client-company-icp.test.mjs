@@ -85,7 +85,7 @@ test("company ICP verification is isolated by client and supports selected segme
   assert.match(route, /authorizeApi/);
   assert.match(route, /set_icp_verified/);
   assert.match(route, /clear_icp_verified/);
-  assert.match(route, /push_companies_to_client_v1/);
+  assert.match(route, /push_companies_to_client_v2/);
   assert.match(route, /set_company_icp_verified_v2/);
   assert.match(route, /resolve_selection/);
   assert.match(route, /parseCompanyBulkSelection/);

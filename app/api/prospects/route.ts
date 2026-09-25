@@ -34,7 +34,7 @@ function isMissingFunction(error: { code?: string } | null | undefined) {
 // behind - which the caller surfaces as a 503 telling the operator to migrate,
 // rather than silently degrading to an older filter contract.
 async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClient>, query: WorkspaceQuery) {
-  const workspace = await supabase.rpc("search_prospect_workspace_v12", {
+  const workspace = await supabase.rpc("search_prospect_workspace_v13", {
     p_search: query.search,
     p_filters: query.filters,
     p_sort: query.sort,
@@ -46,7 +46,7 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
     p_with_total: query.withTotal,
     p_known_versions: query.knownVersions,
   }).abortSignal(query.signal ?? AbortSignal.timeout(30_000));
-  return { ...workspace, version: "v12" };
+  return { ...workspace, version: "v13" };
 }
 
 function workspaceSummary(data: unknown) {
@@ -193,7 +193,7 @@ export async function DELETE(request: Request) {
     const setDenial = await authorizeFilterSets(supabase, filters, (await getAuthorizedUser())?.id ?? '', 'prospect', '');
     if (setDenial) return setDenial;
     const excludedIds = Array.isArray(payload.excludedIds) ? [...new Set(payload.excludedIds.map((id) => String(id).trim()).filter(Boolean))].slice(0, 50000) : [];
-    const { data, error } = await supabase.rpc("delete_prospects_matching_v1", {
+    const { data, error } = await supabase.rpc("delete_prospects_matching_v2", {
       p_search: search,
       p_filters: filters,
       p_excluded_ids: excludedIds,

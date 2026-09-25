@@ -136,6 +136,8 @@ export async function runFrozenAction(
     filters: WireFilter[];
     excludedIds: string[];
     dateContacted?: string | null;
+    /** Source membership boundary for a client-to-client push. */
+    sourceClientId?: string;
     /** Only for add_tag / remove_tag. The worker has nobody to ask for it later. */
     tagId?: string;
   },
@@ -153,6 +155,7 @@ export async function runFrozenAction(
         search: input.search,
         filters: input.filters,
         excludedIds: input.excludedIds,
+        ...(input.action === "push" && input.sourceClientId ? { sourceClientId: input.sourceClientId } : {}),
         ...(input.action === "set_date_contacted" ? { dateContacted: input.dateContacted ?? null } : {}),
         // Carried only where it means something, so a push never travels with a
         // tag id the route would have to decide whether to store.

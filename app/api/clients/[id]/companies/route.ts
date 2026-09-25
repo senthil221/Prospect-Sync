@@ -201,6 +201,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     ? [...new Set(payload.companyIds.map((value) => String(value ?? "").trim()).filter(Boolean))].slice(0, 50000)
     : [];
   const allMatching = payload.allMatching === true;
+  const sourceClientId = action === "push" ? String(payload.sourceClientId ?? "").trim() || null : null;
+  const requestId = action === "push" ? String(payload.requestId ?? "").trim() : "";
+  if (action === "push" && requestId && !/^[a-zA-Z0-9-]{8,100}$/.test(requestId)) {
+    return Response.json({ error: "A valid push request id is required." }, { status: 400 });
+  }
   if (!explicitIds.length && !allMatching) {
     return Response.json({ error: `Select companies before ${action === "push" ? "pushing them" : "updating ICP verification"}.` }, { status: 400 });
   }
@@ -220,12 +225,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const user = await getAuthorizedUser();
   const supabase = createAdminClient();
   if (allMatching && !explicitIds.length) {
-    const sourceScope = action === 'push' ? '' : clientId;
+    const sourceScope = action === 'push' ? sourceClientId ?? '' : clientId;
     const setDenial = await authorizeFilterSets(supabase, filters, user?.id ?? '', 'company', sourceScope,
       peopleScope ? [{ entityType: 'prospect', clientScope: sourceScope, filters: peopleScope.filters }] : []);
     if (setDenial) return setDenial;
   }
-  const rpcName = action === "push" ? "push_companies_to_client_v1" : "set_company_icp_verified_v2";
+  const rpcName = action === "push" ? "push_companies_to_client_v2" : "set_company_icp_verified_v2";
   const rpcArgs = {
     p_client_id: clientId,
     p_company_ids: explicitIds.length ? explicitIds : null,
@@ -236,7 +241,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     p_actor: user?.email ?? "",
   };
   const { data, error } = action === "push"
-    ? await supabase.rpc(rpcName, rpcArgs)
+    ? await supabase.rpc(rpcName, { ...rpcArgs, p_source_client_id: sourceClientId, p_request_id: requestId || crypto.randomUUID() })
     : await supabase.rpc(rpcName, { ...rpcArgs, p_verified: action === "set_icp_verified" });
 
   if (error) {
