@@ -23,6 +23,10 @@ test("Incomplete Info People uses one linked-company predicate and no global piv
   assert.match(migration, /co\.short_description/);
   assert.match(migration, /a person without a linked company was classified/);
   assert.match(migration, /v_compiled <> v_matched or v_compiled <> v_expected/);
+  assert.match(migration, /select p\.oid, p\.proconfig into v_oid, v_cfg/);
+  assert.match(migration, /has_function_privilege\('anon', v_oid, 'EXECUTE'\)/);
+  assert.doesNotMatch(migration, /has_function_privilege\('anon', format\(/);
+  assert.doesNotMatch(migration, /^\s*(?:begin|commit)\s*;\s*$/im);
   assert.match(migration, /prospect_filters_need_company_lookup_v1/);
   assert.match(migration, /bounded first-page count/);
 });

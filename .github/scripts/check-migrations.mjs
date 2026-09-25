@@ -216,14 +216,16 @@ if (baseArgumentIndex !== -1) {
     }
 
     const migrationPath = changedPaths.at(-1) ?? changedPaths[0] ?? "unknown migration";
-    // Runs 32849770060 and 108270283102 proved these migrations failed inside
-    // their transactions and were never recorded. Permit only the named
+    // Runs 32849770060, 108270283102 and 108273005202 proved these migrations
+    // failed inside their transactions and were never recorded. Permit only the named
     // migration from the exact failed release base; any later edit has a
     // different base and remains blocked as immutable history.
     const isUnappliedCorrection = status === "M" && (
       (baseRevision === "8a2b6dda5e7460004b9f8d0b39c378a2e3691fc3"
         && migrationPath === "supabase/migrations/20260825124148_company_keyword_scope_search.sql")
       || (baseRevision === "ee7de5fe2c3a0188d40b959c21e93067e288f348"
+        && migrationPath === "supabase/migrations/20260925212546_incomplete_company_people_single_pass.sql")
+      || (baseRevision === "d1cecb6300777d7ed62aabb69037b3227be9f7da"
         && migrationPath === "supabase/migrations/20260925212546_incomplete_company_people_single_pass.sql")
     );
     if (isUnappliedCorrection) {

@@ -11,8 +11,6 @@
 -- saved filters remain valid. Roll forward by fixing this internal predicate;
 -- rollback is the previous function definitions retained in migration history.
 
-begin;
-
 -- Compile the internal filter to one company lookup. It deliberately requires
 -- a linked company: a person with no company was never in the old company
 -- scope and must not become "incomplete company information" now.
@@ -219,24 +217,26 @@ $assert$;
 do $assert$
 declare
   v_name text;
+  v_oid oid;
   v_cfg text[];
 begin
   foreach v_name in array array[
     'prospect_filter_sql_v1', 'prospect_index_matches_v1',
     'search_prospect_workspace_v12', 'search_prospect_workspace_v13'
   ] loop
-    select p.proconfig into v_cfg from pg_proc p
+    select p.oid, p.proconfig into v_oid, v_cfg from pg_proc p
       join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'public' and p.proname = v_name;
-    if v_cfg is null or not exists (select 1 from unnest(v_cfg) setting where setting like 'search_path=%') then
+    if v_oid is null or v_cfg is null
+      or not exists (select 1 from unnest(v_cfg) setting where setting like 'search_path=%') then
       raise exception '% lost its pinned search_path', v_name;
     end if;
-    if has_function_privilege('anon', format('public.%s', v_name), 'EXECUTE')
-      or has_function_privilege('authenticated', format('public.%s', v_name), 'EXECUTE') then
+    -- The text overload requires a full `name(type,...)` signature. The OID
+    -- overload is unambiguous and is the same pg_proc row checked above.
+    if has_function_privilege('anon', v_oid, 'EXECUTE')
+      or has_function_privilege('authenticated', v_oid, 'EXECUTE') then
       raise exception '% became executable by a browser role', v_name;
     end if;
   end loop;
 end;
 $assert$;
-
-commit;
