@@ -67,7 +67,7 @@ begin
       and n.nspname not like 'pg_toast%'
       and c.relkind in ('r', 'p', 'v', 'm', 'S')
   ) or exists (select 1 from pg_roles where rolname in (
-    'anon', 'authenticated', 'service_role', 'authenticator',
+    'supabase_admin', 'anon', 'authenticated', 'service_role', 'authenticator',
     'prospect_importer', 'prospect_import_worker',
     'prospect_operator', 'prospect_ops_worker',
     'prospect_integrator', 'prospect_integration_worker'

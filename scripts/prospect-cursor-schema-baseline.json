@@ -47,5 +47,23 @@
       "name": "unaccent",
       "schema": "public"
     }
-  ]
+  ],
+  "defaultPrivileges": {
+    "entryCount": 6,
+    "owners": [
+      "postgres",
+      "supabase_admin"
+    ],
+    "grantees": [
+      "anon",
+      "authenticated",
+      "postgres",
+      "service_role"
+    ],
+    "objectTypes": [
+      "S",
+      "f",
+      "r"
+    ]
+  }
 }

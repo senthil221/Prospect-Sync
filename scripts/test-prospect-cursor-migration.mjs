@@ -45,6 +45,13 @@ const manifestSchemas = [...manifest.schemas].sort();
 if (JSON.stringify(dumpSchemas) !== JSON.stringify(manifestSchemas)) {
   throw new Error('Cursor schema baseline contains schemas outside its reviewed manifest.');
 }
+const dumpDefaultAclOwners = [...new Set(
+  [...baseline.matchAll(/^ALTER DEFAULT PRIVILEGES FOR ROLE ([a-z_][a-z0-9_]*)\b/gmu)]
+    .map((match) => match[1]),
+)].sort();
+if (JSON.stringify(dumpDefaultAclOwners) !== JSON.stringify([...manifest.defaultPrivileges.owners].sort())) {
+  throw new Error('Cursor schema baseline default-privilege owners differ from its reviewed manifest.');
+}
 for (const [label, pattern] of [
   ['data rows', /^COPY .+ FROM stdin;$/mu],
   ['role definitions', /^(?:CREATE|ALTER) ROLE\b/mu],
@@ -194,7 +201,7 @@ begin
     raise exception 'disposable cursor migration database is not a fresh stock database';
   end if;
   if exists (select 1 from pg_roles where rolname in (
-    'anon', 'authenticated', 'service_role', 'authenticator',
+    'supabase_admin', 'anon', 'authenticated', 'service_role', 'authenticator',
     'prospect_importer', 'prospect_import_worker',
     'prospect_operator', 'prospect_ops_worker',
     'prospect_integrator', 'prospect_integration_worker'
@@ -237,6 +244,7 @@ psql(
 psql('restored baseline contract', String.raw`
 do $baseline_contract$
 declare
+  v_default_acl_grantees text[];
   v_unexpected_owners text[];
 begin
   if pg_catalog.to_regprocedure(
@@ -272,6 +280,36 @@ begin
     and r.rolname not in ('postgres', 'pg_database_owner');
   if v_unexpected_owners is not null then
     raise exception 'restored baseline has unexpected object owners: %', v_unexpected_owners;
+  end if;
+  if (select count(*) from pg_catalog.pg_default_acl) <> ${manifest.defaultPrivileges.entryCount}
+     or exists (
+       select 1
+       from pg_catalog.pg_default_acl d
+       join pg_catalog.pg_roles owner_role on owner_role.oid = d.defaclrole
+       where owner_role.rolname <> all(${sqlArrayLiteral(manifest.defaultPrivileges.owners)})
+          or d.defaclobjtype::text <> all(${sqlArrayLiteral(manifest.defaultPrivileges.objectTypes)})
+     )
+     or exists (
+       select 1
+       from (values ('postgres'), ('supabase_admin')) expected(owner_name)
+       cross join (values ('S'::"char"), ('f'::"char"), ('r'::"char")) kinds(object_type)
+       where not exists (
+         select 1
+         from pg_catalog.pg_default_acl d
+         join pg_catalog.pg_roles owner_role on owner_role.oid = d.defaclrole
+         where owner_role.rolname = expected.owner_name
+           and d.defaclobjtype = kinds.object_type
+       )
+     ) then
+    raise exception 'restored baseline default-privilege owners or object types differ from the reviewed manifest';
+  end if;
+  select array_agg(distinct grantee_role.rolname order by grantee_role.rolname)
+  into v_default_acl_grantees
+  from pg_catalog.pg_default_acl d
+  cross join lateral pg_catalog.aclexplode(d.defaclacl) acl_entry
+  join pg_catalog.pg_roles grantee_role on grantee_role.oid = acl_entry.grantee;
+  if v_default_acl_grantees is distinct from ${sqlArrayLiteral(manifest.defaultPrivileges.grantees)} then
+    raise exception 'restored baseline default-privilege grantees differ: %', v_default_acl_grantees;
   end if;
   if not exists (select 1 from pg_catalog.pg_extension where extname = 'pg_trgm')
      or not exists (select 1 from pg_catalog.pg_extension where extname = 'unaccent') then

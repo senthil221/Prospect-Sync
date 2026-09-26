@@ -1,6 +1,9 @@
 -- Synthetic equivalents of the cluster roles created by the production
 -- bootstrap. This fixture is used only in the disposable CI database; the
 -- application migrations remain the source of every tested schema/function.
+-- supabase_admin must exist because the reviewed dump preserves its public
+-- schema default privileges; it remains a non-login fixture role here.
+create role supabase_admin nologin noinherit;
 create role anon nologin noinherit;
 create role authenticated nologin noinherit;
 create role service_role nologin noinherit bypassrls;

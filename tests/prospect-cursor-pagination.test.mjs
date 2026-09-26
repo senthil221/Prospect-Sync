@@ -133,6 +133,7 @@ test("disposable PostgreSQL schema upgrade is release-gating and fail-closed", a
   assert.match(seed, /generate_series\(1, 130\)/);
   assert.match(seed, /generate_series\(1, 21\)/);
   assert.doesNotMatch(seed, /cursor-history-volume/);
+  assert.match(roles, /create role supabase_admin nologin noinherit/);
   for (const worker of [
     "prospect_import_worker",
     "prospect_ops_worker",
@@ -158,6 +159,11 @@ test("disposable PostgreSQL schema upgrade is release-gating and fail-closed", a
   assert.equal(manifest.capture.schemaOnly, true);
   assert.equal(manifest.capture.customerRows, false);
   assert.equal(manifest.sourceMigrationLedger.lastVersion, "20260925212546");
+  assert.deepEqual(manifest.defaultPrivileges.owners, ["postgres", "supabase_admin"]);
+  assert.deepEqual(manifest.defaultPrivileges.grantees, ["anon", "authenticated", "postgres", "service_role"]);
+  assert.equal(manifest.defaultPrivileges.entryCount, 6);
+  assert.match(runner, /default-privilege owners differ from its reviewed manifest/);
+  assert.match(runner, /restored baseline default-privilege grantees differ/);
   assert.doesNotMatch(baseline, /^COPY .+ FROM stdin;$/mu);
   assert.doesNotMatch(baseline, /^(?:CREATE|ALTER) ROLE\b/mu);
   assert.doesNotMatch(baseline, /^CREATE EXTENSION\b/mu);
