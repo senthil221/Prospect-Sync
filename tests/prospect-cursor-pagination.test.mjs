@@ -161,7 +161,8 @@ test("disposable PostgreSQL schema upgrade is release-gating and fail-closed", a
   assert.equal(manifest.capture.schemaOnly, true);
   assert.equal(manifest.capture.customerRows, false);
   assert.equal(manifest.sourceMigrationLedger.lastVersion, "20260925212546");
-  assert.equal(manifest.sourceMigrationLedger.versionsMd5, "38e4efa092a7aed057e1251418bb8e96");
+  assert.equal(manifest.sourceMigrationLedger.versionsPipeMd5, "38e4efa092a7aed057e1251418bb8e96");
+  assert.equal(manifest.sourceMigrationLedger.versionColonNameLfMd5, "94474160c81b5c5392b70471f4d89ae6");
   assert.deepEqual(manifest.defaultPrivileges.owners, ["postgres", "supabase_admin"]);
   assert.deepEqual(manifest.defaultPrivileges.grantees, ["anon", "authenticated", "postgres", "service_role"]);
   assert.equal(manifest.defaultPrivileges.entryCount, 6);

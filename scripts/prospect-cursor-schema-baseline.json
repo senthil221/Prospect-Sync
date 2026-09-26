@@ -17,8 +17,8 @@
     "count": 174,
     "firstVersion": "20260807000000",
     "lastVersion": "20260925212546",
-    "captureFingerprint": "94474160c81b5c5392b70471f4d89ae6",
-    "versionsMd5": "38e4efa092a7aed057e1251418bb8e96"
+    "versionColonNameLfMd5": "94474160c81b5c5392b70471f4d89ae6",
+    "versionsPipeMd5": "38e4efa092a7aed057e1251418bb8e96"
   },
   "objectCounts": {
     "schemas": 8,
