@@ -131,4 +131,5 @@ jobs:
       - name: Validate migration ordering and SECURITY DEFINER revokes
         env:
           MIGRATION_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          MIGRATION_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: node .github/scripts/check-migrations.mjs --base "$MIGRATION_BASE_SHA"

@@ -151,6 +151,57 @@ test("migration guard rejects changes to an existing migration", async () => {
   }
 });
 
+test("migration guard resolves an all-zero first-push SHA against the default branch", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "prospect-migration-zero-base-"));
+  try {
+    await mkdir(join(directory, ".github", "scripts"), { recursive: true });
+    await mkdir(join(directory, "supabase", "migrations"), { recursive: true });
+    await copyFile(
+      new URL("../.github/scripts/check-migrations.mjs", import.meta.url),
+      join(directory, ".github", "scripts", "check-migrations.mjs"),
+    );
+    await writeFile(
+      join(directory, "supabase", "migrations", "20260101000000_initial.sql"),
+      "select 1;\n",
+    );
+
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: directory });
+    execFileSync("git", ["config", "user.email", "ci@example.test"], { cwd: directory });
+    execFileSync("git", ["config", "user.name", "CI"], { cwd: directory });
+    execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: directory });
+    execFileSync("git", ["add", "."], { cwd: directory });
+    execFileSync("git", ["commit", "-qm", "base"], { cwd: directory });
+    const base = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: directory,
+      encoding: "utf8",
+    }).trim();
+    execFileSync("git", ["update-ref", "refs/remotes/origin/main", base], { cwd: directory });
+
+    execFileSync("git", ["switch", "-qc", "codex/cursor"], { cwd: directory });
+    await writeFile(
+      join(directory, "supabase", "migrations", "20260102000000_unsafe.sql"),
+      "create function public.unsafe() returns void language sql security definer as $$ select; $$;\n",
+    );
+    execFileSync("git", ["add", "."], { cwd: directory });
+    execFileSync("git", ["commit", "-qm", "unsafe migration"], { cwd: directory });
+
+    const result = spawnSync(
+      "node",
+      [".github/scripts/check-migrations.mjs", "--base", "0000000000000000000000000000000000000000"],
+      {
+        cwd: directory,
+        encoding: "utf8",
+        env: { ...process.env, MIGRATION_DEFAULT_BRANCH: "main" },
+      },
+    );
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /comparing against merge-base/);
+    assert.match(result.stderr, /SECURITY DEFINER without same-file EXECUTE revokes/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("migration guard scopes the failed incomplete-info correction to its exact release", async () => {
   const guard = await readFile(new URL("../.github/scripts/check-migrations.mjs", import.meta.url), "utf8");
   assert.match(guard, /baseRevision === "ee7de5fe2c3a0188d40b959c21e93067e288f348"/);

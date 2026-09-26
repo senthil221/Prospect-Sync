@@ -52,6 +52,25 @@ const psqlEnv = {
   PGDATABASE: database,
 };
 
+function actionEscape(value) {
+  return String(value)
+    .replaceAll('disposable-ci-only', '[redacted]')
+    .replace(/postgres(?:ql)?:\/\/[^\s@]+@/giu, 'postgresql://[redacted]@')
+    .replaceAll('::', ': :')
+    .replaceAll('%', '%25')
+    .replaceAll('\r', '%0D')
+    .replaceAll('\n', '%0A')
+    .slice(0, 700);
+}
+
+function firstPsqlError(result) {
+  const output = `${result.stderr ?? ''}\n${result.stdout ?? ''}`;
+  const errorLine = output.split(/\r?\n/u).find((line) => /\bERROR:/u.test(line));
+  if (errorLine) return errorLine.trim();
+  if (result.error) return result.error.message;
+  return `psql exited with code ${result.status ?? 'unknown'}`;
+}
+
 function psql(label, sql, timeout = 330_000) {
   const result = spawnSync('psql', ['-X', '-q', '-v', 'ON_ERROR_STOP=1'], {
     input: sql,
@@ -61,6 +80,9 @@ function psql(label, sql, timeout = 330_000) {
     maxBuffer: 50 * 1024 * 1024,
   });
   if (result.error || result.status !== 0) {
+    process.stderr.write(
+      `::error title=Cursor migration replay::${actionEscape(label)}: ${actionEscape(firstPsqlError(result))}\n`,
+    );
     process.stdout.write(result.stdout ?? '');
     process.stderr.write(result.stderr ?? '');
     throw result.error ?? new Error(`${label} failed with psql exit code ${result.status}.`);

@@ -12,6 +12,38 @@ function normalizeIdentifier(identifier) {
   return identifier.replaceAll('"', "").replace(/\s+/g, "").toLowerCase();
 }
 
+function gitOutput(arguments_) {
+  try {
+    return execFileSync("git", arguments_, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function commitExists(revision) {
+  return Boolean(revision && gitOutput(["rev-parse", "--verify", `${revision}^{commit}`]));
+}
+
+function defaultBranchMergeBase() {
+  const candidates = [];
+  if (process.env.GITHUB_BASE_REF) candidates.push(`origin/${process.env.GITHUB_BASE_REF}`);
+  if (process.env.MIGRATION_DEFAULT_BRANCH) {
+    candidates.push(`origin/${process.env.MIGRATION_DEFAULT_BRANCH}`);
+  }
+  const remoteHead = gitOutput(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]);
+  if (remoteHead) candidates.push(remoteHead);
+
+  for (const candidate of [...new Set(candidates)]) {
+    if (!commitExists(candidate)) continue;
+    const mergeBase = gitOutput(["merge-base", "HEAD", candidate]);
+    if (commitExists(mergeBase)) return { mergeBase, candidate };
+  }
+  return null;
+}
+
 function findClosingParenthesis(sql, openingIndex) {
   let depth = 0;
   let quote = null;
@@ -197,8 +229,21 @@ for (const migrationName of migrationNames) {
 const baseArgumentIndex = process.argv.indexOf("--base");
 let securityMigrationNames = migrationNames;
 if (baseArgumentIndex !== -1) {
-  const baseRevision = process.argv[baseArgumentIndex + 1];
-  if (!baseRevision) throw new Error("--base requires a Git revision");
+  let baseRevision = process.argv[baseArgumentIndex + 1];
+  const missingPushBefore = !baseRevision || /^0{40}$/.test(baseRevision);
+  if (missingPushBefore) {
+    const fallback = defaultBranchMergeBase();
+    if (!fallback) {
+      throw new Error(
+        "The push base SHA is unavailable and the default branch merge-base could not be resolved. "
+        + "Fetch the default branch and set MIGRATION_DEFAULT_BRANCH rather than skipping migration validation.",
+      );
+    }
+    baseRevision = fallback.mergeBase;
+    console.log(`Migration base SHA was unavailable; comparing against merge-base ${baseRevision} from ${fallback.candidate}.`);
+  } else if (!commitExists(baseRevision)) {
+    throw new Error(`--base is not a local commit: ${baseRevision}`);
+  }
 
   const changedEntries = execFileSync(
     "git",

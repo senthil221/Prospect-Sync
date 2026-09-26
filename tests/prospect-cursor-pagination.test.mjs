@@ -103,6 +103,9 @@ test("disposable PostgreSQL replay is release-gating and non-skipping", async ()
   assert.match(runner, /if \(file === seedBefore\)[\s\S]*historical cursor data fixture/);
   assert.doesNotMatch(runner, /migrationFiles\.at\(-1\) !== candidate/, "later migrations must remain replayable");
   assert.match(runner, /if \(file === candidate\) candidateApplied = true/);
+  assert.match(runner, /::error title=Cursor migration replay::/);
+  assert.match(runner, /find\(\(line\) => \/\\bERROR:/);
+  assert.match(runner, /replaceAll\('disposable-ci-only', '\[redacted\]'\)/);
   assert.match(seed, /generate_series\(1, 130\)/);
   assert.match(seed, /generate_series\(1, 21\)/);
   assert.match(seed, /151::bigint, 151::bigint, 130::bigint, 21::bigint/);
