@@ -89,13 +89,14 @@ test("cursor SQL preserves the mixed created_at DESC/id ASC boundary and service
 });
 
 test("disposable PostgreSQL replay is release-gating and non-skipping", async () => {
-  const [workflow, runner, seed, checks, compatibility, historyVolumeCleanup] = await Promise.all([
+  const [workflow, runner, seed, checks, compatibility, historyVolumeCleanup, roles] = await Promise.all([
     read("../.github/workflows/ci.yml"),
     read("../scripts/test-prospect-cursor-migration.mjs"),
     read("../scripts/prospect-cursor-history-fixture.sql"),
     read("../scripts/check-prospect-cursor-migration.sql"),
     read("../scripts/prospect-cursor-history-compat.sql"),
     read("../scripts/prospect-cursor-history-volume-cleanup.sql"),
+    read("../scripts/prospect-cursor-ci-roles.sql"),
   ]);
   assert.match(workflow, /cursor-migration-contract:[\s\S]*image: postgres:15/);
   assert.doesNotMatch(workflow, /cursor-migration-contract:[\s\S]*if: github\.event_name == ['"]pull_request['"]/);
@@ -138,6 +139,14 @@ test("disposable PostgreSQL replay is release-gating and non-skipping", async ()
   assert.match(runner, /historical 20,000-row assertion fixture cleanup/);
   assert.match(historyVolumeCleanup, /delete from public\.prospects/);
   assert.match(historyVolumeCleanup, /0::bigint, 151::bigint, 151::bigint/);
+  for (const worker of [
+    "prospect_import_worker",
+    "prospect_ops_worker",
+    "prospect_integration_worker",
+  ]) {
+    assert.match(roles, new RegExp(`create role ${worker} login inherit`));
+    assert.doesNotMatch(roles, new RegExp(`create role ${worker} login noinherit`));
+  }
   assert.match(seed, /151::bigint, 151::bigint, 130::bigint, 21::bigint/);
   assert.match(seed, /110::bigint, 132::bigint, 2::bigint/);
   assert.match(checks, /assert_cursor_case\('global'/);
