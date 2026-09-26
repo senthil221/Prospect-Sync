@@ -89,11 +89,12 @@ test("cursor SQL preserves the mixed created_at DESC/id ASC boundary and service
 });
 
 test("disposable PostgreSQL replay is release-gating and non-skipping", async () => {
-  const [workflow, runner, seed, checks] = await Promise.all([
+  const [workflow, runner, seed, checks, compatibility] = await Promise.all([
     read("../.github/workflows/ci.yml"),
     read("../scripts/test-prospect-cursor-migration.mjs"),
     read("../scripts/prospect-cursor-history-fixture.sql"),
     read("../scripts/check-prospect-cursor-migration.sql"),
+    read("../scripts/prospect-cursor-history-compat.sql"),
   ]);
   assert.match(workflow, /cursor-migration-contract:[\s\S]*image: postgres:15/);
   assert.doesNotMatch(workflow, /cursor-migration-contract:[\s\S]*if: github\.event_name == ['"]pull_request['"]/);
@@ -106,6 +107,28 @@ test("disposable PostgreSQL replay is release-gating and non-skipping", async ()
   assert.match(runner, /::error title=Cursor migration replay::/);
   assert.match(runner, /find\(\(line\) => \/\\bERROR:/);
   assert.match(runner, /replaceAll\('disposable-ci-only', '\[redacted\]'\)/);
+  assert.match(runner, /reviewedHistoryHashes = new Map/);
+  assert.match(runner, /createHash\('sha256'\)/);
+  assert.equal((runner.match(/Applying one reviewed CI-only compatibility exception/g) ?? []).length, 1);
+  assert.doesNotMatch(runner, /retry/i, "the historical exception must not become a generic retry path");
+  assert.match(runner, /compatibilityExceptionCount !== 1/);
+  assert.match(runner, /insert into supabase_migrations\.schema_migrations/);
+  assert.match(runner, /synthetic migration ledger does not contain every replayed migration/);
+  assert.match(runner, /Proving candidate RPC and ledger rollback before applying/);
+  assert.match(runner, /forced cursor candidate rollback/);
+  assert.match(runner, /rollback;`/);
+  assert.match(runner, /candidate rollback postcondition/);
+  assert.match(runner, /cursor RPC exists/);
+  assert.match(runner, /cursor migration ledger entry exists/);
+  assert.match(compatibility, /v_phase = 'pre'/);
+  assert.match(compatibility, /array\['p_import_id', 'p_rows', 'processed', 'added', 'updated', 'skipped'\]/);
+  assert.match(compatibility, /drop function public\.import_company_batch_v2\(text, jsonb\) restrict/);
+  assert.doesNotMatch(compatibility, /cascade/i);
+  assert.match(compatibility, /v_phase = 'post'/);
+  assert.match(compatibility, /array\['p_import_id', 'p_rows', 'p_row_offset', 'processed', 'added', 'updated', 'skipped'\]/);
+  assert.match(compatibility, /has_function_privilege[\s\S]*'anon'/);
+  assert.match(compatibility, /has_function_privilege[\s\S]*'authenticated'/);
+  assert.match(compatibility, /has_function_privilege[\s\S]*'service_role'/);
   assert.match(seed, /generate_series\(1, 130\)/);
   assert.match(seed, /generate_series\(1, 21\)/);
   assert.match(seed, /151::bigint, 151::bigint, 130::bigint, 21::bigint/);
