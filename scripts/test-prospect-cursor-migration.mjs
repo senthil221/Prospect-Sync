@@ -131,11 +131,17 @@ function psql(label, sql, timeout = 330_000) {
   return result.stdout ?? '';
 }
 
+function contractFailure(message, details = '') {
+  const suffix = details ? `: ${details}` : '';
+  process.stderr.write(`::error title=Cursor schema upgrade::${actionEscape(message + suffix)}\n`);
+  throw new Error(message);
+}
+
 function parseFingerprints(output) {
   return Object.fromEntries(output.trim().split(/\r?\n/u).filter(Boolean).map((line) => {
     const [signature, hash, ...extra] = line.split('\t');
     if (!signature || !/^[a-f0-9]{32}$/u.test(hash ?? '') || extra.length) {
-      throw new Error(`Malformed cursor baseline fingerprint output: ${actionEscape(line)}`);
+      contractFailure('Malformed cursor baseline fingerprint output', actionEscape(line));
     }
     return [signature, hash];
   }));
@@ -342,7 +348,10 @@ const restoredFingerprints = parseFingerprints(psql(
   30_000,
 ));
 if (JSON.stringify(restoredFingerprints) !== JSON.stringify(manifest.functionFingerprints)) {
-  throw new Error('Restored v12/v13/compiler fingerprints differ from the reviewed production manifest.');
+  contractFailure(
+    'Restored v12/v13/compiler fingerprints differ from the reviewed production manifest',
+    JSON.stringify({ expected: manifest.functionFingerprints, actual: restoredFingerprints }),
+  );
 }
 psql('candidate baseline precondition', candidateAbsentContract('before fixture'));
 psql('current-schema cursor fixture', `begin;\nset local statement_timeout = '60s';\n${fixtureSql}\ncommit;`);
@@ -390,7 +399,10 @@ const upgradedFingerprints = parseFingerprints(psql(
   30_000,
 ));
 if (JSON.stringify(upgradedFingerprints) !== JSON.stringify(restoredFingerprints)) {
-  throw new Error('Cursor candidate changed an inherited v12/v13/compiler function.');
+  contractFailure(
+    'Cursor candidate changed an inherited v12/v13/compiler function',
+    JSON.stringify({ before: restoredFingerprints, after: upgradedFingerprints }),
+  );
 }
 psql('cursor runtime contract', contractSql);
 process.stdout.write('Reviewed schema baseline, cursor upgrade, rollback, and runtime contracts passed.\n');

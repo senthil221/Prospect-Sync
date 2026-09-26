@@ -202,6 +202,58 @@ test("migration guard resolves an all-zero first-push SHA against the default br
   }
 });
 
+test("migration guard treats codex branch migrations as pending until main", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "prospect-migration-codex-base-"));
+  try {
+    await mkdir(join(directory, ".github", "scripts"), { recursive: true });
+    await mkdir(join(directory, "supabase", "migrations"), { recursive: true });
+    await copyFile(
+      new URL("../.github/scripts/check-migrations.mjs", import.meta.url),
+      join(directory, ".github", "scripts", "check-migrations.mjs"),
+    );
+    await writeFile(
+      join(directory, "supabase", "migrations", "20260101000000_initial.sql"),
+      "select 1;\n",
+    );
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: directory });
+    execFileSync("git", ["config", "user.email", "ci@example.test"], { cwd: directory });
+    execFileSync("git", ["config", "user.name", "CI"], { cwd: directory });
+    execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: directory });
+    execFileSync("git", ["add", "."], { cwd: directory });
+    execFileSync("git", ["commit", "-qm", "main baseline"], { cwd: directory });
+    const main = execFileSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8" }).trim();
+    execFileSync("git", ["update-ref", "refs/remotes/origin/main", main], { cwd: directory });
+    execFileSync("git", ["switch", "-qc", "codex/cursor"], { cwd: directory });
+
+    const pending = join(directory, "supabase", "migrations", "20260102000000_cursor.sql");
+    await writeFile(pending, "select 2;\n");
+    execFileSync("git", ["add", "."], { cwd: directory });
+    execFileSync("git", ["commit", "-qm", "add pending migration"], { cwd: directory });
+    const previousPush = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: directory,
+      encoding: "utf8",
+    }).trim();
+    await writeFile(pending, "select 3;\n");
+    execFileSync("git", ["add", "."], { cwd: directory });
+    execFileSync("git", ["commit", "-qm", "correct pending migration"], { cwd: directory });
+
+    const result = spawnSync("node", [".github/scripts/check-migrations.mjs", "--base", previousPush], {
+      cwd: directory,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_EVENT_NAME: "push",
+        GITHUB_REF: "refs/heads/codex/cursor",
+        MIGRATION_DEFAULT_BRANCH: "main",
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Codex validation branch: comparing migrations against merge-base/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("migration guard scopes the failed incomplete-info correction to its exact release", async () => {
   const guard = await readFile(new URL("../.github/scripts/check-migrations.mjs", import.meta.url), "utf8");
   assert.match(guard, /baseRevision === "ee7de5fe2c3a0188d40b959c21e93067e288f348"/);

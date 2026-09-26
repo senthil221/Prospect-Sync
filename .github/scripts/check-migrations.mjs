@@ -231,7 +231,19 @@ let securityMigrationNames = migrationNames;
 if (baseArgumentIndex !== -1) {
   let baseRevision = process.argv[baseArgumentIndex + 1];
   const missingPushBefore = !baseRevision || /^0{40}$/.test(baseRevision);
-  if (missingPushBefore) {
+  const validationBranchPush = process.env.GITHUB_EVENT_NAME === "push"
+    && /^refs\/heads\/codex\//.test(process.env.GITHUB_REF ?? "");
+  if (validationBranchPush) {
+    const fallback = defaultBranchMergeBase();
+    if (!fallback) {
+      throw new Error(
+        "A codex validation branch must resolve the default branch merge-base. "
+        + "Fetch the default branch and set MIGRATION_DEFAULT_BRANCH rather than treating pending migrations as applied.",
+      );
+    }
+    baseRevision = fallback.mergeBase;
+    console.log(`Codex validation branch: comparing migrations against merge-base ${baseRevision} from ${fallback.candidate}.`);
+  } else if (missingPushBefore) {
     const fallback = defaultBranchMergeBase();
     if (!fallback) {
       throw new Error(
