@@ -23,6 +23,7 @@ const migrationsUrl = new URL('../supabase/migrations/', import.meta.url);
 const candidate = '20260926083856_prospect_people_cursor_v1.sql';
 const candidateSignature = 'public.search_prospect_workspace_cursor_v1(text,jsonb,integer,text,timestamp with time zone,text,boolean,jsonb)';
 const seedBefore = '20260902000260_count_people_exactly.sql';
+const historyVolumeAssertion = '20260902000280_esp_equals_matches_either_column.sql';
 const compatibilityTarget = '20260825070000_company_location_filter.sql';
 const compatibilityForwardFix = '20260825103139_fix_company_location_import_drift.sql';
 const reviewedHistoryHashes = new Map([
@@ -39,6 +40,10 @@ if (!migrationFiles.includes(candidate) || !migrationFiles.includes(seedBefore))
 }
 if (migrationFiles.indexOf(seedBefore) >= migrationFiles.indexOf(candidate)) {
   throw new Error(`Historical fixture seed point ${seedBefore} must precede ${candidate}.`);
+}
+if (migrationFiles.indexOf(seedBefore) >= migrationFiles.indexOf(historyVolumeAssertion)
+    || migrationFiles.indexOf(historyVolumeAssertion) >= migrationFiles.indexOf(candidate)) {
+  throw new Error('Historical 20,000-row assertion must stay between the fixture and cursor candidate.');
 }
 if (migrationFiles.indexOf(compatibilityTarget) >= migrationFiles.indexOf(compatibilityForwardFix)) {
   throw new Error('Reviewed company-import compatibility migrations are missing or out of order.');
@@ -172,6 +177,10 @@ create table supabase_migrations.schema_migrations (
 `);
 
 const seedSql = await readFile(new URL('./prospect-cursor-history-fixture.sql', import.meta.url), 'utf8');
+const historyVolumeCleanupSql = await readFile(
+  new URL('./prospect-cursor-history-volume-cleanup.sql', import.meta.url),
+  'utf8',
+);
 const compatibilitySql = await readFile(new URL('./prospect-cursor-history-compat.sql', import.meta.url), 'utf8');
 let seeded = false;
 let candidateApplied = false;
@@ -207,6 +216,12 @@ for (const file of migrationFiles) {
     psql(
       'reviewed company import compatibility postcondition',
       `begin;\n${compatibilitySql.replaceAll('__COMPAT_PHASE__', 'post')}\ncommit;`,
+    );
+  }
+  if (file === historyVolumeAssertion) {
+    psql(
+      'historical 20,000-row assertion fixture cleanup',
+      `begin;\n${historyVolumeCleanupSql}\ncommit;`,
     );
   }
   if (file === candidate) candidateApplied = true;

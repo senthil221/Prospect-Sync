@@ -89,12 +89,13 @@ test("cursor SQL preserves the mixed created_at DESC/id ASC boundary and service
 });
 
 test("disposable PostgreSQL replay is release-gating and non-skipping", async () => {
-  const [workflow, runner, seed, checks, compatibility] = await Promise.all([
+  const [workflow, runner, seed, checks, compatibility, historyVolumeCleanup] = await Promise.all([
     read("../.github/workflows/ci.yml"),
     read("../scripts/test-prospect-cursor-migration.mjs"),
     read("../scripts/prospect-cursor-history-fixture.sql"),
     read("../scripts/check-prospect-cursor-migration.sql"),
     read("../scripts/prospect-cursor-history-compat.sql"),
+    read("../scripts/prospect-cursor-history-volume-cleanup.sql"),
   ]);
   assert.match(workflow, /cursor-migration-contract:[\s\S]*image: postgres:15/);
   assert.doesNotMatch(workflow, /cursor-migration-contract:[\s\S]*if: github\.event_name == ['"]pull_request['"]/);
@@ -131,6 +132,12 @@ test("disposable PostgreSQL replay is release-gating and non-skipping", async ()
   assert.match(compatibility, /has_function_privilege[\s\S]*'service_role'/);
   assert.match(seed, /generate_series\(1, 130\)/);
   assert.match(seed, /generate_series\(1, 21\)/);
+  assert.match(seed, /generate_series\(1, 19849\)/);
+  assert.match(seed, /19849::bigint, 20000::bigint/);
+  assert.match(runner, /historyVolumeAssertion = '20260902000280_esp_equals_matches_either_column\.sql'/);
+  assert.match(runner, /historical 20,000-row assertion fixture cleanup/);
+  assert.match(historyVolumeCleanup, /delete from public\.prospects/);
+  assert.match(historyVolumeCleanup, /0::bigint, 151::bigint, 151::bigint/);
   assert.match(seed, /151::bigint, 151::bigint, 130::bigint, 21::bigint/);
   assert.match(seed, /110::bigint, 132::bigint, 2::bigint/);
   assert.match(checks, /assert_cursor_case\('global'/);

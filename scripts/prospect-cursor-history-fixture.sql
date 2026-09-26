@@ -122,6 +122,25 @@ select public.reindex_prospects(array_agg(id order by id))
 from public.prospects
 where id like 'cursor-fixture-%';
 
+-- 20260902000280 contains a historical complement assertion over exactly the
+-- first 20,000 index rows. A clean database has no production data, so add the
+-- cheapest possible FK-valid rows for that one assertion. The runner removes
+-- them immediately after that unchanged migration; cursor tests retain only
+-- the 151 realistic, scoped rows above.
+insert into public.prospects (id, title, all_data, created_at, updated_at)
+select
+  'cursor-history-volume-' || lpad(n::text, 5, '0'),
+  'Synthetic History Row',
+  jsonb_build_object('fixture', 'cursor-ci-history-volume', 'ordinal', n),
+  '2025-01-01 00:00:00+00'::timestamptz,
+  '2025-01-01 00:00:00+00'::timestamptz
+from generate_series(1, 19849) n;
+
+insert into public.prospect_index (id, title, all_data, search_text, created_at, updated_at)
+select id, title, all_data, title, created_at, updated_at
+from public.prospects
+where id like 'cursor-history-volume-%';
+
 do $fixture_contract$
 declare
   v_prospects bigint;
@@ -131,6 +150,8 @@ declare
   v_list_a bigint;
   v_list_members bigint;
   v_multi_list bigint;
+  v_history_volume bigint;
+  v_total_indexed bigint;
 begin
   select count(*) into v_prospects from public.prospects where id like 'cursor-fixture-%';
   select count(*) into v_indexed from public.prospect_index where id like 'cursor-fixture-%';
@@ -144,12 +165,20 @@ begin
     where prospect_id like 'cursor-fixture-%';
   select count(*) into v_multi_list from public.list_memberships
     where prospect_id = 'cursor-fixture-a-001';
+  select count(*) into v_history_volume from public.prospect_index
+    where id like 'cursor-history-volume-%';
+  select count(*) into v_total_indexed from public.prospect_index;
 
   if (v_prospects, v_indexed, v_client_a, v_client_b, v_list_a, v_list_members, v_multi_list)
      is distinct from (151::bigint, 151::bigint, 130::bigint, 21::bigint,
        110::bigint, 132::bigint, 2::bigint) then
     raise exception 'cursor history fixture incomplete: prospects=%, index=%, client_a=%, client_b=%, list_a=%, memberships=%, multi_list=%',
       v_prospects, v_indexed, v_client_a, v_client_b, v_list_a, v_list_members, v_multi_list;
+  end if;
+  if (v_history_volume, v_total_indexed)
+     is distinct from (19849::bigint, 20000::bigint) then
+    raise exception 'historical assertion volume is wrong: synthetic=%, total=%',
+      v_history_volume, v_total_indexed;
   end if;
 end
 $fixture_contract$;
