@@ -93,20 +93,20 @@ select
   '2026-01-04 00:00:00+00'::timestamptz
 from generate_series(1, 21) n;
 
-insert into public.list_memberships (list_id, prospect_id, import_id, raw_data, imported_at)
-select 'cursor-list-a', id, 'cursor-import-a', all_data, created_at
+insert into public.list_memberships (list_id, prospect_id, import_id, imported_at)
+select 'cursor-list-a', id, 'cursor-import-a', created_at
 from public.prospects
 where id between 'cursor-fixture-a-001' and 'cursor-fixture-a-110';
 
 -- One canonical person belongs to two lists without duplicating either the
 -- prospect or the client membership.
-insert into public.list_memberships (list_id, prospect_id, import_id, raw_data, imported_at)
-select 'cursor-list-a-secondary', id, 'cursor-import-a-secondary', all_data, created_at
+insert into public.list_memberships (list_id, prospect_id, import_id, imported_at)
+select 'cursor-list-a-secondary', id, 'cursor-import-a-secondary', created_at
 from public.prospects
 where id = 'cursor-fixture-a-001';
 
-insert into public.list_memberships (list_id, prospect_id, import_id, raw_data, imported_at)
-select 'cursor-list-b', id, 'cursor-import-b', all_data, created_at
+insert into public.list_memberships (list_id, prospect_id, import_id, imported_at)
+select 'cursor-list-b', id, 'cursor-import-b', created_at
 from public.prospects
 where id like 'cursor-fixture-b-%';
 
