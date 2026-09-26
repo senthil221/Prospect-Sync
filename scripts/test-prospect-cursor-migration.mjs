@@ -23,13 +23,14 @@ const candidate = '20260926083856_prospect_people_cursor_v1.sql';
 const candidateVersion = candidate.slice(0, 14);
 const candidateSignature = 'public.search_prospect_workspace_cursor_v1(text,jsonb,integer,text,timestamp with time zone,text,boolean,jsonb)';
 const normalized = (value) => value.replaceAll('\r\n', '\n');
-const [baselineRaw, manifestRaw, candidateSql, rolesSql, fixtureSql, contractSql] = await Promise.all([
+const [baselineRaw, manifestRaw, candidateSql, rolesSql, fixtureSql, contractSql, fingerprintSql] = await Promise.all([
   readFile(new URL('./prospect-cursor-schema-baseline.sql', import.meta.url), 'utf8'),
   readFile(new URL('./prospect-cursor-schema-baseline.json', import.meta.url), 'utf8'),
   readFile(new URL(`../supabase/migrations/${candidate}`, import.meta.url), 'utf8'),
   readFile(new URL('./prospect-cursor-ci-roles.sql', import.meta.url), 'utf8'),
   readFile(new URL('./prospect-cursor-fixture.sql', import.meta.url), 'utf8'),
   readFile(new URL('./check-prospect-cursor-migration.sql', import.meta.url), 'utf8'),
+  readFile(new URL('./prospect-cursor-baseline-fingerprints.sql', import.meta.url), 'utf8'),
 ]);
 const baseline = normalized(baselineRaw);
 const manifest = JSON.parse(manifestRaw);
@@ -127,6 +128,17 @@ function psql(label, sql, timeout = 330_000) {
     process.stderr.write(result.stderr ?? '');
     throw result.error ?? new Error(`${label} failed with psql exit code ${result.status}.`);
   }
+  return result.stdout ?? '';
+}
+
+function parseFingerprints(output) {
+  return Object.fromEntries(output.trim().split(/\r?\n/u).filter(Boolean).map((line) => {
+    const [signature, hash, ...extra] = line.split('\t');
+    if (!signature || !/^[a-f0-9]{32}$/u.test(hash ?? '') || extra.length) {
+      throw new Error(`Malformed cursor baseline fingerprint output: ${actionEscape(line)}`);
+    }
+    return [signature, hash];
+  }));
 }
 
 function psqlExpectedFailure(label, sql, expected, timeout = 30_000) {
@@ -324,6 +336,14 @@ begin
 end
 $baseline_contract$;
 `);
+const restoredFingerprints = parseFingerprints(psql(
+  'restored baseline function fingerprints',
+  fingerprintSql,
+  30_000,
+));
+if (JSON.stringify(restoredFingerprints) !== JSON.stringify(manifest.functionFingerprints)) {
+  throw new Error('Restored v12/v13/compiler fingerprints differ from the reviewed production manifest.');
+}
 psql('candidate baseline precondition', candidateAbsentContract('before fixture'));
 psql('current-schema cursor fixture', `begin;\nset local statement_timeout = '60s';\n${fixtureSql}\ncommit;`);
 psql('candidate rollback precondition', candidateAbsentContract('before rollback probe'));
@@ -363,6 +383,14 @@ for (const browserRole of ['anon', 'authenticated']) {
     `begin;\nset local role ${browserRole};\n${roleProbe}\nrollback;`,
     /permission denied for function search_prospect_workspace_cursor_v1/iu,
   );
+}
+const upgradedFingerprints = parseFingerprints(psql(
+  'post-upgrade inherited function fingerprints',
+  fingerprintSql,
+  30_000,
+));
+if (JSON.stringify(upgradedFingerprints) !== JSON.stringify(restoredFingerprints)) {
+  throw new Error('Cursor candidate changed an inherited v12/v13/compiler function.');
 }
 psql('cursor runtime contract', contractSql);
 process.stdout.write('Reviewed schema baseline, cursor upgrade, rollback, and runtime contracts passed.\n');

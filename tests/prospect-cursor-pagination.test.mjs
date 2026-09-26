@@ -83,13 +83,13 @@ test("cursor SQL preserves the mixed created_at DESC/id ASC boundary and service
   assert.match(sql, /set search_path = pg_catalog, public/);
   assert.match(sql, /prospect_filters_need_company_lookup_v1\(v_filters\)/);
   assert.match(sql, /cursor v1 accepted company-dependent filter/);
-  assert.match(sql, /global People cursor page differs from OFFSET page/);
-  assert.match(sql, /client People cursor page differs from OFFSET page/);
-  assert.match(sql, /list-filtered People cursor page differs from OFFSET page/);
+  assert.doesNotMatch(sql, /\$assert_pages\$/);
+  assert.doesNotMatch(sql, /group by client_id[\s\S]*having count\(\*\) between 51 and 50000/);
+  assert.doesNotMatch(sql, /group by lm\.list_id[\s\S]*having count\(\*\) > 50/);
 });
 
 test("disposable PostgreSQL schema upgrade is release-gating and fail-closed", async () => {
-  const [workflow, runner, seed, checks, roles, baseline, manifestRaw, diagnosticWorkflow, diagnostic] = await Promise.all([
+  const [workflow, runner, seed, checks, roles, baseline, manifestRaw, fingerprints, liveCanary, diagnosticWorkflow, diagnostic] = await Promise.all([
     read("../.github/workflows/ci.yml"),
     read("../scripts/test-prospect-cursor-migration.mjs"),
     read("../scripts/prospect-cursor-fixture.sql"),
@@ -97,6 +97,8 @@ test("disposable PostgreSQL schema upgrade is release-gating and fail-closed", a
     read("../scripts/prospect-cursor-ci-roles.sql"),
     read("../scripts/prospect-cursor-schema-baseline.sql"),
     read("../scripts/prospect-cursor-schema-baseline.json"),
+    read("../scripts/prospect-cursor-baseline-fingerprints.sql"),
+    read("../scripts/prospect-cursor-live-canary.sql"),
     read("../.github/workflows/historical-migration-diagnostic.yml"),
     read("../scripts/diagnose-prospect-migration-history.mjs"),
   ]);
@@ -159,11 +161,23 @@ test("disposable PostgreSQL schema upgrade is release-gating and fail-closed", a
   assert.equal(manifest.capture.schemaOnly, true);
   assert.equal(manifest.capture.customerRows, false);
   assert.equal(manifest.sourceMigrationLedger.lastVersion, "20260925212546");
+  assert.equal(manifest.sourceMigrationLedger.versionsMd5, "38e4efa092a7aed057e1251418bb8e96");
   assert.deepEqual(manifest.defaultPrivileges.owners, ["postgres", "supabase_admin"]);
   assert.deepEqual(manifest.defaultPrivileges.grantees, ["anon", "authenticated", "postgres", "service_role"]);
   assert.equal(manifest.defaultPrivileges.entryCount, 6);
+  assert.equal(Object.keys(manifest.functionFingerprints).length, 6);
   assert.match(runner, /default-privilege owners differ from its reviewed manifest/);
   assert.match(runner, /restored baseline default-privilege grantees differ/);
+  assert.match(runner, /Restored v12\/v13\/compiler fingerprints differ/);
+  assert.match(runner, /Cursor candidate changed an inherited v12\/v13\/compiler function/);
+  assert.match(fingerprints, /p\.prosrc/);
+  assert.match(fingerprints, /p\.proacl/);
+  assert.match(fingerprints, /search_prospect_workspace_v13/);
+  assert.match(liveCanary, /begin transaction read only/);
+  assert.match(liveCanary, /set local statement_timeout = '15s'/);
+  assert.match(liveCanary, /search_prospect_workspace_cursor_v1/);
+  assert.match(liveCanary, /search_prospect_workspace_v13/);
+  assert.doesNotMatch(liveCanary, /from public\.(client_prospects|list_memberships)/);
   assert.doesNotMatch(baseline, /^COPY .+ FROM stdin;$/mu);
   assert.doesNotMatch(baseline, /^(?:CREATE|ALTER) ROLE\b/mu);
   assert.doesNotMatch(baseline, /^CREATE EXTENSION\b/mu);
