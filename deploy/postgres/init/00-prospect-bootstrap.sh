@@ -167,7 +167,12 @@ psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
 	-- The Prospect Sync RPCs set their own statement_timeout. This is the
 	-- backstop for everything else arriving through PostgREST, so one bad
 	-- ad-hoc query cannot pin a vCPU for an hour.
-	alter role authenticator set statement_timeout = '120s';
+	-- 30s, not 120s (2026-09-26): measured with pg_stat_statements since
+	-- 2026-09-01, the slowest query that relies on this backstop - the
+	-- client_summaries and company_summaries views - took 7.3s. PostgREST does
+	-- not cancel abandoned requests, so this is how long a forgotten one can
+	-- hold a shared connection. Functions that need longer declare their own.
+	alter role authenticator set statement_timeout = '30s';
 	alter role authenticator set idle_in_transaction_session_timeout = '60s';
 	alter role authenticator set lock_timeout = '10s';
 
