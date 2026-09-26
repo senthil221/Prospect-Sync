@@ -5,7 +5,8 @@ import pg from "pg";
 import { from as copyFrom } from "pg-copy-streams";
 import { createServer } from "node:http";
 import { mapProspect, normalizeText, stripUnstorableCharacters } from "./prospect-map.mjs";
-import { pgInterval } from "./pg-interval.mjs";
+import { pgInterval, pgIntervalMilliseconds } from "./pg-interval.mjs";
+import { createWorkerPhaseMetrics } from "./phase-metrics.mjs";
 
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 const restUrl = (process.env.SUPABASE_REST_URL ?? "http://rest:3000").replace(/\/$/, "");
@@ -36,10 +37,19 @@ const batchTimeout = pgInterval(process.env.IMPORT_BATCH_TIMEOUT, "120s", "IMPOR
 // Staging is a COPY of the whole CSV and is legitimately minutes long, so it
 // keeps the generous bound; only the batch loop is tightened.
 const stagingTimeout = pgInterval(process.env.IMPORT_STAGING_TIMEOUT, "10min", "IMPORT_STAGING_TIMEOUT");
+const batchTimeoutMs = pgIntervalMilliseconds(batchTimeout);
+const stagingTimeoutMs = pgIntervalMilliseconds(stagingTimeout);
 const personImportFields = new Set(["First Name", "Last Name", "Job Title", "Email", "Mobile Number", "Personal LinkedIn URL", "Company Name", "Website"]);
 let stopping = false;
 let lastProgressAt = Date.now();
 let activeImportId = "";
+let activePhase = "idle";
+let activePhaseStartedAt = 0;
+let activePhaseDeadlineAt = 0;
+const metrics = createWorkerPhaseMetrics({
+  worker: 'import-worker',
+  phases: ['claim', 'stage', 'merge', 'complete', 'retry'],
+});
 
 if (!serviceKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is required by the import worker.");
 process.on("SIGTERM", () => { stopping = true; });
@@ -48,13 +58,31 @@ process.on("SIGINT", () => { stopping = true; });
 const authHeaders = { apikey: serviceKey, authorization: `Bearer ${serviceKey}` };
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const markProgress = (importId = activeImportId) => { lastProgressAt = Date.now(); activeImportId = importId; };
+const beginPhase = (phase, budgetMs) => {
+  activePhase = phase;
+  activePhaseStartedAt = Date.now();
+  activePhaseDeadlineAt = activePhaseStartedAt + budgetMs;
+};
+const endPhase = () => {
+  markProgress();
+  activePhase = "idle";
+  activePhaseStartedAt = 0;
+  activePhaseDeadlineAt = 0;
+};
 
 const healthServer = createServer((request, response) => {
   if (request.url !== "/health") { response.writeHead(404).end(); return; }
-  const ageMs = Date.now() - lastProgressAt;
-  const healthy = !stopping && ageMs < 180_000;
+  const now = Date.now();
+  const ageMs = now - lastProgressAt;
+  // A large COPY can legitimately run longer than the generic three-minute
+  // idle threshold. It is healthy only until its configured statement budget,
+  // plus a small transaction/transport allowance, expires; this avoids both a
+  // false restart during valid work and an indefinitely "healthy" hung phase.
+  const activeWithinBudget = activePhase !== "idle" && now <= activePhaseDeadlineAt;
+  const healthy = !stopping && (ageMs < 180_000 || activeWithinBudget);
   response.writeHead(healthy ? 200 : 503, { "content-type": "application/json", "cache-control": "no-store" });
-  response.end(JSON.stringify({ status: healthy ? "ok" : "stale", activeImportId: activeImportId || null, ageMs }));
+  response.end(JSON.stringify({ status: healthy ? "ok" : "stale", activeImportId: activeImportId || null, ageMs,
+    activePhase, activePhaseAgeMs: activePhaseStartedAt ? now - activePhaseStartedAt : 0 }));
 });
 
 async function rpc(name, body) {
@@ -183,9 +211,12 @@ async function stageState(client, importId) {
 
 async function processJob(job) {
   markProgress(job.id);
+  const stageStarted = performance.now();
+  let mergeStarted = 0;
   const client = new pg.Client({ application_name: "prospect-import-worker", connectionTimeoutMillis: 10000 });
   await client.connect();
   try {
+    beginPhase('stage', stagingTimeoutMs + 15_000);
     await client.query("set role prospect_importer");
     await client.query(`set statement_timeout = '${stagingTimeout}'`);
     const committedStart = Number(job.committedRowOffset ?? 0);
@@ -202,6 +233,9 @@ async function processJob(job) {
     } else if (totalRows === 0) {
       totalRows = committedStart + state.count;
     }
+    metrics.record('stage', reusable || alreadyMerged ? 'skipped' : 'ok', performance.now() - stageStarted,
+      Math.max(0, totalRows - committedStart));
+    endPhase();
 
     let committedRows = committedStart;
     await heartbeat(job, totalRows, committedRows);
@@ -209,7 +243,10 @@ async function processJob(job) {
     // bound to what a batch should actually take. See batchTimeout above for
     // why the function's own declaration does not do this for us.
     await client.query(`set statement_timeout = '${batchTimeout}'`);
+    mergeStarted = performance.now();
+    let mergedRows = 0;
     while (committedRows < totalRows) {
+      beginPhase('merge', batchTimeoutMs + 15_000);
       const result = await client.query(
         "select * from prospect_import.process_staged_batch_v1($1, $2, $3, $4)",
         [job.id, job.listId, committedRows, batchSize],
@@ -217,17 +254,35 @@ async function processJob(job) {
       const processed = Number(result.rows[0]?.processed ?? 0);
       if (processed <= 0) throw new Error(`No staged rows were processed at offset ${committedRows}.`);
       committedRows += processed;
+      mergedRows += processed;
       await heartbeat(job, totalRows, committedRows);
+      endPhase();
       if (stopping) throw new Error("Worker is shutting down; import will resume automatically.");
     }
+    metrics.record('merge', 'ok', performance.now() - mergeStarted, mergedRows);
+  } catch (error) {
+    const phase = activePhase;
+    if (phase === 'stage') metrics.record('stage', 'error', performance.now() - stageStarted);
+    else if (phase === 'merge') metrics.record('merge', 'error', performance.now() - mergeStarted);
+    endPhase();
+    throw error;
   } finally {
     await client.end().catch(() => undefined);
   }
-  await postApp("/api/internal/imports/complete", { importId: job.id, listId: job.listId });
+  const completeStarted = performance.now();
+  beginPhase('complete', 45_000);
+  try {
+    await postApp("/api/internal/imports/complete", { importId: job.id, listId: job.listId });
+    metrics.record('complete', 'ok', performance.now() - completeStarted);
+  } catch (error) {
+    metrics.record('complete', 'error', performance.now() - completeStarted);
+    throw error;
+  } finally { endPhase(); }
   await removeObject(job.storageObjectPath).catch((error) => console.error("Could not remove completed import object", error));
 }
 
 async function failOrRetry(job, error) {
+  const started = performance.now();
   const message = error instanceof Error ? error.message : String(error);
   const fatal = message.startsWith("FATAL:");
   const retrySeconds = Math.min(3600, 15 * 2 ** Math.min(Number(job.attemptCount ?? 1) - 1, 8));
@@ -237,7 +292,11 @@ async function failOrRetry(job, error) {
     p_error: message.replace(/^FATAL:\s*/, ""),
     p_retry_seconds: retrySeconds,
     p_max_attempts: fatal ? 1 : 3,
-  }).catch((retryError) => console.error("Could not record import retry", retryError));
+  }).then(() => metrics.record('retry', 'ok', performance.now() - started))
+    .catch((retryError) => {
+      metrics.record('retry', 'error', performance.now() - started);
+      console.error("Could not record import retry", retryError);
+    });
 }
 
 async function main() {
@@ -249,7 +308,9 @@ async function main() {
     markProgress("");
     let job = null;
     try {
+      const claimStarted = performance.now();
       job = await rpc("claim_next_prospect_import_v1", { p_worker_id: workerId, p_lease_seconds: leaseSeconds });
+      metrics.record('claim', job ? 'ok' : 'empty', performance.now() - claimStarted, job ? 1 : 0);
       if (!job) { await wait(3000); continue; }
       console.log(`Processing import ${job.id} from row ${job.committedRowOffset ?? 0}.`);
       await processJob(job);
@@ -260,6 +321,7 @@ async function main() {
       else await wait(5000);
     }
   }
+  metrics.flush();
   console.log("Prospect import worker stopped.");
 }
 

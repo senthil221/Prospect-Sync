@@ -15,6 +15,8 @@
 // numbers are a signal, never an audit.
 
 import { logServerEvent } from "./server-log.ts";
+import type { ProspectFilter } from "./prospect-filters.ts";
+import type { CompanyScope } from "./workspace-scopes.ts";
 
 type Outcome = "ok" | "pending" | "client_error" | "over_cap" | "overloaded" | "timed_out" | "server_error";
 
@@ -22,12 +24,83 @@ const counters = new Map<string, number>();
 const slowest = new Map<string, number>();
 const histogramBounds = [100, 250, 500, 1000, 2000, 3000, 5000, 10000, 30000, 120000];
 const histograms = new Map<string, number[]>();
+const queryPhaseHistograms = new Map<string, number[]>();
+const queryPhaseTotals = new Map<string, number>();
+const queryPhaseSlowest = new Map<string, number>();
+const queryPhaseRows = new Map<string, Record<string, number>>();
 const routeFamilies = new Set(['prospects', 'companies', 'clients', 'lists', 'imports', 'company-imports',
   'filter-sets', 'result-sets', 'operations', 'exports', 'coverage', 'data-quality', 'health', 'dashboard', 'search']);
 let logWindow = 0;
 let logCount = 0;
 let suppressedLogs = 0;
 let started = Date.now();
+
+const prospectQueryFamilies = new Set([
+  "unfiltered", "searched", "filtered", "searched_filtered", "client_scoped",
+  "company_scoped", "max_people_cap",
+] as const);
+const prospectQueryPhases = new Set(["authorization", "preparation", "workspace", "metadata"] as const);
+const queryPhaseOutcomes = new Set(["ok", "pending", "client_error", "timed_out", "cancelled", "error"] as const);
+
+export type ProspectQueryFamily = typeof prospectQueryFamilies extends Set<infer T> ? T : never;
+export type ProspectQueryPhase = typeof prospectQueryPhases extends Set<infer T> ? T : never;
+export type QueryPhaseOutcome = typeof queryPhaseOutcomes extends Set<infer T> ? T : never;
+
+// Coarse, mutually-exclusive labels only. Never put search text, client IDs,
+// filter fields/values or saved-set IDs into a metric label: all of those are
+// either customer data or unbounded cardinality. The ordering is deliberate;
+// the expensive cap and pivot paths stay visible even when they also carry a
+// search or ordinary filters.
+export function prospectQueryFamily(input: {
+  search: string;
+  filters: ProspectFilter[];
+  clientId: string | null;
+  companyScope: CompanyScope | null;
+}): ProspectQueryFamily {
+  if (input.filters.some(filter => filter.field === "__max_people_per_company")) return "max_people_cap";
+  if (input.companyScope) return "company_scoped";
+  if (input.clientId) return "client_scoped";
+  const searched = input.search.trim().length > 0;
+  const filtered = input.filters.length > 0;
+  if (searched && filtered) return "searched_filtered";
+  if (searched) return "searched";
+  if (filtered) return "filtered";
+  return "unfiltered";
+}
+
+function rowBucket(rows: number | undefined) {
+  if (rows === undefined || !Number.isFinite(rows)) return undefined;
+  if (rows <= 0) return "0";
+  if (rows <= 10) return "1-10";
+  if (rows <= 50) return "11-50";
+  if (rows <= 100) return "51-100";
+  return "100+";
+}
+
+// Query-family timing is kept in bounded in-process aggregates and exposed only
+// through the already-authenticated health payload. It deliberately records no
+// request ID or query material. This is enough to build a before/after baseline
+// without turning observability into a second prospect database.
+export function recordQueryPhase(family: ProspectQueryFamily, phase: ProspectQueryPhase,
+  outcome: QueryPhaseOutcome, durationMs: number, rows?: number) {
+  if (!prospectQueryFamilies.has(family) || !prospectQueryPhases.has(phase) || !queryPhaseOutcomes.has(outcome)) {
+    return; // Labels are code-owned; never admit arbitrary caller input.
+  }
+  durationMs = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 0;
+  const key = `${family}:${phase}:${outcome}`;
+  queryPhaseTotals.set(key, (queryPhaseTotals.get(key) ?? 0) + 1);
+  const buckets = queryPhaseHistograms.get(key) ?? Array(histogramBounds.length + 1).fill(0);
+  const index = histogramBounds.findIndex(bound => durationMs <= bound);
+  buckets[index < 0 ? histogramBounds.length : index]++;
+  queryPhaseHistograms.set(key, buckets);
+  queryPhaseSlowest.set(key, Math.max(queryPhaseSlowest.get(key) ?? 0, Math.round(durationMs)));
+  const bucket = rowBucket(rows);
+  if (bucket) {
+    const counts = queryPhaseRows.get(key) ?? {};
+    counts[bucket] = (counts[bucket] ?? 0) + 1;
+    queryPhaseRows.set(key, counts);
+  }
+}
 
 function bump(key: string, by = 1) {
   counters.set(key, (counters.get(key) ?? 0) + by);
@@ -126,6 +199,13 @@ export function observabilitySnapshot() {
     routes,
     slowestMs: Object.fromEntries(slowest),
     latency: { boundsMs: [...histogramBounds, '+Inf'], buckets: Object.fromEntries(histograms) },
+    queryPhases: {
+      boundsMs: [...histogramBounds, '+Inf'],
+      totals: Object.fromEntries(queryPhaseTotals),
+      buckets: Object.fromEntries(queryPhaseHistograms),
+      slowestMs: Object.fromEntries(queryPhaseSlowest),
+      rowBuckets: Object.fromEntries(queryPhaseRows),
+    },
     suppressedLogs,
   };
 }
@@ -135,6 +215,10 @@ export function resetObservability() {
   counters.clear();
   slowest.clear();
   histograms.clear();
+  queryPhaseHistograms.clear();
+  queryPhaseTotals.clear();
+  queryPhaseSlowest.clear();
+  queryPhaseRows.clear();
   logCount = 0;
   suppressedLogs = 0;
   started = Date.now();

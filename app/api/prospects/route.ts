@@ -1,6 +1,6 @@
 import { withInteractiveSlot } from "../../../lib/admission";
 import { authorizeFilterSets } from "../../../lib/filter-sets";
-import { databaseErrorResponse, isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
+import { databaseErrorResponse, isClientDisconnect, isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
 import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { filterErrorResponse, parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
 import { createAdminClient } from "../../../lib/supabase/admin";
@@ -8,6 +8,7 @@ import { parseCompanyScope, type CompanyScope } from "../../../lib/workspace-sco
 import { needsCompanyPreparation } from "../../../lib/prepared-search";
 import { ownerIdentity } from "../../../lib/result-sets";
 import { prepareCompanyScope, preparationResponse } from "../../../lib/prepare-company-scope";
+import { prospectQueryFamily, recordQueryPhase, type QueryPhaseOutcome } from "../../../lib/observability";
 
 type WorkspaceQuery = {
   search: string;
@@ -54,6 +55,20 @@ function workspaceSummary(data: unknown) {
   return summary && typeof summary === "object" ? summary as { result_rows?: unknown; total_count?: unknown; scope_capped?: unknown; total_capped?: unknown; data_versions?: unknown } : {};
 }
 
+function queryPhaseOutcome(error: unknown): QueryPhaseOutcome {
+  if (!error) return "ok";
+  if (isStatementTimeout(error as { code?: string })) return "timed_out";
+  if (isClientDisconnect(error)) return "cancelled";
+  return "error";
+}
+
+function queryPhaseResponseOutcome(response: Response | null | undefined): QueryPhaseOutcome {
+  if (!response) return "ok";
+  if (response.status === 202) return "pending";
+  if (response.status >= 500) return response.status === 504 ? "timed_out" : "error";
+  return response.status >= 400 ? "client_error" : "ok";
+}
+
 // Shared by GET and POST. Same query either way; only the transport differs,
 // because a pasted filter list can be far too large for a request line.
 async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSignal) {
@@ -81,39 +96,81 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   let filters: ProspectFilter[];
   try { filters = parseFilters(url.searchParams.get("filters")); }
   catch (error) { return filterErrorResponse(error, "Invalid Boolean filter."); }
+  const queryFamily = prospectQueryFamily({ search, filters, clientId, companyScope });
   const supabase = createAdminClient();
 
   // A set id is not authorization: re-check ownership on every use, before the
   // query that would read the set runs (section 4.1).
-  const user = await getAuthorizedUser();
-  const setDenial = await authorizeFilterSets(supabase, filters, user?.id ?? "", "prospect", clientId ?? "",
-    companyScope ? [{ entityType: 'company', clientScope: clientId ?? '', filters: companyScope.filters }] : []);
+  const authorizationStarted = performance.now();
+  let user: Awaited<ReturnType<typeof getAuthorizedUser>>;
+  let setDenial: Response | null;
+  try {
+    user = await getAuthorizedUser();
+    setDenial = await authorizeFilterSets(supabase, filters, user?.id ?? "", "prospect", clientId ?? "",
+      companyScope ? [{ entityType: 'company', clientScope: clientId ?? '', filters: companyScope.filters }] : []);
+    recordQueryPhase(queryFamily, "authorization", queryPhaseResponseOutcome(setDenial),
+      performance.now() - authorizationStarted);
+  } catch (error) {
+    recordQueryPhase(queryFamily, "authorization", queryPhaseOutcome(error), performance.now() - authorizationStarted);
+    throw error;
+  }
   if (setDenial) return setDenial;
 
   let resolvedScope: WorkspaceQuery['companyScope'] = companyScope;
   if (companyScope && needsCompanyPreparation(companyScope)) {
     const owner = ownerIdentity(user);
-    const prepared = await prepareCompanyScope(supabase, owner, companyScope, signal);
+    const preparationStarted = performance.now();
+    let prepared: Awaited<ReturnType<typeof prepareCompanyScope>>;
+    try {
+      prepared = await prepareCompanyScope(supabase, owner, companyScope, signal);
+      recordQueryPhase(queryFamily, "preparation", queryPhaseResponseOutcome(prepared.response),
+        performance.now() - preparationStarted);
+    } catch (error) {
+      recordQueryPhase(queryFamily, "preparation", queryPhaseOutcome(error), performance.now() - preparationStarted);
+      throw error;
+    }
     if (prepared.response) return prepared.response;
     resolvedScope = prepared.scope ?? companyScope;
   }
 
-  const workspaceRequest = runProspectWorkspace(supabase, {
-    search,
-    filters,
-    sort,
-    direction,
-    limit,
-    offset: (page - 1) * limit,
-    clientId,
-    companyScope: resolvedScope,
-    withTotal,
-    knownVersions,
-    signal,
-  });
-  const fieldsRequest = includeFields
-    ? supabase.from("prospect_fields").select("field_name").order("field_name").limit(500)
-    : Promise.resolve({ data: [] as Array<{ field_name: string }>, error: null });
+  const workspaceRequest = (async () => {
+    const started = performance.now();
+    try {
+      const result = await runProspectWorkspace(supabase, {
+        search,
+        filters,
+        sort,
+        direction,
+        limit,
+        offset: (page - 1) * limit,
+        clientId,
+        companyScope: resolvedScope,
+        withTotal,
+        knownVersions,
+        signal,
+      });
+      const rows = workspaceSummary(result.data).result_rows;
+      recordQueryPhase(queryFamily, "workspace", queryPhaseOutcome(result.error), performance.now() - started,
+        Array.isArray(rows) ? rows.length : undefined);
+      return result;
+    } catch (error) {
+      recordQueryPhase(queryFamily, "workspace", queryPhaseOutcome(error), performance.now() - started);
+      throw error;
+    }
+  })();
+  const fieldsRequest = (async () => {
+    const started = performance.now();
+    if (!includeFields) return { data: [] as Array<{ field_name: string }>, error: null };
+    try {
+      const result = await supabase.from("prospect_fields").select("field_name").order("field_name").limit(500);
+      recordQueryPhase(queryFamily, "metadata", queryPhaseOutcome(result.error), performance.now() - started,
+        result.data?.length);
+      return result;
+    } catch (error) {
+      recordQueryPhase(queryFamily, "metadata", queryPhaseOutcome(error), performance.now() - started);
+      throw error;
+    }
+  })();
   const [workspace, fields] = await Promise.all([workspaceRequest, fieldsRequest]);
   if (isMissingFunction(workspace.error)) {
     return Response.json({ error: "Apply the latest database migration to enable the new prospect filters." }, { status: 503 });

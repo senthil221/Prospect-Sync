@@ -8,6 +8,7 @@ import { createServer } from "node:http";
 import { pgInterval } from "./pg-interval.mjs";
 import { createFairScheduler, integerSetting } from "./fair-scheduler.mjs";
 import { runMaintenanceUnit } from './maintenance-unit.mjs';
+import { createWorkerPhaseMetrics } from './phase-metrics.mjs';
 
 const workerId = `${process.env.HOSTNAME ?? "operations-worker"}:${process.pid}`;
 const setting = (name, fallback, min, max) => integerSetting(process.env[name], fallback, min, max, name);
@@ -34,6 +35,10 @@ if (timeoutMs < 1000 || timeoutMs > 120000) throw new Error('OPERATIONS_STATEMEN
 let stopping = false, connected = false;
 let lastProgressAt = Date.now(), lastRetentionAt = 0;
 let activeWork = '';
+const metrics = createWorkerPhaseMetrics({
+  worker: 'operations-worker',
+  phases: ['queue', 'cleanup', 'snapshot', 'import-janitor', 'reindex'],
+});
 const maintenanceClasses = ['search', 'filter', 'operation', 'export', 'metrics'];
 let nextMaintenance = 0;
 process.on('SIGTERM', () => { stopping = true; });
@@ -45,7 +50,8 @@ const healthServer = createServer((request, response) => {
   const ageMs = Date.now() - lastProgressAt;
   const healthy = connected && !stopping && ageMs < 180000;
   response.writeHead(healthy ? 200 : 503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-  response.end(JSON.stringify({ status: healthy ? 'ok' : 'stale', activeWork: activeWork || null, ageMs, scheduler: 'atomic-round-v1' }));
+  response.end(JSON.stringify({ status: healthy ? 'ok' : 'stale', activeWork: activeWork || null, ageMs,
+    scheduler: 'atomic-round-v1' }));
 });
 const client = new pg.Client({ application_name: "prospect-operations-worker", connectionTimeoutMillis: 10000 });
 // Connection loss is not evidence of job failure. PostgreSQL rolls back that
@@ -56,15 +62,21 @@ async function runUnit(kind) {
   activeWork = kind;
   const started = performance.now();
   const batch = kind === 'operation' ? applyBatchSize : kind === 'export' ? exportBatchSize : batchSize;
-  const { rows } = kind === 'blocklist'
-    ? await client.query('select * from public.run_blocklist_share_submission_unit_v1($1,$2)', [workerId, Math.min(batch, 5000)])
-    : await client.query('select * from prospect_operations.run_queue_unit_v1($1,$2,$3)', [kind, workerId, batch]);
-  markProgress();
-  const result = rows[0];
-  if (result?.job_id) console.log(JSON.stringify({ event: 'background_unit', kind, jobId: result.job_id,
-    outcome: result.outcome, total: Number(result.total), done: result.done, durationMs: Math.round(performance.now() - started) }));
-  activeWork = '';
-  return Boolean(result?.job_id);
+  try {
+    const { rows } = kind === 'blocklist'
+      ? await client.query('select * from public.run_blocklist_share_submission_unit_v1($1,$2)', [workerId, Math.min(batch, 5000)])
+      : await client.query('select * from prospect_operations.run_queue_unit_v1($1,$2,$3)', [kind, workerId, batch]);
+    markProgress();
+    const result = rows[0];
+    metrics.record('queue', result?.job_id ? 'ok' : 'empty', performance.now() - started,
+      result?.job_id ? Number(result.done ?? 0) : 0);
+    if (result?.job_id) console.log(JSON.stringify({ event: 'background_unit', kind, jobId: result.job_id,
+      outcome: result.outcome, total: Number(result.total), done: result.done, durationMs: Math.round(performance.now() - started) }));
+    return Boolean(result?.job_id);
+  } catch (error) {
+    metrics.record('queue', 'error', performance.now() - started);
+    throw error;
+  } finally { activeWork = ''; }
 }
 
 async function runRetention() {
@@ -73,11 +85,17 @@ async function runRetention() {
   const kind = maintenanceClasses[nextMaintenance];
   nextMaintenance = (nextMaintenance + 1) % maintenanceClasses.length;
   activeWork = `cleanup:${kind}`;
+  const started = performance.now();
   try {
     const result = await runMaintenanceUnit(client, kind);
+    metrics.record('cleanup', 'ok', performance.now() - started,
+      Number(result.items_removed ?? 0) + Number(result.parents_removed ?? 0));
     if (result.items_removed || result.parents_removed) console.log(JSON.stringify({event: 'background_cleanup', kind, ...result}));
     markProgress();
-  } catch (error) { console.error('Retention pass failed', { code: error.code ?? 'unknown' }); }
+  } catch (error) {
+    metrics.record('cleanup', 'error', performance.now() - started);
+    console.error('Retention pass failed', { code: error.code ?? 'unknown' });
+  }
   finally { activeWork = ''; }
 }
 
@@ -87,6 +105,7 @@ async function runImportJanitor() {
   // Separate transaction from the snapshots on purpose: a failure to close an
   // abandoned import must not roll back a refreshed dashboard, and neither
   // should wait on the other.
+  const started = performance.now();
   try {
     await client.query('BEGIN');
     await client.query("SET LOCAL statement_timeout = '30s'");
@@ -94,9 +113,11 @@ async function runImportJanitor() {
     const result = await client.query('select public.expire_abandoned_company_imports_v1(24, 50) as expired');
     await client.query('COMMIT');
     const expired = Number(result.rows[0]?.expired ?? 0);
+    metrics.record('import-janitor', 'ok', performance.now() - started, expired);
     // Only worth a line when it did something; the normal case is zero.
     if (expired) console.log(JSON.stringify({ event: 'company_imports_expired', expired }));
   } catch (error) {
+    metrics.record('import-janitor', 'error', performance.now() - started);
     try { await client.query('ROLLBACK'); } catch { /* The main loop handles a dead connection. */ }
     console.error('Abandoned import sweep failed', { code: error.code ?? 'unknown' });
   }
@@ -115,6 +136,7 @@ async function runImportJanitor() {
 async function runReindexDrain() {
   if (Date.now() - lastReindexDrainAt < reindexDrainIntervalMs) return;
   lastReindexDrainAt = Date.now();
+  const started = performance.now();
   try {
     await client.query('BEGIN');
     await client.query("SET LOCAL statement_timeout = '60s'");
@@ -123,10 +145,12 @@ async function runReindexDrain() {
     await client.query('COMMIT');
     const processed = Number(result.rows[0]?.processed ?? 0);
     const remaining = Number(result.rows[0]?.remaining ?? 0);
+    metrics.record('reindex', 'ok', performance.now() - started, processed);
     // Only worth a line when it did something; the normal case is an empty queue.
     if (processed) console.log(JSON.stringify({ event: 'reindex_drain', processed, remaining }));
     if (processed) markProgress();
   } catch (error) {
+    metrics.record('reindex', 'error', performance.now() - started);
     // A lagging index is not worth failing the worker over - the rows stay
     // queued, drain_reindex_backlog records why on each one, and the next pass
     // retries them.
@@ -141,18 +165,22 @@ async function runSnapshots() {
   activeWork = 'snapshot';
   const started = performance.now();
   try {
-    // SET LOCAL needs a transaction to mean anything, and the worker connection
-    // carries a much shorter deadline than a whole-database summary needs.
-    // Nobody is waiting on this one.
+    // Keep this on the worker's single database connection and await it. A
+    // second long-running connection would compete with interactive queries on
+    // the 2-vCPU database precisely when they are already slow. The phase
+    // metric tells us whether this atomic function should be decomposed later;
+    // until then, serial background work is the safer failure boundary.
     await client.query('BEGIN');
     await client.query("SET LOCAL statement_timeout = '300s'");
     await client.query("SET LOCAL lock_timeout = '5s'");
     const result = await client.query('select prospect_operations.refresh_dashboard_snapshots_v1() as refreshed');
     await client.query('COMMIT');
     const refreshed = Number(result.rows[0]?.refreshed ?? 0);
+    metrics.record('snapshot', 'ok', performance.now() - started, refreshed);
     if (refreshed) console.log(JSON.stringify({ event: 'dashboard_snapshot', refreshed, durationMs: Math.round(performance.now() - started) }));
     markProgress();
   } catch (error) {
+    metrics.record('snapshot', 'error', performance.now() - started);
     // A stale summary is not worth failing the worker over; the tab keeps
     // serving the previous one and says when it was computed.
     try { await client.query('ROLLBACK'); } catch { /* The main loop handles a dead connection. */ }
@@ -200,6 +228,7 @@ await new Promise((resolve, reject) => { healthServer.once('error', reject); hea
 try { await main(); }
 finally {
   connected = false;
+  metrics.flush();
   await client.end().catch(() => {});
   await new Promise(resolve => healthServer.close(resolve));
 }

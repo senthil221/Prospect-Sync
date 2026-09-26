@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { withInteractiveSlot } from "../lib/admission.ts";
-import { observabilitySnapshot, outcomeFor, recordRequest, resetObservability, routeOf } from "../lib/observability.ts";
+import { observabilitySnapshot, outcomeFor, prospectQueryFamily, recordQueryPhase, recordRequest, resetObservability, routeOf } from "../lib/observability.ts";
 
 // Releases 1A-1C added three ways to refuse a request that did not exist before.
 // Each is the right answer and each is invisible unless it is counted, so a cap
@@ -57,6 +57,23 @@ test("counts are kept per outcome and per route", () => {
   assert.deepEqual(snapshot.routes["/api/companies"], { overloaded: 1 });
   // The slowest request per route is what warns before the ceiling is crossed.
   assert.equal(snapshot.slowestMs["/api/prospects"], 900);
+  resetObservability();
+});
+
+test("cold prospect phases use bounded labels without query or tenant data", () => {
+  resetObservability();
+  assert.equal(prospectQueryFamily({ search: "private search", filters: [], clientId: null, companyScope: null }), "searched");
+  assert.equal(prospectQueryFamily({ search: "", filters: [{ id: "private-id", field: "__title", operator: "contains", values: ["secret"] }], clientId: null, companyScope: null }), "filtered");
+  assert.equal(prospectQueryFamily({ search: "private", filters: [], clientId: "private-client", companyScope: null }), "client_scoped");
+  recordQueryPhase("searched", "workspace", "ok", 740, 50);
+  // Runtime-supplied strings never become metric keys.
+  recordQueryPhase("private-client", "private-phase", "ok", 1, 1);
+
+  const phases = observabilitySnapshot().queryPhases;
+  assert.deepEqual(phases.totals, { "searched:workspace:ok": 1 });
+  assert.equal(phases.buckets["searched:workspace:ok"][3], 1);
+  assert.deepEqual(phases.rowBuckets["searched:workspace:ok"], { "11-50": 1 });
+  assert.doesNotMatch(JSON.stringify(phases), /private|secret/);
   resetObservability();
 });
 

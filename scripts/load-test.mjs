@@ -19,6 +19,8 @@
 //   LOAD_SECONDS    how long to sustain them      default 900 (15-minute soak)
 //   LOAD_SPIKE      users for a 60s spike after   default 40  (0 to skip)
 //   LOAD_PROFILE    "soak" | "smoke"              default soak; smoke = 5 users, 60s
+//   LOAD_COLD_FILTERS_JSON  representative array of distinct filter arrays;
+//                           values are sent but never printed or used as labels
 //
 // It checks the section 2 service-level objectives and prints a verdict per
 // journey, plus the server's own refusal counters from /api/health, which is the
@@ -77,6 +79,23 @@ const scenarios = [
       { field: "__title", operator: "equals", values: Array.from({ length: 5001 }, (_, i) => `v${i}`) },
     ])}` },
 ];
+
+// Repeated-query caching is not a capacity plan for client ICPs: their filter
+// combinations are often distinct. Supply reviewed, non-sensitive fixtures to
+// exercise those cold combinations through the real endpoint. The fixtures are
+// intentionally external to the repository and never appear in reports.
+if (process.env.LOAD_COLD_FILTERS_JSON) {
+  const coldFilters = JSON.parse(process.env.LOAD_COLD_FILTERS_JSON);
+  const serializedBytes = Buffer.byteLength(JSON.stringify(coldFilters));
+  if (!Array.isArray(coldFilters) || coldFilters.length < 1 || coldFilters.length > 100
+    || coldFilters.some(filters => !Array.isArray(filters) || filters.length > 60)
+    || serializedBytes > 2_000_000) {
+    throw new Error('LOAD_COLD_FILTERS_JSON must contain 1–100 filter arrays, at most 60 filters each and 2MB total');
+  }
+  let coldIndex = 0;
+  scenarios.push({ name: 'cold distinct filter combinations', weight: 10, slo: 5000,
+    path: () => `/api/prospects?page=1&withTotal=1&filters=${encode(coldFilters[coldIndex++ % coldFilters.length])}` });
+}
 
 // Supply the exact keyword fixture for this run, without putting prospect data
 // into logs. Repeated requests measure reuse; distinct cold-search bursts need
@@ -191,6 +210,31 @@ function report(before, after) {
     console.log(`          outcomes=${JSON.stringify(outcomes)}`);
     console.log(`          slowest=${JSON.stringify(slowestMs)}`);
   }
+
+  console.log("\n=== bounded query-family phases observed during this run ===");
+  const beforePhases = before?.load?.queryPhases ?? {};
+  const afterPhases = after?.load?.queryPhases ?? {};
+  const beforeTotals = beforePhases.totals ?? {};
+  const afterTotals = afterPhases.totals ?? {};
+  const bounds = afterPhases.boundsMs ?? [];
+  let phaseRows = 0;
+  for (const key of Object.keys(afterTotals).sort()) {
+    const count = Number(afterTotals[key] ?? 0) - Number(beforeTotals[key] ?? 0);
+    if (count <= 0) continue;
+    phaseRows += 1;
+    const afterBuckets = afterPhases.buckets?.[key] ?? [];
+    const beforeBuckets = beforePhases.buckets?.[key] ?? [];
+    const buckets = afterBuckets.map((value, index) => Math.max(0, Number(value) - Number(beforeBuckets[index] ?? 0)));
+    const target = Math.max(1, Math.ceil(count * 0.95));
+    let cumulative = 0;
+    let p95 = bounds.at(-1) ?? 'unavailable';
+    for (let index = 0; index < buckets.length; index += 1) {
+      cumulative += buckets[index];
+      if (cumulative >= target) { p95 = bounds[index] ?? '+Inf'; break; }
+    }
+    console.log(`  ${key.padEnd(48)} n=${String(count).padStart(5)}  p95<=${p95}ms`);
+  }
+  if (!phaseRows) console.log("  unavailable (deploy this instrumentation before collecting the baseline)");
 
   console.log("\n=== verdict ===");
   console.log('  This run alone is NOT capacity certification: require the workload matrix, cold-cache runs, sufficient samples and recovery checks.');

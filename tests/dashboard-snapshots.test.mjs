@@ -68,18 +68,20 @@ test("the tabs are never blank, because the migration fills the snapshot first",
   assert.ok(migration.includes("would blank the tab"));
 });
 
-test("the worker refresh has its own deadline, inside a transaction", async () => {
+test("the worker refresh has its own deadline and does not add database concurrency", async () => {
   const worker = await read("../worker/operations-worker.mjs");
 
   // Retention runs every 5s under a 3s statement timeout; a whole-database
   // summary fits neither, so this is a separate pass.
   assert.ok(worker.includes("OPERATIONS_SNAPSHOT_MS"));
   assert.ok(worker.includes("await runSnapshots();"));
+  assert.ok(!worker.includes("prospect-operations-snapshot"), "a summary must not create a competing database connection");
   // SET LOCAL means nothing outside a transaction.
   const fn = worker.slice(worker.indexOf("async function runSnapshots"), worker.indexOf("async function main"));
   assert.ok(fn.includes("await client.query('BEGIN');"));
   assert.ok(fn.includes("SET LOCAL statement_timeout = '300s'"));
   assert.ok(fn.includes("ROLLBACK"));
+  assert.ok(fn.includes("metrics.record('snapshot'"));
   // A stale summary must not take the worker down with it.
   assert.ok(fn.includes("Dashboard snapshot refresh failed"));
 });

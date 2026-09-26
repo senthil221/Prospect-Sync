@@ -15,3 +15,12 @@ export function pgInterval(value, fallback, name) {
   }
   return value.trim();
 }
+
+export function pgIntervalMilliseconds(value) {
+  const match = /^(\d+)(ms|s|min|h)$/.exec(value);
+  if (!match) throw new Error(`Invalid PostgreSQL interval '${value}'.`);
+  const multiplier = { ms: 1, s: 1000, min: 60_000, h: 3_600_000 }[match[2]];
+  const milliseconds = Number(match[1]) * multiplier;
+  if (!Number.isSafeInteger(milliseconds)) throw new Error(`PostgreSQL interval '${value}' is too large.`);
+  return milliseconds;
+}
