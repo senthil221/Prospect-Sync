@@ -1,0 +1,40 @@
+name: Historical migration diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  replay-history:
+    name: Replay unchanged migration history (diagnostic only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: disposable-ci-only
+          POSTGRES_DB: history_migration_diagnostic
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+
+      - name: Replay historical migrations without compatibility shims
+        env:
+          DATABASE_URL: postgres://postgres:disposable-ci-only@127.0.0.1:5432/history_migration_diagnostic
+          HISTORY_MIGRATION_DIAGNOSTIC_ALLOW: "1"
+        run: node scripts/diagnose-prospect-migration-history.mjs

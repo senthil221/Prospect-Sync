@@ -88,57 +88,51 @@ test("cursor SQL preserves the mixed created_at DESC/id ASC boundary and service
   assert.match(sql, /list-filtered People cursor page differs from OFFSET page/);
 });
 
-test("disposable PostgreSQL replay is release-gating and non-skipping", async () => {
-  const [workflow, runner, seed, checks, compatibility, historyVolumeCleanup, roles] = await Promise.all([
+test("disposable PostgreSQL schema upgrade is release-gating and fail-closed", async () => {
+  const [workflow, runner, seed, checks, roles, baseline, manifestRaw, diagnosticWorkflow, diagnostic] = await Promise.all([
     read("../.github/workflows/ci.yml"),
     read("../scripts/test-prospect-cursor-migration.mjs"),
-    read("../scripts/prospect-cursor-history-fixture.sql"),
+    read("../scripts/prospect-cursor-fixture.sql"),
     read("../scripts/check-prospect-cursor-migration.sql"),
-    read("../scripts/prospect-cursor-history-compat.sql"),
-    read("../scripts/prospect-cursor-history-volume-cleanup.sql"),
     read("../scripts/prospect-cursor-ci-roles.sql"),
+    read("../scripts/prospect-cursor-schema-baseline.sql"),
+    read("../scripts/prospect-cursor-schema-baseline.json"),
+    read("../.github/workflows/historical-migration-diagnostic.yml"),
+    read("../scripts/diagnose-prospect-migration-history.mjs"),
   ]);
+  const manifest = JSON.parse(manifestRaw);
   assert.match(workflow, /cursor-migration-contract:[\s\S]*image: postgres:15/);
   assert.doesNotMatch(workflow, /cursor-migration-contract:[\s\S]*if: github\.event_name == ['"]pull_request['"]/);
+  assert.match(workflow, /Restore reviewed baseline and verify cursor upgrade/);
   assert.match(workflow, /CURSOR_MIGRATION_TEST_ALLOW: "1"/);
   assert.match(runner, /database !== 'cursor_migration_test'/);
   assert.match(runner, /disposable cursor migration database is not empty/);
-  assert.match(runner, /if \(file === seedBefore\)[\s\S]*historical cursor data fixture/);
-  assert.doesNotMatch(runner, /migrationFiles\.at\(-1\) !== candidate/, "later migrations must remain replayable");
-  assert.match(runner, /if \(file === candidate\) candidateApplied = true/);
-  assert.match(runner, /::error title=Cursor migration replay::/);
+  assert.match(runner, /disposable cursor migration database is not a fresh stock database/);
+  assert.match(runner, /drop schema public restrict/);
+  assert.doesNotMatch(runner, /drop schema public cascade/i);
+  assert.match(runner, /normalizedSha256/);
+  assert.match(runner, /Cursor schema baseline unexpectedly contains/);
+  assert.match(runner, /CREATE EXTENSION pg_trgm WITH SCHEMA public/);
+  assert.match(runner, /CREATE EXTENSION unaccent WITH SCHEMA public/);
+  assert.match(runner, /restored baseline RLS table count differs/);
+  assert.match(runner, /schema-only baseline unexpectedly restored customer rows/);
+  assert.doesNotMatch(runner, /readdir\(migrationsUrl\)/, "the release gate must not replay historical migrations");
+  assert.match(runner, /::error title=Cursor schema upgrade::/);
   assert.match(runner, /find\(\(line\) => \/\\bERROR:/);
   assert.match(runner, /replaceAll\('disposable-ci-only', '\[redacted\]'\)/);
-  assert.match(runner, /reviewedHistoryHashes = new Map/);
   assert.match(runner, /createHash\('sha256'\)/);
-  assert.equal((runner.match(/Applying one reviewed CI-only compatibility exception/g) ?? []).length, 1);
-  assert.doesNotMatch(runner, /retry/i, "the historical exception must not become a generic retry path");
-  assert.match(runner, /compatibilityExceptionCount !== 1/);
   assert.match(runner, /insert into supabase_migrations\.schema_migrations/);
-  assert.match(runner, /synthetic migration ledger does not contain every replayed migration/);
-  assert.match(runner, /Proving candidate RPC and ledger rollback before applying/);
   assert.match(runner, /forced cursor candidate rollback/);
   assert.match(runner, /rollback;`/);
   assert.match(runner, /candidate rollback postcondition/);
   assert.match(runner, /cursor RPC exists/);
   assert.match(runner, /cursor migration ledger entry exists/);
-  assert.match(compatibility, /v_phase = 'pre'/);
-  assert.match(compatibility, /array\['p_import_id', 'p_rows', 'processed', 'added', 'updated', 'skipped'\]/);
-  assert.match(compatibility, /drop function public\.import_company_batch_v2\(text, jsonb\) restrict/);
-  assert.doesNotMatch(compatibility, /cascade/i);
-  assert.match(compatibility, /v_phase = 'post'/);
-  assert.match(compatibility, /array\['p_import_id', 'p_rows', 'p_row_offset', 'processed', 'added', 'updated', 'skipped'\]/);
-  assert.match(compatibility, /has_function_privilege[\s\S]*'anon'/);
-  assert.match(compatibility, /has_function_privilege[\s\S]*'authenticated'/);
-  assert.match(compatibility, /has_function_privilege[\s\S]*'service_role'/);
+  assert.match(runner, /set local role service_role/);
+  assert.match(runner, /for \(const browserRole of \['anon', 'authenticated'\]\)/);
+  assert.match(runner, /permission denied for function search_prospect_workspace_cursor_v1/);
   assert.match(seed, /generate_series\(1, 130\)/);
   assert.match(seed, /generate_series\(1, 21\)/);
-  assert.match(seed, /generate_series\(1, 19849\)/);
-  assert.match(seed, /19849::bigint, 20000::bigint/);
-  assert.match(runner, /historyVolumeAssertion = '20260902000280_esp_equals_matches_either_column\.sql'/);
-  assert.match(runner, /historical 20,000-row assertion fixture cleanup/);
-  assert.match(historyVolumeCleanup, /delete from public\.prospects/);
-  assert.match(historyVolumeCleanup, /0::bigint, 151::bigint, 151::bigint/);
+  assert.doesNotMatch(seed, /cursor-history-volume/);
   for (const worker of [
     "prospect_import_worker",
     "prospect_ops_worker",
@@ -156,7 +150,23 @@ test("disposable PostgreSQL replay is release-gating and non-skipping", async ()
   assert.match(checks, /v_all_ids && v_page_ids/);
   assert.match(checks, /did not traverse a final partial page/);
   assert.match(checks, /v_cursor\.total_count <> 151/);
-  assert.match(checks, /PUBLIC execute privilege differs from workspace v12 or remains granted/);
+  assert.match(checks, /search_prospect_workspace_v13/);
+  assert.doesNotMatch(checks, /search_prospect_workspace_v12/);
+  assert.match(checks, /PUBLIC execute privilege differs from workspace v13 or remains granted/);
+  assert.equal(manifest.formatVersion, 1);
+  assert.equal(manifest.normalizedSha256, "72a086ab70a78c1bb5989c8f6f0e617d6d0098d16a6a2dd25b9a02c52653d848");
+  assert.equal(manifest.capture.schemaOnly, true);
+  assert.equal(manifest.capture.customerRows, false);
+  assert.equal(manifest.sourceMigrationLedger.lastVersion, "20260925212546");
+  assert.doesNotMatch(baseline, /^COPY .+ FROM stdin;$/mu);
+  assert.doesNotMatch(baseline, /^(?:CREATE|ALTER) ROLE\b/mu);
+  assert.doesNotMatch(baseline, /^CREATE EXTENSION\b/mu);
+  assert.doesNotMatch(baseline, /^COMMENT ON\b/mu);
+  assert.doesNotMatch(baseline, /(?:postgres(?:ql)?|https?|smtp):\/\//iu);
+  assert.match(diagnosticWorkflow, /workflow_dispatch:/);
+  assert.doesNotMatch(diagnosticWorkflow, /push:|pull_request:|workflow_call:/);
+  assert.match(diagnostic, /Replaying unchanged/);
+  assert.doesNotMatch(diagnostic, /compat|retry/i);
 });
 
 test("route and both People controllers retain cursor fallback and back-navigation edges", async () => {

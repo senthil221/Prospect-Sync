@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   cursor-migration-contract:
-    name: People cursor migration contract (synthetic)
+    name: People cursor schema-upgrade contract (synthetic)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
@@ -40,7 +40,7 @@ jobs:
         with:
           node-version: "22.13.0"
 
-      - name: Replay history and verify cursor equivalence
+      - name: Restore reviewed baseline and verify cursor upgrade
         env:
           DATABASE_URL: postgres://postgres:disposable-ci-only@127.0.0.1:5432/cursor_migration_test
           CURSOR_MIGRATION_TEST_ALLOW: "1"

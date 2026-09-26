@@ -1,6 +1,6 @@
-import { readdir, readFile } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 
 const allow = process.env.CURSOR_MIGRATION_TEST_ALLOW;
 if (allow !== '1') {
@@ -10,55 +10,54 @@ if (allow !== '1') {
 const url = new URL(process.env.DATABASE_URL ?? '');
 const database = decodeURIComponent(url.pathname.slice(1));
 if (!['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
-  throw new Error('Cursor migration replay only supports a loopback PostgreSQL target.');
+  throw new Error('Cursor migration validation only supports a loopback PostgreSQL target.');
 }
 if (database !== 'cursor_migration_test' || decodeURIComponent(url.username) !== 'postgres') {
-  throw new Error('Cursor migration replay requires postgres@.../cursor_migration_test.');
+  throw new Error('Cursor migration validation requires postgres@.../cursor_migration_test.');
 }
 if (decodeURIComponent(url.password) !== 'disposable-ci-only') {
-  throw new Error('Cursor migration replay requires the disposable CI password.');
+  throw new Error('Cursor migration validation requires the disposable CI password.');
 }
 
-const migrationsUrl = new URL('../supabase/migrations/', import.meta.url);
 const candidate = '20260926083856_prospect_people_cursor_v1.sql';
+const candidateVersion = candidate.slice(0, 14);
 const candidateSignature = 'public.search_prospect_workspace_cursor_v1(text,jsonb,integer,text,timestamp with time zone,text,boolean,jsonb)';
-const seedBefore = '20260902000260_count_people_exactly.sql';
-const historyVolumeAssertion = '20260902000280_esp_equals_matches_either_column.sql';
-const compatibilityTarget = '20260825070000_company_location_filter.sql';
-const compatibilityForwardFix = '20260825103139_fix_company_location_import_drift.sql';
-const reviewedHistoryHashes = new Map([
-  ['20260816013930_resumable_import_cursors.sql', '2c1edbfdfa6eb204338c4922041fdfcd4de12d14b85f17d94e37a6d2ab38fdc6'],
-  [compatibilityTarget, '5d1a6aecfb189f95fd5987d9e31b142fdc3559fc57a09fc312a772a071766c96'],
-  [compatibilityForwardFix, '564d2cd92ab53e07a9e7b4effb7d7f1b2b3d9bb2ea1caca2addca35d1abce3f4'],
+const normalized = (value) => value.replaceAll('\r\n', '\n');
+const [baselineRaw, manifestRaw, candidateSql, rolesSql, fixtureSql, contractSql] = await Promise.all([
+  readFile(new URL('./prospect-cursor-schema-baseline.sql', import.meta.url), 'utf8'),
+  readFile(new URL('./prospect-cursor-schema-baseline.json', import.meta.url), 'utf8'),
+  readFile(new URL(`../supabase/migrations/${candidate}`, import.meta.url), 'utf8'),
+  readFile(new URL('./prospect-cursor-ci-roles.sql', import.meta.url), 'utf8'),
+  readFile(new URL('./prospect-cursor-fixture.sql', import.meta.url), 'utf8'),
+  readFile(new URL('./check-prospect-cursor-migration.sql', import.meta.url), 'utf8'),
 ]);
-const migrationFiles = (await readdir(migrationsUrl))
-  .filter((name) => /^\d{14}_.+\.sql$/.test(name))
+const baseline = normalized(baselineRaw);
+const manifest = JSON.parse(manifestRaw);
+const baselineHash = createHash('sha256').update(baseline, 'utf8').digest('hex');
+if (manifest.formatVersion !== 1 || baselineHash !== manifest.normalizedSha256) {
+  throw new Error('Reviewed cursor schema baseline hash does not match its manifest.');
+}
+
+const dumpSchemas = [...baseline.matchAll(/^CREATE SCHEMA ([a-z_][a-z0-9_]*);$/gmu)]
+  .map((match) => match[1])
   .sort();
-
-if (!migrationFiles.includes(candidate) || !migrationFiles.includes(seedBefore)) {
-  throw new Error('Required cursor or historical seed-point migration is missing.');
+const manifestSchemas = [...manifest.schemas].sort();
+if (JSON.stringify(dumpSchemas) !== JSON.stringify(manifestSchemas)) {
+  throw new Error('Cursor schema baseline contains schemas outside its reviewed manifest.');
 }
-if (migrationFiles.indexOf(seedBefore) >= migrationFiles.indexOf(candidate)) {
-  throw new Error(`Historical fixture seed point ${seedBefore} must precede ${candidate}.`);
-}
-if (migrationFiles.indexOf(seedBefore) >= migrationFiles.indexOf(historyVolumeAssertion)
-    || migrationFiles.indexOf(historyVolumeAssertion) >= migrationFiles.indexOf(candidate)) {
-  throw new Error('Historical 20,000-row assertion must stay between the fixture and cursor candidate.');
-}
-if (migrationFiles.indexOf(compatibilityTarget) >= migrationFiles.indexOf(compatibilityForwardFix)) {
-  throw new Error('Reviewed company-import compatibility migrations are missing or out of order.');
-}
-
-for (const [file, expectedHash] of reviewedHistoryHashes) {
-  const sql = await readFile(new URL(file, migrationsUrl), 'utf8');
-  const normalizedSql = sql.replaceAll('\r\n', '\n');
-  const actualHash = createHash('sha256').update(normalizedSql, 'utf8').digest('hex');
-  if (actualHash !== expectedHash) {
-    throw new Error(`${file} changed after the CI compatibility exception was reviewed.`);
-  }
+for (const [label, pattern] of [
+  ['data rows', /^COPY .+ FROM stdin;$/mu],
+  ['role definitions', /^(?:CREATE|ALTER) ROLE\b/mu],
+  ['extension definitions', /^CREATE EXTENSION\b/mu],
+  ['comments', /^COMMENT ON\b/mu],
+  ['security labels', /^SECURITY LABEL\b/mu],
+  ['foreign connections', /^CREATE (?:SERVER|USER MAPPING|FOREIGN TABLE|SUBSCRIPTION|PUBLICATION)\b/mu],
+  ['database URLs', /(?:postgres(?:ql)?|https?|smtp):\/\//iu],
+  ['private keys', /-----BEGIN [A-Z ]*PRIVATE KEY-----/u],
+]) {
+  if (pattern.test(baseline)) throw new Error(`Cursor schema baseline unexpectedly contains ${label}.`);
 }
 
-const candidateSql = await readFile(new URL(candidate, migrationsUrl), 'utf8');
 const candidateBoundaryLines = candidateSql
   .split(/\r?\n/u)
   .map((line) => line.trim())
@@ -101,6 +100,50 @@ function sqlLiteral(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
+function sqlArrayLiteral(values) {
+  return `array[${values.map(sqlLiteral).join(',')}]::text[]`;
+}
+
+function psql(label, sql, timeout = 330_000) {
+  const result = spawnSync('psql', ['-X', '-q', '-v', 'ON_ERROR_STOP=1'], {
+    input: sql,
+    encoding: 'utf8',
+    env: psqlEnv,
+    timeout,
+    maxBuffer: 100 * 1024 * 1024,
+  });
+  if (result.error || result.status !== 0) {
+    process.stderr.write(
+      `::error title=Cursor schema upgrade::${actionEscape(label)}: ${actionEscape(firstPsqlError(result))}\n`,
+    );
+    process.stdout.write(result.stdout ?? '');
+    process.stderr.write(result.stderr ?? '');
+    throw result.error ?? new Error(`${label} failed with psql exit code ${result.status}.`);
+  }
+}
+
+function psqlExpectedFailure(label, sql, expected, timeout = 30_000) {
+  const result = spawnSync('psql', ['-X', '-q', '-v', 'ON_ERROR_STOP=1'], {
+    input: sql,
+    encoding: 'utf8',
+    env: psqlEnv,
+    timeout,
+    maxBuffer: 1024 * 1024,
+  });
+  const failure = firstPsqlError(result);
+  if (!result.error && result.status !== 0 && expected.test(failure)) return;
+  process.stderr.write(
+    `::error title=Cursor schema upgrade::${actionEscape(label)}: ${actionEscape(failure)}\n`,
+  );
+  throw result.error ?? new Error(`${label} did not fail with the expected permission denial.`);
+}
+
+function replaceExactlyOnce(source, needle, replacement, label) {
+  const count = source.split(needle).length - 1;
+  if (count !== 1) throw new Error(`${label} anchor occurs ${count} times; expected exactly once.`);
+  return source.replace(needle, replacement);
+}
+
 function candidateAbsentContract(label) {
   return String.raw`
 do $candidate_absent$
@@ -110,31 +153,13 @@ begin
   end if;
   if exists (
     select 1 from supabase_migrations.schema_migrations
-    where version = ${sqlLiteral(candidate.slice(0, 14))}
+    where version = ${sqlLiteral(candidateVersion)}
   ) then
     raise exception '${label}: cursor migration ledger entry exists';
   end if;
 end
 $candidate_absent$;
 `;
-}
-
-function psql(label, sql, timeout = 330_000) {
-  const result = spawnSync('psql', ['-X', '-q', '-v', 'ON_ERROR_STOP=1'], {
-    input: sql,
-    encoding: 'utf8',
-    env: psqlEnv,
-    timeout,
-    maxBuffer: 50 * 1024 * 1024,
-  });
-  if (result.error || result.status !== 0) {
-    process.stderr.write(
-      `::error title=Cursor migration replay::${actionEscape(label)}: ${actionEscape(firstPsqlError(result))}\n`,
-    );
-    process.stdout.write(result.stdout ?? '');
-    process.stderr.write(result.stderr ?? '');
-    throw result.error ?? new Error(`${label} failed with psql exit code ${result.status}.`);
-  }
 }
 
 const preflight = String.raw`
@@ -151,6 +176,23 @@ begin
   ) then
     raise exception 'disposable cursor migration database is not empty';
   end if;
+  if exists (
+    select 1 from pg_namespace
+    where nspname not in ('pg_catalog', 'information_schema', 'public')
+      and nspname not like 'pg_toast%'
+      and nspname not like 'pg_temp_%'
+  ) or exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+  ) or exists (
+    select 1 from pg_type t join pg_namespace n on n.oid = t.typnamespace
+    where n.nspname = 'public'
+  ) or exists (
+    select 1 from pg_extension e join pg_namespace n on n.oid = e.extnamespace
+    where n.nspname = 'public'
+  ) then
+    raise exception 'disposable cursor migration database is not a fresh stock database';
+  end if;
   if exists (select 1 from pg_roles where rolname in (
     'anon', 'authenticated', 'service_role', 'authenticator',
     'prospect_importer', 'prospect_import_worker',
@@ -163,88 +205,126 @@ end $$;
 `;
 
 psql('disposable database preflight', preflight);
-psql(
-  'synthetic Supabase role fixture',
-  await readFile(new URL('./prospect-cursor-ci-roles.sql', import.meta.url), 'utf8'),
-);
-psql('synthetic migration ledger', String.raw`
-create schema supabase_migrations;
-create table supabase_migrations.schema_migrations (
-  version text primary key,
-  statements text[],
-  name text
-);
-`);
+psql('synthetic Supabase role fixture', rolesSql);
 
-const seedSql = await readFile(new URL('./prospect-cursor-history-fixture.sql', import.meta.url), 'utf8');
-const historyVolumeCleanupSql = await readFile(
-  new URL('./prospect-cursor-history-volume-cleanup.sql', import.meta.url),
-  'utf8',
+let restoreSql = baseline;
+restoreSql = replaceExactlyOnce(
+  restoreSql,
+  'SET statement_timeout = 0;',
+  "SET statement_timeout = '5min';",
+  'statement timeout',
 );
-const compatibilitySql = await readFile(new URL('./prospect-cursor-history-compat.sql', import.meta.url), 'utf8');
-let seeded = false;
-let candidateApplied = false;
-let compatibilityExceptionCount = 0;
-for (const file of migrationFiles) {
-  if (file === seedBefore) {
-    psql('historical cursor data fixture', `begin;\nset local statement_timeout = '60s';\n${seedSql}\ncommit;`);
-    seeded = true;
-  }
-  if (file === compatibilityTarget) {
-    process.stdout.write(`Applying one reviewed CI-only compatibility exception before ${file}\n`);
-    psql(
-      'reviewed company import compatibility precondition',
-      `begin;\n${compatibilitySql.replaceAll('__COMPAT_PHASE__', 'pre')}\ncommit;`,
-    );
-    compatibilityExceptionCount += 1;
-  }
-  const sql = await readFile(new URL(file, migrationsUrl), 'utf8');
-  const version = file.slice(0, 14);
-  const name = file.slice(15, -4);
-  if (file === candidate) {
-    psql('candidate rollback precondition', candidateAbsentContract('before rollback probe'));
-    process.stdout.write(`Proving candidate RPC and ledger rollback before applying ${file}\n`);
-    psql(
-      'forced cursor candidate rollback',
-      `begin;\nset local lock_timeout = '5s';\nset local statement_timeout = '5min';\n${sql}\n;\ninsert into supabase_migrations.schema_migrations (version, name) values (${sqlLiteral(version)}, ${sqlLiteral(name)});\nrollback;`,
-    );
-    psql('candidate rollback postcondition', candidateAbsentContract('after rollback probe'));
-  }
-  process.stdout.write(`${file === candidate ? 'Applying candidate' : 'Replaying'} ${file}\n`);
-  psql(file, `begin;\nset local lock_timeout = '5s';\nset local statement_timeout = '5min';\n${sql}\n;\ninsert into supabase_migrations.schema_migrations (version, name) values (${sqlLiteral(version)}, ${sqlLiteral(name)});\ncommit;`);
-  if (file === compatibilityForwardFix) {
-    psql(
-      'reviewed company import compatibility postcondition',
-      `begin;\n${compatibilitySql.replaceAll('__COMPAT_PHASE__', 'post')}\ncommit;`,
-    );
-  }
-  if (file === historyVolumeAssertion) {
-    psql(
-      'historical 20,000-row assertion fixture cleanup',
-      `begin;\n${historyVolumeCleanupSql}\ncommit;`,
-    );
-  }
-  if (file === candidate) candidateApplied = true;
-}
-if (!seeded) throw new Error(`Historical fixture was not inserted before ${seedBefore}.`);
-if (!candidateApplied) throw new Error(`Cursor candidate ${candidate} was not replayed.`);
-if (compatibilityExceptionCount !== 1) {
-  throw new Error(`Expected exactly one reviewed compatibility exception, applied ${compatibilityExceptionCount}.`);
-}
-psql('synthetic migration ledger contract', String.raw`
+restoreSql = replaceExactlyOnce(
+  restoreSql,
+  'SET lock_timeout = 0;',
+  "SET lock_timeout = '5s';",
+  'lock timeout',
+);
+restoreSql = replaceExactlyOnce(
+  restoreSql,
+  'ALTER SCHEMA public OWNER TO pg_database_owner;',
+  String.raw`ALTER SCHEMA public OWNER TO pg_database_owner;
+
+CREATE EXTENSION pg_trgm WITH SCHEMA public;
+CREATE EXTENSION unaccent WITH SCHEMA public;`,
+  'public extension injection',
+);
+psql(
+  'reviewed schema-only baseline restore',
+  `begin;\ndrop schema public restrict;\n${restoreSql}\ncommit;`,
+);
+
+psql('restored baseline contract', String.raw`
+do $baseline_contract$
+declare
+  v_unexpected_owners text[];
+begin
+  if pg_catalog.to_regprocedure(
+       'public.search_prospect_workspace_v13(text,jsonb,text,text,integer,integer,text,jsonb,boolean,jsonb)'
+     ) is null
+     or pg_catalog.to_regprocedure(
+       'public.search_prospect_workspace_v12(text,jsonb,text,text,integer,integer,text,jsonb,boolean,jsonb)'
+     ) is null then
+    raise exception 'reviewed workspace readers are missing from the restored baseline';
+  end if;
+  if pg_catalog.to_regprocedure('public.import_company_batch_v2(text,jsonb)') is not null
+     or pg_catalog.to_regprocedure('public.import_company_batch_v2(text,jsonb,integer)') is null then
+    raise exception 'restored baseline has the wrong company import contract';
+  end if;
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'list_memberships'
+      and column_name = 'raw_data'
+  ) then
+    raise exception 'restored baseline unexpectedly has retired list_memberships.raw_data';
+  end if;
+  if (select count(*) from pg_catalog.pg_class c
+      join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+      where c.relkind in ('r', 'p') and c.relrowsecurity
+        and n.nspname = any(${sqlArrayLiteral(manifest.schemas)})) <> ${manifest.objectCounts.rlsEnabledTables} then
+    raise exception 'restored baseline RLS table count differs from the reviewed manifest';
+  end if;
+  select array_agg(distinct r.rolname order by r.rolname) into v_unexpected_owners
+  from pg_catalog.pg_class c
+  join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+  join pg_catalog.pg_roles r on r.oid = c.relowner
+  where n.nspname = any(${sqlArrayLiteral(manifest.schemas)})
+    and r.rolname not in ('postgres', 'pg_database_owner');
+  if v_unexpected_owners is not null then
+    raise exception 'restored baseline has unexpected object owners: %', v_unexpected_owners;
+  end if;
+  if not exists (select 1 from pg_catalog.pg_extension where extname = 'pg_trgm')
+     or not exists (select 1 from pg_catalog.pg_extension where extname = 'unaccent') then
+    raise exception 'required public text-search extensions are missing';
+  end if;
+  if exists (select 1 from supabase_migrations.schema_migrations) then
+    raise exception 'schema-only baseline unexpectedly restored migration rows';
+  end if;
+  if exists (select 1 from public.prospects) then
+    raise exception 'schema-only baseline unexpectedly restored customer rows';
+  end if;
+end
+$baseline_contract$;
+`);
+psql('candidate baseline precondition', candidateAbsentContract('before fixture'));
+psql('current-schema cursor fixture', `begin;\nset local statement_timeout = '60s';\n${fixtureSql}\ncommit;`);
+psql('candidate rollback precondition', candidateAbsentContract('before rollback probe'));
+psql(
+  'forced cursor candidate rollback',
+  `begin;\nset local lock_timeout = '5s';\nset local statement_timeout = '5min';\n${candidateSql}\n;\ninsert into supabase_migrations.schema_migrations (version, name) values (${sqlLiteral(candidateVersion)}, ${sqlLiteral(candidate.slice(15, -4))});\nrollback;`,
+);
+psql('candidate rollback postcondition', candidateAbsentContract('after rollback probe'));
+psql(
+  candidate,
+  `begin;\nset local lock_timeout = '5s';\nset local statement_timeout = '5min';\n${candidateSql}\n;\ninsert into supabase_migrations.schema_migrations (version, name) values (${sqlLiteral(candidateVersion)}, ${sqlLiteral(candidate.slice(15, -4))});\ncommit;`,
+);
+psql('candidate migration ledger contract', String.raw`
 do $ledger$
 begin
-  if (select count(*) from supabase_migrations.schema_migrations) <> ${migrationFiles.length} then
-    raise exception 'synthetic migration ledger does not contain every replayed migration';
-  end if;
-  if (select count(*) from supabase_migrations.schema_migrations where version = ${sqlLiteral(candidate.slice(0, 14))}) <> 1 then
-    raise exception 'cursor candidate is not recorded exactly once in the synthetic migration ledger';
+  if (select count(*) from supabase_migrations.schema_migrations) <> 1
+     or (select count(*) from supabase_migrations.schema_migrations
+         where version = ${sqlLiteral(candidateVersion)}) <> 1 then
+    raise exception 'cursor candidate is not the single recorded synthetic upgrade';
   end if;
 end
 $ledger$;
 `);
-psql(
-  'cursor runtime contract',
-  await readFile(new URL('./check-prospect-cursor-migration.sql', import.meta.url), 'utf8'),
+const roleProbe = String.raw`
+select count(*) from public.search_prospect_workspace_cursor_v1(
+  '', '[]'::jsonb, 1, null, null, null, false, null
 );
-process.stdout.write('Cursor migration replay and runtime contract passed.\n');
+`;
+psql(
+  'service-role cursor execution probe',
+  `begin;\nset local role service_role;\n${roleProbe}\nrollback;`,
+  30_000,
+);
+for (const browserRole of ['anon', 'authenticated']) {
+  psqlExpectedFailure(
+    `${browserRole} cursor execution denial`,
+    `begin;\nset local role ${browserRole};\n${roleProbe}\nrollback;`,
+    /permission denied for function search_prospect_workspace_cursor_v1/iu,
+  );
+}
+psql('cursor runtime contract', contractSql);
+process.stdout.write('Reviewed schema baseline, cursor upgrade, rollback, and runtime contracts passed.\n');

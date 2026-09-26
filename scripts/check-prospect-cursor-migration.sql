@@ -25,7 +25,7 @@ declare
 begin
   loop
     select * into strict v_offset_page
-    from public.search_prospect_workspace_v12(
+    from public.search_prospect_workspace_v13(
       '', p_filters, 'created_at', 'desc', 50, v_offset, p_client_id,
       '{}'::jsonb, v_offset = 0, v_known_versions);
     select * into strict v_cursor_page
@@ -38,7 +38,7 @@ begin
        or v_cursor_page.scope_capped is distinct from v_offset_page.scope_capped
        or v_cursor_page.total_capped is distinct from v_offset_page.total_capped
        or v_cursor_page.data_versions is distinct from v_offset_page.data_versions then
-      raise exception '% page at offset % differs from workspace v12', p_label, v_offset;
+      raise exception '% page at offset % differs from workspace v13', p_label, v_offset;
     end if;
 
     v_page_length := jsonb_array_length(v_cursor_page.result_rows);
@@ -102,10 +102,10 @@ declare
   v_public_execute boolean;
   v_legacy_public_execute boolean;
   v_signature text := 'public.search_prospect_workspace_cursor_v1(text,jsonb,integer,text,timestamp with time zone,text,boolean,jsonb)';
-  v_legacy_signature text := 'public.search_prospect_workspace_v12(text,jsonb,text,text,integer,integer,text,jsonb,boolean,jsonb)';
+  v_legacy_signature text := 'public.search_prospect_workspace_v13(text,jsonb,text,text,integer,integer,text,jsonb,boolean,jsonb)';
 begin
   if (select count(*) from public.prospect_index where id like 'cursor-fixture-%') <> 151 then
-    raise exception 'cursor fixture is not present after the historical replay';
+    raise exception 'cursor fixture is not present after the schema baseline restore';
   end if;
 
   perform pg_temp.assert_cursor_case('global', '[]'::jsonb, null, 151);
@@ -120,7 +120,7 @@ begin
     null, 110);
 
   v_known := public.data_versions_v1(array['prospect']);
-  select * into strict v_offset from public.search_prospect_workspace_v12(
+  select * into strict v_offset from public.search_prospect_workspace_v13(
     '', '[]'::jsonb, 'created_at', 'desc', 50, 0, null, '{}'::jsonb, false, v_known);
   select * into strict v_cursor from public.search_prospect_workspace_cursor_v1(
     '', '[]'::jsonb, 50, null, null, null, false, v_known);
@@ -134,7 +134,7 @@ begin
   if v_after = v_known then
     raise exception 'prospect version did not advance';
   end if;
-  select * into strict v_offset from public.search_prospect_workspace_v12(
+  select * into strict v_offset from public.search_prospect_workspace_v13(
     '', '[]'::jsonb, 'created_at', 'desc', 50, 0, null, '{}'::jsonb, false, v_known);
   select * into strict v_cursor from public.search_prospect_workspace_cursor_v1(
     '', '[]'::jsonb, 50, null, null, null, false, v_known);
@@ -154,7 +154,7 @@ begin
      or not has_function_privilege('service_role', v_signature, 'execute')
      or has_function_privilege('anon', v_signature, 'execute')
      or has_function_privilege('authenticated', v_signature, 'execute') then
-    raise exception 'cursor RPC execute privileges differ from workspace v12 or violate service-role-only access';
+    raise exception 'cursor RPC execute privileges differ from workspace v13 or violate service-role-only access';
   end if;
 
   select exists (
@@ -174,7 +174,7 @@ begin
       and acl_entry.privilege_type = 'EXECUTE'
   ) into v_legacy_public_execute;
   if v_public_execute is distinct from v_legacy_public_execute or v_public_execute then
-    raise exception 'cursor RPC PUBLIC execute privilege differs from workspace v12 or remains granted';
+    raise exception 'cursor RPC PUBLIC execute privilege differs from workspace v13 or remains granted';
   end if;
 
   select p.prosecdef, p.provolatile, p.proconfig, r.rolname as owner

@@ -1,0 +1,51 @@
+{
+  "formatVersion": 1,
+  "capturedAt": "2026-09-26",
+  "postgresVersion": "15.8",
+  "normalizedSha256": "72a086ab70a78c1bb5989c8f6f0e617d6d0098d16a6a2dd25b9a02c52653d848",
+  "schemas": [
+    "prospect_exports",
+    "prospect_filters",
+    "prospect_import",
+    "prospect_integrations",
+    "prospect_operations",
+    "prospect_results",
+    "public",
+    "supabase_migrations"
+  ],
+  "sourceMigrationLedger": {
+    "count": 174,
+    "firstVersion": "20260807000000",
+    "lastVersion": "20260925212546",
+    "fingerprint": "94474160c81b5c5392b70471f4d89ae6"
+  },
+  "objectCounts": {
+    "schemas": 8,
+    "tables": 57,
+    "functions": 253,
+    "views": 6,
+    "sequences": 2,
+    "triggers": 31,
+    "indexes": 139,
+    "rlsEnabledTables": 48
+  },
+  "capture": {
+    "schemaOnly": true,
+    "comments": false,
+    "securityLabels": false,
+    "globals": false,
+    "customerRows": false,
+    "authSchema": false,
+    "storageSchema": false
+  },
+  "requiredExtensions": [
+    {
+      "name": "pg_trgm",
+      "schema": "public"
+    },
+    {
+      "name": "unaccent",
+      "schema": "public"
+    }
+  ]
+}
