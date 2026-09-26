@@ -242,8 +242,7 @@ test("migration guard treats codex branch migrations as pending until main", asy
       encoding: "utf8",
       env: {
         ...process.env,
-        GITHUB_EVENT_NAME: "push",
-        GITHUB_REF: "refs/heads/codex/cursor",
+        MIGRATION_PENDING_BRANCH: "1",
         MIGRATION_DEFAULT_BRANCH: "main",
       },
     });

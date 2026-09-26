@@ -147,6 +147,14 @@ function parseFingerprints(output) {
   }));
 }
 
+function fingerprintDifferences(expected, actual) {
+  return [...new Set([...Object.keys(expected), ...Object.keys(actual)])]
+    .sort()
+    .filter((signature) => expected[signature] !== actual[signature])
+    .map((signature) => `${signature}:${expected[signature] ?? 'missing'}>${actual[signature] ?? 'missing'}`)
+    .join(',');
+}
+
 function psqlExpectedFailure(label, sql, expected, timeout = 30_000) {
   const result = spawnSync('psql', ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], {
     input: sql,
@@ -350,7 +358,7 @@ const restoredFingerprints = parseFingerprints(psql(
 if (JSON.stringify(restoredFingerprints) !== JSON.stringify(manifest.functionFingerprints)) {
   contractFailure(
     'Restored v12/v13/compiler fingerprints differ from the reviewed production manifest',
-    JSON.stringify({ expected: manifest.functionFingerprints, actual: restoredFingerprints }),
+    fingerprintDifferences(manifest.functionFingerprints, restoredFingerprints),
   );
 }
 psql('candidate baseline precondition', candidateAbsentContract('before fixture'));
@@ -401,7 +409,7 @@ const upgradedFingerprints = parseFingerprints(psql(
 if (JSON.stringify(upgradedFingerprints) !== JSON.stringify(restoredFingerprints)) {
   contractFailure(
     'Cursor candidate changed an inherited v12/v13/compiler function',
-    JSON.stringify({ before: restoredFingerprints, after: upgradedFingerprints }),
+    fingerprintDifferences(restoredFingerprints, upgradedFingerprints),
   );
 }
 psql('cursor runtime contract', contractSql);

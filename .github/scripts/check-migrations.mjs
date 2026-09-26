@@ -231,8 +231,7 @@ let securityMigrationNames = migrationNames;
 if (baseArgumentIndex !== -1) {
   let baseRevision = process.argv[baseArgumentIndex + 1];
   const missingPushBefore = !baseRevision || /^0{40}$/.test(baseRevision);
-  const validationBranchPush = process.env.GITHUB_EVENT_NAME === "push"
-    && /^refs\/heads\/codex\//.test(process.env.GITHUB_REF ?? "");
+  const validationBranchPush = process.env.MIGRATION_PENDING_BRANCH === "1";
   if (validationBranchPush) {
     const fallback = defaultBranchMergeBase();
     if (!fallback) {
