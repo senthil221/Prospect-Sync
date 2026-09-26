@@ -9,6 +9,7 @@ import { needsCompanyPreparation } from "../../../lib/prepared-search";
 import { ownerIdentity } from "../../../lib/result-sets";
 import { prepareCompanyScope, preparationResponse } from "../../../lib/prepare-company-scope";
 import { prospectQueryFamily, recordQueryPhase, type QueryPhaseOutcome } from "../../../lib/observability";
+import { decodeProspectCursor, encodeProspectCursor, isProspectCursorEligible, prospectCursorQueryHash, type ProspectCursor } from "../../../lib/prospect-pagination";
 
 type WorkspaceQuery = {
   search: string;
@@ -23,6 +24,8 @@ type WorkspaceQuery = {
   knownVersions: Record<string, number> | null;
   signal: AbortSignal | undefined;
 };
+
+const cursorFeatureEnabled = process.env.PROSPECT_CURSOR_PAGINATION === "1";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883"]);
 
@@ -48,6 +51,24 @@ async function runProspectWorkspace(supabase: ReturnType<typeof createAdminClien
     p_known_versions: query.knownVersions,
   }).abortSignal(query.signal ?? AbortSignal.timeout(30_000));
   return { ...workspace, version: "v13" };
+}
+
+async function runProspectCursorWorkspace(
+  supabase: ReturnType<typeof createAdminClient>,
+  query: WorkspaceQuery,
+  cursor: ProspectCursor,
+) {
+  const workspace = await supabase.rpc("search_prospect_workspace_cursor_v1", {
+    p_search: query.search,
+    p_filters: query.filters,
+    p_limit: query.limit,
+    p_client_id: query.clientId,
+    p_after_created_at: cursor.createdAt,
+    p_after_id: cursor.id,
+    p_with_total: query.withTotal,
+    p_known_versions: query.knownVersions,
+  }).abortSignal(query.signal ?? AbortSignal.timeout(30_000));
+  return { ...workspace, version: "cursor-v1" };
 }
 
 function workspaceSummary(data: unknown) {
@@ -96,6 +117,25 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   let filters: ProspectFilter[];
   try { filters = parseFilters(url.searchParams.get("filters")); }
   catch (error) { return filterErrorResponse(error, "Invalid Boolean filter."); }
+  const requestedCursorMode = url.searchParams.get("pagination") === "cursor";
+  const rawCursor = (url.searchParams.get("cursor") ?? "").trim();
+  const cursorEligible = isProspectCursorEligible({
+    featureEnabled: cursorFeatureEnabled,
+    requested: requestedCursorMode,
+    page,
+    rawCursor,
+    sort,
+    direction,
+    companyScoped: companyScope !== null,
+    filters,
+  });
+  // A numeric deep link has no predecessor boundary. Eligibility keeps it on
+  // OFFSET; only an in-session next page carries a cursor.
+  const queryHash = prospectCursorQueryHash({ search, filters, sort, direction, clientId });
+  const cursor = cursorEligible && rawCursor ? decodeProspectCursor(rawCursor, queryHash) : null;
+  if (cursorEligible && rawCursor && !cursor) {
+    return Response.json({ error: "This People page cursor is invalid or belongs to a different query. Return to page 1 and try again." }, { status: 400 });
+  }
   const queryFamily = prospectQueryFamily({ search, filters, clientId, companyScope });
   const supabase = createAdminClient();
 
@@ -136,7 +176,7 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   const workspaceRequest = (async () => {
     const started = performance.now();
     try {
-      const result = await runProspectWorkspace(supabase, {
+      const workspaceQuery: WorkspaceQuery = {
         search,
         filters,
         sort,
@@ -148,7 +188,10 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
         withTotal,
         knownVersions,
         signal,
-      });
+      };
+      const result = cursor
+        ? await runProspectCursorWorkspace(supabase, workspaceQuery, cursor)
+        : await runProspectWorkspace(supabase, workspaceQuery);
       const rows = workspaceSummary(result.data).result_rows;
       recordQueryPhase(queryFamily, "workspace", queryPhaseOutcome(result.error), performance.now() - started,
         Array.isArray(rows) ? rows.length : undefined);
@@ -184,8 +227,12 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   }
   if (error) return databaseErrorResponse("The prospect listing", error);
   const summary = workspaceSummary(workspace.data);
+  const prospects = Array.isArray(summary.result_rows) ? summary.result_rows : [];
+  const nextCursor = cursorEligible && prospects.length === limit
+    ? encodeProspectCursor(prospects[prospects.length - 1], queryHash)
+    : null;
   return Response.json({
-    prospects: summary.result_rows ?? [],
+    prospects,
     total: summary.total_count === null || summary.total_count === undefined ? null : Number(summary.total_count),
     // Every People count is now an exact one, the unscoped whole-database total
     // included: 20260902000260 replaced pg_class.reltuples with count(*) after
@@ -205,6 +252,7 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
     versions: summary.data_versions ?? null,
     page,
     limit,
+    pagination: cursorEligible ? { mode: "cursor", nextCursor } : { mode: "offset", nextCursor: null },
     fields: (fields.data ?? []).map((item) => item.field_name),
   });
 }

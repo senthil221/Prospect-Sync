@@ -2,7 +2,7 @@
 
 import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
-import { api, encodeFilters, fetchCompanies, fetchProspects, filterPayload, isAbortError } from "../../lib/dashboard-api";
+import { api, encodeFilters, fetchCompanies, fetchProspects, filterPayload, isAbortError, type ProspectPagination } from "../../lib/dashboard-api";
 import { filterPayloadWithSets } from "../../lib/filter-set-client";
 import { formatNumber, initials } from "../../lib/dashboard-helpers";
 import type { ClientFolder, ClientRecord, Company, ListRecord, Prospect, ProspectFilter } from "../../lib/types";
@@ -20,6 +20,7 @@ import { useDebouncedValue } from "./useDebouncedValue";
 import { useDismiss } from "../use-dismiss";
 import { needsCompanyPreparation, type PreparationProgress } from "../../lib/prepared-search";
 import SearchPreparation from './SearchPreparation';
+import { prospectCursorShapeSupported } from "../../lib/prospect-pagination-policy";
 
 function distinctSourceFile(list: ListRecord) {
   const filename = list.source_file_name?.trim() ?? "";
@@ -467,6 +468,8 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const fieldsLoaded = useRef(false);
+  const pageCursors = useRef(new Map<number, string>([[1, ""]]));
+  const cursorQueryRef = useRef("");
   // Total plus the version vector it was counted at; the server recounts when
   // the vector it is given no longer matches the live one.
   const totalCache = useRef(new Map<string, { total: number; versions: Record<string, number> | null }>());
@@ -474,6 +477,8 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);
   const encodedFilters = useMemo(() => encodeFilters(filters), [filters]);
   const countKey = useMemo(() => JSON.stringify([client.id, debouncedSearch.trim(), encodedFilters, companyScope, refresh, client.prospect_count]), [client.id, client.prospect_count, companyScope, debouncedSearch, encodedFilters, refresh]);
+  const cursorQueryKey = useMemo(() => JSON.stringify([client.id, debouncedSearch.trim(), encodedFilters, sort, direction, companyScope, refresh, client.prospect_count]), [client.id, client.prospect_count, companyScope, debouncedSearch, direction, encodedFilters, refresh, sort]);
+  const cursorShapeSupported = useMemo(() => prospectCursorShapeSupported({ sort, direction, companyScoped: companyScope !== null, filters: JSON.parse(encodedFilters) }), [companyScope, direction, encodedFilters, sort]);
   useEffect(() => {
     let current = true;
     const controller = new AbortController();
@@ -482,12 +487,22 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
     void (async () => {
       setRefreshing(true);
       try {
+        if (cursorQueryRef.current !== cursorQueryKey) {
+          pageCursors.current = new Map([[1, ""]]);
+          cursorQueryRef.current = cursorQueryKey;
+        }
+        const pageCursor = pageCursors.current.get(page);
+        const canRequestCursor = cursorShapeSupported && (page === 1 || pageCursor !== undefined);
         const cached = totalCache.current.get(countKey);
         setPreparationError('');
         setPreparation(needsCompanyPreparation(companyScope) ? { status: 'checking', message: 'Checking the matching companies…', matchedCompanies: 0 } : null);
-        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; versions?: Record<string, number> | null; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, clientId: client.id, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !cached, knownVersions: cached?.versions ?? null }, { signal: controller.signal }, progress => { if (current) setPreparation(progress); });
+        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; versions?: Record<string, number> | null; fields?: string[]; pagination?: ProspectPagination }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, clientId: client.id, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !cached, knownVersions: cached?.versions ?? null, pagination: canRequestCursor ? "cursor" : "offset", cursor: pageCursor }, { signal: controller.signal }, progress => { if (current) setPreparation(progress); });
         if (current) {
           setProspects(data.prospects);
+          if (data.pagination?.mode === "cursor") {
+            if (data.pagination.nextCursor) pageCursors.current.set(page + 1, data.pagination.nextCursor);
+            else pageCursors.current.delete(page + 1);
+          }
           // A client view is never the unfiltered whole database, so its count is
           // always the capped one -- carry the flag through or a bounded number
           // would read here as an exact one.
@@ -505,7 +520,7 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
       finally { if (current) { setLoading(false); setRefreshing(false); setPreparation(null); } }
     })();
     return () => { current = false; controller.abort(); };
-  }, [active, client.id, client.prospect_count, deferredSearch, debouncedSearch, page, sort, direction, encodedFilters, refresh, companyScope, countKey]);
+  }, [active, client.id, client.prospect_count, deferredSearch, debouncedSearch, page, sort, direction, encodedFilters, refresh, companyScope, countKey, cursorQueryKey, cursorShapeSupported]);
   // Asking is a render, not a blocking call: window.confirm freezes the tab,
   // cannot carry the scope sentence that makes this safe to say yes to, and has
   // none of the focus contract every other dialog here keeps.

@@ -51,6 +51,7 @@ x-app: &app
     INTEGRATION_ADMIN_EMAILS: ${INTEGRATION_ADMIN_EMAILS:-}
     INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:-}
     INTEGRATION_WORKER_HEALTH_URL: http://integration-worker:9092/health
+    PROSPECT_CURSOR_PAGINATION: ${PROSPECT_CURSOR_PAGINATION:-0}
     SMARTLEAD_DELIVERY_ENABLED: "true"
     # Node heap ceiling so a runaway CSV import cannot OOM the whole box.
     NODE_OPTIONS: "--max-old-space-size=1024"

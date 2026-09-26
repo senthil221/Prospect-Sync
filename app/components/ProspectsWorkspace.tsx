@@ -2,7 +2,7 @@
 import { BoundedCache } from '../../lib/bounded-cache';
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { encodeFilters, fetchProspects, isAbortError } from "../../lib/dashboard-api";
+import { encodeFilters, fetchProspects, isAbortError, type ProspectPagination } from "../../lib/dashboard-api";
 import { filterPayloadWithSets } from "../../lib/filter-set-client";
 import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import type { ClientRecord, Prospect, ProspectFilter } from "../../lib/types";
@@ -10,6 +10,7 @@ import ProspectTable from "./ProspectTable";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { needsCompanyPreparation, type PreparationProgress } from "../../lib/prepared-search";
 import SearchPreparation from './SearchPreparation';
+import { prospectCursorShapeSupported } from "../../lib/prospect-pagination-policy";
 
 export function useProspectsWorkspaceController({ active, search, filters, sort, direction, companyScope, statsProspects, initialPage, onLoading, onError }: { active: boolean; search: string; filters: ProspectFilter[]; sort: string; direction: "asc" | "desc"; companyScope: CompanyScope | null; statsProspects: number; initialPage?: number; onLoading: (loading: boolean) => void; onError: (error: string) => void }) {
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -26,6 +27,11 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
   const [page, setPage] = useState(initialPage ?? 1);
   const [refresh, setRefresh] = useState(0);
   const fieldsLoaded = useRef(false);
+  // A cursor is an edge between two adjacent pages, not durable URL state.
+  // Keep the edges only for this exact query. A pasted/deep numeric page has
+  // no edge and therefore continues through the server's OFFSET fallback.
+  const pageCursors = useRef(new Map<number, string>([[1, ""]]));
+  const cursorQueryRef = useRef("");
   // A cached total is only meaningful alongside the dependency-version vector it
   // was counted at, so the two are stored together and sent back as a pair.
   const totalCache = useRef(new BoundedCache<{ total: number; estimated: boolean; capped: boolean; versions: Record<string, number> | null }>());
@@ -33,6 +39,8 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);
   const encodedFilters = useMemo(() => encodeFilters(filters), [filters]);
   const countKey = useMemo(() => JSON.stringify([debouncedSearch.trim(), encodedFilters, companyScope, refresh, statsProspects]), [companyScope, debouncedSearch, encodedFilters, refresh, statsProspects]);
+  const cursorQueryKey = useMemo(() => JSON.stringify([debouncedSearch.trim(), encodedFilters, sort, direction, companyScope, refresh, statsProspects]), [companyScope, debouncedSearch, direction, encodedFilters, refresh, sort, statsProspects]);
+  const cursorShapeSupported = useMemo(() => prospectCursorShapeSupported({ sort, direction, companyScoped: companyScope !== null, filters: JSON.parse(encodedFilters) }), [companyScope, direction, encodedFilters, sort]);
 
   useEffect(() => {
     let current = true;
@@ -44,6 +52,12 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
       setPreparationError('');
       setPreparation(needsCompanyPreparation(companyScope) ? { status: 'checking', message: 'Checking the matching companies…', matchedCompanies: 0 } : null);
       try {
+        if (cursorQueryRef.current !== cursorQueryKey) {
+          pageCursors.current = new Map([[1, ""]]);
+          cursorQueryRef.current = cursorQueryKey;
+        }
+        const pageCursor = pageCursors.current.get(page);
+        const canRequestCursor = cursorShapeSupported && (page === 1 || pageCursor !== undefined);
         const cached = totalCache.current.get(countKey);
         // A big pasted list is stored once and sent as an id from then on. Note
         // this changes the transport only: countKey above still uses the plain
@@ -51,9 +65,13 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
         // identity (section 4.1) - the same question asked with values or with
         // a set id is the same question, and must hit the same cached count.
         const requestFilters = JSON.stringify(await filterPayloadWithSets(JSON.parse(encodedFilters), "prospect", ""));
-        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; scopeCapped?: boolean; versions?: Record<string, number> | null; fields?: string[] }>({ search: debouncedSearch, page, sort, direction, filters: requestFilters, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !cached, knownVersions: cached?.versions ?? null }, { signal: controller.signal }, progress => { if (current) setPreparation(progress); });
+        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; scopeCapped?: boolean; versions?: Record<string, number> | null; fields?: string[]; pagination?: ProspectPagination }>({ search: debouncedSearch, page, sort, direction, filters: requestFilters, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !cached, knownVersions: cached?.versions ?? null, pagination: canRequestCursor ? "cursor" : "offset", cursor: pageCursor }, { signal: controller.signal }, progress => { if (current) setPreparation(progress); });
         if (current) {
           setProspects(data.prospects);
+          if (data.pagination?.mode === "cursor") {
+            if (data.pagination.nextCursor) pageCursors.current.set(page + 1, data.pagination.nextCursor);
+            else pageCursors.current.delete(page + 1);
+          }
           setScopeCapped(data.scopeCapped === true);
           if (data.total !== null) {
             const cachedTotal = { total: data.total, estimated: data.totalEstimated, capped: data.totalCapped === true, versions: data.versions ?? null };
@@ -73,7 +91,7 @@ export function useProspectsWorkspaceController({ active, search, filters, sort,
       finally { if (current) { onLoading(false); setPreparation(null); } }
     })();
     return () => { current = false; controller.abort(); };
-  }, [active, deferredSearch, debouncedSearch, statsProspects, page, encodedFilters, sort, direction, refresh, companyScope, countKey, onError, onLoading]);
+  }, [active, deferredSearch, debouncedSearch, statsProspects, page, encodedFilters, sort, direction, refresh, companyScope, countKey, cursorQueryKey, cursorShapeSupported, onError, onLoading]);
 
   const refreshWorkspace = useCallback(() => setRefresh((current) => current + 1), []);
   return { prospects, total, totalEstimated, totalCapped, scopeCapped, fields, page, setPage, deferredSearch, fieldsLoaded: fields.length > 0, refreshWorkspace, preparation, preparationError };

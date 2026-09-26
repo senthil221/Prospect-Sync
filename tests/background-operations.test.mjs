@@ -428,6 +428,7 @@ function routeActions(source) {
 test("the retired search functions are dropped, and the live search entrypoints are not", async () => {
   const migration = await read("../supabase/migrations/20260916130000_drop_the_superseded_search_functions.sql");
   const featurePack = await read("../supabase/migrations/20260924205130_client_workspace_feature_pack.sql");
+  const cursorMigration = await read("../supabase/migrations/20260926083856_prospect_people_cursor_v1.sql");
   const code = codeOnly(migration);
 
   // Every drop names a full signature. DROP FUNCTION by bare name is ambiguous
@@ -457,6 +458,7 @@ test("the retired search functions are dropped, and the live search entrypoints 
   for (const live of ["search_prospect_export_v6", "search_prospect_workspace_v13"]) {
     assert.match(featurePack, new RegExp(`create or replace function public\\.${live}`));
   }
+  assert.match(cursorMigration, /create or replace function public\.search_prospect_workspace_cursor_v1/);
   assert.match(code, /this migration dropped the wrong one/);
 
   // And the report the file exists to clean is checked in the file's own terms.
@@ -471,5 +473,5 @@ test("the retired search functions are dropped, and the live search entrypoints 
   ]);
   const calls = new Set(sources.flatMap((source) =>
     [...codeOnly(source).matchAll(/rpc\("(search_prospect_[a-z_0-9]+|filter_companies[a-z_0-9]*)"/g)].map((match) => match[1])));
-  assert.deepEqual([...calls].sort(), ["filter_companies_v4", "search_prospect_export_v6", "search_prospect_workspace_v13"]);
+  assert.deepEqual([...calls].sort(), ["filter_companies_v4", "search_prospect_export_v6", "search_prospect_workspace_cursor_v1", "search_prospect_workspace_v13"]);
 });

@@ -111,8 +111,12 @@ export function prefetchApi(path: string) {
   void api(path).catch(() => undefined);
 }
 
-export function prospectApiPath({ search = "", page = 1, sort = "created_at", direction = "desc", filters = "[]", clientId = "", includeFields = true, companyScope = null, withTotal = page === 1, knownVersions = null }: { search?: string; page?: number; sort?: string; direction?: "asc" | "desc"; filters?: string; clientId?: string; includeFields?: boolean; companyScope?: CompanyScope | null; withTotal?: boolean; knownVersions?: Record<string, number> | null }) {
+export type ProspectPagination = { mode: "cursor" | "offset"; nextCursor: string | null };
+
+export function prospectApiPath({ search = "", page = 1, sort = "created_at", direction = "desc", filters = "[]", clientId = "", includeFields = true, companyScope = null, withTotal = page === 1, knownVersions = null, pagination = "offset", cursor = "" }: { search?: string; page?: number; sort?: string; direction?: "asc" | "desc"; filters?: string; clientId?: string; includeFields?: boolean; companyScope?: CompanyScope | null; withTotal?: boolean; knownVersions?: Record<string, number> | null; pagination?: "cursor" | "offset"; cursor?: string }) {
   const params = new URLSearchParams({ search, page: String(page), sort, direction, filters, includeFields: includeFields ? "1" : "0", withTotal: withTotal ? "1" : "0" });
+  if (pagination === "cursor") params.set("pagination", "cursor");
+  if (cursor) params.set("cursor", cursor);
   if (clientId) params.set("clientId", clientId);
   if (companyScope) params.set("companyScope", JSON.stringify(companyScope));
   // The version vector the caller's cached total was counted at. The server
@@ -232,6 +236,8 @@ export async function fetchProspects<T>(query: ProspectQuery, init?: RequestInit
       ...(query.clientId ? { clientId: query.clientId } : {}),
       ...(query.companyScope ? { companyScope: JSON.stringify(query.companyScope) } : {}),
       ...(query.knownVersions ? { knownVersions: JSON.stringify(query.knownVersions) } : {}),
+      ...(query.pagination === "cursor" ? { pagination: "cursor" } : {}),
+      ...(query.cursor ? { cursor: query.cursor } : {}),
     }),
   }, true);
   const response = prepared ? await awaitPreparedSearch(read, { signal: init?.signal, onProgress: onPreparation }) : await read();
