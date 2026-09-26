@@ -113,7 +113,7 @@ function sqlArrayLiteral(values) {
 }
 
 function psql(label, sql, timeout = 330_000) {
-  const result = spawnSync('psql', ['-X', '-q', '-v', 'ON_ERROR_STOP=1'], {
+  const result = spawnSync('psql', ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], {
     input: sql,
     encoding: 'utf8',
     env: psqlEnv,
@@ -148,7 +148,7 @@ function parseFingerprints(output) {
 }
 
 function psqlExpectedFailure(label, sql, expected, timeout = 30_000) {
-  const result = spawnSync('psql', ['-X', '-q', '-v', 'ON_ERROR_STOP=1'], {
+  const result = spawnSync('psql', ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'], {
     input: sql,
     encoding: 'utf8',
     env: psqlEnv,
