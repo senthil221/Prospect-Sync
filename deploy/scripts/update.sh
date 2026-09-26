@@ -293,7 +293,20 @@ trap 'rollback_on_error $?' ERR
 
 echo "==> Active slot: ${ACTIVE_SLOT}; candidate slot: ${CANDIDATE_SLOT}"
 echo "==> Pulling ${NEW_IMAGE}"
-docker pull "$NEW_IMAGE"
+# The build job pushes this image seconds before the deploy asks for it, and a
+# registry that has not finished publishing answers "manifest unknown". That
+# failed a release on 2026-09-26 (d12a227, 4 s in, no database touched) when a
+# pull a minute later succeeded. Retry the pull before calling it a failure;
+# a genuinely missing image still fails after the last attempt.
+pulled=0
+for attempt in 1 2 3 4; do
+  if docker pull "$NEW_IMAGE"; then pulled=1; break; fi
+  if [[ "$attempt" -lt 4 ]]; then
+    echo "    pull attempt ${attempt}/4 failed; retrying in $((attempt * 10))s" >&2
+    sleep "$((attempt * 10))"
+  fi
+done
+[[ "$pulled" == "1" ]] || false
 set_app_image "$NEW_IMAGE"
 
 echo "==> Ensuring the database and Supabase services are up"
