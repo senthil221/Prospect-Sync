@@ -68,11 +68,11 @@
     ]
   },
   "functionFingerprints": {
-    "data_versions_v1(text[])": "bc3209a7dade488538c15f61e7e7f541",
-    "prospect_filters_need_company_lookup_v1(jsonb)": "2b9e2c40c577b1763daeaaf27c3b5d10",
-    "prospect_filter_sql_v1(text,jsonb)": "8db1782d5bfc209d50cda10250fc07cb",
-    "prospect_prefilter_sql(text,jsonb)": "c960f574cde738ffd71c1b1f10a70100",
-    "search_prospect_workspace_v12(text,jsonb,text,text,integer,integer,text,jsonb,boolean,jsonb)": "d0d0cbed46091a7ed29db2067cb23209",
-    "search_prospect_workspace_v13(text,jsonb,text,text,integer,integer,text,jsonb,boolean,jsonb)": "4110906c237235c6592776225ae817e4"
+    "data_versions_v1(text[])": "e93ec189e8f0d730dcfee044c4e49c34",
+    "prospect_filters_need_company_lookup_v1(jsonb)": "a4f5f064d1bd7dd1928aff246e6bff90",
+    "prospect_filter_sql_v1(text,jsonb)": "c62f4a3fc89bc748228bc04b782b8aeb",
+    "prospect_prefilter_sql(text,jsonb)": "d3739680b12181d7f212473fd5283757",
+    "search_prospect_workspace_v12(text,jsonb,text,text,integer,integer,text,jsonb,boolean,jsonb)": "cc26c680099ca365510119d579d70e19",
+    "search_prospect_workspace_v13(text,jsonb,text,text,integer,integer,text,jsonb,boolean,jsonb)": "5b6c097fac0275f04d4ffa068ca60851"
   }
 }

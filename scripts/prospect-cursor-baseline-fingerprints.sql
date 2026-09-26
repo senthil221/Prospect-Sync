@@ -5,7 +5,7 @@ select p.oid::regprocedure::text || chr(9) || md5(concat_ws(
   p.prosrc,
   pg_catalog.pg_get_function_identity_arguments(p.oid),
   pg_catalog.pg_get_function_result(p.oid),
-  p.prolang::regproc::text,
+  language.lanname,
   p.provolatile::text,
   p.proparallel::text,
   p.prosecdef::text,
@@ -39,6 +39,7 @@ select p.oid::regprocedure::text || chr(9) || md5(concat_ws(
   ), '')
 ))
 from pg_catalog.pg_proc p
+join pg_catalog.pg_language language on language.oid = p.prolang
 where p.oid in (
   pg_catalog.to_regprocedure('public.data_versions_v1(text[])'),
   pg_catalog.to_regprocedure('public.prospect_filter_sql_v1(text,jsonb)'),

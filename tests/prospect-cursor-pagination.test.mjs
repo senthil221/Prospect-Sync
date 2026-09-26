@@ -175,6 +175,8 @@ test("disposable PostgreSQL schema upgrade is release-gating and fail-closed", a
   assert.match(fingerprints, /acl_entry\.grantor/);
   assert.match(fingerprints, /acl_entry\.grantee/);
   assert.match(fingerprints, /pg_get_userbyid\(p\.proowner\)/);
+  assert.match(fingerprints, /pg_language language on language\.oid = p\.prolang/);
+  assert.doesNotMatch(fingerprints, /p\.prolang::regproc/);
   assert.match(fingerprints, /search_prospect_workspace_v13/);
   assert.match(liveCanary, /begin transaction read only/);
   assert.match(liveCanary, /set local statement_timeout = '15s'/);
