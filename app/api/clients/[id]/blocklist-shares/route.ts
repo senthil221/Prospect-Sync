@@ -13,7 +13,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const { id } = await context.params;
   const admin = createAdminClient();
   const [shares, failed, pending] = await Promise.all([
-    admin.from("client_blocklist_shares").select("id,label,created_at,expires_at,revoked_at,last_submitted_at").eq("client_id", id).order("created_at", { ascending: false }),
+    admin.from("client_blocklist_shares").select("id,label,created_at,expires_at,revoked_at,last_submitted_at").eq("client_id", id).is("revoked_at", null).order("created_at", { ascending: false }),
     admin.from("client_blocklist_share_submissions").select("id", { count: "exact", head: true }).eq("client_id", id).eq("status", "failed"),
     admin.from("client_blocklist_share_submissions").select("id", { count: "exact", head: true }).eq("client_id", id).in("status", ["queued", "running"]),
   ]);

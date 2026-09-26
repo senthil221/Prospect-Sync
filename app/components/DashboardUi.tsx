@@ -303,10 +303,11 @@ export function FormDialog({ titleId, busy = false, onClose, children }: {
  * every other dialog here now keeps. The scope sentence matters most - the
  * whole point of this dialog is that the People DB record survives.
  */
-export function ConfirmDialog({ title, body, scopeNote, confirmLabel, busy = false, onCancel, onConfirm }: {
+export function ConfirmDialog({ title, body, scopeNote, error, confirmLabel, busy = false, onCancel, onConfirm }: {
   title: string;
   body: string;
   scopeNote?: string;
+  error?: string;
   confirmLabel: string;
   busy?: boolean;
   onCancel: () => void;
@@ -319,6 +320,7 @@ export function ConfirmDialog({ title, body, scopeNote, confirmLabel, busy = fal
       <span className="warning-mark">!</span>
       <h2 id="confirm-title">{title}</h2>
       <p id="confirm-body">{body}</p>
+      {error ? <p className="form-error" role="alert">{error}</p> : null}
       {scopeNote ? <p className="shared-safety">{scopeNote}</p> : null}
       <div className="modal-actions">
         {/* Cancel takes focus: the Enter that opened this must not confirm it. */}

@@ -681,6 +681,8 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
 .ds-menu-field { padding: var(--space-1) var(--space-2) var(--space-2); display: grid; gap: var(--space-1); }
 .ds-menu-field > span { color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-wide); text-transform: uppercase; }
 .ds-menu-field select { width: 100%; }
+.ds-menu-field input { width: 100%; }
+.company-cap-input { max-width: 100%; }
 
 .ds-menu-section {
   margin-top: var(--space-2);
@@ -798,6 +800,16 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
 .client-row-archive { border: 0; background: transparent; color: var(--text-tertiary); font-size: var(--text-xs); cursor: pointer; }
 .client-row-archive:hover { color: var(--danger); }
 .client-row-open { white-space: nowrap; }
+
+.recent-source-group th {
+  padding: var(--space-3) var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-sunken);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-align: left;
+}
 
 /* One folder navigator and one selected directory replaces the long stack of
    folder tables. The selection, count and location now remain visible. */

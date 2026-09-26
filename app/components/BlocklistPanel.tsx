@@ -5,11 +5,12 @@ import { api } from "../../lib/dashboard-api";
 import { formatNumber } from "../../lib/dashboard-helpers";
 import { BLOCKLIST_REQUEST_VALUES, MAX_BLOCKLIST_PASTE_VALUES, partitionBlocklistValues } from "../../lib/bulk-values.ts";
 import type { BlocklistEntry, ClientRecord } from "../../lib/types";
-import { EmptyCompact } from "./DashboardUi";
+import { ConfirmDialog, EmptyCompact } from "./DashboardUi";
 import { AppIcon } from "./DashboardUi";
 
 const blocklistReasons = ["Client Provided", "ICP Invalid", "Campaign Reply"] as const;
 type BlocklistShare = { id: string; label: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_submitted_at: string | null };
+type BlocklistSelection = { ids?: string[]; allMatching?: boolean; search?: string; kind?: string; dateFrom?: string; dateTo?: string; excludedIds?: string[]; selectedBefore?: string };
 
 // The blocklist is per client. Matching memberships are retained internally for
 // audit/restore, but disappear from the client's People and Company databases.
@@ -37,6 +38,9 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
   const [shareQueue, setShareQueue] = useState({ pending: 0, failed: 0 });
   const [shareLabel, setShareLabel] = useState("Client blocklist form");
   const [shareUrl, setShareUrl] = useState("");
+  const [deleteShareError, setDeleteShareError] = useState("");
+  const [removeRequest, setRemoveRequest] = useState<{ count: number; payload: BlocklistSelection } | null>(null);
+  const [deleteShareRequest, setDeleteShareRequest] = useState<BlocklistShare | null>(null);
   const [activeTool, setActiveTool] = useState<"add" | "links" | null>(null);
 
   const parsedPending = useMemo(() => partitionBlocklistValues(text), [text]);
@@ -150,24 +154,25 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
     finally { setBusy(false); setProgress(null); }
   }
 
-  async function removeSelected() {
-    if (!allMatching && !selected.size) return;
+  async function removeSelected(payload: BlocklistSelection = selectionPayload()) {
+    if (!payload.allMatching && !payload.ids?.length) return;
     setBusy(true); setNotice(""); setError("");
     try {
       const data = await api<{ result: { removed: number; restored: number; companiesRestored?: number } }>(
         `/api/clients/${encodeURIComponent(client.id)}/blocklist`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(selectionPayload()),
+          body: JSON.stringify(payload),
         });
       const companiesRestored = Number(data.result.companiesRestored ?? 0);
       setNotice(`Removed ${formatNumber(data.result.removed)} entries · ${formatNumber(data.result.restored)} records${companiesRestored ? ` and ${formatNumber(companiesRestored)} compan${companiesRestored === 1 ? "y" : "ies"}` : ""} restored to this client.`);
       setSelected(new Set());
       setAllMatching(false);
+      setRemoveRequest(null);
       setPage(1);
       await load(1);
       onChanged();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to remove those entries."); }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to remove those entries."); setRemoveRequest(null); }
     finally { setBusy(false); }
   }
 
@@ -179,7 +184,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
     });
   }
 
-  function selectionPayload() {
+  function selectionPayload(): BlocklistSelection {
     return allMatching
       ? { allMatching: true, search: search.trim(), kind, dateFrom, dateTo, excludedIds: [...selected], selectedBefore }
       : { ids: [...selected] };
@@ -238,12 +243,14 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
   }
 
   async function revokeShare(shareId: string) {
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setDeleteShareError("");
     try {
       await api(`/api/clients/${encodeURIComponent(client.id)}/blocklist-shares`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shareId }) });
-      setShares((current) => current.map((share) => share.id === shareId ? { ...share, revoked_at: new Date().toISOString() } : share));
-      setNotice("The client submission link was revoked.");
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to revoke the share link."); }
+      setShares((current) => current.filter((share) => share.id !== shareId));
+      setShareUrl("");
+      setDeleteShareRequest(null);
+      setNotice("The client submission link was deleted. Its submission history is kept.");
+    } catch (caught) { setDeleteShareError(caught instanceof Error ? caught.message : "Unable to delete the share link."); }
     finally { setBusy(false); }
   }
 
@@ -300,27 +307,30 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
       <div className="panel-head"><div><h3>Client submission links</h3><p>Create a revocable link clients can use only to submit new blocklist entries. Existing entries are never exposed.</p></div></div>
       <div className="blocklist-add-actions"><input aria-label="Submission link label" value={shareLabel} onChange={(event) => setShareLabel(event.target.value)} maxLength={120}/><button disabled={busy || !shareLabel.trim()} onClick={() => void createShare()}>Create &amp; copy link</button></div>
       {shareUrl ? <div className="selection-scope"><span>Link ready for sharing</span><button aria-label="Copy new client submission link" onClick={() => void navigator.clipboard.writeText(shareUrl)}>Copy link</button></div> : null}
-      {shares.length ? <div className="table-wrap"><table><thead><tr><th>Label</th><th>Created</th><th>Last submission</th><th>Status</th><th>Action</th></tr></thead><tbody>{shares.map((share) => <tr key={share.id}><td>{share.label}</td><td>{new Date(share.created_at).toLocaleDateString("en-IN")}</td><td>{share.last_submitted_at ? new Date(share.last_submitted_at).toLocaleString("en-IN") : "—"}</td><td>{share.revoked_at ? "Revoked" : "Active"}</td><td>{share.revoked_at ? "—" : <button className="row-danger" disabled={busy} onClick={() => void revokeShare(share.id)}>Revoke</button>}</td></tr>)}</tbody></table></div> : <p className="blocklist-note">No client submission links created yet.</p>}
+      {shares.length ? <div className="table-wrap"><table><thead><tr><th>Link</th><th>Created</th><th>Action</th></tr></thead><tbody>{shares.map((share) => <tr key={share.id}><td><strong>{share.label}</strong></td><td>{new Date(share.created_at).toLocaleDateString("en-IN")}</td><td><button type="button" className="row-danger" disabled={busy} onClick={() => { setDeleteShareError(""); setDeleteShareRequest(share); }}>Delete link</button></td></tr>)}</tbody></table></div> : <p className="blocklist-note">No active client links.</p>}
     </article>
 
     <article className="panel table-panel blocklist-entries-panel">
       <div className="panel-head">
         <div><h3>Blocked entries</h3><p>{formatNumber(total)} total{client.blocked_count ? ` · ${formatNumber(client.blocked_count)} client records currently removed` : ""}</p></div>
-        {selectedCount ? <div className="blocklist-add-actions"><select aria-label="New reason for selected entries" value={bulkReason} onChange={(event) => setBulkReason(event.target.value as (typeof blocklistReasons)[number])}>{blocklistReasons.map((option) => <option key={option} value={option}>{option}</option>)}</select><button disabled={busy} onClick={() => void updateSelectedReason()}>Update reason</button><button className="row-danger" disabled={busy} onClick={() => void removeSelected()}>Remove {formatNumber(selectedCount)} selected</button></div> : null}
+        {selectedCount ? <div className="blocklist-add-actions"><select aria-label="New reason for selected entries" value={bulkReason} onChange={(event) => setBulkReason(event.target.value as (typeof blocklistReasons)[number])}>{blocklistReasons.map((option) => <option key={option} value={option}>{option}</option>)}</select><button disabled={busy} onClick={() => void updateSelectedReason()}>Update reason</button><button className="row-danger" disabled={busy} onClick={() => setRemoveRequest({ count: selectedCount, payload: selectionPayload() })}>Remove {formatNumber(selectedCount)} selected</button></div> : null}
       </div>
       {!allMatching && selected.size > 0 && selected.size < total ? <div className="selection-scope"><span>{formatNumber(selected.size)} on this page selected.</span><button onClick={() => { setAllMatching(true); setSelectedBefore(new Date().toISOString()); setSelected(new Set()); }}>Select all {formatNumber(total)} matching entries</button></div> : null}
       {allMatching ? <div className="selection-scope"><span>All {formatNumber(total)} matching entries selected{selected.size ? ` except ${formatNumber(selected.size)}` : ""}.</span><button onClick={() => { setAllMatching(false); setSelected(new Set()); }}>Clear selection</button></div> : null}
       {loading ? <div className="workspace-loading">Loading the blocklist…</div> : entries.length ? <div className="table-wrap"><table>
-        <thead><tr><th className="select-column"><input type="checkbox" aria-label="Select all entries on this page" checked={pageSelected} onChange={() => { if (pageSelected) { setSelected((current) => { const next = new Set(current); entries.forEach((entry) => allMatching ? next.add(entry.id) : next.delete(entry.id)); return next; }); } else { setSelected((current) => { const next = new Set(current); entries.forEach((entry) => allMatching ? next.delete(entry.id) : next.add(entry.id)); return next; }); } }}/></th><th>Value</th><th>Type</th><th>Reason</th><th>Added</th></tr></thead>
+        <thead><tr><th className="select-column"><input type="checkbox" aria-label="Select all entries on this page" checked={pageSelected} onChange={() => { if (pageSelected) { setSelected((current) => { const next = new Set(current); entries.forEach((entry) => allMatching ? next.add(entry.id) : next.delete(entry.id)); return next; }); } else { setSelected((current) => { const next = new Set(current); entries.forEach((entry) => allMatching ? next.delete(entry.id) : next.add(entry.id)); return next; }); } }}/></th><th>Value</th><th>Type</th><th>Reason</th><th>Added</th><th>Action</th></tr></thead>
         <tbody>{entries.map((entry) => <tr key={entry.id}>
           <td className="select-column"><input type="checkbox" aria-label={`Select ${entry.value}`} checked={allMatching ? !selected.has(entry.id) : selected.has(entry.id)} onChange={() => toggle(entry.id)}/></td>
           <td><strong>{entry.value}</strong></td>
           <td><span className={`data-source-badge ${entry.kind}`}>{entry.kind === "domain" ? "Domain" : "Email"}</span></td>
           <td>{entry.reason || <span className="missing-value">-</span>}</td>
           <td>{new Date(entry.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</td>
+          <td><button type="button" className="row-danger" disabled={busy} aria-label={`Remove ${entry.value} from this client blocklist`} onClick={() => setRemoveRequest({ count: 1, payload: { ids: [entry.id] } })}>Remove</button></td>
         </tr>)}</tbody>
       </table></div> : <EmptyCompact text={search ? `No blocked entries match “${search}”.` : "Nothing is blocked for this client yet."} />}
       {totalPages > 1 ? <div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={loading || page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}><AppIcon name="back" size={14}/> Previous</button><button disabled={loading || page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Next</button></div></div> : null}
     </article>
+    {removeRequest ? <ConfirmDialog title={`Remove ${formatNumber(removeRequest.count)} blocklist entr${removeRequest.count === 1 ? "y" : "ies"}?`} body="These entries will stop blocking matches in this client. Matching records may return to the client workspace." confirmLabel="Remove entries" busy={busy} onCancel={() => setRemoveRequest(null)} onConfirm={() => void removeSelected(removeRequest.payload)}/> : null}
+    {deleteShareRequest ? <ConfirmDialog title="Delete this client link?" body={`“${deleteShareRequest.label}” will stop working. Existing client submissions and their history will be kept.`} error={deleteShareError} confirmLabel="Delete link" busy={busy} onCancel={() => { setDeleteShareRequest(null); setDeleteShareError(""); }} onConfirm={() => void revokeShare(deleteShareRequest.id)}/> : null}
   </section>;
 }

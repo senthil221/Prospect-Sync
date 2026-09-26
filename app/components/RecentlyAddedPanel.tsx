@@ -7,10 +7,16 @@ import type { ClientAdditionBatch, ClientRecord } from "../../lib/types";
 import { AppIcon, EmptyCompact } from "./DashboardUi";
 import { useDebouncedValue } from "./useDebouncedValue";
 
-function sourceLabel(batch: ClientAdditionBatch) {
+function sourceGroup(batch: ClientAdditionBatch) {
+  if (batch.source_kind === "import") return { key: "import", label: "Import" };
+  if (batch.source_kind === "client") return { key: "client", label: "Pushed from Client DB" };
+  return { key: "master", label: "Pushed from Master DB" };
+}
+
+function sourceDetail(batch: ClientAdditionBatch) {
   if (batch.source_kind === "import") return batch.source_label || "Imported file";
-  if (batch.source_kind === "client") return `Pushed from ${batch.source_label || batch.source_client_name || "Client DB"}`;
-  return batch.source_label || "Master DB push";
+  if (batch.source_kind === "client") return batch.source_client_name || batch.source_label || "Client DB";
+  return "Master DB";
 }
 
 type BatchRecord = {
@@ -39,6 +45,13 @@ export default function RecentlyAddedPanel({ client }: { client: ClientRecord; o
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [recordsError, setRecordsError] = useState("");
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const batchGroups = batches.reduce<Array<{ key: string; label: string; batches: ClientAdditionBatch[] }>>((groups, batch) => {
+    const source = sourceGroup(batch);
+    const existing = groups.find((group) => group.key === source.key);
+    if (existing) existing.batches.push(batch);
+    else groups.push({ ...source, batches: [batch] });
+    return groups;
+  }, []);
 
   useEffect(() => {
     let current = true;
@@ -91,13 +104,15 @@ export default function RecentlyAddedPanel({ client }: { client: ClientRecord; o
     <article className="panel table-panel">
       {loading ? <div className="workspace-loading">Loading recent batches…</div> : batches.length ? <div className="table-wrap"><table>
         <thead><tr><th>Source</th><th>Type</th><th>Records</th><th>Added</th><th>Action</th></tr></thead>
-        <tbody>{batches.map((batch) => <tr key={batch.id}>
-          <td className="recent-source-cell"><strong title={sourceLabel(batch)}>{sourceLabel(batch)}</strong><small>{batch.source_kind === "import" ? "Import" : batch.source_kind === "client" ? "Client push" : "Master push"}</small></td>
+        {batchGroups.map((group) => <tbody key={group.key}>
+        <tr className="recent-source-group"><th colSpan={5} scope="rowgroup">{group.label}</th></tr>
+        {group.batches.map((batch) => <tr key={batch.id}>
+          <td>{sourceDetail(batch)}</td>
           <td><span className="data-source-badge">{batch.entity_type === "people" ? "People" : "Companies"}</span></td>
           <td>{formatNumber(Number(batch.record_count ?? 0))}</td>
           <td><time dateTime={batch.created_at}>{new Date(batch.created_at).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</time></td>
           <td><button className="outline-button" aria-expanded={expanded === batch.id} onClick={() => { const opening = expanded !== batch.id; setExpanded(opening ? batch.id : null); setRecordPage(1); setRecordsLoading(opening); if (!opening) { setRecords([]); setRecordTotal(0); setRecordsError(""); } }}>{expanded === batch.id ? "Hide records" : "View records"}</button></td>
-        </tr>)}</tbody>
+        </tr>)}</tbody>)}
       </table></div> : <EmptyCompact text={search ? `No recent batch contains “${search}”.` : "No import or push batches have been recorded for this client yet."}/>}
       {totalPages > 1 ? <div className="company-pagination"><span>Page {page} of {totalPages} · {formatNumber(total)} batches</span><div><button disabled={loading || page <= 1} onClick={() => setPage((value) => value - 1)}><AppIcon name="back" size={14}/> Previous</button><button disabled={loading || page >= totalPages} onClick={() => setPage((value) => value + 1)}>Next</button></div></div> : null}
     </article>
