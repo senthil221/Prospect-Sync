@@ -171,7 +171,10 @@ test("disposable PostgreSQL schema upgrade is release-gating and fail-closed", a
   assert.match(runner, /Restored v12\/v13\/compiler fingerprints differ/);
   assert.match(runner, /Cursor candidate changed an inherited v12\/v13\/compiler function/);
   assert.match(fingerprints, /p\.prosrc/);
-  assert.match(fingerprints, /p\.proacl/);
+  assert.match(fingerprints, /aclexplode/);
+  assert.match(fingerprints, /acl_entry\.grantor/);
+  assert.match(fingerprints, /acl_entry\.grantee/);
+  assert.match(fingerprints, /pg_get_userbyid\(p\.proowner\)/);
   assert.match(fingerprints, /search_prospect_workspace_v13/);
   assert.match(liveCanary, /begin transaction read only/);
   assert.match(liveCanary, /set local statement_timeout = '15s'/);

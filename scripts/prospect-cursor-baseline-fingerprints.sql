@@ -12,7 +12,31 @@ select p.oid::regprocedure::text || chr(9) || md5(concat_ws(
   p.proleakproof::text,
   coalesce(pg_catalog.array_to_string(p.proconfig, E'\x1e'), ''),
   pg_catalog.pg_get_userbyid(p.proowner),
-  coalesce(p.proacl::text, '')
+  coalesce((
+    select pg_catalog.string_agg(
+      pg_catalog.concat_ws(
+        ':',
+        pg_catalog.pg_get_userbyid(acl_entry.grantor),
+        case when acl_entry.grantee = 0
+          then 'PUBLIC'
+          else pg_catalog.pg_get_userbyid(acl_entry.grantee)
+        end,
+        acl_entry.privilege_type,
+        acl_entry.is_grantable::text
+      ),
+      ',' order by
+        pg_catalog.pg_get_userbyid(acl_entry.grantor),
+        case when acl_entry.grantee = 0
+          then 'PUBLIC'
+          else pg_catalog.pg_get_userbyid(acl_entry.grantee)
+        end,
+        acl_entry.privilege_type,
+        acl_entry.is_grantable
+    )
+    from pg_catalog.aclexplode(
+      coalesce(p.proacl, pg_catalog.acldefault('f', p.proowner))
+    ) acl_entry
+  ), '')
 ))
 from pg_catalog.pg_proc p
 where p.oid in (
