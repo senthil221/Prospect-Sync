@@ -26,6 +26,7 @@ let lastJanitorAt = 0;
 // The backlog is usually empty, so this is a cheap poll; it only has real work
 // to do just after a company import or a bulk client change.
 const reindexDrainIntervalMs = setting('OPERATIONS_REINDEX_MS', 15000, 1000, 600000);
+const reindexCatchUpMs = setting('OPERATIONS_REINDEX_CATCHUP_MS', 2000, 500, 600000);
 let lastReindexDrainAt = 0;
 const statementTimeout = pgInterval(process.env.OPERATIONS_STATEMENT_TIMEOUT, "120s", "OPERATIONS_STATEMENT_TIMEOUT");
 const timeoutParts = /^(\d+)(ms|s|min|h)$/.exec(statementTimeout);
@@ -149,6 +150,14 @@ async function runReindexDrain() {
     // Only worth a line when it did something; the normal case is an empty queue.
     if (processed) console.log(JSON.stringify({ event: 'reindex_drain', processed, remaining }));
     if (processed) markProgress();
+    // Bulk actions now defer everything past their first 200 prospects to this
+    // backlog (20260926170000), so a backlog is the normal aftermath of a large
+    // action rather than a rare repair. While one exists, come back after a
+    // short breath instead of the full interval: still one unit at a time on
+    // this single connection, and the fair scheduler runs between passes.
+    if (processed && remaining > 0) {
+      lastReindexDrainAt = Date.now() - reindexDrainIntervalMs + reindexCatchUpMs;
+    }
   } catch (error) {
     metrics.record('reindex', 'error', performance.now() - started);
     // A lagging index is not worth failing the worker over - the rows stay

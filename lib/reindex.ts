@@ -12,6 +12,12 @@ const benignCodes = new Set(["PGRST202", "42883", "42P01"]);
 // rather than silently dropped.
 const batchSize = 2000;
 
+// How many prospects a request re-indexes before it returns. Everything past
+// this goes to the backlog the operations worker drains, so a large selection
+// cannot hold an interactive connection for most of a minute - the same bound
+// reindex_scope_v1 applies in the database (20260926170000).
+const inlineLimit = 200;
+
 function isBenign(error: { code?: string } | null | undefined) {
   return Boolean(error?.code && benignCodes.has(error.code));
 }
@@ -35,8 +41,15 @@ export async function reindexProspects(supabase: Admin, ids: Array<string | null
   let queued = 0;
   let degraded = false;
 
-  for (let index = 0; index < unique.length; index += batchSize) {
-    const batch = unique.slice(index, index + batchSize);
+  const deferred = unique.slice(inlineLimit);
+  if (deferred.length) {
+    if (await enqueue(supabase, deferred, "")) queued += deferred.length;
+    else degraded = true;
+  }
+  const inline = unique.slice(0, inlineLimit);
+
+  for (let index = 0; index < inline.length; index += batchSize) {
+    const batch = inline.slice(index, index + batchSize);
     const { data, error } = await supabase.rpc("reindex_prospects", { p_ids: batch });
     if (!error) { reindexed += Number(data ?? batch.length); continue; }
     if (isBenign(error)) { degraded = true; continue; }
