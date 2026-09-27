@@ -64,7 +64,19 @@ grant prospect_verifier to prospect_verification_worker;
 
 for (let index = 0; index < migrations.length; index += 1) {
   const name = migrations[index];
-  const body = sqlFiles[index];
+  let body = sqlFiles[index];
+  if (name === '20260926150000_indexes_are_reachable_and_background_work_waits.sql') {
+    // The shipped proof deliberately checks a production-depth cursor. The
+    // reviewed synthetic fixture is tiny, so a 200,000 offset returns NULL and
+    // accidentally compares page one with an empty page. Keep the same adjacent
+    // cursor-vs-OFFSET proof at rows 2/3, and require both exact anchors so this
+    // adaptation cannot mask a future change to the historical migration.
+    for (const [from, to] of [['offset 200000 limit 1', 'offset 2 limit 1'], ['offset 200001 limit 50', 'offset 3 limit 50']]) {
+      const occurrences = body.split(from).length - 1;
+      if (occurrences !== 1) throw new Error(`${name}: expected one ${from} proof anchor, found ${occurrences}.`);
+      body = body.replace(from, to);
+    }
+  }
   const meaningful = body.split(/\r?\n/u).map(line => line.trim()).filter(line => line && !line.startsWith('--'));
   if (meaningful[0]?.toLowerCase() === 'begin;' || meaningful.at(-1)?.toLowerCase() === 'commit;') {
     throw new Error(`${name} must not own its transaction.`);
