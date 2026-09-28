@@ -61,7 +61,11 @@ create table if not exists prospect_verification.runs (
   processed_count integer not null default 0,
   reused_count integer not null default 0,
   skipped_count integer not null default 0,
+  cancelled_count integer not null default 0,
   error_count integer not null default 0,
+  snapshot_complete boolean not null default false,
+  preparation_token uuid,
+  preparation_lease_expires_at timestamptz,
   last_error text,
   created_at timestamptz not null default now(),
   started_at timestamptz,
@@ -84,6 +88,7 @@ create table if not exists prospect_verification.email_checks (
   lease_expires_at timestamptz,
   worker_id text,
   last_error_code text,
+  priority smallint not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (normalized_email, generation)
@@ -91,9 +96,12 @@ create table if not exists prospect_verification.email_checks (
 
 create table if not exists prospect_verification.run_targets (
   run_id uuid not null references prospect_verification.runs(id) on delete cascade,
-  prospect_id text not null references public.prospects(id) on delete cascade,
+  prospect_id text not null,
   normalized_email text not null,
   email_revision bigint not null,
+  deletion_epoch bigint not null default 0,
+  generation_floor integer not null default 0,
+  reuse_result boolean not null default false,
   check_id uuid references prospect_verification.email_checks(id),
   state text not null default 'waiting' check (state in ('waiting','reused','completed','skipped','error','cancelled')),
   created_at timestamptz not null default now(),
@@ -105,8 +113,23 @@ create index if not exists idx_verification_targets_check
   on prospect_verification.run_targets(check_id, state);
 create index if not exists idx_verification_targets_prospect
   on prospect_verification.run_targets(prospect_id);
+create index if not exists idx_verification_targets_runnable
+  on prospect_verification.run_targets(run_id, check_id)
+  where state='waiting';
+create index if not exists idx_verification_targets_unallocated
+  on prospect_verification.run_targets(run_id, prospect_id)
+  where state='waiting' and check_id is null;
+create index if not exists idx_verification_targets_reconcile
+  on prospect_verification.run_targets(run_id, prospect_id, check_id)
+  where state='waiting' and check_id is not null;
 create index if not exists idx_verification_checks_claim
   on prospect_verification.email_checks(execution_state, next_attempt_at, created_at);
+create index if not exists idx_verification_checks_priority_claim
+  on prospect_verification.email_checks(priority desc, created_at)
+  where execution_state in ('queued','running');
+create index if not exists idx_verification_checks_fifo_claim
+  on prospect_verification.email_checks(created_at)
+  where execution_state in ('queued','running');
 create unique index if not exists uq_verification_active_email
   on prospect_verification.email_checks(normalized_email)
   where execution_state in ('queued','running');
@@ -125,6 +148,8 @@ create table if not exists prospect_verification.provider_control (
   rolling_attempts integer not null default 0,
   daily_window_started_at timestamptz not null default (date_trunc('day', now() at time zone 'UTC') at time zone 'UTC'),
   daily_attempts integer not null default 0,
+  dispatch_sequence bigint not null default 0,
+  consecutive_failures integer not null default 0,
   daily_limit integer not null default 150000 check (daily_limit between 1 and 200000),
   worker_configured boolean not null default false,
   worker_seen_at timestamptz,
@@ -140,11 +165,21 @@ create table if not exists prospect_verification.dispatch_attempts (
 create index if not exists idx_verification_dispatch_attempts_at
   on prospect_verification.dispatch_attempts(attempted_at);
 
+-- A deletion increments only this tiny private fence. Targets deliberately keep
+-- their immutable history and therefore do not reference prospects by FK.
+-- Recreating the same public id cannot inherit a result captured before delete.
+create table if not exists prospect_verification.prospect_deletions (
+  prospect_id text primary key,
+  deletion_epoch bigint not null default 0,
+  deleted_at timestamptz not null default now()
+);
+
 alter table prospect_verification.runs enable row level security;
 alter table prospect_verification.email_checks enable row level security;
 alter table prospect_verification.run_targets enable row level security;
 alter table prospect_verification.provider_control enable row level security;
 alter table prospect_verification.dispatch_attempts enable row level security;
+alter table prospect_verification.prospect_deletions enable row level security;
 revoke all on all tables in schema prospect_verification from public, anon, authenticated;
 
 create or replace function prospect_verification.normalize_email(p_email text)
@@ -233,16 +268,11 @@ for each row execute function prospect_verification.hydrate_index_projection();
 create or replace function prospect_verification.account_deleted_prospect()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
-  with changed as (
-    update prospect_verification.run_targets set state='skipped',completed_at=now()
-    where prospect_id=old.id and state='waiting' returning run_id
-  ), delta as (select run_id,count(*)::int skipped from changed group by run_id)
-  update prospect_verification.runs r set processed_count=r.processed_count+d.skipped,
-    skipped_count=r.skipped_count+d.skipped,
-    status=case when r.status in ('queued','preparing','paused','cancelled') then r.status
-      when r.processed_count+d.skipped>=r.total_count then case when r.error_count>0 then 'completed_with_errors' else 'completed' end else r.status end,
-    completed_at=case when r.status='running' and r.processed_count+d.skipped>=r.total_count then now() else r.completed_at end,
-    updated_at=now() from delta d where r.id=d.run_id;
+  insert into prospect_verification.prospect_deletions(prospect_id,deletion_epoch,deleted_at)
+  values(old.id,1,now())
+  on conflict(prospect_id) do update set
+    deletion_epoch=prospect_verification.prospect_deletions.deletion_epoch+1,
+    deleted_at=excluded.deleted_at;
   return old;
 end $$;
 drop trigger if exists prospect_verification_account_delete on public.prospects;
@@ -253,7 +283,10 @@ create or replace function public.request_email_verification_v1(
   p_request_id uuid, p_payload jsonb, p_actor_id uuid default null
 ) returns jsonb
 language plpgsql security definer set search_path = '' as $$
-declare v_hash text := pg_catalog.md5(coalesce(p_payload, '{}'::jsonb)::text);
+declare v_hash text := pg_catalog.md5((
+  (coalesce(p_payload,'{}'::jsonb)-'companyScope'-'intentCompanyScope') ||
+  jsonb_build_object('companyScope',coalesce(p_payload->'intentCompanyScope',p_payload->'companyScope','{}'::jsonb))
+)::text);
 declare v_run prospect_verification.runs;
 declare v_scope text := coalesce(p_payload->>'scope', '');
 begin
@@ -276,10 +309,20 @@ end $$;
 
 create or replace function public.email_verification_runs_v1(p_limit integer default 20)
 returns jsonb language sql stable security definer set search_path = '' as $$
+  with selected as (
+    select r.* from prospect_verification.runs r
+    where r.status not in ('completed','completed_with_errors','cancelled','failed')
+    union all
+    select recent.* from (
+      select r.* from prospect_verification.runs r
+      where r.status in ('completed','completed_with_errors','cancelled','failed')
+      order by r.created_at desc limit greatest(1,least(coalesce(p_limit,20),100))
+    ) recent
+  )
   select jsonb_build_object(
     'runs', coalesce(jsonb_agg(to_jsonb(r) order by r.created_at desc), '[]'::jsonb),
     'provider', (select to_jsonb(pc) - 'singleton' from prospect_verification.provider_control pc where singleton)
-  ) from (select * from prospect_verification.runs order by created_at desc limit greatest(1,least(coalesce(p_limit,20),100))) r;
+  ) from selected r;
 $$;
 
 create or replace function public.control_email_verification_run_v1(p_run_id uuid, p_action text)
@@ -291,14 +334,17 @@ begin
     where id=p_run_id and status in ('queued','preparing','running') returning * into v_run;
   elsif p_action='continue' then
     update prospect_verification.runs set
-      status=case when total_count=0 then 'queued' when processed_count>=total_count then case when error_count>0 then 'completed_with_errors' else 'completed' end else 'running' end,
-      completed_at=case when total_count>0 and processed_count>=total_count then coalesce(completed_at,now()) else completed_at end,updated_at=now()
+      status=case when not snapshot_complete then 'queued'
+        when processed_count>=total_count then case when error_count>0 then 'completed_with_errors' else 'completed' end
+        else 'running' end,
+      preparation_token=case when snapshot_complete then preparation_token else null end,
+      preparation_lease_expires_at=case when snapshot_complete then preparation_lease_expires_at else null end,
+      completed_at=case when snapshot_complete and processed_count>=total_count then coalesce(completed_at,now()) else null end,
+      updated_at=now()
     where id=p_run_id and status='paused' returning * into v_run;
   elsif p_action='cancel' then
     update prospect_verification.runs set status='cancelled',completed_at=now(),updated_at=now()
     where id=p_run_id and status in ('queued','preparing','running','paused') returning * into v_run;
-    update prospect_verification.run_targets set state='cancelled',completed_at=now()
-    where run_id=p_run_id and state='waiting';
   else raise exception 'Unsupported run action' using errcode='22023'; end if;
   if not found then select * into v_run from prospect_verification.runs where id=p_run_id; end if;
   if v_run.id is null then raise exception 'Verification run not found' using errcode='P0002'; end if;
@@ -326,9 +372,36 @@ returns void language sql security definer set search_path = '' as $$
   update prospect_verification.provider_control set worker_configured=p_configured,worker_seen_at=now(),updated_at=now() where singleton;
 $$;
 
--- Atomically freezes a bounded selection.  Any failure rolls back the status
--- change and every target, so dispatch can never observe a partial snapshot.
-create or replace function public.prepare_email_verification_run_v1(p_run_id uuid, p_limit integer default 2000000)
+-- Reserve preparation in a short transaction. The worker performs the exact
+-- INSERT SELECT in a separate call so claims and provider result settlement do
+-- not wait behind a long Master snapshot.
+create or replace function public.prepare_next_email_verification_run_v1(p_lease_seconds integer default 900)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v_run prospect_verification.runs;
+begin
+  with candidate as (
+    select id from prospect_verification.runs
+    where (status='queued' and not snapshot_complete)
+       or (status='preparing' and not snapshot_complete and preparation_lease_expires_at<=now())
+    order by priority desc,created_at
+    for update skip locked limit 1
+  )
+  update prospect_verification.runs r set status='preparing',
+    preparation_token=gen_random_uuid(),
+    preparation_lease_expires_at=now()+make_interval(secs=>greatest(60,least(coalesce(p_lease_seconds,900),1800))),
+    started_at=coalesce(started_at,now()),updated_at=now()
+  from candidate c where r.id=c.id returning r.* into v_run;
+  if v_run.id is null then return null; end if;
+  return jsonb_build_object('id',v_run.id,'preparationToken',v_run.preparation_token,
+    'leaseExpiresAt',v_run.preparation_lease_expires_at);
+end $$;
+
+-- Atomically freezes the exact full selection. There is no check allocation or
+-- canonical prospect write in this transaction. If its lease was replaced,
+-- the attempted target snapshot is removed before returning.
+create or replace function public.prepare_email_verification_run_v1(
+  p_run_id uuid,p_preparation_token uuid,p_limit integer default 2000000
+)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare v_run prospect_verification.runs;
 declare v_prefilter text;
@@ -339,10 +412,14 @@ declare v_has_scope boolean;
 declare v_has_cap boolean;
 declare v_inserted bigint;
 begin
-  select * into v_run from prospect_verification.runs where id=p_run_id for update;
+  if not pg_try_advisory_xact_lock(hashtextextended('verification-prepare:'||p_run_id::text,7193)) then
+    select * into v_run from prospect_verification.runs where id=p_run_id;
+    return to_jsonb(v_run);
+  end if;
+  select * into v_run from prospect_verification.runs where id=p_run_id;
   if v_run.id is null then raise exception 'Verification run not found' using errcode='P0002'; end if;
-  if v_run.status not in ('queued','preparing') then return to_jsonb(v_run); end if;
-  update prospect_verification.runs set status='preparing',started_at=coalesce(started_at,now()),updated_at=now() where id=p_run_id;
+  if v_run.snapshot_complete or v_run.preparation_token is distinct from p_preparation_token
+     or v_run.status not in ('preparing','paused','cancelled') then return to_jsonb(v_run); end if;
   begin
     if v_run.scope <> 'import' then
       v_has_cap := exists(select 1 from jsonb_array_elements(v_run.filters) f where f->>'field'='__max_people_per_company');
@@ -357,10 +434,13 @@ begin
         and (btrim(coalesce(v_run.company_scope->>'search',''))<>'' or coalesce(v_run.company_scope->'filters','[]'::jsonb)<>'[]'::jsonb);
       if v_has_cap then
         execute format($q$
-          insert into prospect_verification.run_targets(run_id,prospect_id,normalized_email,email_revision)
-          select %L::uuid,pi.id,prospect_verification.normalize_email(pi.work_email),pi.work_email_revision
+          insert into prospect_verification.run_targets(run_id,prospect_id,normalized_email,email_revision,deletion_epoch,generation_floor)
+          select %L::uuid,pi.id,prospect_verification.normalize_email(pi.work_email),pi.work_email_revision,
+            coalesce(pd.deletion_epoch,0),coalesce((select max(ec.generation) from prospect_verification.email_checks ec
+              where ec.normalized_email=prospect_verification.normalize_email(pi.work_email) and ec.execution_state='completed'),0)
           from public.prospect_capped_candidate_ids_v1(%L,%L::jsonb,null,%L::jsonb) candidate
           join public.prospect_index pi on pi.id=candidate.prospect_id
+          left join prospect_verification.prospect_deletions pd on pd.prospect_id=pi.id
           where nullif(prospect_verification.normalize_email(pi.work_email),'') is not null
           on conflict do nothing$q$,p_run_id,v_run.search,v_run.filters::text,v_run.company_scope::text);
       else
@@ -369,9 +449,12 @@ begin
           v_scope_join:=' join eligible_companies eligible on eligible.company_id=pi.company_id ';
         end if;
         execute format($q$
-          insert into prospect_verification.run_targets(run_id,prospect_id,normalized_email,email_revision)
-          %s select %L::uuid,pi.id,prospect_verification.normalize_email(pi.work_email),pi.work_email_revision
+          insert into prospect_verification.run_targets(run_id,prospect_id,normalized_email,email_revision,deletion_epoch,generation_floor)
+          %s select %L::uuid,pi.id,prospect_verification.normalize_email(pi.work_email),pi.work_email_revision,
+          coalesce(pd.deletion_epoch,0),coalesce((select max(ec.generation) from prospect_verification.email_checks ec
+            where ec.normalized_email=prospect_verification.normalize_email(pi.work_email) and ec.execution_state='completed'),0)
           from public.prospect_index pi %s
+          left join prospect_verification.prospect_deletions pd on pd.prospect_id=pi.id
           where nullif(prospect_verification.normalize_email(pi.work_email),'') is not null
             and (%s) and (%s) on conflict do nothing$q$,v_scope_cte,p_run_id,v_scope_join,v_prefilter,v_predicate);
       end if;
@@ -384,81 +467,90 @@ begin
     update prospect_verification.runs set status='failed',last_error='Verification preparation timed out.',completed_at=now(),updated_at=now() where id=p_run_id returning * into v_run;
     return to_jsonb(v_run);
   when others then
+    delete from prospect_verification.run_targets where run_id=p_run_id;
     update prospect_verification.runs set status='failed',last_error=left(sqlerrm,500),completed_at=now(),updated_at=now() where id=p_run_id returning * into v_run;
     return to_jsonb(v_run);
   end;
-
-  drop table if exists pg_temp.verification_check_map;
-  create temporary table verification_check_map(
-    normalized_email text primary key,base_generation integer not null default 0,
-    check_id uuid,state text not null default 'waiting'
-  ) on commit drop;
-  insert into verification_check_map(normalized_email,base_generation)
-    select t.normalized_email,coalesce(max(c.generation),0)
-    from (select distinct normalized_email from prospect_verification.run_targets where run_id=p_run_id)t
-    left join prospect_verification.email_checks c on c.normalized_email=t.normalized_email group by t.normalized_email;
-
-  perform 1 from prospect_verification.email_checks c
-  where c.normalized_email in(select normalized_email from verification_check_map)
-    and c.execution_state in ('queued','running') for update;
-
-  update verification_check_map m set check_id=(select c.id from prospect_verification.email_checks c
-    where c.normalized_email=m.normalized_email and c.execution_state in ('queued','running') order by c.generation desc limit 1);
-  if not v_run.force_reverify then
-    update verification_check_map m set check_id=(select c.id from prospect_verification.email_checks c
-      where c.normalized_email=m.normalized_email and c.execution_state='completed' order by c.generation desc limit 1),state='reused'
-    where m.check_id is null and exists(select 1 from prospect_verification.email_checks c
-      where c.normalized_email=m.normalized_email and c.execution_state='completed');
+  update prospect_verification.runs set snapshot_complete=true,total_count=v_inserted,
+    preparation_lease_expires_at=null,
+    status=case when status in ('paused','cancelled') then status when v_inserted=0 then 'completed' else 'running' end,
+    completed_at=case when status='cancelled' or (status not in ('paused','cancelled') and v_inserted=0) then coalesce(completed_at,now()) else completed_at end,
+    updated_at=now()
+  where id=p_run_id and preparation_token=p_preparation_token
+    and status in ('preparing','paused','cancelled') returning * into v_run;
+  if v_run.id is null then
+    delete from prospect_verification.run_targets where run_id=p_run_id;
+    select * into v_run from prospect_verification.runs where id=p_run_id;
   end if;
-
-  insert into prospect_verification.email_checks(normalized_email,generation)
-  select m.normalized_email,m.base_generation+1
-  from verification_check_map m where m.check_id is null
-  on conflict do nothing;
-  perform 1 from prospect_verification.email_checks c join verification_check_map m on m.normalized_email=c.normalized_email
-    where m.check_id is null and c.generation>m.base_generation for update;
-  update verification_check_map m set
-    check_id=(select c.id from prospect_verification.email_checks c
-      where c.normalized_email=m.normalized_email and c.generation>m.base_generation order by c.generation desc limit 1),
-    state=case when exists(select 1 from prospect_verification.email_checks c
-      where c.normalized_email=m.normalized_email and c.generation>m.base_generation and c.execution_state='completed') then 'reused' else 'waiting' end
-  where m.check_id is null;
-  if exists(select 1 from verification_check_map where check_id is null) then
-    update prospect_verification.runs set status='failed',last_error='Could not allocate every shared verification check.',completed_at=now(),updated_at=now() where id=p_run_id returning * into v_run;
-    return to_jsonb(v_run);
-  end if;
-
-  update prospect_verification.run_targets t set check_id=m.check_id,state=m.state,
-    completed_at=case when m.state='reused' then now() end
-  from verification_check_map m where t.run_id=p_run_id and t.normalized_email=m.normalized_email;
-  update public.prospects p set
-    verification_checked_email=c.normalized_email,verification_status=c.result_status,
-    verification_reason=c.result_reason,verification_provider=c.provider,
-    verification_checked_at=c.checked_at,verification_generation=c.generation,verification_result_id=c.id
-  from prospect_verification.run_targets t join prospect_verification.email_checks c on c.id=t.check_id
-  where t.run_id=p_run_id and t.state='reused' and p.id=t.prospect_id
-    and p.work_email_revision=t.email_revision and prospect_verification.normalize_email(p.work_email)=t.normalized_email
-    and coalesce(p.verification_generation,0)<=c.generation;
-  update prospect_verification.runs r set
-    total_count=(select count(*) from prospect_verification.run_targets t where t.run_id=r.id),
-    reused_count=(select count(*) from prospect_verification.run_targets t where t.run_id=r.id and t.state='reused'),
-    processed_count=(select count(*) from prospect_verification.run_targets t where t.run_id=r.id and t.state in ('reused','completed','skipped','error')),
-    status=case when not exists(select 1 from prospect_verification.run_targets t where t.run_id=r.id and t.state='waiting') then 'completed' else 'running' end,
-    completed_at=case when not exists(select 1 from prospect_verification.run_targets t where t.run_id=r.id and t.state='waiting') then now() end,
-    updated_at=now() where id=p_run_id returning * into v_run;
   return to_jsonb(v_run);
 end $$;
 
-create or replace function public.prepare_next_email_verification_run_v1()
-returns jsonb language plpgsql security definer set search_path = '' as $$
-declare v_id uuid;
+-- Attach at most one bounded slice of immutable snapshot targets to shared
+-- checks. The run row serializes allocators for one run; a deterministic
+-- per-email advisory lock serializes the same address across different runs.
+create or replace function public.allocate_email_verification_targets_v1(
+  p_run_id uuid,p_limit integer default 500
+) returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v_run prospect_verification.runs;
+declare v_target record;
+declare v_check prospect_verification.email_checks;
+declare v_count integer:=0;
+declare v_generation integer;
 begin
-  select id into v_id from prospect_verification.runs where status='queued'
-    or (status='preparing' and updated_at<now()-interval '5 minutes')
-  order by priority desc,created_at for update skip locked limit 1;
-  if v_id is null then return null; end if;
-  return public.prepare_email_verification_run_v1(v_id,2000000);
+  select * into v_run from prospect_verification.runs where id=p_run_id for update;
+  if v_run.id is null then raise exception 'Verification run not found' using errcode='P0002'; end if;
+  if not v_run.snapshot_complete or v_run.status<>'running' then
+    return jsonb_build_object('allocated',0,'remaining',exists(select 1 from prospect_verification.run_targets where run_id=p_run_id and state='waiting' and check_id is null));
+  end if;
+  for v_target in
+    select prospect_id,normalized_email,generation_floor
+    from prospect_verification.run_targets
+    where run_id=p_run_id and state='waiting' and check_id is null
+    order by prospect_id limit greatest(1,least(coalesce(p_limit,500),500))
+  loop
+    perform pg_advisory_xact_lock(hashtextextended(v_target.normalized_email,7194));
+    v_check:=null;
+    if v_run.force_reverify then
+      select * into v_check from prospect_verification.email_checks
+      where normalized_email=v_target.normalized_email and execution_state='completed'
+        and generation>v_target.generation_floor
+      order by generation desc limit 1 for update;
+    else
+      select * into v_check from prospect_verification.email_checks
+      where normalized_email=v_target.normalized_email and execution_state='completed'
+      order by generation desc limit 1 for update;
+    end if;
+    if v_check.id is null then
+      select * into v_check from prospect_verification.email_checks
+      where normalized_email=v_target.normalized_email and execution_state in ('queued','running')
+        and (not v_run.force_reverify or generation>v_target.generation_floor)
+      order by generation desc limit 1 for update;
+    end if;
+    if v_check.id is null then
+      select greatest(coalesce(max(generation),0),v_target.generation_floor)+1 into v_generation
+      from prospect_verification.email_checks where normalized_email=v_target.normalized_email;
+      insert into prospect_verification.email_checks(normalized_email,generation,priority)
+      values(v_target.normalized_email,v_generation,v_run.priority) returning * into v_check;
+    end if;
+    update prospect_verification.email_checks set priority=greatest(priority,v_run.priority),updated_at=now()
+      where id=v_check.id and execution_state in ('queued','running');
+    update prospect_verification.run_targets set check_id=v_check.id,
+      reuse_result=(v_check.execution_state='completed')
+    where run_id=p_run_id and prospect_id=v_target.prospect_id and state='waiting' and check_id is null;
+    if found then v_count:=v_count+1; end if;
+  end loop;
+  return jsonb_build_object('allocated',v_count,'remaining',exists(
+    select 1 from prospect_verification.run_targets where run_id=p_run_id and state='waiting' and check_id is null));
 end $$;
+
+create or replace function public.next_email_verification_allocation_run_v1()
+returns uuid language sql stable security definer set search_path = '' as $$
+  select r.id from prospect_verification.runs r
+  where r.snapshot_complete and r.status='running'
+    and exists(select 1 from prospect_verification.run_targets t
+      where t.run_id=r.id and t.state='waiting' and t.check_id is null)
+  order by r.priority desc,r.created_at limit 1;
+$$;
 
 create or replace function public.claim_email_verification_check_v1(
   p_worker_id text,p_lease_seconds integer default 120,p_max_attempts integer default 4
@@ -466,33 +558,37 @@ create or replace function public.claim_email_verification_check_v1(
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare v_control prospect_verification.provider_control;
 declare v_check prospect_verification.email_checks;
+declare v_run prospect_verification.runs;
+declare v_candidate record;
 declare v_token uuid:=gen_random_uuid();
 declare v_daily integer;
 declare v_rolling integer;
 begin
+  -- Pick without locks. After the singleton is locked, try-lock the supporting
+  -- run and then the check, and revalidate all predicates before dispatch.
+  select dispatch_sequence into v_daily from prospect_verification.provider_control where singleton;
+  if mod(coalesce(v_daily,0),5)=0 then
+    select r.id run_id,c.id check_id into v_candidate
+    from prospect_verification.runs r
+    join prospect_verification.run_targets t on t.run_id=r.id and t.state='waiting'
+    join prospect_verification.email_checks c on c.id=t.check_id
+    where r.status='running' and r.snapshot_complete
+      and (c.execution_state='queued' or (c.execution_state='running' and c.lease_expires_at<=now()))
+      and c.next_attempt_at<=now() and c.attempts<greatest(1,least(coalesce(p_max_attempts,4),20))
+    order by c.created_at limit 1;
+  else
+    select r.id run_id,c.id check_id into v_candidate
+    from prospect_verification.runs r
+    join prospect_verification.run_targets t on t.run_id=r.id and t.state='waiting'
+    join prospect_verification.email_checks c on c.id=t.check_id
+    where r.status='running' and r.snapshot_complete
+      and (c.execution_state='queued' or (c.execution_state='running' and c.lease_expires_at<=now()))
+      and c.next_attempt_at<=now() and c.attempts<greatest(1,least(coalesce(p_max_attempts,4),20))
+    order by c.priority desc,c.created_at limit 1;
+  end if;
+  if v_candidate.check_id is null then return null; end if;
   select * into v_control from prospect_verification.provider_control where singleton for update;
   if not v_control.enabled or v_control.manually_paused or coalesce(v_control.cooldown_until,'-infinity')>now() or v_control.next_dispatch_at>now() then return null; end if;
-  -- A provider response normally decides terminality. A worker that repeatedly
-  -- dies after claiming never reaches that response path, so expired leases
-  -- also consume the bounded attempt budget and eventually settle their runs.
-  with exhausted as (
-    update prospect_verification.email_checks set execution_state='error',lease_token=null,
-      lease_expires_at=null,worker_id=null,last_error_code='lease_exhausted',updated_at=now()
-    where execution_state='running' and lease_expires_at<=now()
-      and attempts>=greatest(1,least(coalesce(p_max_attempts,4),20))
-    returning id
-  ), changed as (
-    update prospect_verification.run_targets t set state='error',completed_at=now()
-    where t.state='waiting' and t.check_id in(select id from exhausted)
-    returning t.run_id
-  ), delta as (select run_id,count(*)::int errors from changed group by run_id)
-  update prospect_verification.runs r set processed_count=r.processed_count+d.errors,
-    error_count=r.error_count+d.errors,
-    status=case when r.status in ('paused','cancelled') then r.status
-      when r.processed_count+d.errors>=r.total_count then 'completed_with_errors' else r.status end,
-    completed_at=case when r.status not in ('paused','cancelled')
-      and r.processed_count+d.errors>=r.total_count then now() else r.completed_at end,
-    updated_at=now() from delta d where r.id=d.run_id;
   delete from prospect_verification.dispatch_attempts where id in (
     select id from prospect_verification.dispatch_attempts where attempted_at<now()-interval '48 hours' order by id limit 1000
   );
@@ -508,65 +604,67 @@ begin
       quota_wait_until=(select min(attempted_at)+interval '10 seconds' from prospect_verification.dispatch_attempts where attempted_at>now()-interval '10 seconds'),updated_at=now() where singleton;
     return null;
   end if;
-  select c.* into v_check from prospect_verification.email_checks c
-  where (c.execution_state='queued' or (c.execution_state='running' and c.lease_expires_at<=now()))
-    and c.next_attempt_at<=now()
-    and exists(select 1 from prospect_verification.run_targets t join prospect_verification.runs r on r.id=t.run_id
-      where t.check_id=c.id and t.state='waiting' and r.status='running')
-  -- Four dispatches favour interactive/import work; every fifth takes the
-  -- oldest runnable check so a long Master backfill can never starve.
-  order by
-    case when mod(v_daily,5)=0 then c.created_at end,
-    case when mod(v_daily,5)<>0 then (
-      select max(r.priority) from prospect_verification.run_targets t
-      join prospect_verification.runs r on r.id=t.run_id
-      where t.check_id=c.id and t.state='waiting' and r.status='running'
-    ) end desc,
-    c.created_at
-  for update skip locked limit 1;
+  select * into v_run from prospect_verification.runs
+    where id=v_candidate.run_id and status='running' and snapshot_complete for update skip locked;
+  if v_run.id is null then return null; end if;
+  select * into v_check from prospect_verification.email_checks
+    where id=v_candidate.check_id
+      and (execution_state='queued' or (execution_state='running' and lease_expires_at<=now()))
+      and next_attempt_at<=now() and attempts<greatest(1,least(coalesce(p_max_attempts,4),20))
+    for update skip locked;
   if v_check.id is null then return null; end if;
+  if not exists(select 1 from prospect_verification.run_targets
+    where run_id=v_run.id and check_id=v_check.id and state='waiting') then return null; end if;
   update prospect_verification.email_checks set execution_state='running',attempts=attempts+1,
     lease_token=v_token,lease_expires_at=now()+make_interval(secs=>greatest(30,least(coalesce(p_lease_seconds,120),600))),
     worker_id=left(p_worker_id,120),updated_at=now() where id=v_check.id returning * into v_check;
   insert into prospect_verification.dispatch_attempts(check_id) values(v_check.id);
   update prospect_verification.provider_control set next_dispatch_at=now()+interval '500 milliseconds',
     rolling_window_started_at=now()-interval '10 seconds',daily_window_started_at=now()-interval '24 hours',
-    rolling_attempts=v_rolling+1,daily_attempts=v_daily+1,quota_wait_until=null,updated_at=now() where singleton;
+    rolling_attempts=v_rolling+1,daily_attempts=v_daily+1,dispatch_sequence=dispatch_sequence+1,
+    quota_wait_until=null,updated_at=now() where singleton;
   return jsonb_build_object('id',v_check.id,'email',v_check.normalized_email,'leaseToken',v_token,'attempt',v_check.attempts);
+end $$;
+
+-- Lease exhaustion is maintenance, not dispatch. It continues while the
+-- provider is disabled or paused and mutates checks only; reconciliation owns
+-- all target/run accounting.
+create or replace function public.expire_email_verification_leases_v1(
+  p_max_attempts integer default 4,p_limit integer default 500
+) returns integer language plpgsql security definer set search_path = '' as $$
+declare v_count integer;
+begin
+  with candidate as (
+    select id from prospect_verification.email_checks
+    where execution_state='running' and lease_expires_at<=now()
+      and attempts>=greatest(1,least(coalesce(p_max_attempts,4),20))
+    order by lease_expires_at for update skip locked
+    limit greatest(1,least(coalesce(p_limit,500),500))
+  )
+  update prospect_verification.email_checks c set execution_state='error',lease_token=null,
+    lease_expires_at=null,worker_id=null,last_error_code='lease_exhausted',updated_at=now()
+  from candidate x where c.id=x.id;
+  get diagnostics v_count=row_count;
+  return v_count;
 end $$;
 
 create or replace function public.complete_email_verification_check_v1(
   p_check_id uuid,p_lease_token uuid,p_status text,p_reason text,p_provider text,p_checked_at timestamptz
 ) returns boolean language plpgsql security definer set search_path = '' as $$
 declare v_check prospect_verification.email_checks;
+declare v_control prospect_verification.provider_control;
 begin
   if p_status not in ('valid','invalid','catch_all','unverifiable') then raise exception 'Invalid result status' using errcode='22023'; end if;
+  select * into v_control from prospect_verification.provider_control where singleton for update;
   update prospect_verification.email_checks set execution_state='completed',result_status=p_status,
     result_reason=left(coalesce(p_reason,''),300),provider=left(coalesce(p_provider,''),80),checked_at=coalesce(p_checked_at,now()),
     lease_token=null,lease_expires_at=null,worker_id=null,updated_at=now()
   where id=p_check_id and execution_state='running' and lease_token=p_lease_token and lease_expires_at>now() returning * into v_check;
   if v_check.id is null then return false; end if;
-  update public.prospects p set verification_checked_email=v_check.normalized_email,
-    verification_status=v_check.result_status,verification_reason=v_check.result_reason,
-    verification_provider=v_check.provider,verification_checked_at=v_check.checked_at,
-    verification_generation=v_check.generation,verification_result_id=v_check.id
-  from prospect_verification.run_targets t where t.check_id=v_check.id and t.prospect_id=p.id
-    and t.email_revision=p.work_email_revision and t.normalized_email=prospect_verification.normalize_email(p.work_email)
-    and coalesce(p.verification_generation,0)<=v_check.generation;
-  with changed as (
-    update prospect_verification.run_targets t set state=case when exists(
-      select 1 from public.prospects p where p.id=t.prospect_id and p.work_email_revision=t.email_revision
-        and prospect_verification.normalize_email(p.work_email)=t.normalized_email) then 'completed' else 'skipped' end,
-      completed_at=now() where t.check_id=v_check.id and t.state='waiting' returning t.run_id,t.state
-  ), delta as (
-    select run_id,count(*)::int processed,count(*) filter(where state='skipped')::int skipped from changed group by run_id
-  )
-  update prospect_verification.runs r set processed_count=r.processed_count+d.processed,
-    skipped_count=r.skipped_count+d.skipped,
-    status=case when r.status in ('paused','cancelled') then r.status
-      when r.processed_count+d.processed>=r.total_count then case when r.error_count>0 then 'completed_with_errors' else 'completed' end else r.status end,
-    completed_at=case when r.status not in ('paused','cancelled') and r.processed_count+d.processed>=r.total_count then now() else r.completed_at end,
-    updated_at=now() from delta d where r.id=d.run_id;
+  update prospect_verification.provider_control set consecutive_failures=0,
+    cooldown_until=case when pause_reason like 'Repeated provider failures%' then null else cooldown_until end,
+    pause_reason=case when pause_reason like 'Repeated provider failures%' then null else pause_reason end,
+    updated_at=now() where singleton;
   return true;
 end $$;
 
@@ -575,32 +673,158 @@ create or replace function public.retry_email_verification_check_v1(
   p_provider_pause_seconds integer default null,p_pause_reason text default null
 ) returns boolean language plpgsql security definer set search_path = '' as $$
 declare v_changed integer;
+declare v_control prospect_verification.provider_control;
 begin
+  select * into v_control from prospect_verification.provider_control where singleton for update;
   update prospect_verification.email_checks set execution_state=case when p_terminal then 'error' else 'queued' end,
     next_attempt_at=now()+make_interval(secs=>greatest(1,least(coalesce(p_delay_seconds,1),86400))),
     lease_token=null,lease_expires_at=null,worker_id=null,last_error_code=left(coalesce(p_error_code,'unknown'),80),updated_at=now()
   where id=p_check_id and execution_state='running' and lease_token=p_lease_token;
   get diagnostics v_changed=row_count;
   if v_changed=0 then return false; end if;
-  if p_terminal then
-    with changed as (
-      update prospect_verification.run_targets set state='error',completed_at=now()
-      where check_id=p_check_id and state='waiting' returning run_id
-    ), delta as (select run_id,count(*)::int errors from changed group by run_id)
-    update prospect_verification.runs r set processed_count=r.processed_count+d.errors,error_count=r.error_count+d.errors,
-      status=case when r.status in ('paused','cancelled') then r.status
-        when r.processed_count+d.errors>=r.total_count then 'completed_with_errors' else r.status end,
-      completed_at=case when r.status not in ('paused','cancelled') and r.processed_count+d.errors>=r.total_count then now() else r.completed_at end,
-      updated_at=now() from delta d where r.id=d.run_id;
-  end if;
   if p_provider_pause_seconds is not null then
     update prospect_verification.provider_control set
       manually_paused=case when p_error_code in ('auth','account') then true else manually_paused end,
       cooldown_until=greatest(coalesce(cooldown_until,'-infinity'),now()+make_interval(secs=>greatest(1,least(p_provider_pause_seconds,86400)))),
       pause_reason=left(coalesce(p_pause_reason,p_error_code),300),updated_at=now() where singleton;
   end if;
+  if p_error_code in ('network','timeout','malformed','email_mismatch','provider_outage','http_error','transient_result') then
+    update prospect_verification.provider_control set
+      consecutive_failures=consecutive_failures+1,
+      cooldown_until=case when consecutive_failures+1>=3
+        then greatest(coalesce(cooldown_until,'-infinity'),now()+interval '5 minutes') else cooldown_until end,
+      pause_reason=case when consecutive_failures+1>=3
+        then 'Repeated provider failures; automatic five-minute circuit break' else pause_reason end,
+      updated_at=now() where singleton;
+  elsif p_error_code not in ('auth','account') then
+    update prospect_verification.provider_control set consecutive_failures=0,updated_at=now() where singleton;
+  end if;
   return true;
 end $$;
+
+-- Apply terminal check results to one bounded run slice. This is the only path
+-- that mutates targets, canonical prospect labels, and run counters together.
+-- The lock order is RUN -> own TARGETS -> PROSPECTS ascending by id.
+create or replace function public.reconcile_email_verification_run_v1(
+  p_run_id uuid,p_limit integer default 500
+) returns jsonb language plpgsql security definer set search_path = '' as $$
+declare v_run prospect_verification.runs;
+declare v_processed integer:=0;
+declare v_reused integer:=0;
+declare v_skipped integer:=0;
+declare v_errors integer:=0;
+declare v_cancelled integer:=0;
+begin
+  select * into v_run from prospect_verification.runs where id=p_run_id for update;
+  if v_run.id is null then raise exception 'Verification run not found' using errcode='P0002'; end if;
+  if not v_run.snapshot_complete then return jsonb_build_object('processed',0,'remaining',false); end if;
+
+  drop table if exists pg_temp.verification_reconcile_batch;
+  create temporary table verification_reconcile_batch(prospect_id text primary key) on commit drop;
+  if v_run.status='cancelled' then
+    insert into verification_reconcile_batch
+    select prospect_id from prospect_verification.run_targets
+    where run_id=p_run_id and state='waiting'
+    order by prospect_id for update skip locked
+    limit greatest(1,least(coalesce(p_limit,500),500));
+  else
+    insert into verification_reconcile_batch
+    select t.prospect_id from prospect_verification.run_targets t
+    join prospect_verification.email_checks c on c.id=t.check_id
+    where t.run_id=p_run_id and t.state='waiting' and c.execution_state in ('completed','error')
+    order by t.prospect_id for update of t skip locked
+    limit greatest(1,least(coalesce(p_limit,500),500));
+  end if;
+  if not exists(select 1 from verification_reconcile_batch) then
+    return jsonb_build_object('processed',0,'remaining',exists(
+      select 1 from prospect_verification.run_targets where run_id=p_run_id and state='waiting'));
+  end if;
+
+  if v_run.status='cancelled' then
+    with changed as (
+      update prospect_verification.run_targets t set state='cancelled',completed_at=now()
+      from verification_reconcile_batch b where t.run_id=p_run_id and t.prospect_id=b.prospect_id
+        and t.state='waiting' returning 1
+    ) select count(*)::int into v_cancelled from changed;
+  else
+    -- Lock every still-existing prospect in a stable order before applying any
+    -- projection. Deletes touch only prospect -> deletion_epoch and never wait
+    -- for a run/target/check lock.
+    perform 1 from public.prospects p join verification_reconcile_batch b on b.prospect_id=p.id
+      order by p.id for update of p;
+
+    update public.prospects p set
+      verification_checked_email=c.normalized_email,verification_status=c.result_status,
+      verification_reason=c.result_reason,verification_provider=c.provider,
+      verification_checked_at=c.checked_at,verification_generation=c.generation,
+      verification_result_id=c.id
+    from verification_reconcile_batch b
+    join prospect_verification.run_targets t on t.run_id=p_run_id and t.prospect_id=b.prospect_id
+    join prospect_verification.email_checks c on c.id=t.check_id
+    left join prospect_verification.prospect_deletions pd on pd.prospect_id=t.prospect_id
+    where p.id=t.prospect_id and t.state='waiting' and c.execution_state='completed'
+      and p.work_email_revision=t.email_revision
+      and prospect_verification.normalize_email(p.work_email)=t.normalized_email
+      and coalesce(pd.deletion_epoch,0)=t.deletion_epoch
+      and (not v_run.force_reverify or c.generation>t.generation_floor)
+      and coalesce(p.verification_generation,0)<=c.generation;
+
+    with changed as (
+      update prospect_verification.run_targets t set
+        state=case
+          when p.id is null or p.work_email_revision<>t.email_revision
+            or prospect_verification.normalize_email(p.work_email)<>t.normalized_email
+            or coalesce(pd.deletion_epoch,0)<>t.deletion_epoch then 'skipped'
+          when c.execution_state='error' then 'error'
+          when c.execution_state='completed' and (not v_run.force_reverify or c.generation>t.generation_floor)
+            then case when t.reuse_result then 'reused' else 'completed' end
+          else 'error' end,
+        completed_at=now()
+      from verification_reconcile_batch b
+      join prospect_verification.email_checks c on c.id=(select x.check_id from prospect_verification.run_targets x where x.run_id=p_run_id and x.prospect_id=b.prospect_id)
+      left join public.prospects p on p.id=b.prospect_id
+      left join prospect_verification.prospect_deletions pd on pd.prospect_id=b.prospect_id
+      where t.run_id=p_run_id and t.prospect_id=b.prospect_id and t.state='waiting'
+      returning t.state
+    )
+    select count(*)::int,
+      count(*) filter(where state='reused')::int,
+      count(*) filter(where state='skipped')::int,
+      count(*) filter(where state='error')::int
+    into v_processed,v_reused,v_skipped,v_errors from changed;
+  end if;
+
+  v_processed:=v_processed+v_cancelled;
+  update prospect_verification.runs set
+    processed_count=processed_count+v_processed,
+    reused_count=reused_count+v_reused,
+    skipped_count=skipped_count+v_skipped,
+    error_count=error_count+v_errors,
+    cancelled_count=cancelled_count+v_cancelled,
+    status=case when status in ('paused','cancelled') then status
+      when processed_count+v_processed>=total_count then case when error_count+v_errors>0 then 'completed_with_errors' else 'completed' end
+      else status end,
+    completed_at=case when status='cancelled' then coalesce(completed_at,now())
+      when status<>'paused' and processed_count+v_processed>=total_count then now() else completed_at end,
+    updated_at=now()
+  where id=p_run_id returning * into v_run;
+  return jsonb_build_object('processed',v_processed,'reused',v_reused,'skipped',v_skipped,
+    'errors',v_errors,'cancelled',v_cancelled,'run',to_jsonb(v_run),
+    'remaining',exists(select 1 from prospect_verification.run_targets where run_id=p_run_id and state='waiting'));
+end $$;
+
+create or replace function public.next_email_verification_reconciliation_run_v1()
+returns uuid language sql stable security definer set search_path = '' as $$
+  select r.id from prospect_verification.runs r
+  where r.snapshot_complete and r.status in ('running','paused','cancelled')
+    and exists(
+      select 1 from prospect_verification.run_targets t
+      left join prospect_verification.email_checks c on c.id=t.check_id
+      where t.run_id=r.id and t.state='waiting'
+        and (r.status='cancelled' or c.execution_state in ('completed','error'))
+    )
+  order by r.priority desc,r.created_at limit 1;
+$$;
 
 create or replace function public.complete_prospect_import_v2(p_import_id text,p_list_id text)
 returns jsonb language plpgsql security definer set search_path = '' as $$
@@ -611,7 +835,13 @@ begin
   if v_import.id is null then raise exception 'Import not found' using errcode='P0002'; end if;
   if v_import.status='completed' then
     select id into v_run_id from prospect_verification.runs where source_import_id=p_import_id;
-    return jsonb_build_object('summary',to_jsonb(v_import),'verificationRunId',v_run_id);
+    return jsonb_build_object('summary',jsonb_build_object(
+      'processed_rows',v_import.processed_rows,
+      'unique_added',v_import.unique_added,
+      'duplicates_linked',v_import.duplicates_linked,
+      'total_rows',v_import.total_rows,
+      'status',v_import.status
+    ),'verificationRunId',v_run_id);
   end if;
   if v_import.status<>'processing' then raise exception 'Import is not processing' using errcode='40001'; end if;
   if v_import.total_rows is not null and v_import.processed_rows<>v_import.total_rows then raise exception 'Import has not committed every row' using errcode='40001'; end if;
@@ -620,16 +850,26 @@ begin
   -- Memberships are canonical and include duplicate-linked people; this makes
   -- the originating import durable even when an older batch path rewrote it.
   if v_import.verify_work_emails then
-    insert into prospect_verification.runs(request_id,payload_hash,source,source_import_id,scope,priority,status)
-    values(gen_random_uuid(),pg_catalog.md5(jsonb_build_object('importId',p_import_id)::text),'import',p_import_id,'import',20,'queued')
+    insert into prospect_verification.runs(request_id,payload_hash,source,source_import_id,scope,priority,status,started_at)
+    values(gen_random_uuid(),pg_catalog.md5(jsonb_build_object('importId',p_import_id)::text),'import',p_import_id,'import',20,'preparing',now())
     on conflict(source_import_id) do update set source_import_id=excluded.source_import_id returning id into v_run_id;
-    insert into prospect_verification.run_targets(run_id,prospect_id,normalized_email,email_revision)
-    select v_run_id,p.id,prospect_verification.normalize_email(p.work_email),p.work_email_revision
+    insert into prospect_verification.run_targets(
+      run_id,prospect_id,normalized_email,email_revision,deletion_epoch,generation_floor
+    )
+    select v_run_id,p.id,prospect_verification.normalize_email(p.work_email),p.work_email_revision,
+      coalesce(pd.deletion_epoch,0),coalesce((select max(ec.generation)
+        from prospect_verification.email_checks ec
+        where ec.normalized_email=prospect_verification.normalize_email(p.work_email)
+          and ec.execution_state='completed'),0)
     from public.list_memberships lm join public.prospects p on p.id=lm.prospect_id
+    left join prospect_verification.prospect_deletions pd on pd.prospect_id=p.id
     where lm.list_id=p_list_id and lm.import_id=p_import_id
       and nullif(prospect_verification.normalize_email(p.work_email),'') is not null on conflict do nothing;
     update prospect_verification.runs set
       total_count=(select count(*) from prospect_verification.run_targets where run_id=v_run_id),
+      snapshot_complete=true,
+      status=case when exists(select 1 from prospect_verification.run_targets where run_id=v_run_id) then 'running' else 'completed' end,
+      completed_at=case when exists(select 1 from prospect_verification.run_targets where run_id=v_run_id) then null else now() end,
       updated_at=now()
     where id=v_run_id;
   end if;
@@ -650,6 +890,11 @@ declare v_def text; v_anchor text; v_new text; v_hits integer;
 begin
   v_def:=pg_get_functiondef('public.prospect_filter_sql_v1(text,jsonb)'::regprocedure);
   if v_def not like '%__work_email_status%' then
+    v_anchor:='    if cardinality(raw_values) = 0 and coalesce(filter_item->>''setId'', '''') = '''' and operator_key not in (''empty'', ''not_empty'') then';
+    v_hits:=(length(v_def)-length(replace(v_def,v_anchor,'')))/length(v_anchor);
+    if v_hits<>1 then raise exception 'prospect_filter_sql_v1 empty-value guard anchor appears % times',v_hits; end if;
+    v_new:='    if cardinality(raw_values) = 0 and coalesce(filter_item->>''setId'', '''') = '''' and operator_key not in (''empty'', ''not_empty'', ''never'') then';
+    v_def:=replace(v_def,v_anchor,v_new);
     v_anchor:='      when ''__email_provider_type'' then ''pi.email_provider_type''';
     v_hits:=(length(v_def)-length(replace(v_def,v_anchor,'')))/length(v_anchor);
     if v_hits<>1 then raise exception 'prospect_filter_sql_v1 verification field anchor appears % times',v_hits; end if;
@@ -689,11 +934,16 @@ revoke execute on function public.email_verification_runs_v1(integer) from publi
 revoke execute on function public.control_email_verification_run_v1(uuid,text) from public,anon,authenticated;
 revoke execute on function public.control_email_verification_provider_v1(text,text) from public,anon,authenticated;
 revoke execute on function public.report_email_verification_worker_v1(boolean) from public,anon,authenticated;
-revoke execute on function public.prepare_email_verification_run_v1(uuid,integer) from public,anon,authenticated;
-revoke execute on function public.prepare_next_email_verification_run_v1() from public,anon,authenticated;
+revoke execute on function public.prepare_email_verification_run_v1(uuid,uuid,integer) from public,anon,authenticated;
+revoke execute on function public.prepare_next_email_verification_run_v1(integer) from public,anon,authenticated;
+revoke execute on function public.allocate_email_verification_targets_v1(uuid,integer) from public,anon,authenticated;
+revoke execute on function public.next_email_verification_allocation_run_v1() from public,anon,authenticated;
 revoke execute on function public.claim_email_verification_check_v1(text,integer,integer) from public,anon,authenticated;
+revoke execute on function public.expire_email_verification_leases_v1(integer,integer) from public,anon,authenticated;
 revoke execute on function public.complete_email_verification_check_v1(uuid,uuid,text,text,text,timestamptz) from public,anon,authenticated;
 revoke execute on function public.retry_email_verification_check_v1(uuid,uuid,text,integer,boolean,integer,text) from public,anon,authenticated;
+revoke execute on function public.reconcile_email_verification_run_v1(uuid,integer) from public,anon,authenticated;
+revoke execute on function public.next_email_verification_reconciliation_run_v1() from public,anon,authenticated;
 revoke execute on function public.complete_prospect_import_v2(text,text) from public,anon,authenticated;
 
 grant execute on function public.request_email_verification_v1(uuid,jsonb,uuid) to service_role;
@@ -705,11 +955,17 @@ grant execute on function public.complete_prospect_import_v2(text,text) to servi
 do $$ begin
   if exists(select 1 from pg_roles where rolname='prospect_verifier') then
     execute 'grant usage on schema public to prospect_verifier';
-    execute 'grant execute on function public.prepare_next_email_verification_run_v1() to prospect_verifier';
+    execute 'grant execute on function public.prepare_next_email_verification_run_v1(integer) to prospect_verifier';
+    execute 'grant execute on function public.prepare_email_verification_run_v1(uuid,uuid,integer) to prospect_verifier';
+    execute 'grant execute on function public.allocate_email_verification_targets_v1(uuid,integer) to prospect_verifier';
+    execute 'grant execute on function public.next_email_verification_allocation_run_v1() to prospect_verifier';
     execute 'grant execute on function public.report_email_verification_worker_v1(boolean) to prospect_verifier';
     execute 'grant execute on function public.claim_email_verification_check_v1(text,integer,integer) to prospect_verifier';
+    execute 'grant execute on function public.expire_email_verification_leases_v1(integer,integer) to prospect_verifier';
     execute 'grant execute on function public.complete_email_verification_check_v1(uuid,uuid,text,text,text,timestamptz) to prospect_verifier';
     execute 'grant execute on function public.retry_email_verification_check_v1(uuid,uuid,text,integer,boolean,integer,text) to prospect_verifier';
+    execute 'grant execute on function public.reconcile_email_verification_run_v1(uuid,integer) to prospect_verifier';
+    execute 'grant execute on function public.next_email_verification_reconciliation_run_v1() to prospect_verifier';
   end if;
 end $$;
 

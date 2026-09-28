@@ -12,6 +12,22 @@ values ('verify-p1','Verify One','shared-check@corp.test','personal1@example.tes
 on conflict(id) do nothing;
 select public.reindex_prospects(array['verify-p1','verify-p2','verify-p3','verify-p4']);
 
+create or replace function pg_temp.prepare_verification_run(p_run uuid,p_limit integer default 100)
+returns jsonb language plpgsql as $$
+declare v_token uuid:=gen_random_uuid(); v_result jsonb; v_alloc jsonb;
+begin
+  update prospect_verification.runs set status='preparing',preparation_token=v_token,
+    preparation_lease_expires_at=now()+interval '15 minutes',started_at=coalesce(started_at,now())
+  where id=p_run and status='queued';
+  v_result:=public.prepare_email_verification_run_v1(p_run,v_token,p_limit);
+  if v_result->>'status' not in ('running','completed','paused','cancelled') then return v_result; end if;
+  loop
+    v_alloc:=public.allocate_email_verification_targets_v1(p_run,500);
+    exit when not coalesce((v_alloc->>'remaining')::boolean,false);
+  end loop;
+  return (select to_jsonb(r) from prospect_verification.runs r where r.id=p_run);
+end $$;
+
 do $contract$
 declare
   v_request uuid := '10000000-0000-4000-8000-000000000001';
@@ -30,8 +46,21 @@ begin
     perform public.request_email_verification_v1(v_request,'{"scope":"all","forceReverify":false}'::jsonb,null);
     raise exception 'changed idempotency payload did not conflict';
   exception when unique_violation then null; end;
+  -- Prepared-set handles are execution details and may rotate while the same
+  -- browser request is retried. They must not turn one user intent into a 409.
+  v_request:='10000000-0000-4000-8000-000000000009';
+  v_run:=(public.request_email_verification_v1(v_request,
+    '{"scope":"filtered","filters":[],"companyScope":{"search":"Verification Scope A","filters":[],"_prepared_set_id":"20000000-0000-4000-8000-000000000001"},"intentCompanyScope":{"search":"Verification Scope A","filters":[],"limit":250000},"forceReverify":false}'::jsonb,null)->>'id')::uuid;
+  if (public.request_email_verification_v1(v_request,
+    '{"scope":"filtered","filters":[],"companyScope":{"search":"Verification Scope A","filters":[],"_prepared_set_id":"20000000-0000-4000-8000-000000000002"},"intentCompanyScope":{"search":"Verification Scope A","filters":[],"limit":250000},"forceReverify":false}'::jsonb,null)->>'id')::uuid<>v_run then
+    raise exception 'prepared scope handle changed stable request identity';
+  end if;
+  perform public.control_email_verification_run_v1(v_run,'cancel');
+  -- Continue the duplicate-email contract with its original request.
+  v_request:='10000000-0000-4000-8000-000000000001';
+  v_run:=(select id from prospect_verification.runs where request_id=v_request);
 
-  perform public.prepare_email_verification_run_v1(v_run,100);
+  perform pg_temp.prepare_verification_run(v_run,100);
   if (select count(*) from prospect_verification.run_targets where run_id=v_run)<>2
      or (select count(distinct check_id) from prospect_verification.run_targets where run_id=v_run)<>1 then
     raise exception 'duplicate normalized emails did not share one check';
@@ -41,7 +70,7 @@ begin
   -- first removes only its demand; completion still satisfies the second.
   v_run2:=(public.request_email_verification_v1('10000000-0000-4000-8000-000000000002',
     '{"scope":"filtered","filters":[{"field":"__work_email","operator":"equals","values":["shared-check@corp.test"]}],"forceReverify":false}'::jsonb,null)->>'id')::uuid;
-  perform public.prepare_email_verification_run_v1(v_run2,100);
+  perform pg_temp.prepare_verification_run(v_run2,100);
   if (select count(distinct check_id) from prospect_verification.run_targets where run_id in(v_run,v_run2))<>1 then
     raise exception 'overlapping runs did not share the active check';
   end if;
@@ -53,6 +82,8 @@ begin
   if not public.complete_email_verification_check_v1(v_check,v_token,'valid','Accepted','mailtester_ninja','2026-09-28T05:00:00Z') then
     raise exception 'fenced completion was rejected';
   end if;
+  perform public.reconcile_email_verification_run_v1(v_run,500);
+  perform public.reconcile_email_verification_run_v1(v_run2,500);
   if (select status from prospect_verification.runs where id=v_run)<>'cancelled'
      or (select status from prospect_verification.runs where id=v_run2)<>'completed' then
     raise exception 'shared completion changed cancelled demand or failed live demand';
@@ -65,14 +96,15 @@ begin
   -- later generation, then Pause/Continue resumes that same run.
   v_run3:=(public.request_email_verification_v1('10000000-0000-4000-8000-000000000003',
     '{"scope":"filtered","filters":[{"field":"__work_email","operator":"equals","values":["shared-check@corp.test"]}],"forceReverify":false}'::jsonb,null)->>'id')::uuid;
-  perform public.prepare_email_verification_run_v1(v_run3,100);
+  perform pg_temp.prepare_verification_run(v_run3,100);
+  perform public.reconcile_email_verification_run_v1(v_run3,500);
   if (select reused_count from prospect_verification.runs where id=v_run3)<>2
      or exists(select 1 from public.prospects where id in('verify-p1','verify-p2') and verification_checked_at<>'2026-09-28T05:00:00Z') then
     raise exception 'completed result was not reused with its original timestamp';
   end if;
   v_run3:=(public.request_email_verification_v1('10000000-0000-4000-8000-000000000004',
     '{"scope":"filtered","filters":[{"field":"__work_email","operator":"equals","values":["shared-check@corp.test"]}],"forceReverify":true}'::jsonb,null)->>'id')::uuid;
-  perform public.prepare_email_verification_run_v1(v_run3,100);
+  perform pg_temp.prepare_verification_run(v_run3,100);
   select max(generation) into v_generation from prospect_verification.email_checks where normalized_email='shared-check@corp.test';
   if v_generation<>2 then raise exception 'forced reverify did not create generation 2'; end if;
   perform public.control_email_verification_run_v1(v_run3,'pause');
@@ -90,18 +122,34 @@ begin
   v_token:=(v_json->>'leaseToken')::uuid;
   if v_token is null or v_token=v_old_token then raise exception 'expired lease was not reclaimed with a new fence'; end if;
   if public.complete_email_verification_check_v1(v_check,v_old_token,'invalid','Rejected','mailtester_ninja',now()) then raise exception 'stale lease token completed a check'; end if;
+  -- Repeated protocol/transport failures open one global circuit, then a
+  -- successful provider result closes it without inventing an invalid label.
+  update prospect_verification.provider_control set consecutive_failures=2 where singleton;
+  perform public.retry_email_verification_check_v1(v_check,v_token,'network',1,false,null,null);
+  if (select consecutive_failures<>3 or cooldown_until<=now() from prospect_verification.provider_control where singleton) then
+    raise exception 'repeated provider failures did not open the circuit';
+  end if;
+  update prospect_verification.provider_control set cooldown_until=null,next_dispatch_at=now()-interval '1 second' where singleton;
+  v_json:=public.claim_email_verification_check_v1('sql-contract-recovered',30);
+  v_token:=(v_json->>'leaseToken')::uuid;
+  if (v_json->>'id')::uuid<>v_check then raise exception 'circuit recovery did not resume the same check'; end if;
   perform public.complete_email_verification_check_v1(v_check,v_token,'valid','Accepted','mailtester_ninja','2026-09-28T06:00:00Z');
+  perform public.reconcile_email_verification_run_v1(v_run3,500);
+  if (select consecutive_failures<>0 from prospect_verification.provider_control where singleton) then
+    raise exception 'successful provider result did not reset the circuit';
+  end if;
 
   -- Email mutation invalidates projection and makes the in-flight target
   -- skipped; the older generation can never overwrite a newer observation.
   v_run3:=(public.request_email_verification_v1('10000000-0000-4000-8000-000000000005',
     '{"scope":"filtered","filters":[{"field":"__work_email","operator":"equals","values":["mutation@corp.test"]}],"forceReverify":true}'::jsonb,null)->>'id')::uuid;
-  perform public.prepare_email_verification_run_v1(v_run3,100);
+  perform pg_temp.prepare_verification_run(v_run3,100);
   update prospect_verification.provider_control set next_dispatch_at=now()-interval '1 second' where singleton;
   v_json:=public.claim_email_verification_check_v1('sql-contract',120);
   v_check:=(v_json->>'id')::uuid; v_token:=(v_json->>'leaseToken')::uuid;
   update public.prospects set work_email='new-mutation@corp.test' where id='verify-p3';
   perform public.complete_email_verification_check_v1(v_check,v_token,'invalid','Rejected','mailtester_ninja',now());
+  perform public.reconcile_email_verification_run_v1(v_run3,500);
   if (select verification_status is not null from public.prospects where id='verify-p3')
      or (select skipped_count from prospect_verification.runs where id=v_run3)<>1 then
     raise exception 'changed email accepted a stale result or was not accounted skipped';
@@ -123,7 +171,7 @@ begin
   -- Company pivot scope and per-company cap freeze the same set as the grid.
   v_run3:=(public.request_email_verification_v1('10000000-0000-4000-8000-000000000006',
     '{"scope":"filtered","filters":[],"companyScope":{"search":"Verification Scope A","filters":[],"limit":250000},"forceReverify":false}'::jsonb,null)->>'id')::uuid;
-  v_json:=public.prepare_email_verification_run_v1(v_run3,100);
+  v_json:=pg_temp.prepare_verification_run(v_run3,100);
   if v_json->>'status'='failed' then raise exception 'company-scope preparation failed: %',v_json->>'last_error'; end if;
   if (select total_count from prospect_verification.runs where id=v_run3)<>2 then raise exception 'company scope did not freeze exactly its two people'; end if;
   v_run3:=(public.request_email_verification_v1('10000000-0000-4000-8000-000000000007',
@@ -131,7 +179,7 @@ begin
   -- The migration replay fixture includes disposable rows for historical
   -- migration proofs. Admit them here so this assertion tests the company cap,
   -- rather than the unrelated preparation-overflow guard below.
-  v_json:=public.prepare_email_verification_run_v1(v_run3,2000);
+  v_json:=pg_temp.prepare_verification_run(v_run3,2000);
   if v_json->>'status'='failed' then raise exception 'max-people preparation failed: %',v_json->>'last_error'; end if;
   if (select count(*) from prospect_verification.run_targets where run_id=v_run3 and prospect_id in('verify-p1','verify-p2'))<>1 then
     raise exception 'max-people-per-company path did not cap the shared company';
@@ -140,7 +188,7 @@ begin
   -- Explicit overflow fails atomically instead of silently truncating.
   v_run3:=(public.request_email_verification_v1('10000000-0000-4000-8000-000000000008',
     '{"scope":"filtered","filters":[{"field":"__work_email","operator":"equals","values":["shared-check@corp.test"]}],"forceReverify":true}'::jsonb,null)->>'id')::uuid;
-  v_json:=public.prepare_email_verification_run_v1(v_run3,1);
+  v_json:=pg_temp.prepare_verification_run(v_run3,1);
   if v_json->>'status'<>'failed' or exists(select 1 from prospect_verification.run_targets where run_id=v_run3) then
     raise exception 'overflow did not roll back targets and persist failure';
   end if;
@@ -180,6 +228,7 @@ begin
   if v_run is null or (v_second->>'verificationRunId')::uuid<>v_run
      or (select count(*) from prospect_verification.runs where source_import_id='verify-import-new')<>1
      or (select count(*) from prospect_verification.run_targets where run_id=v_run)<>1
+     or not (select snapshot_complete from prospect_verification.runs where id=v_run)
      or not exists(select 1 from prospect_verification.run_targets where run_id=v_run and prospect_id='verify-p3') then
     raise exception 'import completion did not enqueue exactly one current-import verification run';
   end if;
@@ -192,6 +241,7 @@ begin
      or has_table_privilege('authenticated','prospect_verification.runs','SELECT')
      or has_function_privilege('prospect_verification_worker','public.request_email_verification_v1(uuid,jsonb,uuid)','EXECUTE')
      or not has_function_privilege('prospect_verification_worker','public.claim_email_verification_check_v1(text,integer,integer)','EXECUTE')
+     or not has_function_privilege('prospect_verification_worker','public.reconcile_email_verification_run_v1(uuid,integer)','EXECUTE')
      or not has_function_privilege('service_role','public.request_email_verification_v1(uuid,jsonb,uuid)','EXECUTE') then
     raise exception 'verification grants exceed or miss the intended capability boundary';
   end if;
