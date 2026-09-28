@@ -17,8 +17,14 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 process.on('SIGTERM', () => { stopping = true; });
 process.on('SIGINT', () => { stopping = true; });
 
+function markFatal(fault) {
+  workerFault = fault;
+  stopping = true;
+  process.exitCode = 1;
+}
+
 const db = new pg.Pool({ max: 2, application_name: 'prospect-verification-worker', connectionTimeoutMillis: 10_000 });
-db.on('error', () => { connected = false; stopping = true; });
+db.on('error', () => { connected = false; markFatal('database_connection_failed'); });
 
 const health = createServer((request, response) => {
   if (request.url !== '/health') { response.writeHead(404).end(); return; }
@@ -134,7 +140,7 @@ async function maintain() {
     const reservation = reserved.rows[0]?.reservation;
     if (reservation) {
       snapshotPromise = prepareSnapshot(reservation)
-        .catch(() => { workerFault = 'snapshot_persistence_failed'; })
+        .catch(() => { markFatal('snapshot_persistence_failed'); })
         .finally(() => { snapshotPromise = null; });
     }
   }
@@ -171,12 +177,13 @@ async function main() {
         claim: claimOne,
         start: unit => {
           const task = processUnit(unit)
-            .catch(() => { workerFault = 'result_persistence_failed'; })
+            .catch(() => { markFatal('result_persistence_failed'); })
             .finally(() => inFlight.delete(task));
           inFlight.add(task);
         },
         wait,
         lastClaimAt,
+        canStart: () => !stopping,
       });
       started = filled.started;
       lastClaimAt = filled.lastClaimAt;

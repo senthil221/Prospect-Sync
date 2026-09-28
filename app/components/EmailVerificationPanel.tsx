@@ -43,7 +43,16 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
   const [forceReverify, setForceReverify] = useState(false);
   const [confirmationRequestId, setConfirmationRequestId] = useState("");
   const panel = useRef<HTMLElement>(null);
-  useDialogFocus(panel, { onClose, busy: Boolean(busy) });
+  const verifyAllLauncher = useRef<HTMLButtonElement | null>(null);
+  const verifyMatchingLauncher = useRef<HTMLButtonElement | null>(null);
+  const confirmationScopeRef = useRef<"all" | "filtered" | null>(null);
+  const confirmationBack = useRef<HTMLButtonElement | null>(null);
+  const closeConfirmation = useCallback(() => {
+    const scope = confirmationScopeRef.current;
+    setConfirmScope(null); setForceReverify(false); setConfirmationRequestId("");
+    window.setTimeout(() => (scope === "all" ? verifyAllLauncher.current : verifyMatchingLauncher.current)?.focus(), 0);
+  }, []);
+  useDialogFocus(panel, { onClose: confirmScope ? closeConfirmation : onClose, busy: Boolean(busy) });
   const hasMatchingScope = Boolean(search.trim() || filters.length || companyScope);
 
   const refresh = useCallback(async () => {
@@ -61,6 +70,8 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
     const timer = window.setInterval(() => void refresh(), 5000);
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [open, refresh]);
+
+  useEffect(() => { if (confirmScope) confirmationBack.current?.focus(); }, [confirmScope]);
 
   const active = useMemo(() => (data.runs ?? []).filter((run) => !terminal.has(run.status)), [data.runs]);
 
@@ -122,17 +133,24 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
     : quotaWaiting ? "Provider quota wait"
     : coolingDown ? "Provider circuit is cooling down"
     : providerRunning ? "Provider dispatch is running" : "Provider dispatch is stopped";
-  const openConfirmation = (scope: "all" | "filtered") => { setConfirmationRequestId(crypto.randomUUID()); setForceReverify(false); setConfirmScope(scope); setError(""); };
+  const openConfirmation = (scope: "all" | "filtered") => { confirmationScopeRef.current = scope; setConfirmationRequestId(crypto.randomUUID()); setForceReverify(false); setConfirmScope(scope); setError(""); };
   return <DialogBackdrop className="verification-backdrop">
-    <section ref={panel} className="verification-modal" role="dialog" aria-modal="true" aria-labelledby="verification-title">
+    <section ref={panel} className="verification-modal" role="dialog" aria-modal="true" aria-labelledby={confirmScope ? "verify-confirm-title" : "verification-title"}>
+    {confirmScope ? <div className="verification-confirm-view">
+      <p className="eyebrow">CONFIRM VERIFICATION</p><h2 id="verify-confirm-title">{confirmScope === "all" ? "Verify the entire Master People database?" : "Verify every matching person?"}</h2>
+      <p>{confirmScope === "all" ? "This ignores the current page, search, filters and company pivot. Every Master record with a work email is included." : "The current search, filters, people-per-company limit and company scope are frozen across every result page."}</p>
+      <label className="inline-checkbox" htmlFor="verification-force-recheck">Reverify completed unchanged emails<input id="verification-force-recheck" aria-label="Reverify completed unchanged emails" type="checkbox" disabled={busy === "create"} checked={forceReverify} onChange={(event) => { setForceReverify(event.target.checked); setConfirmationRequestId(crypto.randomUUID()); }}/><span><small>Leave off to reuse existing results and preserve their original verified date.</small></span></label>
+      {error ? <p className="form-error" role="alert">{error}</p> : null}
+      <div className="modal-actions"><button ref={confirmationBack} data-autofocus className="secondary" disabled={busy === "create"} onClick={closeConfirmation}>Back</button><button className="primary" disabled={busy === "create"} onClick={() => void createRun()}>{busy === "create" ? "Preparing and starting…" : "Start verification"}</button></div>
+    </div> : <>
       <header><div><p className="eyebrow">MASTER EMAIL VERIFICATION</p><h2 id="verification-title">Work email verification</h2><p>MailTester Ninja checks work emails in the background. Results are labels only and never remove people from exports, pushes or outreach.</p></div><button className="icon-button" data-autofocus aria-label="Close verification" onClick={onClose}><AppIcon name="close" size={16}/></button></header>
       <div className={`verification-provider ${providerRunning ? "running" : "paused"}`}>
         <div><span className="verification-dot"/><div><strong>{providerTitle}</strong><small>{provider.pause_reason || (providerConfigured ? `${count(provider.daily_attempts)} of ${count(provider.daily_limit)} checks used in the rolling day` : "Add MTN_API_KEY to the verification worker, then start dispatch here.")}</small></div></div>
         <div>{providerRunning ? <button disabled={Boolean(busy)} onClick={() => void controlProvider("pause")}>Pause provider</button> : <button disabled={Boolean(busy) || !providerReady} onClick={() => void controlProvider(provider.enabled ? "continue" : "start")}>Start provider</button>}</div>
       </div>
       <div className="verification-actions">
-        <button className="primary" onClick={() => openConfirmation("all")}><AppIcon name="target" size={15}/> Verify all work emails</button>
-        <button className="secondary" disabled={!hasMatchingScope} title={hasMatchingScope ? "Verify every record matching the current search and filters, across all pages" : "Apply a search, filter or company scope first"} onClick={() => openConfirmation("filtered")}><AppIcon name="filter" size={15}/> Verify matching people</button>
+        <button ref={verifyAllLauncher} className="primary" onClick={() => openConfirmation("all")}><AppIcon name="target" size={15}/> Verify all work emails</button>
+        <button ref={verifyMatchingLauncher} className="secondary" disabled={!hasMatchingScope} title={hasMatchingScope ? "Verify every record matching the current search and filters, across all pages" : "Apply a search, filter or company scope first"} onClick={() => openConfirmation("filtered")}><AppIcon name="filter" size={15}/> Verify matching people</button>
       </div>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       <div className="verification-runs-head"><strong>Runs</strong><button disabled={loading} onClick={() => void refresh()}>{loading ? "Refreshing…" : "Refresh"}</button></div>
@@ -141,7 +159,7 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
           const percent = run.total_count ? Math.min(100, Math.round((run.processed_count / run.total_count) * 100)) : 0;
           return <article className="verification-run" key={run.id}>
             <div className="verification-run-title"><div><strong>{run.scope === "all" ? "Entire Master People" : run.scope === "import" ? "Import verification" : "Matching people"}</strong><span className={`verification-state state-${run.status}`}>{label(run.status)}</span></div><time>{new Date(run.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</time></div>
-            <div className="verification-progress" aria-label={`${percent}% complete`}><i style={{ width: `${percent}%` }}/></div>
+            <div className="verification-progress" role="progressbar" aria-label={`${percent}% complete`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><i style={{ width: `${percent}%` }}/></div>
             <div className="verification-run-counts"><span><strong>{count(run.processed_count)}</strong> processed</span><span><strong>{count(run.total_count)}</strong> total</span><span><strong>{count(run.reused_count)}</strong> reused</span>{run.error_count ? <span><strong>{count(run.error_count)}</strong> errors</span> : null}</div>
             {run.last_error ? <p className="form-error">{run.last_error}</p> : null}
             {!terminal.has(run.status) ? <div className="verification-run-controls">{run.status === "paused" ? <button disabled={Boolean(busy)} onClick={() => void controlRun(run, "continue")}>Continue same run</button> : <button disabled={Boolean(busy)} onClick={() => void controlRun(run, "pause")}>Pause</button>}<button className="danger-button" disabled={Boolean(busy)} onClick={() => void controlRun(run, "cancel")}>Cancel</button></div> : null}
@@ -149,12 +167,7 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
         }) : <div className="verification-empty">{loading ? "Loading runs…" : "No verification runs yet."}</div>}
       </div>
       <footer><span>{active.length ? `${active.length} active run${active.length === 1 ? "" : "s"}` : "No active runs"}</span><button className="secondary" onClick={onClose}>Close</button></footer>
-    {confirmScope ? <div className="verification-confirm-layer" role="presentation"><section className="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="verify-confirm-title">
-      <p className="eyebrow">CONFIRM VERIFICATION</p><h2 id="verify-confirm-title">{confirmScope === "all" ? "Verify the entire Master People database?" : "Verify every matching person?"}</h2>
-      <p>{confirmScope === "all" ? "This ignores the current page, search, filters and company pivot. Every Master record with a work email is included." : "The current search, filters, people-per-company limit and company scope are frozen across every result page."}</p>
-      <label className="inline-checkbox" htmlFor="verification-force-recheck">Reverify completed unchanged emails<input id="verification-force-recheck" aria-label="Reverify completed unchanged emails" type="checkbox" disabled={busy === "create"} checked={forceReverify} onChange={(event) => { setForceReverify(event.target.checked); setConfirmationRequestId(crypto.randomUUID()); }}/><span><small>Leave off to reuse existing results and preserve their original verified date.</small></span></label>
-      <div className="modal-actions"><button className="secondary" disabled={busy === "create"} onClick={() => { setConfirmScope(null); setForceReverify(false); setConfirmationRequestId(""); }}>Back</button><button className="primary" disabled={busy === "create"} onClick={() => void createRun()}>{busy === "create" ? "Preparing and starting…" : "Start verification"}</button></div>
-    </section></div> : null}
+    </>}
     </section>
   </DialogBackdrop>;
 }

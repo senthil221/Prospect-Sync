@@ -1,0 +1,66 @@
+# Master work-email verification
+
+This feature verifies `work_email` with the dedicated Prospect Sync MailTester Ninja account. Results are labels only. They do not change Contactable/Lead membership, client pushes, exports, Smartlead eligibility, or any existing outreach rule.
+
+## Runtime contract
+
+- **Verify all work emails** freezes the entire Master People selection. It ignores the current page, search, filters, and company pivot.
+- **Verify matching people** freezes the complete authorized filter/search/company scope across all pages, including the people-per-company limit.
+- A completed result for the same unchanged normalized work email is reused by default, preserving its original `checked_at`. Reverify is an explicit confirmation option.
+- Pause prevents new allocation and dispatch for that run. An already-started provider request may settle and is reconciled truthfully. Continue resumes the same run ID.
+- Cancel preserves results already reconciled and marks unfinished targets cancelled in bounded reconciliation.
+- Verify on Import freezes canonical memberships for that import only, including linked duplicates, after the import commits successfully.
+- There is no scheduled re-verification cycle. Another run starts only when an authorized user requests it or opts into verification for an import. Provider start/pause controls remain administrator-only.
+
+The queue is Postgres-backed. Snapshot preparation, shared-check allocation, provider settlement, and canonical projection reconciliation are separate fenced phases. Provider calls never run inside a database transaction. Redis, BullMQ, Waterfall Verifier, and paid fallback providers are not dependencies.
+
+## Secrets and least privilege
+
+Provision two separate credentials:
+
+1. `VERIFICATION_WORKER_DB_PASSWORD` — a strong random database password used only by the `prospect_verification_worker` login. Never reuse `POSTGRES_PASSWORD`.
+2. `MTN_API_KEY` — the provider-issued key from the dedicated Prospect Sync MailTester Ninja plan. Never reuse the Waterfall Verifier key.
+
+Put both values only in the server's mode-600 `deploy/.env`. The browser and Next.js application do not receive either value. Do not paste either secret into tickets, CI logs, chat, screenshots, or client-side environment variables.
+
+The worker login inherits only `prospect_verifier`, whose grants are limited to fenced verification capability functions. The private queue tables have RLS enabled and no access for `PUBLIC`, `anon`, or `authenticated`.
+
+## Safe rollout
+
+1. Back up the database and confirm the backup is readable.
+2. Add a unique `VERIFICATION_WORKER_DB_PASSWORD` to `deploy/.env`. `update.sh` and `restore.sh` stop before changing services if it is missing.
+3. Add `MTN_API_KEY` to `deploy/.env`, or leave it empty for a healthy idle worker during schema/UI validation.
+4. Deploy normally. Bootstrap provisions the narrow login by forwarding the named environment variable into the existing database container; adding this feature does not require recreating the database container.
+5. Apply the migration and start the worker. The provider remains database-disabled and manually paused after migration.
+6. Confirm the worker heartbeat appears as configured/online in the Master People verification panel.
+7. With dispatch still paused, create a very small filtered run and confirm its exact frozen count.
+8. Start provider dispatch manually. Confirm checks, projection labels, original reuse timestamps, Pause/Continue, and Cancel on the small run.
+9. Only then use Verify all work emails.
+
+Forward releases require the worker file and health endpoint. An explicit rollback to an image that predates the worker stops the newer worker instead of failing the application rollback. Database migrations are additive and are not removed by an application rollback.
+
+## Operational controls
+
+Defaults are intentionally below the advertised 200,000/day account maximum:
+
+- daily rolling limit: 150,000 starts;
+- start spacing: 500 ms, with an 18-per-10-second rolling guard;
+- HTTP concurrency: 8;
+- provider timeout: 45 seconds;
+- maximum attempts: 4.
+
+HTTP 429 and provider outages cause a bounded cooldown. Repeated transport/protocol failures open a five-minute circuit. Account/authentication failures manually pause provider dispatch until an administrator fixes the key/account and explicitly continues. Malformed responses, email mismatches, network failures, and timeouts never become invalid-email labels.
+
+The worker continues expired-lease recovery and bounded result reconciliation while the provider is disabled, paused, missing a key, or cooling down. A long Master snapshot uses one dedicated pool connection while heartbeat, reconciliation, allocation, and claims continue on the other connection.
+
+## Verification and release evidence
+
+Before enabling production dispatch, require:
+
+- the synthetic PostgreSQL migration/runtime contract;
+- the multi-session concurrency harness;
+- unit tests, lint, and production build;
+- the hydrated component interaction fixture and visual review;
+- a final secret/grant/diff review.
+
+No live MailTester Ninja call is part of CI. A successful build proves code and synthetic database behavior, not provider-account validity or production throughput.

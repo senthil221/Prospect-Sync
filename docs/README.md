@@ -13,6 +13,9 @@ the measured description-search release. Covers all query consumers, fair
 background work, cache/storage budgets, snapshot correctness and capacity
 certification. Implementation is in progress; see the
 [verification ledger](v8-implementation-status.md) for implemented work and gaps.
+
+Operational setup for the dedicated Master work-email verifier is documented in
+[Master work-email verification](master-email-verification.md).
 Mobile validation remains last. A plan is not production-change authorization.
 
 **[Company-description performance report](company-description-search-performance.md)** —

@@ -146,7 +146,7 @@ export function filterId(field: string, operator: ProspectFilterOperator) {
 }
 
 function activeCount(filters: ProspectFilter[]) {
-  return filters.reduce((count, filter) => count + (filter.operator === "empty" || filter.operator === "not_empty" ? 1 : filter.values.length), 0);
+  return filters.reduce((count, filter) => count + (["empty", "not_empty", "never"].includes(filter.operator) ? 1 : filter.values.length), 0);
 }
 
 export function filterLabel(field: string, customFields: ProspectFieldDefinition[] = []) {
@@ -415,6 +415,7 @@ export function EmailVerificationStatusFilter({ filters, onChange }: {
 function kolkataBoundary(date: string, nextDay = false) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "";
   const instant = new Date(`${date}T00:00:00+05:30`);
+  if (!Number.isFinite(instant.getTime())) return "";
   if (nextDay) instant.setUTCDate(instant.getUTCDate() + 1);
   return instant.toISOString();
 }
@@ -436,18 +437,23 @@ export function EmailVerificationDateFilter({ filters, onChange }: {
   const [start, setStart] = useState(() => kolkataCalendarDate(current?.values[0]));
   const [end, setEnd] = useState(() => kolkataCalendarDate(current?.values[1] ? new Date(Date.parse(current.values[1]) - 86_400_000).toISOString() : undefined));
   function apply() {
-    let values: string[] = [];
-    if (operator === "never") values = [];
-    else if (start && operator === "on") values = [kolkataBoundary(start), kolkataBoundary(start, true)];
-    else if (start && operator === "between" && end && end >= start) values = [kolkataBoundary(start), kolkataBoundary(end, true)];
-    else if (start) values = [kolkataBoundary(start)];
-    if (values.every(Boolean) && values.length) onChange([{ id: current?.id ?? filterId("__work_email_verified_at", operator), field: "__work_email_verified_at", operator, values }]);
+    if (operator === "never") {
+      onChange([{ id: current?.id ?? filterId("__work_email_verified_at", operator), field: "__work_email_verified_at", operator, values: [] }]);
+      return;
+    }
+    if (!start || (operator === "between" && (!end || end < start))) return;
+    const values = operator === "on"
+      ? [kolkataBoundary(start), kolkataBoundary(start, true)]
+      : operator === "between"
+        ? [kolkataBoundary(start), kolkataBoundary(end, true)]
+        : [kolkataBoundary(start)];
+    if (values.every(Boolean)) onChange([{ id: current?.id ?? filterId("__work_email_verified_at", operator), field: "__work_email_verified_at", operator, values }]);
   }
   return <div className="verification-date-filter">
     <label><span>Condition</span><select value={operator} onChange={(event) => setOperator(event.target.value as typeof operator)}><option value="never">Never verified</option><option value="before">Before date</option><option value="on">On date</option><option value="after">On or after date</option><option value="between">Between dates</option></select></label>
     {operator !== "never" ? <label><span>{operator === "between" ? "From" : "Date"}</span><input type="date" value={start} onChange={(event) => setStart(event.target.value)}/></label> : null}
     {operator === "between" ? <label><span>Through</span><input type="date" min={start} value={end} onChange={(event) => setEnd(event.target.value)}/></label> : null}
-    <button type="button" disabled={operator !== "never" && (!start || (operator === "between" && !end))} onClick={apply}>Apply date</button>
+    <button type="button" disabled={operator !== "never" && (!start || (operator === "between" && (!end || end < start)))} onClick={apply}>Apply date</button>
   </div>;
 }
 

@@ -18,13 +18,15 @@ export async function fillDispatchSlots({
   now = Date.now,
   spacingMs = PROVIDER_START_SPACING_MS,
   lastClaimAt = 0,
+  canStart = () => true,
 }) {
   let started = 0;
-  while (started < maxStarts && inFlightSize() < concurrency) {
+  while (started < maxStarts && canStart() && inFlightSize() < concurrency) {
     const delay = claimDelayMilliseconds(lastClaimAt, now(), spacingMs);
     if (delay) await wait(delay);
     const unit = await claim();
     if (!unit) break;
+    if (!canStart()) break;
     lastClaimAt = now();
     started += 1;
     start(unit);

@@ -27,38 +27,40 @@ button {
 @media (max-width: 600px) { .integration-mapping-row { grid-template-columns: 1fr; } }
 .integration-actions { display: flex; gap: 12px; flex-wrap: wrap; }
 .verification-backdrop { z-index: 70; padding: 24px; }
-.verification-modal { position: relative; width: min(860px, 100%); max-height: min(820px, calc(100vh - 48px)); overflow: hidden; display: flex; flex-direction: column; gap: 18px; padding: 24px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); box-shadow: 0 24px 80px rgba(15, 23, 42, .24); }
+.verification-modal { position: relative; width: min(860px, 100%); max-height: min(820px, calc(100vh - 48px)); overflow: hidden; display: flex; flex-direction: column; gap: 18px; padding: 24px; border: 1px solid var(--border-default); border-radius: 18px; background: var(--surface-raised); color: var(--text-primary); box-shadow: 0 24px 80px rgba(15, 23, 42, .24); }
 .verification-modal > header, .verification-modal > footer, .verification-runs-head, .verification-run-title, .verification-run-title > div, .verification-run-controls, .verification-actions, .verification-provider, .verification-provider > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .verification-modal > header { align-items: flex-start; }
-.verification-modal > header h2 { margin: 3px 0 6px; }
-.verification-modal > header p:last-child { max-width: 680px; margin: 0; color: var(--muted); }
-.verification-provider { padding: 13px 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); }
+.verification-modal > header h2, .verification-confirm-view h2 { margin: 3px 0 6px; color: var(--text-primary); font-size: var(--text-xl); font-weight: var(--weight-bold); letter-spacing: -.55px; line-height: 1.2; }
+.verification-modal > header p:last-child { max-width: 680px; margin: 0; color: var(--text-secondary); }
+.verification-provider { padding: 13px 15px; border: 1px solid var(--border-default); border-radius: 12px; background: var(--surface-sunken); }
 .verification-provider > div:first-child { justify-content: flex-start; }
-.verification-provider small { display: block; margin-top: 3px; color: var(--muted); }
+.verification-provider small { display: block; margin-top: 3px; color: var(--text-secondary); }
 .verification-dot { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 4px rgba(245, 158, 11, .12); }
 .verification-provider.running .verification-dot { background: #16a34a; box-shadow: 0 0 0 4px rgba(22, 163, 74, .12); }
 .verification-actions { justify-content: flex-start; }
 .verification-run-list { min-height: 120px; max-height: 390px; overflow: auto; display: grid; gap: 10px; padding-right: 4px; }
-.verification-run { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.verification-run { padding: 14px; border: 1px solid var(--border-default); border-radius: 12px; background: var(--surface-raised); }
 .verification-run-title > div { justify-content: flex-start; }
-.verification-run-title time { color: var(--muted); font-size: 12px; }
-.verification-state { padding: 3px 8px; border-radius: 999px; background: var(--surface-soft); color: var(--muted); font-size: 11px; font-weight: 700; }
-.verification-progress { height: 7px; margin: 12px 0 10px; overflow: hidden; border-radius: 999px; background: var(--surface-soft); }
-.verification-progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2563eb, #4f46e5); }
-.verification-run-counts { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--muted); font-size: 12px; }
-.verification-run-counts strong { color: var(--text); }
+.verification-run-title time { color: var(--text-secondary); font-size: 12px; }
+.verification-state { padding: 3px 8px; border: 1px solid var(--border-subtle); border-radius: 999px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 11px; font-weight: 700; }
+.verification-state.state-running, .verification-state.state-preparing { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-text); }
+.verification-progress { height: 7px; margin: 12px 0 10px; overflow: hidden; border-radius: 999px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+.verification-progress i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.verification-run-counts { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--text-secondary); font-size: 12px; }
+.verification-run-counts strong { color: var(--text-primary); }
 .verification-run-controls { justify-content: flex-end; margin-top: 12px; }
-.verification-empty { padding: 36px 16px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; color: var(--muted); }
-.verification-modal > footer { padding-top: 2px; color: var(--muted); font-size: 12px; }
-.verification-confirm-layer { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; padding: 24px; border-radius: inherit; background: rgba(15, 23, 42, .52); }
-.verification-confirm-layer .confirm-modal { width: min(520px, 100%); }
-.verification-confirm-layer .inline-checkbox { align-items: flex-start; }
-.verification-confirm-layer .inline-checkbox span small { display: block; margin-top: 3px; color: var(--muted); font-weight: 400; }
+.verification-empty { padding: 36px 16px; border: 1px dashed var(--border-default); border-radius: 12px; text-align: center; color: var(--text-secondary); }
+.verification-modal > footer { padding-top: 2px; color: var(--text-secondary); font-size: 12px; }
+.verification-confirm-view { width: min(560px, 100%); margin: auto; display: grid; gap: 16px; }
+.verification-confirm-view h2, .verification-confirm-view p { margin: 0; }
+.verification-confirm-view > p:not(.eyebrow) { color: var(--text-secondary); line-height: 1.55; }
+.verification-confirm-view .inline-checkbox { align-items: flex-start; }
+.verification-confirm-view .inline-checkbox span small { display: block; margin-top: 3px; color: var(--text-secondary); font-weight: 400; }
 .verification-status-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.verification-status-options label { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; }
+.verification-status-options label { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border-default); border-radius: 9px; background: var(--surface-raised); }
 .verification-date-filter { display: grid; gap: 10px; }
 .verification-date-filter label { display: grid; gap: 5px; }
-.verification-date-filter label span { color: var(--muted); font-size: 12px; font-weight: 650; }
+.verification-date-filter label span { color: var(--text-secondary); font-size: 12px; font-weight: 650; }
 
 @media (max-width: 700px) {
   .verification-backdrop { padding: 0; align-items: stretch; }

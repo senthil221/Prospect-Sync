@@ -83,6 +83,28 @@ test('fast provider completions cannot starve the outer maintenance cadence', as
   assert.deepEqual(delays, [500, 500, 500, 500, 500, 500, 500]);
 });
 
+test('a permanent result-save failure closes the dispatch gate before another paid start', async () => {
+  let clock = 10_000;
+  let starts = 0;
+  let fatal = false;
+  const result = await fillDispatchSlots({
+    maxStarts: 8,
+    concurrency: 8,
+    inFlightSize: () => 0,
+    claim: async () => ({ id: `unit-${starts + 1}` }),
+    start: () => {
+      starts += 1;
+      void Promise.reject(new Error('mock permanent database failure')).catch(() => { fatal = true; });
+    },
+    wait: async delay => { clock += delay; await Promise.resolve(); },
+    now: () => clock,
+    canStart: () => !fatal,
+  });
+  assert.equal(result.started, 1);
+  assert.equal(starts, 1);
+  assert.equal(fatal, true);
+});
+
 test('errors and source contain no provider key, email, alternate provider, or raw URL', async () => {
   const secret = 'never-log-this-key';
   const email = 'private-person@example.com';
