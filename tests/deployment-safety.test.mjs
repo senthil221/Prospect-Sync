@@ -5,6 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+test("production image includes the shared Smartlead worker parser", async () => {
+  const dockerfile = await readFile(new URL("../Dockerfile", import.meta.url), "utf8");
+  assert.match(dockerfile, /COPY --from=builder[^\n]*\/app\/lib\/integrations\/smartlead-inbox\.mjs \.\/lib\/integrations\/smartlead-inbox\.mjs/);
+  assert.match(dockerfile, /RUN test -f \.\/lib\/integrations\/smartlead-inbox\.mjs/);
+});
+
 test("readiness checks Auth, PostgREST, and PostgreSQL before a deploy passes", async () => {
   const [route, compose, workflow] = await Promise.all([
     readFile(new URL("../app/api/health/route.ts", import.meta.url), "utf8"),

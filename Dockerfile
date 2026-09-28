@@ -83,7 +83,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/worker ./worker
+COPY --from=builder --chown=nextjs:nodejs /app/lib/integrations/smartlead-inbox.mjs ./lib/integrations/smartlead-inbox.mjs
 COPY --from=worker-deps --chown=nextjs:nodejs /app/worker/node_modules ./worker/node_modules
+
+# This module is imported by the integration worker at boot, outside Next.js's
+# standalone tracing. Fail the image build instead of discovering it on the VPS.
+RUN test -f ./lib/integrations/smartlead-inbox.mjs
 
 USER nextjs
 EXPOSE 3000
