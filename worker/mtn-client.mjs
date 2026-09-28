@@ -10,12 +10,14 @@ const normalizedEmail = value => String(value ?? '').trim().toLowerCase();
 export function classifyMtnResult(code, message) {
   const detail = normalized(message);
   if (accountFailure.test(detail)) return { kind: 'account', reason: String(message ?? '').trim() || 'Account failure' };
-  if (detail === 'limited') return { kind: 'transient', reason: 'Limited' };
+  if (['limited', 'mx error', 'timeout', 'spam block'].includes(detail)) {
+    return { kind: 'result', status: 'unverifiable', reason: String(message).trim() };
+  }
   if (normalized(code) === 'ok') return { kind: 'result', status: 'valid', reason: String(message ?? '').trim() || 'Accepted' };
   if (normalized(code) === 'ko') return { kind: 'result', status: 'invalid', reason: String(message ?? '').trim() || 'Rejected' };
   if (normalized(code) === 'mb' && detail === 'catch-all') return { kind: 'result', status: 'catch_all', reason: 'Catch-All' };
-  if (normalized(code) === 'mb' || ['mx error', 'timeout', 'spam block'].includes(detail)) {
-    return { kind: 'transient', reason: String(message ?? '').trim() || 'Unverifiable' };
+  if (normalized(code) === 'mb') {
+    return { kind: 'result', status: 'unverifiable', reason: String(message ?? '').trim() || 'Unverifiable' };
   }
   if (detail === 'accepted') return { kind: 'result', status: 'valid', reason: 'Accepted' };
   if (['rejected', 'no mx'].includes(detail)) return { kind: 'result', status: 'invalid', reason: String(message).trim() };

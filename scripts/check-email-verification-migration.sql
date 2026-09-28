@@ -189,6 +189,37 @@ begin
     raise exception 'successful provider result did not reset the circuit';
   end if;
 
+  -- Mailbox-level provider uncertainty is a completed, reusable result. It
+  -- preserves the provider reason and closes an earlier transport circuit in
+  -- exactly the same way as valid, invalid, and catch-all completions.
+  v_check:='30000000-0000-4000-8000-000000000001';
+  v_token:=gen_random_uuid();
+  insert into prospect_verification.email_checks(
+    id,normalized_email,generation,execution_state,attempts,lease_token,lease_expires_at,worker_id
+  ) values (
+    v_check,'unverifiable-contract@corp.test',1,'running',1,v_token,now()+interval '2 minutes','sql-contract'
+  ) on conflict(id) do update set
+    execution_state='running',result_status=null,result_reason=null,provider=null,checked_at=null,
+    attempts=1,lease_token=excluded.lease_token,lease_expires_at=excluded.lease_expires_at,
+    worker_id=excluded.worker_id,last_error_code=null,updated_at=now();
+  update prospect_verification.provider_control set consecutive_failures=2,
+    cooldown_until=now()+interval '5 minutes',
+    pause_reason='Repeated provider failures; automatic five-minute circuit break'
+  where singleton;
+  if not public.complete_email_verification_check_v1(
+    v_check,v_token,'unverifiable','SPAM Block','mailtester_ninja','2026-09-28T06:30:00Z'
+  ) then raise exception 'unverifiable completion was rejected'; end if;
+  if exists(
+    select 1 from prospect_verification.email_checks where id=v_check and (
+      execution_state<>'completed' or result_status<>'unverifiable' or result_reason<>'SPAM Block'
+      or provider<>'mailtester_ninja' or checked_at<>'2026-09-28T06:30:00Z'
+    )
+  ) then raise exception 'unverifiable result or provider reason was not persisted'; end if;
+  if (select consecutive_failures<>0 or cooldown_until is not null
+      or pause_reason is not null from prospect_verification.provider_control where singleton) then
+    raise exception 'unverifiable completion did not close the repeated-failure circuit';
+  end if;
+
   -- Email mutation invalidates projection and makes the in-flight target
   -- skipped; the older generation can never overwrite a newer observation.
   v_run3:=(public.request_email_verification_v1('10000000-0000-4000-8000-000000000005',

@@ -7,14 +7,35 @@ const response = (body, status = 200, headers = {}) => new Response(JSON.stringi
   status, headers: { 'content-type': 'application/json', ...headers },
 });
 
-test('MTN classification follows code while account and Limited messages override it', () => {
+test('MTN classification follows code while account and unverifiable messages override it', () => {
   assert.deepEqual(classifyMtnResult('ok', 'Accepted'), { kind: 'result', status: 'valid', reason: 'Accepted' });
   assert.deepEqual(classifyMtnResult('ko', 'Rejected'), { kind: 'result', status: 'invalid', reason: 'Rejected' });
   assert.deepEqual(classifyMtnResult('ko', 'No MX'), { kind: 'result', status: 'invalid', reason: 'No MX' });
   assert.deepEqual(classifyMtnResult('mb', 'Catch-All'), { kind: 'result', status: 'catch_all', reason: 'Catch-All' });
-  assert.equal(classifyMtnResult('ok', 'Limited').kind, 'transient');
+  assert.deepEqual(classifyMtnResult('ok', 'Limited'), { kind: 'result', status: 'unverifiable', reason: 'Limited' });
   assert.equal(classifyMtnResult('ok', 'Disabled Key').kind, 'account');
-  for (const message of ['MX Error', 'Timeout', 'SPAM Block']) assert.equal(classifyMtnResult('mb', message).kind, 'transient');
+  for (const message of ['MX Error', 'Timeout', 'SPAM Block']) {
+    assert.deepEqual(classifyMtnResult('mb', message), { kind: 'result', status: 'unverifiable', reason: message });
+  }
+  assert.deepEqual(classifyMtnResult(' mb ', '  mX eRrOr  '), {
+    kind: 'result', status: 'unverifiable', reason: 'mX eRrOr',
+  });
+  assert.deepEqual(classifyMtnResult('mb', 'Unexpected provider status'), {
+    kind: 'result', status: 'unverifiable', reason: 'Unexpected provider status',
+  });
+  assert.deepEqual(classifyMtnResult('mb', '   '), {
+    kind: 'result', status: 'unverifiable', reason: 'Unverifiable',
+  });
+});
+
+test('client returns every provider mb response except Catch-All as a completed unverifiable result', async () => {
+  for (const message of ['Limited', 'MX Error', 'Timeout', 'SPAM Block', 'Unexpected provider status']) {
+    const result = await verifyWithMtn('a@example.com', {
+      apiKey: 'secret',
+      fetchImpl: async () => response({ email: 'a@example.com', code: 'mb', message }),
+    });
+    assert.deepEqual(result, { kind: 'result', status: 'unverifiable', reason: message });
+  }
 });
 
 test('client normalizes decorated key and validates returned email', async () => {
@@ -29,6 +50,9 @@ test('client normalizes decorated key and validates returned email', async () =>
   assert.equal(requested.searchParams.get('key'), 'secret-value');
   await assert.rejects(() => verifyWithMtn('a@example.com', {
     apiKey: 'secret-value', fetchImpl: async () => response({ email: 'b@example.com', code: 'ok', message: 'Accepted' }),
+  }), error => error instanceof MtnRequestError && error.code === 'email_mismatch');
+  await assert.rejects(() => verifyWithMtn('a@example.com', {
+    apiKey: 'secret-value', fetchImpl: async () => response({ email: 'b@example.com', code: 'mb', message: 'Timeout' }),
   }), error => error instanceof MtnRequestError && error.code === 'email_mismatch');
   await assert.rejects(() => verifyWithMtn('a b@example.com', {
     apiKey: 'secret-value', fetchImpl: async () => response({ email: 'a b@example.com', code: 'ok', message: 'Accepted' }),
