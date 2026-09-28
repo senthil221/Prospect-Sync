@@ -8,9 +8,17 @@ insert into public.prospects(id,full_name,work_email,personal_email,company_id)
 values ('verify-p1','Verify One','shared-check@corp.test','personal1@example.test','verify-company-a'),
        ('verify-p2','Verify Two','shared-check@corp.test','personal2@example.test','verify-company-a'),
        ('verify-p3','Verify Three','mutation@corp.test','','verify-company-b'),
-       ('verify-p4','Personal Only','','personal4@example.test','verify-company-b')
+       ('verify-p4','Personal Only','','personal4@example.test','verify-company-b'),
+       ('verify-limit-a1','Limit A One','bounded-manual-a@corp.test','','verify-company-a'),
+       ('verify-limit-a2','Limit A Two','BOUNDED-MANUAL-A@corp.test','','verify-company-a'),
+       ('verify-limit-b','Limit B','bounded-manual-b@corp.test','','verify-company-a'),
+       ('verify-limit-c','Limit C','bounded-manual-c@corp.test','','verify-company-a'),
+       ('verify-limit-d','Limit D','bounded-manual-d@corp.test','','verify-company-a')
 on conflict(id) do nothing;
-select public.reindex_prospects(array['verify-p1','verify-p2','verify-p3','verify-p4']);
+select public.reindex_prospects(array[
+  'verify-p1','verify-p2','verify-p3','verify-p4','verify-limit-a1',
+  'verify-limit-a2','verify-limit-b','verify-limit-c','verify-limit-d'
+]);
 
 create or replace function pg_temp.prepare_verification_run(p_run uuid,p_limit integer default 100)
 returns jsonb language plpgsql as $$
@@ -34,7 +42,46 @@ declare
   v_run uuid; v_run2 uuid; v_run3 uuid; v_check uuid; v_token uuid; v_old_token uuid;
   v_json jsonb; v_count bigint; v_compiled bigint; v_matched bigint; v_generation integer;
 begin
+  -- A manual cap applies to unique normalized addresses only after the full
+  -- authorized candidate set is known. Every person sharing either selected
+  -- address remains in the immutable target snapshot.
+  v_request:='10000000-0000-4000-8000-000000000010';
+  v_json:=public.request_email_verification_v1(v_request,
+    '{"scope":"filtered","filters":[{"field":"__work_email","operator":"contains","values":["bounded-manual-"]}],"forceReverify":false,"maxEmails":2}'::jsonb,null);
+  v_run:=(v_json->>'id')::uuid;
+  if (v_json->>'max_emails')::integer<>2 then raise exception 'manual email cap was not stored'; end if;
+  if (public.request_email_verification_v1(v_request,
+    '{"scope":"filtered","filters":[{"field":"__work_email","operator":"contains","values":["bounded-manual-"]}],"forceReverify":false,"maxEmails":2}'::jsonb,null)->>'id')::uuid<>v_run then
+    raise exception 'identical capped request replay returned a different run';
+  end if;
+  begin
+    perform public.request_email_verification_v1(v_request,
+      '{"scope":"filtered","filters":[{"field":"__work_email","operator":"contains","values":["bounded-manual-"]}],"forceReverify":false,"maxEmails":3}'::jsonb,null);
+    raise exception 'changed manual email cap did not conflict';
+  exception when unique_violation then null; end;
+  begin
+    perform public.request_email_verification_v1('10000000-0000-4000-8000-000000000011',
+      '{"scope":"all","filters":[],"forceReverify":false,"maxEmails":0}'::jsonb,null);
+    raise exception 'out-of-range manual email cap was accepted';
+  exception when invalid_parameter_value then null; end;
+  perform pg_temp.prepare_verification_run(v_run,100);
+  if (select row(max_emails,eligible_email_count,selected_email_count,total_count)
+      is distinct from row(2,4,2,3) from prospect_verification.runs where id=v_run) then
+    raise exception 'capped run counters do not describe 2 of 4 unique emails and all 3 people';
+  end if;
+  if (select array_agg(normalized_email order by normalized_email collate "C")
+      from (select distinct normalized_email from prospect_verification.run_targets where run_id=v_run) selected)
+      is distinct from array['bounded-manual-a@corp.test','bounded-manual-b@corp.test']::text[] then
+    raise exception 'capped run did not deterministically select the first normalized addresses';
+  end if;
+  if not exists(select 1 from prospect_verification.run_targets where run_id=v_run and prospect_id='verify-limit-a1')
+     or not exists(select 1 from prospect_verification.run_targets where run_id=v_run and prospect_id='verify-limit-a2') then
+    raise exception 'capped run split people sharing one selected work email';
+  end if;
+  perform public.control_email_verification_run_v1(v_run,'cancel');
+
   -- Stable request UUID replay and changed-payload conflict.
+  v_request:='10000000-0000-4000-8000-000000000001';
   v_json:=public.request_email_verification_v1(v_request,
     '{"scope":"filtered","filters":[{"field":"__work_email","operator":"equals","values":["shared-check@corp.test"]}],"forceReverify":false}'::jsonb,null);
   v_run:=(v_json->>'id')::uuid;

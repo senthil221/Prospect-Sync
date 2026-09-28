@@ -30,7 +30,9 @@ globalThis.fetch = async (input, init = {}) => {
     if (createAttempts === 1) return Response.json({ preparation: { message: "Preparing the matching companies…" } }, { status: 202 });
     runs.unshift({ id: "fixture-new-run", scope: body.scope, source: "manual", status: "running",
       total_count: 23850, processed_count: 0, reused_count: 0, skipped_count: 0, error_count: 0,
-      force_reverify: body.forceReverify, created_at: new Date().toISOString() });
+      force_reverify: body.forceReverify, max_emails: body.maxEmails ?? null,
+      eligible_email_count: 40000, selected_email_count: body.maxEmails ?? 40000,
+      created_at: new Date().toISOString() });
     return Response.json({ run: runs[0] }, { status: 202 });
   }
   if (url.includes("/api/verifications/fixture-paused-run") && init.method === "POST") {

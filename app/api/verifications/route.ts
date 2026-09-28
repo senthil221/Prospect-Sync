@@ -8,6 +8,7 @@ import { parseCompanyScope } from '../../../lib/workspace-scopes';
 import { scopeRestricts } from '../../../lib/workspace-scopes';
 import { prepareCompanyScope } from '../../../lib/prepare-company-scope';
 import { ownerIdentity } from '../../../lib/result-sets';
+import { parseManualVerificationEmailLimit } from '../../../lib/verification-limits';
 
 export const runtime = 'nodejs';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -41,6 +42,9 @@ export async function POST(request: Request) {
   } catch (error) { return filterErrorResponse(error, 'Invalid verification filters.'); }
   const search = scope === 'filtered' ? String(raw.search ?? '').trim() : '';
   if (search.length > 300 || typeof raw.forceReverify !== 'boolean') return reply({ error: 'Invalid verification request.' }, 400);
+  let maxEmails: number | undefined;
+  try { maxEmails = parseManualVerificationEmailLimit(raw.maxEmails); }
+  catch (error) { return reply({ error: error instanceof Error ? error.message : 'Invalid email limit.' }, 400); }
   const db = createAdminClient();
   const denial = await authorizeFilterSets(db, filters, user.id, 'prospect', '', companyScope
     ? [{ entityType: 'company', clientScope: '', filters: companyScope.filters }] : []);
@@ -55,7 +59,8 @@ export async function POST(request: Request) {
     resolvedCompanyScope = prepared.scope ?? companyScope!;
   }
   const payload = { scope, search, filters, companyScope: resolvedCompanyScope,
-    intentCompanyScope: companyScope ?? {}, forceReverify: raw.forceReverify };
+    intentCompanyScope: companyScope ?? {}, forceReverify: raw.forceReverify,
+    ...(maxEmails === undefined ? {} : { maxEmails }) };
   const { data, error } = await db.rpc('request_email_verification_v1', {
     p_request_id: String(raw.requestId), p_payload: payload, p_actor_id: user.id,
   }).abortSignal(AbortSignal.timeout(5000));

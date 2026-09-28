@@ -6,11 +6,14 @@ This feature verifies `work_email` with the dedicated Prospect Sync MailTester N
 
 - **Verify all work emails** freezes the entire Master People selection. It ignores the current page, search, filters, and company pivot.
 - **Verify matching people** freezes the complete authorized filter/search/company scope across all pages, including the people-per-company limit.
+- Manual all/matching runs may set **Maximum unique work emails** from 1 to 200,000. The database applies the limit only after building the complete authorized candidate set, orders distinct normalized addresses deterministically, and keeps every matching person who shares a selected address. Leaving it blank preserves the original unlimited behavior.
 - A completed result for the same unchanged normalized work email is reused by default, preserving its original `checked_at`. Reverify is an explicit confirmation option.
 - Pause prevents new allocation and dispatch for that run. An already-started provider request may settle and is reconciled truthfully. Continue resumes the same run ID.
 - Cancel preserves results already reconciled and marks unfinished targets cancelled in bounded reconciliation.
 - Verify on Import freezes canonical memberships for that import only, including linked duplicates, after the import commits successfully.
 - There is no scheduled re-verification cycle. Another run starts only when an authorized user requests it or opts into verification for an import. Provider start/pause controls remain administrator-only.
+
+For a controlled 10,000-email batch, apply any desired People filters (use **Last Verified → Never Verified** for a fresh batch), choose **Verify matching people**, enter `10000`, and start the run. The run card records eligible unique emails, selected unique emails, selected people, and the requested limit. Because unchanged completed results are reused by default, the number of paid provider calls can be lower than the selected-email count. Repeating the same broad capped scope can select the same deterministic addresses; use Last Verified or another filter to advance to a fresh batch.
 
 The queue is Postgres-backed. Snapshot preparation, shared-check allocation, provider settlement, and canonical projection reconciliation are separate fenced phases. Provider calls never run inside a database transaction. Redis, BullMQ, Waterfall Verifier, and paid fallback providers are not dependencies.
 

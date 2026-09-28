@@ -8,13 +8,19 @@ test("verification confirmation keeps one request id across preparation and cont
   await page.getByRole("button", { name: "Verify matching people" }).click();
   await expect(page.getByRole("dialog")).toContainText("every matching person");
   await expect(page.getByRole("button", { name: "Back" })).toBeFocused();
+  await page.getByLabel("Maximum unique work emails").fill("10000");
   await page.getByLabel("Reverify completed unchanged emails").check();
+  await page.screenshot({ path: "test-results/email-verification-limit-confirmation.png", fullPage: true });
   await page.getByRole("button", { name: "Start verification" }).click();
   await expect(page.getByText("23,850").first()).toBeVisible({ timeout: 10_000 });
   const requests = await page.evaluate(() => (globalThis as typeof globalThis & { __verificationRequests?: Array<Record<string, unknown>> }).__verificationRequests ?? []);
   expect(requests).toHaveLength(2);
   expect(requests[0].requestId).toBe(requests[1].requestId);
   expect(requests[0].forceReverify).toBe(true);
+  expect(requests[0].maxEmails).toBe(10_000);
+  await expect(page.getByText(/10,000 emails selected/)).toBeVisible();
+  await expect(page.getByText(/40,000 emails eligible/)).toBeVisible();
+  await expect(page.getByText(/10,000 requested limit/)).toBeVisible();
   await page.getByRole("button", { name: "Continue same run" }).click();
   await expect(page.getByText("Running").first()).toBeVisible();
   await page.locator(".verification-run-list").evaluate(element => { element.scrollTop = 0; });
@@ -64,4 +70,5 @@ test("Last Verified restores saved dates and preserves Never Verified in the mat
   await expect(page.getByText("23,850").first()).toBeVisible({ timeout: 10_000 });
   const requests = await page.evaluate(() => (globalThis as typeof globalThis & { __verificationRequests?: Array<Record<string, unknown>> }).__verificationRequests ?? []);
   expect(requests[0].filters).toEqual(expect.arrayContaining([expect.objectContaining({ field: "__work_email_verified_at", operator: "never", values: [] })]));
+  expect(requests[0].maxEmails).toBeUndefined();
 });

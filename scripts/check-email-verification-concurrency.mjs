@@ -74,6 +74,41 @@ async function waitForBlock(waitingPid, label, blockerPid = null) {
 }
 
 try {
+  stage = `iteration ${iteration}: concurrent bounded snapshot preparation`;
+  const boundedEmailA = fixtureEmail('bounded-a');
+  const boundedEmailB = fixtureEmail('bounded-b');
+  const boundedEmailC = fixtureEmail('bounded-c');
+  const boundedProspects = [fixtureId('bounded-a1'), fixtureId('bounded-a2'), fixtureId('bounded-b'), fixtureId('bounded-c')];
+  await makeProspect(boundedProspects[0], boundedEmailA);
+  await makeProspect(boundedProspects[1], boundedEmailA);
+  await makeProspect(boundedProspects[2], boundedEmailB);
+  await makeProspect(boundedProspects[3], boundedEmailC);
+  await query('select public.reindex_prospects($1::text[])', [boundedProspects]);
+  const boundedRun = randomUUID();
+  const preparationToken = randomUUID();
+  const boundedFilters = JSON.stringify([{ field: '__work_email', operator: 'contains', values: [fixtureTag] }]);
+  await query(`insert into prospect_verification.runs
+    (id,request_id,payload_hash,scope,filters,status,priority,snapshot_complete,force_reverify,
+      max_emails,preparation_token,preparation_lease_expires_at,started_at)
+    values($1,$2,$3,'filtered',$4::jsonb,'preparing',10,false,false,2,$5,now()+interval '15 minutes',now())`,
+  [boundedRun, randomUUID(), randomUUID(), boundedFilters, preparationToken]);
+  await Promise.all([
+    query('select public.prepare_email_verification_run_v1($1,$2,100)', [boundedRun, preparationToken]),
+    query('select public.prepare_email_verification_run_v1($1,$2,100)', [boundedRun, preparationToken]),
+  ]);
+  const boundedState = await query(`select r.status,r.total_count,r.eligible_email_count,r.selected_email_count,
+      count(distinct t.normalized_email)::int selected_addresses,count(*)::int selected_people
+    from prospect_verification.runs r
+    left join prospect_verification.run_targets t on t.run_id=r.id
+    where r.id=$1
+    group by r.id`, [boundedRun]);
+  const bounded = boundedState.rows[0];
+  if (bounded.status !== 'running' || bounded.eligible_email_count !== 3 || bounded.selected_email_count !== 2
+    || bounded.total_count !== 3 || bounded.selected_addresses !== 2 || bounded.selected_people !== 3) {
+    throw new Error(`concurrent capped preparation drifted: ${JSON.stringify(bounded)}`);
+  }
+  await query(`select public.control_email_verification_run_v1($1,'cancel')`, [boundedRun]);
+
   stage = `iteration ${iteration}: crossed allocation and reconciliation`;
   // Reversed prospect order across overlapping runs must still acquire all
   // per-email advisory locks in one numeric order.

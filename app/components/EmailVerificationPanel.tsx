@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { filterPayload } from "../../lib/dashboard-api";
 import type { ProspectFilter } from "../../lib/types";
+import { MAX_MANUAL_VERIFICATION_EMAILS, parseManualVerificationEmailLimit } from "../../lib/verification-limits";
 import type { CompanyScope } from "../../lib/workspace-scopes";
 import { AppIcon, DialogBackdrop } from "./DashboardUi";
 import { useDialogFocus } from "./use-dialog";
@@ -11,6 +12,7 @@ type VerificationRun = {
   id: string; scope: "all" | "filtered" | "import"; source: "manual" | "import";
   status: string; total_count: number; processed_count: number; reused_count: number;
   skipped_count: number; error_count: number; force_reverify: boolean; created_at: string;
+  max_emails?: number | null; eligible_email_count?: number | null; selected_email_count?: number | null;
   completed_at?: string | null; last_error?: string | null;
 };
 type ProviderState = {
@@ -41,6 +43,7 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
   const [error, setError] = useState("");
   const [confirmScope, setConfirmScope] = useState<"all" | "filtered" | null>(null);
   const [forceReverify, setForceReverify] = useState(false);
+  const [maxEmails, setMaxEmails] = useState("");
   const [confirmationRequestId, setConfirmationRequestId] = useState("");
   const panel = useRef<HTMLElement>(null);
   const verifyAllLauncher = useRef<HTMLButtonElement | null>(null);
@@ -49,7 +52,7 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
   const confirmationBack = useRef<HTMLButtonElement | null>(null);
   const closeConfirmation = useCallback(() => {
     const scope = confirmationScopeRef.current;
-    setConfirmScope(null); setForceReverify(false); setConfirmationRequestId("");
+    setConfirmScope(null); setForceReverify(false); setMaxEmails(""); setConfirmationRequestId("");
     window.setTimeout(() => (scope === "all" ? verifyAllLauncher.current : verifyMatchingLauncher.current)?.focus(), 0);
   }, []);
   useDialogFocus(panel, { onClose: confirmScope ? closeConfirmation : onClose, busy: Boolean(busy) });
@@ -79,6 +82,7 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
     if (!confirmScope) return;
     setBusy("create"); setError("");
     try {
+      const parsedMaxEmails = maxEmails === "" ? undefined : parseManualVerificationEmailLimit(Number(maxEmails));
       const requestId = confirmationRequestId || crypto.randomUUID();
       setConfirmationRequestId(requestId);
       let created = false;
@@ -87,6 +91,7 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             requestId, scope: confirmScope, forceReverify,
+            ...(parsedMaxEmails === undefined ? {} : { maxEmails: parsedMaxEmails }),
             ...(confirmScope === "filtered" ? { search: search.trim(), filters: filterPayload(filters), companyScope } : {}),
           }),
         });
@@ -96,7 +101,7 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
         await new Promise((resolve) => window.setTimeout(resolve, 2000));
       }
       if (!created) throw new Error("The matching company scope is still preparing. Try again in a moment; the same request will be reused.");
-      setConfirmScope(null); setForceReverify(false); await refresh();
+      setConfirmScope(null); setForceReverify(false); setMaxEmails(""); await refresh();
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to start verification."); }
     finally { setBusy(""); }
   }
@@ -133,12 +138,17 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
     : quotaWaiting ? "Provider quota wait"
     : coolingDown ? "Provider circuit is cooling down"
     : providerRunning ? "Provider dispatch is running" : "Provider dispatch is stopped";
-  const openConfirmation = (scope: "all" | "filtered") => { confirmationScopeRef.current = scope; setConfirmationRequestId(crypto.randomUUID()); setForceReverify(false); setConfirmScope(scope); setError(""); };
+  const openConfirmation = (scope: "all" | "filtered") => { confirmationScopeRef.current = scope; setConfirmationRequestId(crypto.randomUUID()); setForceReverify(false); setMaxEmails(""); setConfirmScope(scope); setError(""); };
   return <DialogBackdrop className="verification-backdrop">
     <section ref={panel} className="verification-modal" role="dialog" aria-modal="true" aria-labelledby={confirmScope ? "verify-confirm-title" : "verification-title"}>
     {confirmScope ? <div className="verification-confirm-view">
       <p className="eyebrow">CONFIRM VERIFICATION</p><h2 id="verify-confirm-title">{confirmScope === "all" ? "Verify the entire Master People database?" : "Verify every matching person?"}</h2>
       <p>{confirmScope === "all" ? "This ignores the current page, search, filters and company pivot. Every Master record with a work email is included." : "The current search, filters, people-per-company limit and company scope are frozen across every result page."}</p>
+      <div className="form-field verification-limit-field">
+        <label htmlFor="verification-max-emails">Maximum unique work emails</label>
+        <input id="verification-max-emails" aria-describedby="verification-max-emails-help" type="number" inputMode="numeric" min={1} max={MAX_MANUAL_VERIFICATION_EMAILS} step={1} placeholder="All eligible emails" disabled={busy === "create"} value={maxEmails} onChange={(event) => { setMaxEmails(event.target.value); setConfirmationRequestId(crypto.randomUUID()); }}/>
+        <small id="verification-max-emails-help">Optional. Enter 10,000 to freeze at most 10,000 distinct work emails. People sharing a selected email stay together. Existing results may be reused without another paid check.</small>
+      </div>
       <label className="inline-checkbox" htmlFor="verification-force-recheck">Reverify completed unchanged emails<input id="verification-force-recheck" aria-label="Reverify completed unchanged emails" type="checkbox" disabled={busy === "create"} checked={forceReverify} onChange={(event) => { setForceReverify(event.target.checked); setConfirmationRequestId(crypto.randomUUID()); }}/><span><small>Leave off to reuse existing results and preserve their original verified date.</small></span></label>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       <div className="modal-actions"><button ref={confirmationBack} data-autofocus className="secondary" disabled={busy === "create"} onClick={closeConfirmation}>Back</button><button className="primary" disabled={busy === "create"} onClick={() => void createRun()}>{busy === "create" ? "Preparing and starting…" : "Start verification"}</button></div>
@@ -160,7 +170,7 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
           return <article className="verification-run" key={run.id}>
             <div className="verification-run-title"><div><strong>{run.scope === "all" ? "Entire Master People" : run.scope === "import" ? "Import verification" : "Matching people"}</strong><span className={`verification-state state-${run.status}`}>{label(run.status)}</span></div><time>{new Date(run.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</time></div>
             <div className="verification-progress" role="progressbar" aria-label={`${percent}% complete`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><i style={{ width: `${percent}%` }}/></div>
-            <div className="verification-run-counts"><span><strong>{count(run.processed_count)}</strong> processed</span><span><strong>{count(run.total_count)}</strong> total</span><span><strong>{count(run.reused_count)}</strong> reused</span>{run.error_count ? <span><strong>{count(run.error_count)}</strong> errors</span> : null}</div>
+            <div className="verification-run-counts"><span><strong>{count(run.processed_count)}</strong> people processed</span><span><strong>{count(run.total_count)}</strong> people selected</span>{run.selected_email_count != null ? <span><strong>{count(run.selected_email_count)}</strong> emails selected</span> : null}{run.eligible_email_count != null ? <span><strong>{count(run.eligible_email_count)}</strong> emails eligible</span> : null}{run.max_emails != null ? <span><strong>{count(run.max_emails)}</strong> requested limit</span> : null}<span><strong>{count(run.reused_count)}</strong> reused</span>{run.error_count ? <span><strong>{count(run.error_count)}</strong> errors</span> : null}</div>
             {run.last_error ? <p className="form-error">{run.last_error}</p> : null}
             {!terminal.has(run.status) ? <div className="verification-run-controls">{run.status === "paused" ? <button disabled={Boolean(busy)} onClick={() => void controlRun(run, "continue")}>Continue same run</button> : <button disabled={Boolean(busy)} onClick={() => void controlRun(run, "pause")}>Pause</button>}<button className="danger-button" disabled={Boolean(busy)} onClick={() => void controlRun(run, "cancel")}>Cancel</button></div> : null}
           </article>;
