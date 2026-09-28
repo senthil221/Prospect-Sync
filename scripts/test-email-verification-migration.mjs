@@ -104,5 +104,16 @@ ${body}`;
   psql(name, `begin; set local lock_timeout='5s'; set local statement_timeout='5min';\n${body}\ncommit;`);
 }
 psql('verification runtime behavior', contract);
-await import('./check-email-verification-concurrency.mjs');
+try {
+  await import('./check-email-verification-concurrency.mjs');
+} catch (error) {
+  const details = error instanceof Error
+    ? [error.message, error.code, error.detail, error.context, error.where].filter(Boolean).join(' | ')
+    : String(error);
+  const safe = details
+    .replace(/postgres(?:ql)?:\/\/[^\s]+/giu, '[redacted database URL]')
+    .replaceAll(process.env.DATABASE_URL ?? '', '[redacted database URL]');
+  process.stderr.write(`::error title=Email verification concurrency contract::${escape(safe)}\n`);
+  throw error;
+}
 process.stdout.write('Email verification schema, concurrency fences, filters, lifecycle, quota, imports, and grants passed.\n');

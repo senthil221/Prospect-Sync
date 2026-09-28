@@ -1,7 +1,7 @@
 "use client";
 
 import { createRoot } from "react-dom/client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import EmailVerificationPanel from "../../app/components/EmailVerificationPanel";
 import { EmailVerificationDateFilter } from "../../app/ApolloFilterPanel";
 import type { ProspectFilter } from "../../lib/types";
@@ -50,7 +50,9 @@ function Fixture() {
     values: ["2026-09-01T18:30:00.000Z", "2026-09-04T18:30:00.000Z"],
   }]);
   const filters: ProspectFilter[] = [{ id: "fixture-filter", field: "__country", operator: "equals", values: ["India"] }, ...dateFilters];
-  (globalThis as typeof globalThis & { __verificationDateFilters?: ProspectFilter[] }).__verificationDateFilters = dateFilters;
+  useEffect(() => {
+    (globalThis as typeof globalThis & { __verificationDateFilters?: ProspectFilter[] }).__verificationDateFilters = dateFilters;
+  }, [dateFilters]);
   return <div className="app-shell"><main><div className="content">
     <div className="people-heading"><div><p className="eyebrow">DATABASE WORKSPACE</p><h1>People database</h1><p>Synthetic verification interaction fixture.</p></div></div>
     <button id="verification-launcher" onClick={() => setOpen(true)}>Open email verification</button>

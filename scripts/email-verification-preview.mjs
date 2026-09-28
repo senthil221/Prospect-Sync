@@ -49,7 +49,7 @@ const server = createServer(async (request, response) => {
       response.end(await readFile(new URL(`../.next/${url.pathname.slice('/_next/'.length)}`, import.meta.url)));
       return;
     }
-  } catch {}
+  } catch { /* Missing fixture assets fall through to the bounded 404 below. */ }
   response.writeHead(404); response.end('Not found');
 });
 server.listen(3218, '127.0.0.1', () => console.log('Email verification fixture: http://127.0.0.1:3218'));
