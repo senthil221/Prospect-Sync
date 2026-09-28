@@ -436,7 +436,7 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
     <TabPanel id="incomplete" active={tab === "incomplete"} keepMounted className="client-tab-panel">{tab === "incomplete" ? <IncompleteInfoPanel client={client} clients={clients} onSelect={onSelectProspect} onImport={onImport}/> : null}</TabPanel>
     {/* Its own fetch against a narrow time window, so it is mounted only while
         open rather than on every client screen. */}
-    <TabPanel id="recent" active={tab === "recent"} keepMounted className="client-tab-panel">{tab === "recent" ? <RecentlyAddedPanel client={client} onChanged={onRefreshClients}/> : null}</TabPanel>
+    <TabPanel id="recent" active={tab === "recent"} keepMounted className="client-tab-panel">{tab === "recent" ? <RecentlyAddedPanel key={client.id} client={client} onChanged={onRefreshClients}/> : null}</TabPanel>
     {/* Mounted only while open, like the blocklist: the ICP list is its own
         fetch and there is no reason to pay for it on every client screen. */}
     <TabPanel id="icp" active={tab === "icp"} keepMounted className="client-tab-panel">{tab === "icp" ? <ClientIcpPanel client={client}/> : null}</TabPanel>

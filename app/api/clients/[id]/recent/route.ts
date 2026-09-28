@@ -32,18 +32,39 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const rawEntity = url.searchParams.get("entity") ?? "";
   const entity = rawEntity === "people" || rawEntity === "companies" ? rawEntity : "";
   const search = (url.searchParams.get("search") ?? "").trim().slice(0, 200);
+  const rawSource = url.searchParams.get("source");
+  const source = (rawSource ?? "all").trim();
+  const sources = new Set(["all", "import", "master", "client"]);
+  if (rawSource !== null && !sources.has(source)) {
+    return Response.json({ error: "Unknown source." }, { status: 400 });
+  }
   const windowKey = url.searchParams.get("window") ?? "30d";
   const windows: Record<string, number | null> = { "24h": 24, "7d": 168, "30d": 720, all: null };
-  if (!(windowKey in windows)) return Response.json({ error: "Unknown time window." }, { status: 400 });
+  // Requests without `source` are older clients. Keep their v1 time-window
+  // contract while the source-first UI uses v2's bounded 48-hour view.
+  if (rawSource === null && !(windowKey in windows)) {
+    return Response.json({ error: "Unknown time window." }, { status: 400 });
+  }
 
-  const { data, error } = await supabase.rpc("client_recent_batches_v1", {
-    p_client_id: clientId,
-    p_search: search,
-    p_entity: entity,
-    p_hours: windows[windowKey],
-    p_limit: pageSize,
-    p_offset: (page - 1) * pageSize,
-  }).abortSignal(request.signal ?? AbortSignal.timeout(30_000));
+  const query = rawSource === null
+    ? supabase.rpc("client_recent_batches_v1", {
+        p_client_id: clientId,
+        p_search: search,
+        p_entity: entity,
+        p_hours: windows[windowKey],
+        p_limit: pageSize,
+        p_offset: (page - 1) * pageSize,
+      })
+    : supabase.rpc("client_recent_batches_v2", {
+        p_client_id: clientId,
+        p_search: search,
+        p_entity: entity,
+        p_source: source,
+        p_hours: 48,
+        p_limit: pageSize,
+        p_offset: (page - 1) * pageSize,
+      });
+  const { data, error } = await query.abortSignal(request.signal ?? AbortSignal.timeout(30_000));
 
   if (error) {
     if (missingFunctionCodes.has(error.code ?? "")) {
@@ -60,7 +81,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     batches: summary?.result_rows ?? [],
     total: Number(summary?.total_count ?? 0),
     entity,
-    window: windowKey,
+    source: rawSource === null ? undefined : source,
+    window: rawSource === null ? windowKey : "48h",
     page,
     pageSize,
   });

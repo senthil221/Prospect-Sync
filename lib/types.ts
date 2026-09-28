@@ -51,7 +51,7 @@ export type QualitySummary = { total: number; missingEmail: number; missingTitle
 // screen, so "not counted" and "counted nothing" must stay tellable apart.
 export type ClientIcpProfile = { id: string; name: string; description: string; tag_id: string | null; sort_order: number; created_at: string; updated_at: string; prospect_count?: number | null; company_count?: number | null };
 export type BlocklistEntry = { id: string; kind: "domain" | "email"; value: string; reason: string; source: string; created_at: string };
-export type ClientAdditionBatch = { id: string; entity_type: "people" | "companies"; source_kind: "import" | "master" | "client"; source_label: string; source_client_id?: string | null; source_client_name?: string | null; record_count: number; created_at: string; completed_at?: string | null };
+export type ClientAdditionBatch = { id: string; entity_type: "people" | "companies"; source_kind: "import" | "master" | "client"; source_label: string; outcome_kind?: "new_memberships" | "historical_import_rows" | "historical_source_unavailable"; source_client_id?: string | null; source_client_name?: string | null; record_count: number; created_at: string; completed_at?: string | null };
 export type EnrichmentPreview = { companies: number; fields: number; sample: Array<{ companyId: string; company: string; domain: string; fields: number }> };
 export type PushResult = { added: number; alreadyPresent: number; blocked: number; queued: number };
 // companyCountsDrifted is optional: an older database returns the drift report

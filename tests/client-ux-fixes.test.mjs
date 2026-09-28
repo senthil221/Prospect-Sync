@@ -44,16 +44,60 @@ test("blocklist removal has per-row actions and confirms bulk changes", async ()
   assert.match(panel, /onConfirm=\{\(\) => void removeSelected\(removeRequest\.payload\)\}/);
 });
 
-test("recent batches group by source while keeping batch times and record expansion", async () => {
-  const panel = await read("../app/components/RecentlyAddedPanel.tsx");
-  assert.match(panel, /key: "import", label: "Import"/);
-  assert.match(panel, /key: "client", label: "Pushed from Client DB"/);
+test("recent batches use source tabs over a bounded 48-hour database query", async () => {
+  const [panel, clientsPanel, route, migration, sqlFixture, sqlRunner, workflow, css] = await Promise.all([
+    read("../app/components/RecentlyAddedPanel.tsx"),
+    read("../app/components/ClientsPanel.tsx"),
+    read("../app/api/clients/[id]/recent/route.ts"),
+    read("../supabase/migrations/20260928202444_client_recent_batches_v2.sql"),
+    read("../supabase/tests/client_recent_batches_v2.sql"),
+    read("../scripts/test-client-recent-batches-migration.mjs"),
+    read("../.github/workflows/ci.yml"),
+    read("../app/workspace.css"),
+  ]);
+  assert.match(panel, /type SourceFilter = "all" \| "import" \| "master" \| "client"/);
+  assert.match(panel, /params\.set\("source", source\)/);
+  assert.match(panel, /All sources/);
+  assert.match(panel, /if \(batch\.source_kind === "import"\) return "Import"/);
+  assert.match(panel, /if \(batch\.source_kind === "client"\) return "Pushed from Client DB"/);
   assert.match(panel, /Pushed from Master DB/);
+  assert.match(panel, /outcome_kind === "historical_source_unavailable"/);
+  assert.match(panel, /past 48 hours/);
   assert.match(panel, /source_client_name \|\| batch\.source_label/);
   assert.match(panel, /source_label \|\| "Imported file"/);
   assert.match(panel, /dateTime=\{batch\.created_at\}/);
   assert.match(panel, /View records/);
-  assert.doesNotMatch(panel, /groupByDay|dayGroup/);
+  assert.match(panel, /batches\.map\(\(batch\)/);
+  assert.doesNotMatch(panel, /batchGroups|recent-source-group|windowKey|24 hours|7 days|30 days|All time|groupByDay|dayGroup/);
+  assert.match(clientsPanel, /<RecentlyAddedPanel key=\{client\.id\} client=\{client\}/);
+  assert.match(panel, /return \(\) => \{ current = false; controller\.abort\(\); \}/);
+
+  assert.match(route, /rawSource === null[\s\S]*client_recent_batches_v1/);
+  assert.match(route, /client_recent_batches_v2/);
+  assert.match(route, /p_source: source/);
+  assert.match(route, /p_hours: 48/);
+  assert.match(route, /Unknown source/);
+  assert.match(migration, /b\.created_at >= now\(\) - pg_catalog\.make_interval/);
+  assert.match(migration, /b\.source_kind = p_source[\s\S]*b\.outcome_kind <> 'historical_source_unavailable'/);
+  assert.ok(migration.indexOf("b.source_kind = p_source") < migration.indexOf("page_rows as"), "source filtering must happen before pagination");
+  assert.match(migration, /security invoker/);
+  assert.doesNotMatch(migration, /create index/i);
+  assert.match(migration, /revoke execute on function public\.client_recent_batches_v2[\s\S]*from public, anon, authenticated/);
+  assert.match(migration, /grant execute on function public\.client_recent_batches_v2[\s\S]*to service_role/);
+  assert.match(sqlFixture, /generate_series\(1, 60\)/);
+  assert.match(sqlFixture, /v_total <> 64/);
+  assert.match(sqlFixture, /preserve newest-first SQL order/);
+  assert.match(sqlFixture, /Master source must exclude source-unavailable history/);
+  assert.match(sqlFixture, /Source, entity and search filters must run before pagination/);
+  assert.match(sqlFixture, /exactly 48 hours ago must remain visible/);
+  assert.match(sqlFixture, /older than 48 hours by one microsecond must be excluded/);
+  assert.match(sqlFixture, /another client crossed the client boundary/);
+  assert.match(sqlFixture, /rollback;/);
+  assert.match(sqlRunner, /RECENT_BATCHES_MIGRATION_TEST_ALLOW/);
+  assert.match(sqlRunner, /cursor_migration_test/);
+  assert.match(sqlRunner, /source-first recent-batches behavior/);
+  assert.match(workflow, /node scripts\/test-client-recent-batches-migration\.mjs/);
+  assert.match(css, /\.recent-source-tabs/);
 });
 
 test("deleting a client link revokes it, hides it from active links, and keeps submission records", async () => {

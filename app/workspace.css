@@ -1285,7 +1285,10 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 .uploaded-list-table .list-open-button strong, .uploaded-list-table .list-open-button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .uploaded-list-table .list-open-button span { color: var(--text-tertiary); }
 .list-result-metrics { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); color: var(--text-secondary); font-size: var(--text-xs); }
-.recent-filter-bar { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.recent-filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.recent-source-tabs { flex: 1 1 100%; max-width: 100%; overflow-x: auto; }
+.recent-source-tabs button { flex: 0 0 auto; white-space: nowrap; }
+.recent-entity-filters { margin-left: auto; }
 .recent-source-cell { max-width: 0; }
 .recent-source-cell strong, .recent-source-cell small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recent-source-cell small { color: var(--text-tertiary); font-size: var(--text-2xs); }

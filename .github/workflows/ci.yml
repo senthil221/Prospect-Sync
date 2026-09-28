@@ -48,6 +48,11 @@ jobs:
           DATABASE_URL: postgres://postgres:disposable-ci-only@127.0.0.1:5432/cursor_migration_test
           VERIFICATION_MIGRATION_TEST_ALLOW: "1"
         run: node scripts/test-email-verification-migration.mjs
+      - name: Verify source-first recent batches and restricted grants
+        env:
+          DATABASE_URL: postgres://postgres:disposable-ci-only@127.0.0.1:5432/cursor_migration_test
+          RECENT_BATCHES_MIGRATION_TEST_ALLOW: "1"
+        run: node scripts/test-client-recent-batches-migration.mjs
 
   cursor-migration-contract:
     name: People cursor schema-upgrade contract (synthetic)
