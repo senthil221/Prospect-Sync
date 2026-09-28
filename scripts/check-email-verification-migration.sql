@@ -147,7 +147,11 @@ begin
 
   -- Rolling budget is durable and exposes a separate quota wait.
   update prospect_verification.provider_control set daily_limit=1,next_dispatch_at=now()-interval '1 second',quota_wait_until=null where singleton;
-  if public.claim_email_verification_check_v1('sql-contract',120) is not null
+  -- Evaluate the volatile claim before reading the control row. Keeping both
+  -- inside one boolean lets PostgreSQL hoist the uncorrelated SELECT into an
+  -- InitPlan and observe quota_wait_until before the function updates it.
+  v_json:=public.claim_email_verification_check_v1('sql-contract',120);
+  if v_json is not null
      or (select quota_wait_until is null from prospect_verification.provider_control where singleton) then
     raise exception 'rolling provider budget was not enforced/persisted';
   end if;
