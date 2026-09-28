@@ -15,7 +15,7 @@ const runs: MockRun[] = [{
   error_count: 1, force_reverify: false, created_at: "2026-09-28T05:00:00Z",
 }];
 
-globalThis.fetch = async (input, init = {}) => {
+const fixtureFetch: typeof fetch = async (input, init = {}) => {
   const url = String(input);
   if (url === "/api/verifications" && (!init.method || init.method === "GET")) {
     return Response.json({ runs, provider: {
@@ -44,9 +44,14 @@ globalThis.fetch = async (input, init = {}) => {
   if (url === "/api/verifications/provider") return Response.json({ ok: true });
   return Response.json({ error: "Unexpected fixture request" }, { status: 500 });
 };
+if (typeof window !== "undefined") globalThis.fetch = fixtureFetch;
 
-function Fixture() {
-  const [open, setOpen] = useState(true);
+export function Fixture() {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const initial = window.setTimeout(() => setOpen(true), 0);
+    return () => window.clearTimeout(initial);
+  }, []);
   const [dateFilters, setDateFilters] = useState<ProspectFilter[]>([{
     id: "fixture-date", field: "__work_email_verified_at", operator: "between",
     values: ["2026-09-01T18:30:00.000Z", "2026-09-04T18:30:00.000Z"],
@@ -63,4 +68,6 @@ function Fixture() {
   </div></main></div>;
 }
 
-createRoot(document.getElementById("root")!).render(<Fixture/>);
+if (typeof document !== "undefined" && document.getElementById("root")) {
+  createRoot(document.getElementById("root")!).render(<Fixture/>);
+}

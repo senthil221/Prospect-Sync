@@ -21,6 +21,8 @@ type ProviderState = {
   daily_attempts?: number; daily_limit?: number; worker_configured?: boolean; worker_seen_at?: string | null;
 };
 type StatusPayload = { runs?: VerificationRun[]; provider?: ProviderState | null };
+type ManualScope = "all" | "filtered";
+type LimitMode = "100" | "1000" | "10000" | "custom" | "all";
 
 const terminal = new Set(["completed", "completed_with_errors", "cancelled", "failed"]);
 const label = (value: string) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -36,33 +38,47 @@ async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
 export default function EmailVerificationPanel({ open, search, filters, companyScope, onClose }: {
   open: boolean; search: string; filters: ProspectFilter[]; companyScope: CompanyScope | null; onClose: () => void;
 }) {
+  const hasMatchingScope = Boolean(search.trim() || filters.length || companyScope);
   const [data, setData] = useState<StatusPayload>({});
   const [loading, setLoading] = useState(false);
+  const [statusLoaded, setStatusLoaded] = useState(false);
   const [clock, setClock] = useState(0);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [confirmScope, setConfirmScope] = useState<"all" | "filtered" | null>(null);
+  const [notice, setNotice] = useState("");
+  const [runScope, setRunScope] = useState<ManualScope>(hasMatchingScope ? "filtered" : "all");
+  const [confirmScope, setConfirmScope] = useState<ManualScope | null>(null);
   const [forceReverify, setForceReverify] = useState(false);
-  const [maxEmails, setMaxEmails] = useState("");
+  const [limitMode, setLimitMode] = useState<LimitMode>("10000");
+  const [customEmails, setCustomEmails] = useState("10000");
   const [confirmationRequestId, setConfirmationRequestId] = useState("");
   const panel = useRef<HTMLElement>(null);
-  const verifyAllLauncher = useRef<HTMLButtonElement | null>(null);
-  const verifyMatchingLauncher = useRef<HTMLButtonElement | null>(null);
-  const confirmationScopeRef = useRef<"all" | "filtered" | null>(null);
+  const reviewLauncher = useRef<HTMLButtonElement | null>(null);
   const confirmationBack = useRef<HTMLButtonElement | null>(null);
   const closeConfirmation = useCallback(() => {
-    const scope = confirmationScopeRef.current;
-    setConfirmScope(null); setForceReverify(false); setMaxEmails(""); setConfirmationRequestId("");
-    window.setTimeout(() => (scope === "all" ? verifyAllLauncher.current : verifyMatchingLauncher.current)?.focus(), 0);
+    setConfirmScope(null); setConfirmationRequestId("");
+    window.setTimeout(() => reviewLauncher.current?.focus(), 0);
   }, []);
   useDialogFocus(panel, { onClose: confirmScope ? closeConfirmation : onClose, busy: Boolean(busy) });
-  const hasMatchingScope = Boolean(search.trim() || filters.length || companyScope);
+  const effectiveScope = runScope === "filtered" && !hasMatchingScope ? "all" : runScope;
+
+  function selectedMaxEmails(): number | undefined {
+    if (limitMode === "all") return undefined;
+    if (limitMode !== "custom") return Number(limitMode);
+    if (!/^\d+$/.test(customEmails.trim())) throw new Error("Enter a whole number of emails to verify.");
+    return parseManualVerificationEmailLimit(Number(customEmails));
+  }
+  let limitError = "";
+  try { selectedMaxEmails(); }
+  catch (caught) { limitError = caught instanceof Error ? caught.message : "Enter a valid email limit."; }
+  const displayedLimit = limitMode === "all" ? "All eligible work emails"
+    : limitError ? "Choose a valid email limit" : `Up to ${count(limitMode === "custom" ? customEmails : limitMode)} unique work emails`;
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const status = await jsonRequest<StatusPayload>("/api/verifications", { cache: "no-store" });
-      setData(status); setClock(Date.now());
+      setData(status); setClock(Date.now()); setStatusLoaded(true);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to load verification status."); }
     finally { setLoading(false); }
   }, []);
@@ -80,9 +96,9 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
 
   async function createRun() {
     if (!confirmScope) return;
-    setBusy("create"); setError("");
+    setBusy("create"); setError(""); setNotice("");
     try {
-      const parsedMaxEmails = maxEmails === "" ? undefined : parseManualVerificationEmailLimit(Number(maxEmails));
+      const parsedMaxEmails = selectedMaxEmails();
       const requestId = confirmationRequestId || crypto.randomUUID();
       setConfirmationRequestId(requestId);
       let created = false;
@@ -97,12 +113,12 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
         });
         if (result.run) { created = true; break; }
         if (!result.preparation) throw new Error("The verification run was not created.");
-        setError(result.preparation.message || "Preparing the matching companies…");
+        setNotice(result.preparation.message || "Preparing the matching companies…");
         await new Promise((resolve) => window.setTimeout(resolve, 2000));
       }
       if (!created) throw new Error("The matching company scope is still preparing. Try again in a moment; the same request will be reused.");
-      setConfirmScope(null); setForceReverify(false); setMaxEmails(""); await refresh();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to start verification."); }
+      setConfirmScope(null); setConfirmationRequestId(""); setNotice(""); await refresh();
+    } catch (caught) { setNotice(""); setError(caught instanceof Error ? caught.message : "Unable to start verification."); }
     finally { setBusy(""); }
   }
 
@@ -132,49 +148,81 @@ export default function EmailVerificationPanel({ open, search, filters, companyS
   const quotaWaiting = Boolean(provider.quota_wait_until && Date.parse(provider.quota_wait_until) > clock);
   const coolingDown = Boolean(provider.cooldown_until && Date.parse(provider.cooldown_until) > clock);
   const providerRunning = providerReady && provider.enabled === true && provider.manually_paused !== true && !quotaWaiting && !coolingDown;
-  const providerTitle = !providerConfigured ? "Worker needs its dedicated key"
+  const providerTitle = !statusLoaded ? "Checking verification worker"
+    : !providerConfigured ? "Worker needs its dedicated key"
     : !heartbeatFresh ? "Verification worker is offline"
-    : provider.manually_paused ? "Provider dispatch is paused"
-    : quotaWaiting ? "Provider quota wait"
-    : coolingDown ? "Provider circuit is cooling down"
-    : providerRunning ? "Provider dispatch is running" : "Provider dispatch is stopped";
-  const openConfirmation = (scope: "all" | "filtered") => { confirmationScopeRef.current = scope; setConfirmationRequestId(crypto.randomUUID()); setForceReverify(false); setMaxEmails(""); setConfirmScope(scope); setError(""); };
+    : provider.manually_paused ? "Verification paused"
+    : quotaWaiting ? "Waiting for daily allowance"
+    : coolingDown ? "Temporarily paused"
+    : providerRunning ? "Verification running" : "Verification stopped";
+  const providerDetail = !statusLoaded ? "Loading provider status…"
+    : provider.pause_reason || (providerConfigured
+      ? `${count(provider.daily_attempts)} of ${count(provider.daily_limit)} checks used in the rolling day`
+      : "Add the dedicated MailTesterNinja key on the server to enable dispatch.");
+  const openConfirmation = () => {
+    if (limitError) return;
+    setConfirmationRequestId(crypto.randomUUID());
+    setConfirmScope(effectiveScope);
+    setError("");
+    setNotice("");
+  };
   return <DialogBackdrop className="verification-backdrop">
     <section ref={panel} className="verification-modal" role="dialog" aria-modal="true" aria-labelledby={confirmScope ? "verify-confirm-title" : "verification-title"}>
     {confirmScope ? <div className="verification-confirm-view">
-      <p className="eyebrow">CONFIRM VERIFICATION</p><h2 id="verify-confirm-title">{confirmScope === "all" ? "Verify the entire Master People database?" : "Verify every matching person?"}</h2>
-      <p>{confirmScope === "all" ? "This ignores the current page, search, filters and company pivot. Every Master record with a work email is included." : "The current search, filters, people-per-company limit and company scope are frozen across every result page."}</p>
-      <div className="form-field verification-limit-field">
-        <label htmlFor="verification-max-emails">Maximum unique work emails</label>
-        <input id="verification-max-emails" aria-describedby="verification-max-emails-help" type="number" inputMode="numeric" min={1} max={MAX_MANUAL_VERIFICATION_EMAILS} step={1} placeholder="All eligible emails" disabled={busy === "create"} value={maxEmails} onChange={(event) => { setMaxEmails(event.target.value); setConfirmationRequestId(crypto.randomUUID()); }}/>
-        <small id="verification-max-emails-help">Optional. Enter 10,000 to freeze at most 10,000 distinct work emails. People sharing a selected email stay together. Existing results may be reused without another paid check.</small>
+      <div><p className="eyebrow">REVIEW RUN</p><h2 id="verify-confirm-title">Review verification run</h2><p>Confirm the scope and limit before creating a background run.</p></div>
+      <div className="verification-review-summary">
+        <div><span>Database scope</span><strong>{confirmScope === "all" ? "Master People" : "Current search & filters"}</strong><small>{confirmScope === "all" ? "Across the entire Master database, not just this page." : "Your current search, filters and company scope are frozen across all pages."}</small></div>
+        <div><span>Email selection</span><strong>{displayedLimit}</strong><small>People sharing a selected work email stay together.</small></div>
+        <div><span>Existing results</span><strong>{forceReverify ? "Recheck unchanged emails" : "Reuse unchanged results"}</strong><small>{forceReverify ? "This can use additional provider checks." : "Reused results do not use a new provider check."}</small></div>
       </div>
-      <label className="inline-checkbox" htmlFor="verification-force-recheck">Reverify completed unchanged emails<input id="verification-force-recheck" aria-label="Reverify completed unchanged emails" type="checkbox" disabled={busy === "create"} checked={forceReverify} onChange={(event) => { setForceReverify(event.target.checked); setConfirmationRequestId(crypto.randomUUID()); }}/><span><small>Leave off to reuse existing results and preserve their original verified date.</small></span></label>
+      <p className="verification-review-note">{providerRunning ? "The provider is already running. Checks can begin when preparation finishes." : "This run will wait until you select Start provider. Creating it does not start provider dispatch."}</p>
+      {notice ? <p className="verification-notice" role="status">{notice}</p> : null}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
-      <div className="modal-actions"><button ref={confirmationBack} data-autofocus className="secondary" disabled={busy === "create"} onClick={closeConfirmation}>Back</button><button className="primary" disabled={busy === "create"} onClick={() => void createRun()}>{busy === "create" ? "Preparing and starting…" : "Start verification"}</button></div>
+      <div className="modal-actions verification-review-actions"><button ref={confirmationBack} data-autofocus className="secondary" disabled={busy === "create"} onClick={closeConfirmation}>Back to setup</button><button className="primary" disabled={busy === "create"} onClick={() => void createRun()}>{busy === "create" ? "Preparing run…" : "Create run"}</button></div>
     </div> : <>
-      <header><div><p className="eyebrow">MASTER EMAIL VERIFICATION</p><h2 id="verification-title">Work email verification</h2><p>MailTester Ninja checks work emails in the background. Results are labels only and never remove people from exports, pushes or outreach.</p></div><button className="icon-button" data-autofocus aria-label="Close verification" onClick={onClose}><AppIcon name="close" size={16}/></button></header>
-      <div className={`verification-provider ${providerRunning ? "running" : "paused"}`}>
-        <div><span className="verification-dot"/><div><strong>{providerTitle}</strong><small>{provider.pause_reason || (providerConfigured ? `${count(provider.daily_attempts)} of ${count(provider.daily_limit)} checks used in the rolling day` : "Add MTN_API_KEY to the verification worker, then start dispatch here.")}</small></div></div>
-        <div>{providerRunning ? <button disabled={Boolean(busy)} onClick={() => void controlProvider("pause")}>Pause provider</button> : <button disabled={Boolean(busy) || !providerReady} onClick={() => void controlProvider(provider.enabled ? "continue" : "start")}>Start provider</button>}</div>
+      <header><div><p className="eyebrow">MASTER PEOPLE · EMAIL QUALITY</p><h2 id="verification-title">Work email verification</h2><p>Run a controlled batch of MailTesterNinja checks. Results are saved as labels and never remove people from exports or client pushes.</p></div><button className="icon-button" data-autofocus aria-label="Close verification" onClick={onClose}><AppIcon name="close" size={16}/></button></header>
+      <div className={"verification-provider" + (providerRunning ? " running" : " paused")}>
+        <div><span className="verification-dot" aria-hidden="true"/><div><strong>{providerTitle}</strong><small>{providerDetail}</small></div></div>
+        <div>{providerRunning ? <button className="secondary" disabled={Boolean(busy)} onClick={() => void controlProvider("pause")}>Pause provider</button> : <button className="secondary" disabled={Boolean(busy) || !providerReady} onClick={() => void controlProvider(provider.enabled ? "continue" : "start")}>Start provider</button>}</div>
       </div>
-      <div className="verification-actions">
-        <button ref={verifyAllLauncher} className="primary" onClick={() => openConfirmation("all")}><AppIcon name="target" size={15}/> Verify all work emails</button>
-        <button ref={verifyMatchingLauncher} className="secondary" disabled={!hasMatchingScope} title={hasMatchingScope ? "Verify every record matching the current search and filters, across all pages" : "Apply a search, filter or company scope first"} onClick={() => openConfirmation("filtered")}><AppIcon name="filter" size={15}/> Verify matching people</button>
-      </div>
+      <section className="verification-setup" aria-labelledby="verification-setup-title">
+        <div className="verification-section-heading"><div><p className="eyebrow">NEW RUN</p><h3 id="verification-setup-title">Choose what to verify</h3></div><span className="verification-setup-tag">Background job</span></div>
+        <div className="verification-setting">
+          <span className="verification-setting-label">1. Database scope</span>
+          <div className="verification-scope-options" role="group" aria-label="Verification scope">
+            <button type="button" className={effectiveScope === "filtered" ? "selected" : ""} aria-pressed={effectiveScope === "filtered"} disabled={!hasMatchingScope} onClick={() => setRunScope("filtered")}><strong>Current search & filters</strong><small>{hasMatchingScope ? "Only people matching this view, across every page" : "Apply a search or filter to use this scope"}</small></button>
+            <button type="button" className={effectiveScope === "all" ? "selected" : ""} aria-pressed={effectiveScope === "all"} onClick={() => setRunScope("all")}><strong>Master People</strong><small>All eligible work emails in the Master database</small></button>
+          </div>
+        </div>
+        <div className="verification-setting">
+          <span className="verification-setting-label">2. Maximum unique work emails</span>
+          <div className="verification-limit-options" role="group" aria-label="Maximum unique work emails">
+            <button type="button" className={limitMode === "100" ? "selected" : ""} aria-pressed={limitMode === "100"} onClick={() => setLimitMode("100")}>100</button>
+            <button type="button" className={limitMode === "1000" ? "selected" : ""} aria-pressed={limitMode === "1000"} onClick={() => setLimitMode("1000")}>1,000</button>
+            <button type="button" className={limitMode === "10000" ? "selected" : ""} aria-pressed={limitMode === "10000"} onClick={() => setLimitMode("10000")}>10,000</button>
+            <button type="button" className={limitMode === "custom" ? "selected" : ""} aria-pressed={limitMode === "custom"} onClick={() => setLimitMode("custom")}>Custom</button>
+            <button type="button" className={limitMode === "all" ? "selected" : ""} aria-pressed={limitMode === "all"} onClick={() => setLimitMode("all")}>All eligible</button>
+          </div>
+          {limitMode === "custom" ? <div className="verification-custom-limit"><label htmlFor="verification-max-emails">Maximum unique work emails</label><input id="verification-max-emails" type="number" inputMode="numeric" min={1} max={MAX_MANUAL_VERIFICATION_EMAILS} step={1} aria-invalid={Boolean(limitError)} aria-describedby="verification-limit-help" value={customEmails} onChange={(event) => setCustomEmails(event.target.value)}/></div> : null}
+          <small id="verification-limit-help" className={limitError ? "verification-limit-help invalid" : "verification-limit-help"}>{limitError || "A limit selects distinct work emails. People sharing an address stay together; existing completed results are reused by default."}</small>
+        </div>
+        <details className="verification-advanced"><summary>More options</summary><label className="inline-checkbox" htmlFor="verification-force-recheck"><input id="verification-force-recheck" aria-label="Reverify completed unchanged emails" type="checkbox" checked={forceReverify} onChange={(event) => setForceReverify(event.target.checked)}/> Reverify completed unchanged emails</label><small>Leave this off to preserve the original verified date and avoid a new provider check for unchanged emails.</small></details>
+        <div className="verification-setup-footer"><div><strong>{displayedLimit}</strong><small>{providerRunning ? "The worker can start this run after preparation." : "The run will wait until you start provider dispatch."}</small></div><button ref={reviewLauncher} className="primary" disabled={Boolean(limitError)} onClick={openConfirmation}>Review verification <AppIcon name="arrow" size={15}/></button></div>
+      </section>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
-      <div className="verification-runs-head"><strong>Runs</strong><button disabled={loading} onClick={() => void refresh()}>{loading ? "Refreshing…" : "Refresh"}</button></div>
+      <div className="verification-runs-head"><div><p className="eyebrow">ACTIVITY</p><h3>Verification runs</h3></div><button className="secondary" disabled={loading} onClick={() => void refresh()}>{loading ? "Refreshing…" : "Refresh"}</button></div>
       <div className="verification-run-list">
         {(data.runs ?? []).length ? (data.runs ?? []).map((run) => {
           const percent = run.total_count ? Math.min(100, Math.round((run.processed_count / run.total_count) * 100)) : 0;
           return <article className="verification-run" key={run.id}>
-            <div className="verification-run-title"><div><strong>{run.scope === "all" ? "Entire Master People" : run.scope === "import" ? "Import verification" : "Matching people"}</strong><span className={`verification-state state-${run.status}`}>{label(run.status)}</span></div><time>{new Date(run.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</time></div>
+            <div className="verification-run-title"><div><strong>{run.scope === "all" ? "Master People" : run.scope === "import" ? "Import verification" : "Current filters"}{run.max_emails != null ? " · Up to " + count(run.max_emails) + " emails" : ""}</strong><span className={`verification-state state-${run.status}`}>{label(run.status)}</span></div><time>{new Date(run.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</time></div>
             <div className="verification-progress" role="progressbar" aria-label={`${percent}% complete`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><i style={{ width: `${percent}%` }}/></div>
-            <div className="verification-run-counts"><span><strong>{count(run.processed_count)}</strong> people processed</span><span><strong>{count(run.total_count)}</strong> people selected</span>{run.selected_email_count != null ? <span><strong>{count(run.selected_email_count)}</strong> emails selected</span> : null}{run.eligible_email_count != null ? <span><strong>{count(run.eligible_email_count)}</strong> emails eligible</span> : null}{run.max_emails != null ? <span><strong>{count(run.max_emails)}</strong> requested limit</span> : null}<span><strong>{count(run.reused_count)}</strong> reused</span>{run.error_count ? <span><strong>{count(run.error_count)}</strong> errors</span> : null}</div>
+            <div className="verification-run-metrics"><span><strong>{count(run.processed_count)} / {count(run.total_count)}</strong> people processed</span>{run.selected_email_count != null ? <span><strong>{count(run.selected_email_count)}</strong> emails selected</span> : null}</div>
+            <div className="verification-run-counts">{run.eligible_email_count != null ? <span>{count(run.eligible_email_count)} emails eligible</span> : null}{run.max_emails != null ? <span>{count(run.max_emails)} requested limit</span> : null}<span>{count(run.reused_count)} people reused</span>{run.error_count ? <span>{count(run.error_count)} errors</span> : null}</div>
             {run.last_error ? <p className="form-error">{run.last_error}</p> : null}
             {!terminal.has(run.status) ? <div className="verification-run-controls">{run.status === "paused" ? <button disabled={Boolean(busy)} onClick={() => void controlRun(run, "continue")}>Continue same run</button> : <button disabled={Boolean(busy)} onClick={() => void controlRun(run, "pause")}>Pause</button>}<button className="danger-button" disabled={Boolean(busy)} onClick={() => void controlRun(run, "cancel")}>Cancel</button></div> : null}
           </article>;
-        }) : <div className="verification-empty">{loading ? "Loading runs…" : "No verification runs yet."}</div>}
+        }) : <div className="verification-empty">{loading || !statusLoaded ? "Loading runs…" : "No verification runs yet. Your first bounded run will appear here."}</div>}
       </div>
       <footer><span>{active.length ? `${active.length} active run${active.length === 1 ? "" : "s"}` : "No active runs"}</span><button className="secondary" onClick={onClose}>Close</button></footer>
     </>}
