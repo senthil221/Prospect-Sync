@@ -187,7 +187,7 @@ begin
   if has_schema_privilege('anon','prospect_verification','USAGE')
      or has_table_privilege('authenticated','prospect_verification.runs','SELECT')
      or has_function_privilege('prospect_verification_worker','public.request_email_verification_v1(uuid,jsonb,uuid)','EXECUTE')
-     or not has_function_privilege('prospect_verification_worker','public.claim_email_verification_check_v1(text,integer)','EXECUTE')
+     or not has_function_privilege('prospect_verification_worker','public.claim_email_verification_check_v1(text,integer,integer)','EXECUTE')
      or not has_function_privilege('service_role','public.request_email_verification_v1(uuid,jsonb,uuid)','EXECUTE') then
     raise exception 'verification grants exceed or miss the intended capability boundary';
   end if;
