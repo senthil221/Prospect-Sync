@@ -121,9 +121,11 @@ create table if not exists prospect_verification.provider_control (
   next_dispatch_at timestamptz not null default now(),
   rolling_window_started_at timestamptz not null default now(),
   rolling_attempts integer not null default 0,
-  daily_window_started_at timestamptz not null default date_trunc('day', now() at time zone 'UTC') at time zone 'UTC',
+  daily_window_started_at timestamptz not null default (date_trunc('day', now() at time zone 'UTC') at time zone 'UTC'),
   daily_attempts integer not null default 0,
   daily_limit integer not null default 150000 check (daily_limit between 1 and 200000),
+  worker_configured boolean not null default false,
+  worker_seen_at timestamptz,
   updated_at timestamptz not null default now()
 );
 insert into prospect_verification.provider_control(singleton) values (true) on conflict do nothing;
@@ -316,6 +318,11 @@ begin
   else raise exception 'Unsupported provider action' using errcode='22023'; end if;
   return to_jsonb(v_control)-'singleton';
 end $$;
+
+create or replace function public.report_email_verification_worker_v1(p_configured boolean)
+returns void language sql security definer set search_path = '' as $$
+  update prospect_verification.provider_control set worker_configured=p_configured,worker_seen_at=now(),updated_at=now() where singleton;
+$$;
 
 -- Atomically freezes a bounded selection.  Any failure rolls back the status
 -- change and every target, so dispatch can never observe a partial snapshot.
@@ -640,6 +647,7 @@ revoke execute on function public.request_email_verification_v1(uuid,jsonb,uuid)
 revoke execute on function public.email_verification_runs_v1(integer) from public,anon,authenticated;
 revoke execute on function public.control_email_verification_run_v1(uuid,text) from public,anon,authenticated;
 revoke execute on function public.control_email_verification_provider_v1(text,text) from public,anon,authenticated;
+revoke execute on function public.report_email_verification_worker_v1(boolean) from public,anon,authenticated;
 revoke execute on function public.prepare_email_verification_run_v1(uuid,integer) from public,anon,authenticated;
 revoke execute on function public.prepare_next_email_verification_run_v1() from public,anon,authenticated;
 revoke execute on function public.claim_email_verification_check_v1(text,integer) from public,anon,authenticated;
@@ -657,6 +665,7 @@ do $$ begin
   if exists(select 1 from pg_roles where rolname='prospect_verifier') then
     execute 'grant usage on schema public to prospect_verifier';
     execute 'grant execute on function public.prepare_next_email_verification_run_v1() to prospect_verifier';
+    execute 'grant execute on function public.report_email_verification_worker_v1(boolean) to prospect_verifier';
     execute 'grant execute on function public.claim_email_verification_check_v1(text,integer) to prospect_verifier';
     execute 'grant execute on function public.complete_email_verification_check_v1(uuid,uuid,text,text,text,timestamptz) to prospect_verifier';
     execute 'grant execute on function public.retry_email_verification_check_v1(uuid,uuid,text,integer,boolean,integer,text) to prospect_verifier';

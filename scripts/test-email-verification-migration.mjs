@@ -37,8 +37,8 @@ function diagnostic(result) {
   const lines = `${result.stderr ?? ''}\n${result.stdout ?? ''}`.split(/\r?\n/u);
   const first = lines.findIndex(line => /\bERROR:/u.test(line));
   if (first >= 0) {
-    const context = lines.slice(first + 1).find(line => /^(CONTEXT|LINE|DETAIL|HINT):/u.test(line));
-    return `${lines[first].trim()}${context ? ` | ${context.trim()}` : ''}`;
+    const context = lines.slice(first + 1, first + 7).map(line => line.trim()).filter(Boolean);
+    return [lines[first].trim(), ...context].join(' | ');
   }
   return result.error?.message ?? `psql exited ${result.status ?? 'unknown'}`;
 }
