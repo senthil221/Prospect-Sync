@@ -502,13 +502,24 @@ begin
   if not v_run.snapshot_complete or v_run.status<>'running' then
     return jsonb_build_object('allocated',0,'remaining',exists(select 1 from prospect_verification.run_targets where run_id=p_run_id and state='waiting' and check_id is null));
   end if;
+  drop table if exists pg_temp.verification_allocate_batch;
+  create temporary table verification_allocate_batch(
+    prospect_id text primary key,normalized_email text not null,generation_floor integer not null
+  ) on commit drop;
+  insert into verification_allocate_batch
+  select prospect_id,normalized_email,generation_floor
+  from prospect_verification.run_targets
+  where run_id=p_run_id and state='waiting' and check_id is null
+  order by prospect_id limit greatest(1,least(coalesce(p_limit,500),500));
+  -- Every overlapping run acquires the bounded batch's email locks in the same
+  -- numeric order before touching checks, including hash-collision ties.
+  perform pg_advisory_xact_lock(lock_key) from (
+    select distinct hashtextextended(normalized_email,7194) lock_key
+    from verification_allocate_batch order by lock_key
+  ) ordered_locks;
   for v_target in
-    select prospect_id,normalized_email,generation_floor
-    from prospect_verification.run_targets
-    where run_id=p_run_id and state='waiting' and check_id is null
-    order by prospect_id limit greatest(1,least(coalesce(p_limit,500),500))
+    select prospect_id,normalized_email,generation_floor from verification_allocate_batch order by prospect_id
   loop
-    perform pg_advisory_xact_lock(hashtextextended(v_target.normalized_email,7194));
     v_check:=null;
     if v_run.force_reverify then
       select * into v_check from prospect_verification.email_checks
@@ -890,10 +901,10 @@ declare v_def text; v_anchor text; v_new text; v_hits integer;
 begin
   v_def:=pg_get_functiondef('public.prospect_filter_sql_v1(text,jsonb)'::regprocedure);
   if v_def not like '%__work_email_status%' then
-    v_anchor:='    if cardinality(raw_values) = 0 and coalesce(filter_item->>''setId'', '''') = '''' and operator_key not in (''empty'', ''not_empty'') then';
+    v_anchor:='    if cardinality(raw_values) = 0 then'||E'\n      conjuncts := array_append(conjuncts, ''false'');'||E'\n      continue;'||E'\n    end if;';
     v_hits:=(length(v_def)-length(replace(v_def,v_anchor,'')))/length(v_anchor);
     if v_hits<>1 then raise exception 'prospect_filter_sql_v1 empty-value guard anchor appears % times',v_hits; end if;
-    v_new:='    if cardinality(raw_values) = 0 and coalesce(filter_item->>''setId'', '''') = '''' and operator_key not in (''empty'', ''not_empty'', ''never'') then';
+    v_new:='    if field_key = ''__work_email_verified_at'' and operator_key = ''never'' then'||E'\n      conjuncts := array_append(conjuncts, ''pi.verification_checked_at is null'');'||E'\n      continue;'||E'\n    end if;'||E'\n\n'||v_anchor;
     v_def:=replace(v_def,v_anchor,v_new);
     v_anchor:='      when ''__email_provider_type'' then ''pi.email_provider_type''';
     v_hits:=(length(v_def)-length(replace(v_def,v_anchor,'')))/length(v_anchor);
