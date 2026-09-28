@@ -105,7 +105,9 @@ ${body}`;
 }
 psql('verification runtime behavior', contract);
 try {
-  await import('./check-email-verification-concurrency.mjs');
+  for (let iteration = 1; iteration <= 3; iteration += 1) {
+    await import(`./check-email-verification-concurrency.mjs?iteration=${iteration}`);
+  }
 } catch (error) {
   const details = error instanceof Error
     ? [error.message, error.code, error.detail, error.context, error.where].filter(Boolean).join(' | ')

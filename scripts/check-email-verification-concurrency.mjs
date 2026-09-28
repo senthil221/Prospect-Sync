@@ -18,6 +18,11 @@ const pool = new pg.Pool({
   max: 6,
   options: '-c statement_timeout=8000 -c lock_timeout=3000',
 });
+const iteration = new URL(import.meta.url).searchParams.get('iteration') ?? '0';
+const fixtureTag = `${iteration}-${randomUUID().replaceAll('-', '').slice(0, 10)}`;
+const fixtureId = label => `concurrency-${fixtureTag}-${label}`;
+const fixtureEmail = label => `${label}-${fixtureTag}@example.test`;
+let stage = `iteration ${iteration}: setup`;
 
 async function query(text, values = []) {
   return pool.query(text, values);
@@ -50,19 +55,44 @@ async function completedCheck(email, generation = 1) {
   return id;
 }
 
+async function backendPid(client) {
+  return Number((await client.query('select pg_backend_pid() pid')).rows[0].pid);
+}
+
+async function waitForBlock(waitingPid, label, blockerPid = null) {
+  const deadline = Date.now() + 4_000;
+  while (Date.now() < deadline) {
+    const state = await query(`select state,wait_event_type,pg_blocking_pids(pid) blockers
+      from pg_stat_activity where pid=$1`, [waitingPid]);
+    const row = state.rows[0];
+    const blockers = (row?.blockers ?? []).map(Number);
+    if (row?.state === 'active' && row.wait_event_type === 'Lock'
+      && blockers.length && (blockerPid === null || blockers.includes(blockerPid))) return;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw new Error(`${label} did not reach its required PostgreSQL lock barrier`);
+}
+
 try {
+  stage = `iteration ${iteration}: crossed allocation and reconciliation`;
   // Reversed prospect order across overlapping runs must still acquire all
   // per-email advisory locks in one numeric order.
-  await makeProspect('concurrency-a', 'concurrency-x@example.test');
-  await makeProspect('concurrency-z', 'concurrency-y@example.test');
-  await makeProspect('concurrency-b', 'concurrency-y@example.test');
-  await makeProspect('concurrency-y', 'concurrency-x@example.test');
+  const prospectA = fixtureId('a');
+  const prospectZ = fixtureId('z');
+  const prospectB = fixtureId('b');
+  const prospectY = fixtureId('y');
+  const emailX = fixtureEmail('x');
+  const emailY = fixtureEmail('y');
+  await makeProspect(prospectA, emailX);
+  await makeProspect(prospectZ, emailY);
+  await makeProspect(prospectB, emailY);
+  await makeProspect(prospectY, emailX);
   const runA = await makeRun();
   const runB = await makeRun();
-  await addTarget(runA, 'concurrency-a', 'concurrency-x@example.test');
-  await addTarget(runA, 'concurrency-z', 'concurrency-y@example.test');
-  await addTarget(runB, 'concurrency-b', 'concurrency-y@example.test');
-  await addTarget(runB, 'concurrency-y', 'concurrency-x@example.test');
+  await addTarget(runA, prospectA, emailX);
+  await addTarget(runA, prospectZ, emailY);
+  await addTarget(runB, prospectB, emailY);
+  await addTarget(runB, prospectY, emailX);
   await Promise.all([
     query('select public.allocate_email_verification_targets_v1($1,500)', [runA]),
     query('select public.allocate_email_verification_targets_v1($1,500)', [runB]),
@@ -74,7 +104,7 @@ try {
   // Reconciliation in reversed run target order locks canonical prospects by
   // ascending id, so two sessions cannot create a projection deadlock.
   const checks = await query(`select normalized_email,id from prospect_verification.email_checks
-    where normalized_email in ('concurrency-x@example.test','concurrency-y@example.test') and execution_state='queued'`);
+    where normalized_email=any($1::text[]) and execution_state='queued'`, [[emailX, emailY]]);
   for (const row of checks.rows) {
     await query(`update prospect_verification.email_checks set execution_state='completed',result_status='valid',
       result_reason='Accepted',provider='mailtester_ninja',checked_at=now() where id=$1`, [row.id]);
@@ -90,87 +120,116 @@ try {
   // Provider settlement and allocation may meet on the same active check.
   // Their protocol (allocator RUN->CHECK; completion PROVIDER->CHECK only)
   // must converge without touching targets from the completion transaction.
-  await makeProspect('concurrency-settle', 'settle@example.test');
+  stage = `iteration ${iteration}: completion during allocation`;
+  const settleProspect = fixtureId('settle');
+  const settleEmail = fixtureEmail('settle');
+  await makeProspect(settleProspect, settleEmail);
   const settleRun = await makeRun();
-  await addTarget(settleRun, 'concurrency-settle', 'settle@example.test');
+  await addTarget(settleRun, settleProspect, settleEmail);
   const settleCheck = randomUUID();
   const settleToken = randomUUID();
   await query(`insert into prospect_verification.email_checks
     (id,normalized_email,generation,execution_state,attempts,lease_token,lease_expires_at)
-    values($1,'settle@example.test',1,'running',1,$2,now()+interval '2 minutes')`, [settleCheck, settleToken]);
+    values($1,$2,1,'running',1,$3,now()+interval '2 minutes')`, [settleCheck, settleEmail, settleToken]);
   await Promise.all([
     query('select public.allocate_email_verification_targets_v1($1,500)', [settleRun]),
     query(`select public.complete_email_verification_check_v1($1,$2,'valid','Accepted','mailtester_ninja',now())`, [settleCheck, settleToken]),
   ]);
   await query('select public.reconcile_email_verification_run_v1($1,500)', [settleRun]);
   const settled = await query(`select r.status,p.verification_status from prospect_verification.runs r
-    cross join public.prospects p where r.id=$1 and p.id='concurrency-settle'`, [settleRun]);
+    cross join public.prospects p where r.id=$1 and p.id=$2`, [settleRun, settleProspect]);
   if (settled.rows[0].status !== 'completed' || settled.rows[0].verification_status !== 'valid') {
     throw new Error('completion during allocation did not converge through reconciliation');
   }
 
   // A deleted and recreated public id has a newer deletion epoch. Its old
   // snapshot is skipped and can never project onto the replacement person.
-  await makeProspect('concurrency-recreate', 'old-recreate@example.test');
+  stage = `iteration ${iteration}: delete versus reconciliation epoch fence`;
+  const recreateProspect = fixtureId('recreate');
+  const recreateEmail = fixtureEmail('old-recreate');
+  await makeProspect(recreateProspect, recreateEmail);
   const recreateRun = await makeRun();
-  await addTarget(recreateRun, 'concurrency-recreate', 'old-recreate@example.test');
-  const recreateCheck = await completedCheck('old-recreate@example.test');
+  await addTarget(recreateRun, recreateProspect, recreateEmail);
+  const recreateCheck = await completedCheck(recreateEmail);
   await query(`update prospect_verification.run_targets set check_id=$2 where run_id=$1`, [recreateRun, recreateCheck]);
   const prospectLocker = await pool.connect();
+  const deleteClient = await pool.connect();
+  const reconcileClient = await pool.connect();
   try {
     await prospectLocker.query('begin');
-    await prospectLocker.query(`select 1 from public.prospects where id='concurrency-recreate' for update`);
-    const deleting = query(`delete from public.prospects where id='concurrency-recreate'`);
-    await new Promise(resolve => setTimeout(resolve, 75));
-    const reconciling = query('select public.reconcile_email_verification_run_v1($1,500)', [recreateRun]);
-    await new Promise(resolve => setTimeout(resolve, 75));
+    const lockerPid = await backendPid(prospectLocker);
+    await prospectLocker.query('select 1 from public.prospects where id=$1 for update', [recreateProspect]);
+    const deletePid = await backendPid(deleteClient);
+    const deleting = deleteClient.query('delete from public.prospects where id=$1', [recreateProspect]);
+    await waitForBlock(deletePid, 'delete', lockerPid);
+    const reconcilePid = await backendPid(reconcileClient);
+    const reconciling = reconcileClient.query('select public.reconcile_email_verification_run_v1($1,500)', [recreateRun]);
+    await waitForBlock(reconcilePid, 'reconciliation');
     await prospectLocker.query('commit');
     await Promise.all([reconciling, deleting]);
-  } finally { prospectLocker.release(); }
-  await makeProspect('concurrency-recreate', 'old-recreate@example.test');
+  } finally {
+    await prospectLocker.query('rollback').catch(() => undefined);
+    prospectLocker.release(); deleteClient.release(); reconcileClient.release();
+  }
+  await makeProspect(recreateProspect, recreateEmail);
   await query('select public.reconcile_email_verification_run_v1($1,500)', [recreateRun]);
   const recreated = await query(`select r.skipped_count,p.verification_status from prospect_verification.runs r
-    cross join public.prospects p where r.id=$1 and p.id='concurrency-recreate'`, [recreateRun]);
+    cross join public.prospects p where r.id=$1 and p.id=$2`, [recreateRun, recreateProspect]);
   if (recreated.rows[0].skipped_count !== 1 || recreated.rows[0].verification_status !== null) {
     throw new Error('delete/recreate epoch fence allowed a stale label');
   }
 
   // Pause/Cancel update only the run row. If control is queued behind an
   // existing run lock, claim uses SKIP LOCKED and cannot slip through later.
-  await makeProspect('concurrency-control', 'control@example.test');
+  stage = `iteration ${iteration}: claim versus Pause and Cancel fences`;
+  const controlProspect = fixtureId('control');
+  const controlEmail = fixtureEmail('control');
+  await makeProspect(controlProspect, controlEmail);
   const controlRun = await makeRun({ priority: 40 });
-  await addTarget(controlRun, 'concurrency-control', 'control@example.test');
+  await addTarget(controlRun, controlProspect, controlEmail);
   await query('select public.allocate_email_verification_targets_v1($1,500)', [controlRun]);
   await query(`update prospect_verification.runs set status='paused'
     where id<>$1 and status in ('running','preparing','queued')`, [controlRun]);
   await query(`update prospect_verification.provider_control set enabled=true,manually_paused=false,
     cooldown_until=null,next_dispatch_at=now()-interval '1 second',daily_limit=150000 where singleton`);
   const controlLocker = await pool.connect();
+  const pauseClient = await pool.connect();
   try {
     await controlLocker.query('begin');
+    const lockerPid = await backendPid(controlLocker);
     await controlLocker.query('select 1 from prospect_verification.runs where id=$1 for update', [controlRun]);
-    const pausing = query(`select public.control_email_verification_run_v1($1,'pause')`, [controlRun]);
-    await new Promise(resolve => setTimeout(resolve, 75));
-    const claimWhilePausing = await query(`select public.claim_email_verification_check_v1('pause-race',120,4) unit`);
+    const pausePid = await backendPid(pauseClient);
+    const pausing = pauseClient.query(`select public.control_email_verification_run_v1($1,'pause')`, [controlRun]);
+    await waitForBlock(pausePid, 'Pause control', lockerPid);
+    const claimWhilePausing = await query(`select public.claim_email_verification_check_v1($1,120,4) unit`, [`pause-race-${fixtureTag}`]);
     if (claimWhilePausing.rows[0].unit !== null) throw new Error('claim crossed a pending Pause fence');
     await controlLocker.query('commit');
     await pausing;
-  } finally { controlLocker.release(); }
+  } finally {
+    await controlLocker.query('rollback').catch(() => undefined);
+    controlLocker.release(); pauseClient.release();
+  }
   const pausedStatus = await query('select status from prospect_verification.runs where id=$1', [controlRun]);
   if (pausedStatus.rows[0].status !== 'paused') throw new Error('Pause race did not preserve paused state');
   await query(`select public.control_email_verification_run_v1($1,'continue')`, [controlRun]);
   const cancelLocker = await pool.connect();
+  const cancelClient = await pool.connect();
   try {
     await cancelLocker.query('begin');
+    const lockerPid = await backendPid(cancelLocker);
     await cancelLocker.query('select 1 from prospect_verification.runs where id=$1 for update', [controlRun]);
-    const cancelling = query(`select public.control_email_verification_run_v1($1,'cancel')`, [controlRun]);
-    await new Promise(resolve => setTimeout(resolve, 75));
+    const cancelPid = await backendPid(cancelClient);
+    const cancelling = cancelClient.query(`select public.control_email_verification_run_v1($1,'cancel')`, [controlRun]);
+    await waitForBlock(cancelPid, 'Cancel control', lockerPid);
     await query(`update prospect_verification.provider_control set next_dispatch_at=now()-interval '1 second' where singleton`);
-    const claimWhileCancelling = await query(`select public.claim_email_verification_check_v1('cancel-race',120,4) unit`);
+    const claimWhileCancelling = await query(`select public.claim_email_verification_check_v1($1,120,4) unit`, [`cancel-race-${fixtureTag}`]);
     if (claimWhileCancelling.rows[0].unit !== null) throw new Error('claim crossed a pending Cancel fence');
     await cancelLocker.query('commit');
     await cancelling;
-  } finally { cancelLocker.release(); }
+  } finally {
+    await cancelLocker.query('rollback').catch(() => undefined);
+    cancelLocker.release(); cancelClient.release();
+  }
   await query('select public.reconcile_email_verification_run_v1($1,500)', [controlRun]);
   const cancelledStatus = await query('select status,cancelled_count,processed_count from prospect_verification.runs where id=$1', [controlRun]);
   if (cancelledStatus.rows[0].status !== 'cancelled' || cancelledStatus.rows[0].cancelled_count !== 1 || cancelledStatus.rows[0].processed_count !== 1) {
@@ -179,13 +238,16 @@ try {
 
   // Two recovery workers may see the same exhausted lease; SKIP LOCKED makes
   // exactly one terminal transition and reconciliation counts it once.
-  await makeProspect('concurrency-expired', 'expired@example.test');
+  stage = `iteration ${iteration}: concurrent exhausted lease recovery`;
+  const expiredProspect = fixtureId('expired');
+  const expiredEmail = fixtureEmail('expired');
+  await makeProspect(expiredProspect, expiredEmail);
   const expiredRun = await makeRun();
-  await addTarget(expiredRun, 'concurrency-expired', 'expired@example.test');
+  await addTarget(expiredRun, expiredProspect, expiredEmail);
   const expiredCheck = randomUUID();
   await query(`insert into prospect_verification.email_checks
     (id,normalized_email,generation,execution_state,attempts,lease_token,lease_expires_at)
-    values($1,'expired@example.test',1,'running',4,$2,now()-interval '1 second')`, [expiredCheck, randomUUID()]);
+    values($1,$2,1,'running',4,$3,now()-interval '1 second')`, [expiredCheck, expiredEmail, randomUUID()]);
   await query(`update prospect_verification.run_targets set check_id=$2 where run_id=$1`, [expiredRun, expiredCheck]);
   const expired = await Promise.all([
     query('select public.expire_email_verification_leases_v1(4,500) n'),
@@ -200,26 +262,34 @@ try {
 
   // A locked preferred run must not starve another runnable run. Candidate
   // probing skips the busy run and claims serviceable demand.
+  stage = `iteration ${iteration}: busy preferred run serviceability`;
   await query(`update prospect_verification.provider_control set enabled=true,manually_paused=false,
     cooldown_until=null,next_dispatch_at=now()-interval '1 second',daily_limit=150000 where singleton`);
   const busyRun = await makeRun({ priority: 30 });
   const liveRun = await makeRun({ priority: 20 });
-  await makeProspect('concurrency-busy', 'busy@example.test');
-  await makeProspect('concurrency-live', 'live@example.test');
-  await addTarget(busyRun, 'concurrency-busy', 'busy@example.test');
-  await addTarget(liveRun, 'concurrency-live', 'live@example.test');
+  const busyProspect = fixtureId('busy');
+  const liveProspect = fixtureId('live');
+  const busyEmail = fixtureEmail('busy');
+  const liveEmail = fixtureEmail('live');
+  await makeProspect(busyProspect, busyEmail);
+  await makeProspect(liveProspect, liveEmail);
+  await addTarget(busyRun, busyProspect, busyEmail);
+  await addTarget(liveRun, liveProspect, liveEmail);
   await query('select public.allocate_email_verification_targets_v1($1,500)', [busyRun]);
   await query('select public.allocate_email_verification_targets_v1($1,500)', [liveRun]);
   const locker = await pool.connect();
   try {
     await locker.query('begin');
     await locker.query('select 1 from prospect_verification.runs where id=$1 for update', [busyRun]);
-    const claimed = await query(`select public.claim_email_verification_check_v1('concurrency',120,4) unit`);
-    if (claimed.rows[0].unit?.email !== 'live@example.test') throw new Error('busy preferred run starved serviceable live demand');
+    const claimed = await query(`select public.claim_email_verification_check_v1($1,120,4) unit`, [`serviceability-${fixtureTag}`]);
+    if (claimed.rows[0].unit?.email !== liveEmail) throw new Error('busy preferred run starved serviceable live demand');
     await locker.query('rollback');
   } finally { locker.release(); }
 
-  process.stdout.write('Multi-session verification allocation, reconciliation, deletion fence, and busy-run serviceability passed.\n');
+  process.stdout.write(`Multi-session verification iteration ${iteration} passed.\n`);
+} catch (error) {
+  if (error instanceof Error) error.message = `${stage}: ${error.message}`;
+  throw error;
 } finally {
   await pool.end();
 }
