@@ -24,6 +24,15 @@ BEGIN
   inserted AS (INSERT INTO public.client_blocklist(client_id,kind,value,reason,source) SELECT p_client_id,kind,value,p_reason,'paste' FROM incoming ON CONFLICT(client_id,kind,value) DO NOTHING RETURNING 1)
   SELECT count(*)::integer INTO added FROM inserted;
   RETURN jsonb_build_object('added',added,'suppressed',0,'remaining',false,'reindexed',0,'queued',0);
+END $$;
+CREATE OR REPLACE FUNCTION public.remove_client_blocklist_v1(p_client_id text,p_ids text[],p_actor text default '')
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE removed integer;
+BEGIN
+  DELETE FROM public.client_blocklist
+    WHERE client_id=p_client_id AND id=ANY(coalesce(p_ids,array[]::text[]));
+  GET DIAGNOSTICS removed=ROW_COUNT;
+  RETURN jsonb_build_object('removed',removed,'restored',0,'companiesRestored',0);
 END $$;`;
 const input = ['BEGIN; SET LOCAL statement_timeout=\'5s\';', fixture,
   await read('../supabase/migrations/20260906001221_integration_connections.sql'),
