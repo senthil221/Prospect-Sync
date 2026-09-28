@@ -130,6 +130,7 @@ begin
     raise exception 'repeated provider failures did not open the circuit';
   end if;
   update prospect_verification.provider_control set cooldown_until=null,next_dispatch_at=now()-interval '1 second' where singleton;
+  update prospect_verification.email_checks set next_attempt_at=now()-interval '1 second' where id=v_check;
   v_json:=public.claim_email_verification_check_v1('sql-contract-recovered',30);
   v_token:=(v_json->>'leaseToken')::uuid;
   if (v_json->>'id')::uuid<>v_check then raise exception 'circuit recovery did not resume the same check'; end if;
