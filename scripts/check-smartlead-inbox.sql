@@ -17,13 +17,15 @@ create trigger trg_fixture_tombstone_after_insert
   execute function prospect_integrations.fixture_tombstone_after_insert_v1();
 
 do $$
-declare token uuid; action jsonb; result jsonb; generation uuid; i integer:=0;
+declare token uuid; action jsonb; result jsonb; v_generation uuid; i integer:=0;
 begin
   if (select enabled from prospect_integrations.smartlead_inbox_settings) then raise exception 'Inbox sync must default disabled'; end if;
   if prospect_integrations.claim_smartlead_inbox_sync_v1() is not null then raise exception 'Disabled sync was claimable'; end if;
-  update public.integration_connections set connected=true,credential_ciphertext='fixture',generation=gen_random_uuid(),next_request_at='-infinity' where provider='smartlead' returning generation into generation;
+  update public.integration_connections as connection
+    set connected=true,credential_ciphertext='fixture',generation=gen_random_uuid(),next_request_at='-infinity'
+    where connection.provider='smartlead' returning connection.generation into v_generation;
   insert into public.client_blocklist(client_id,kind,value,reason,source) values('fixture-acme','email','manual@example.test','Client Provided','manual');
-  if not public.confirm_smartlead_inbox_contract_v1('fixture',generation,'official-v1') then raise exception 'Contract validation failed'; end if;
+  if not public.confirm_smartlead_inbox_contract_v1('fixture',v_generation,'official-v1') then raise exception 'Contract validation failed'; end if;
   if not public.set_smartlead_inbox_enabled_v1('fixture',true) then raise exception 'Enable failed'; end if;
   select prospect_integrations.claim_smartlead_inbox_sync_v1() into result;
   token:=(result->>'token')::uuid;
@@ -81,7 +83,7 @@ begin
   insert into prospect_integrations.smartlead_inbox_observations(provider_key,campaign_id,campaign_name,email,domain,category_id,reply_time,client_id,mapping_status,last_cycle)
     values('reply-delete-race',8,'Acme - Race','race@example.test','example.test',3,now(),'fixture-acme','matched',gen_random_uuid());
   insert into prospect_integrations.smartlead_inbox_actions(provider_key,category_id,connection_generation,client_id,kind,value)
-    values('reply-delete-race',3,generation,'fixture-acme','email','race@example.test');
+    values('reply-delete-race',3,v_generation,'fixture-acme','email','race@example.test');
   action:=prospect_integrations.claim_smartlead_inbox_action_v1();
   result:=prospect_integrations.apply_smartlead_inbox_action_v1((action->>'id')::uuid,(action->>'token')::uuid);
   if result->>'state'<>'manual_removed'
@@ -96,7 +98,7 @@ begin
   insert into prospect_integrations.smartlead_inbox_observations(provider_key,campaign_id,campaign_name,email,domain,category_id,reply_time,client_id,mapping_status,last_cycle)
     values('reply-fenced',7,'Acme - Fence','fenced@example.test','example.test',3,now(),'fixture-acme','matched',gen_random_uuid());
   insert into prospect_integrations.smartlead_inbox_actions(provider_key,category_id,connection_generation,client_id,kind,value)
-    values('reply-fenced',3,generation,'fixture-acme','email','fenced@example.test');
+    values('reply-fenced',3,v_generation,'fixture-acme','email','fenced@example.test');
   perform public.set_smartlead_inbox_enabled_v1('fixture',false);
   if prospect_integrations.claim_smartlead_inbox_action_v1() is not null then raise exception 'Paused sync claimed a blocklist write'; end if;
   if not public.set_smartlead_inbox_enabled_v1('fixture',true) then raise exception 'Resume before fencing failed'; end if;
