@@ -100,6 +100,8 @@ export function prospectFieldValue(prospect: Prospect, field: string) {
   if (field === "__website") return String(prospect.company_domain || "");
   if (field === "__mobile_number") return String(prospect.mobile_number || "");
   if (field === "__email") return String(prospect.work_email || prospect.personal_email || "");
+  if (field === "__work_email_status") return prospect.work_email ? String(prospect.verification_status || "Not checked").replaceAll("_", " ") : "No work email";
+  if (field === "__work_email_verified_at") return prospect.verification_checked_at ? new Date(prospect.verification_checked_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "";
   if (field === "__title") return String(prospect.title || "");
   if (field === "__keywords") return Array.isArray(prospect.keywords) ? prospect.keywords.join(", ") : "";
   if (field === "__lists") return Array.isArray(prospect.list_names) ? prospect.list_names.join(", ") : "";

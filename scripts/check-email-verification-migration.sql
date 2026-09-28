@@ -116,6 +116,7 @@ begin
   update prospect_verification.provider_control set next_dispatch_at=now()-interval '1 second' where singleton;
   v_json:=public.claim_email_verification_check_v1('sql-contract',30);
   v_check:=(v_json->>'id')::uuid; v_old_token:=(v_json->>'leaseToken')::uuid;
+  if v_check is null or v_old_token is null then raise exception 'forced reverify check was not claimable'; end if;
   update prospect_verification.email_checks set lease_expires_at=now()-interval '1 second' where id=v_check;
   update prospect_verification.provider_control set next_dispatch_at=now()-interval '1 second' where singleton;
   v_json:=public.claim_email_verification_check_v1('sql-contract-restart',30);
@@ -133,7 +134,7 @@ begin
   update prospect_verification.email_checks set next_attempt_at=now()-interval '1 second' where id=v_check;
   v_json:=public.claim_email_verification_check_v1('sql-contract-recovered',30);
   v_token:=(v_json->>'leaseToken')::uuid;
-  if (v_json->>'id')::uuid<>v_check then raise exception 'circuit recovery did not resume the same check'; end if;
+  if (v_json->>'id')::uuid is distinct from v_check then raise exception 'circuit recovery did not resume the same check'; end if;
   perform public.complete_email_verification_check_v1(v_check,v_token,'valid','Accepted','mailtester_ninja','2026-09-28T06:00:00Z');
   perform public.reconcile_email_verification_run_v1(v_run3,500);
   if (select consecutive_failures<>0 from prospect_verification.provider_control where singleton) then
@@ -148,6 +149,7 @@ begin
   update prospect_verification.provider_control set next_dispatch_at=now()-interval '1 second' where singleton;
   v_json:=public.claim_email_verification_check_v1('sql-contract',120);
   v_check:=(v_json->>'id')::uuid; v_token:=(v_json->>'leaseToken')::uuid;
+  if v_check is null or v_token is null then raise exception 'mutation check was not claimable'; end if;
   update public.prospects set work_email='new-mutation@corp.test' where id='verify-p3';
   perform public.complete_email_verification_check_v1(v_check,v_token,'invalid','Rejected','mailtester_ninja',now());
   perform public.reconcile_email_verification_run_v1(v_run3,500);

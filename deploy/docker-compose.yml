@@ -459,6 +459,41 @@ services:
     stop_grace_period: 55s
     networks: [internal]
 
+  # Durable MailTester Ninja verifier. It has a dedicated Postgres capability
+  # role and a dedicated provider secret; neither the application service role
+  # nor the Waterfall verifier connection is reused. An empty key is a healthy,
+  # idle configuration and dispatch also remains database-disabled by default.
+  verification-worker:
+    image: ${APP_IMAGE}
+    container_name: prospect-verification-worker
+    <<: [*default-restart]
+    logging: *default-logging
+    command: ["node", "worker/verification-worker.mjs"]
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: prospect_verification_worker
+      PGPASSWORD: ${VERIFICATION_WORKER_DB_PASSWORD:?VERIFICATION_WORKER_DB_PASSWORD is required}
+      MTN_API_KEY: ${MTN_API_KEY:-}
+      MTN_CONCURRENCY: ${MTN_CONCURRENCY:-8}
+      MTN_TIMEOUT_MS: ${MTN_TIMEOUT_MS:-45000}
+      MTN_MAX_ATTEMPTS: ${MTN_MAX_ATTEMPTS:-4}
+      NODE_OPTIONS: "--max-old-space-size=128"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9093/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    mem_limit: 192m
+    cpus: "0.35"
+    stop_grace_period: 100s
+    networks: [internal]
+
   # Stable internal proxy between the public Caddy listener and the two app
   # slots. Its configuration reload is graceful, so ports 80/443 and existing
   # public connections are never bounced during an application release.

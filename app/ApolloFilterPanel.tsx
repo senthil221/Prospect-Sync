@@ -14,7 +14,7 @@ import { useClientLists } from "./components/use-client-lists";
 export type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 
 type FilterDefinition = ProspectFieldDefinition & {
-  kind?: "text" | "employee" | "tiers" | "departments" | "year" | "funding" | "company_keywords";
+  kind?: "text" | "employee" | "tiers" | "departments" | "year" | "funding" | "company_keywords" | "verification_status" | "verification_date";
   advanced?: boolean;
   description?: string;
   /** Which value endpoint autocompletes this field. Company fields ask the company one. */
@@ -72,6 +72,8 @@ const classifierFilters: FilterDefinition[] = [
 // - by id, rename-proof - is the Client ICP section further down, and the
 // picker beside the client tabs.
 const optionalFilters: FilterDefinition[] = [
+  { id: "__work_email_status", label: "Work Email Status", kind: "verification_status", description: "MailTester Ninja result for the current work email. Labels do not change export or outreach eligibility." },
+  { id: "__work_email_verified_at", label: "Last Verified", kind: "verification_date", description: "Calendar dates are interpreted in Asia/Kolkata and sent to the database as exact UTC boundaries." },
   { id: "__tags", label: "Tags", description: "Matches an ICP tag by name. Use the Client ICP filter to pick one exactly." },
 ];
 
@@ -250,6 +252,10 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
           ? <RangeFilter field={definition.id} filters={fieldFilters} presets={fundingRanges} unknownLabel="Funding is not known" minPlaceholder="e.g. 1000000" maxPlaceholder="No maximum" onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "company_keywords"
           ? <CompanyKeywordFilter key={fieldFilters.map((filter) => filter.scopes?.join("|") ?? "default").join(";") || "default"} filters={fieldFilters} defaultScopes={["keywords"]} onChange={(next) => replaceField(definition.id, next)} />
+          : definition.kind === "verification_status"
+          ? <EmailVerificationStatusFilter filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
+          : definition.kind === "verification_date"
+          ? <EmailVerificationDateFilter key={fieldFilters.map((filter) => `${filter.id}:${filter.operator}:${filter.values.join("|")}`).join(";") || "empty"} filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "text" && definition.advanced
             ? <TextBooleanFilter key={fieldFilters.map((filter) => `${filter.id}:${filter.values.join("|")}`).join(";")} definition={definition} filters={fieldFilters} clientId={clientId} valuesEndpoint={definition.valuesEndpoint} onChange={(next) => replaceField(definition.id, next)} />
             : <IncludeExcludeFilter field={definition.id} filters={fieldFilters} clientId={clientId} valuesEndpoint={definition.valuesEndpoint} onChange={(next) => replaceField(definition.id, next)} />}
@@ -383,6 +389,65 @@ export function IncludeExcludeFilter({ field, filters, clientId, valuesEndpoint,
   return <div className="include-exclude-grid">
     <div><span className="include-exclude-label">Include</span><TokenValuePicker field={field} values={includeRule?.values ?? []} clientId={clientId} valuesEndpoint={valuesEndpoint} placeholder="Type or paste comma-separated values" onChange={(values) => setValues("include", values)} /></div>
     <div><span className="include-exclude-label">Exclude</span><TokenValuePicker field={field} values={excludeRule?.values ?? []} clientId={clientId} valuesEndpoint={valuesEndpoint} placeholder="Values to leave out" onChange={(values) => setValues("exclude", values)} /></div>
+  </div>;
+}
+
+const verificationStatuses = [
+  ["valid", "Valid"], ["invalid", "Invalid"], ["catch_all", "Catch-all"],
+  ["unverifiable", "Unverifiable"], ["not_checked", "Not checked"], ["no_work_email", "No work email"],
+] as const;
+
+export function EmailVerificationStatusFilter({ filters, onChange }: {
+  filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void;
+}) {
+  const current = filters.find((filter) => filter.operator === "equals");
+  const selected = new Set(current?.values ?? []);
+  function toggle(value: string) {
+    const next = new Set(selected);
+    if (next.has(value)) next.delete(value); else next.add(value);
+    onChange(next.size ? [{ id: current?.id ?? filterId("__work_email_status", "equals"), field: "__work_email_status", operator: "equals", values: [...next] }] : []);
+  }
+  return <div className="verification-status-options">
+    {verificationStatuses.map(([value, label]) => <label key={value}><input type="checkbox" checked={selected.has(value)} onChange={() => toggle(value)}/><span>{label}</span></label>)}
+  </div>;
+}
+
+function kolkataBoundary(date: string, nextDay = false) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return "";
+  const instant = new Date(`${date}T00:00:00+05:30`);
+  if (nextDay) instant.setUTCDate(instant.getUTCDate() + 1);
+  return instant.toISOString();
+}
+
+function kolkataCalendarDate(value: string | undefined) {
+  if (!value || !Number.isFinite(Date.parse(value))) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(value));
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+export function EmailVerificationDateFilter({ filters, onChange }: {
+  filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void;
+}) {
+  const current = filters[0];
+  const [operator, setOperator] = useState<"never" | "before" | "on" | "after" | "between">(
+    (["never", "before", "on", "after", "between"].includes(current?.operator ?? "") ? current?.operator : "on") as "never" | "before" | "on" | "after" | "between"
+  );
+  const [start, setStart] = useState(() => kolkataCalendarDate(current?.values[0]));
+  const [end, setEnd] = useState(() => kolkataCalendarDate(current?.values[1] ? new Date(Date.parse(current.values[1]) - 86_400_000).toISOString() : undefined));
+  function apply() {
+    let values: string[] = [];
+    if (operator === "never") values = [];
+    else if (start && operator === "on") values = [kolkataBoundary(start), kolkataBoundary(start, true)];
+    else if (start && operator === "between" && end && end >= start) values = [kolkataBoundary(start), kolkataBoundary(end, true)];
+    else if (start) values = [kolkataBoundary(start)];
+    if (values.every(Boolean) && values.length) onChange([{ id: current?.id ?? filterId("__work_email_verified_at", operator), field: "__work_email_verified_at", operator, values }]);
+  }
+  return <div className="verification-date-filter">
+    <label><span>Condition</span><select value={operator} onChange={(event) => setOperator(event.target.value as typeof operator)}><option value="never">Never verified</option><option value="before">Before date</option><option value="on">On date</option><option value="after">On or after date</option><option value="between">Between dates</option></select></label>
+    {operator !== "never" ? <label><span>{operator === "between" ? "From" : "Date"}</span><input type="date" value={start} onChange={(event) => setStart(event.target.value)}/></label> : null}
+    {operator === "between" ? <label><span>Through</span><input type="date" min={start} value={end} onChange={(event) => setEnd(event.target.value)}/></label> : null}
+    <button type="button" disabled={operator !== "never" && (!start || (operator === "between" && !end))} onClick={apply}>Apply date</button>
   </div>;
 }
 

@@ -571,6 +571,7 @@ declare v_control prospect_verification.provider_control;
 declare v_check prospect_verification.email_checks;
 declare v_run prospect_verification.runs;
 declare v_candidate record;
+declare v_candidates jsonb;
 declare v_token uuid:=gen_random_uuid();
 declare v_daily integer;
 declare v_rolling integer;
@@ -579,25 +580,31 @@ begin
   -- run and then the check, and revalidate all predicates before dispatch.
   select dispatch_sequence into v_daily from prospect_verification.provider_control where singleton;
   if mod(coalesce(v_daily,0),5)=0 then
-    select r.id run_id,c.id check_id into v_candidate
-    from prospect_verification.runs r
-    join prospect_verification.run_targets t on t.run_id=r.id and t.state='waiting'
-    join prospect_verification.email_checks c on c.id=t.check_id
-    where r.status='running' and r.snapshot_complete
-      and (c.execution_state='queued' or (c.execution_state='running' and c.lease_expires_at<=now()))
-      and c.next_attempt_at<=now() and c.attempts<greatest(1,least(coalesce(p_max_attempts,4),20))
-    order by c.created_at limit 1;
+    select coalesce(jsonb_agg(jsonb_build_object('runId',run_id,'checkId',check_id) order by created_at),'[]'::jsonb)
+    into v_candidates from (
+      select r.id run_id,c.id check_id,min(c.created_at) created_at
+      from prospect_verification.runs r
+      join prospect_verification.run_targets t on t.run_id=r.id and t.state='waiting'
+      join prospect_verification.email_checks c on c.id=t.check_id
+      where r.status='running' and r.snapshot_complete
+        and (c.execution_state='queued' or (c.execution_state='running' and c.lease_expires_at<=now()))
+        and c.next_attempt_at<=now() and c.attempts<greatest(1,least(coalesce(p_max_attempts,4),20))
+      group by r.id,c.id order by created_at limit 20
+    ) candidates;
   else
-    select r.id run_id,c.id check_id into v_candidate
-    from prospect_verification.runs r
-    join prospect_verification.run_targets t on t.run_id=r.id and t.state='waiting'
-    join prospect_verification.email_checks c on c.id=t.check_id
-    where r.status='running' and r.snapshot_complete
-      and (c.execution_state='queued' or (c.execution_state='running' and c.lease_expires_at<=now()))
-      and c.next_attempt_at<=now() and c.attempts<greatest(1,least(coalesce(p_max_attempts,4),20))
-    order by c.priority desc,c.created_at limit 1;
+    select coalesce(jsonb_agg(jsonb_build_object('runId',run_id,'checkId',check_id) order by priority desc,created_at),'[]'::jsonb)
+    into v_candidates from (
+      select r.id run_id,c.id check_id,max(c.priority) priority,min(c.created_at) created_at
+      from prospect_verification.runs r
+      join prospect_verification.run_targets t on t.run_id=r.id and t.state='waiting'
+      join prospect_verification.email_checks c on c.id=t.check_id
+      where r.status='running' and r.snapshot_complete
+        and (c.execution_state='queued' or (c.execution_state='running' and c.lease_expires_at<=now()))
+        and c.next_attempt_at<=now() and c.attempts<greatest(1,least(coalesce(p_max_attempts,4),20))
+      group by r.id,c.id order by priority desc,created_at limit 20
+    ) candidates;
   end if;
-  if v_candidate.check_id is null then return null; end if;
+  if v_candidates='[]'::jsonb then return null; end if;
   select * into v_control from prospect_verification.provider_control where singleton for update;
   if not v_control.enabled or v_control.manually_paused or coalesce(v_control.cooldown_until,'-infinity')>now() or v_control.next_dispatch_at>now() then return null; end if;
   delete from prospect_verification.dispatch_attempts where id in (
@@ -615,17 +622,22 @@ begin
       quota_wait_until=(select min(attempted_at)+interval '10 seconds' from prospect_verification.dispatch_attempts where attempted_at>now()-interval '10 seconds'),updated_at=now() where singleton;
     return null;
   end if;
-  select * into v_run from prospect_verification.runs
-    where id=v_candidate.run_id and status='running' and snapshot_complete for update skip locked;
-  if v_run.id is null then return null; end if;
-  select * into v_check from prospect_verification.email_checks
-    where id=v_candidate.check_id
-      and (execution_state='queued' or (execution_state='running' and lease_expires_at<=now()))
-      and next_attempt_at<=now() and attempts<greatest(1,least(coalesce(p_max_attempts,4),20))
-    for update skip locked;
+  for v_candidate in select value from jsonb_array_elements(v_candidates)
+  loop
+    v_run:=null; v_check:=null;
+    select * into v_run from prospect_verification.runs
+      where id=(v_candidate.value->>'runId')::uuid and status='running' and snapshot_complete for update skip locked;
+    if v_run.id is null then continue; end if;
+    select * into v_check from prospect_verification.email_checks
+      where id=(v_candidate.value->>'checkId')::uuid
+        and (execution_state='queued' or (execution_state='running' and lease_expires_at<=now()))
+        and next_attempt_at<=now() and attempts<greatest(1,least(coalesce(p_max_attempts,4),20))
+      for update skip locked;
+    if v_check.id is not null and exists(select 1 from prospect_verification.run_targets
+      where run_id=v_run.id and check_id=v_check.id and state='waiting') then exit; end if;
+    v_check:=null;
+  end loop;
   if v_check.id is null then return null; end if;
-  if not exists(select 1 from prospect_verification.run_targets
-    where run_id=v_run.id and check_id=v_check.id and state='waiting') then return null; end if;
   update prospect_verification.email_checks set execution_state='running',attempts=attempts+1,
     lease_token=v_token,lease_expires_at=now()+make_interval(secs=>greatest(30,least(coalesce(p_lease_seconds,120),600))),
     worker_id=left(p_worker_id,120),updated_at=now() where id=v_check.id returning * into v_check;

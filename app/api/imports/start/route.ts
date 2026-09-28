@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Supabase is not configured." }, { status: 503 });
   }
   if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const payload = await request.json() as { clientId?: string; clientName?: string; withoutClient?: boolean; listName?: string; dateContacted?: string | null; fileName?: string; totalRows?: number; headers?: string[]; sourceHeaders?: string[]; fieldMap?: Record<string, string>; dataSource?: string; allowMissingFields?: boolean; background?: boolean; storageObjectPath?: string; fileSizeBytes?: number; mergeMode?: unknown };
+  const payload = await request.json() as { clientId?: string; clientName?: string; withoutClient?: boolean; listName?: string; dateContacted?: string | null; fileName?: string; totalRows?: number; headers?: string[]; sourceHeaders?: string[]; fieldMap?: Record<string, string>; dataSource?: string; allowMissingFields?: boolean; background?: boolean; storageObjectPath?: string; fileSizeBytes?: number; mergeMode?: unknown; verifyWorkEmails?: unknown };
   const supabase = createAdminClient();
   const dataSource = normalizeDataSource(payload.dataSource);
   if (!dataSource) return Response.json({ error: "Choose a data source before importing." }, { status: 400 });
@@ -91,6 +91,7 @@ export async function POST(request: Request) {
     storage_object_path: payload.background === true ? payload.storageObjectPath : null,
     source_headers: sourceHeaders,
     file_size_bytes: payload.background === true ? Number(payload.fileSizeBytes ?? 0) : null,
+    verify_work_emails: payload.verifyWorkEmails === true,
   });
   if (importResult.error) {
     await supabase.from("lists").delete().eq("id", listId);

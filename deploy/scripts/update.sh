@@ -15,6 +15,10 @@ set -eEuo pipefail
 cd "$(dirname "$0")/.."
 source "$(dirname "$0")/_env.sh"
 load_env .env
+if [[ -z "${VERIFICATION_WORKER_DB_PASSWORD:-}" ]]; then
+  echo "VERIFICATION_WORKER_DB_PASSWORD is required. Generate a dedicated value; do not reuse POSTGRES_PASSWORD." >&2
+  exit 1
+fi
 
 LAST_IMAGE_FILE=".last-image"
 ACTIVE_SLOT_FILE=".active-app-slot"
@@ -233,7 +237,9 @@ if [[ "$ACTIVE_SLOT" != "none" ]]; then
   PREVIOUS_IMAGE="$(image_for_slot "$ACTIVE_SLOT")"
 fi
 
+ROLLBACK_REQUESTED=0
 if [[ "${1:-}" == "--rollback" ]]; then
+  ROLLBACK_REQUESTED=1
   [[ -f "$LAST_IMAGE_FILE" ]] || { echo "No previous image recorded." >&2; exit 1; }
   NEW_IMAGE="$(tr -d '[:space:]' < "$LAST_IMAGE_FILE")"
   EXPECTED_VERSION=""
@@ -282,6 +288,11 @@ rollback_on_error() {
       || echo "WARNING: the previous import worker image could not be restored automatically." >&2
     docker compose up -d --no-deps operations-worker >/dev/null 2>&1 \
       || echo "WARNING: the previous operations worker image could not be restored automatically." >&2
+    docker compose stop verification-worker >/dev/null 2>&1 || true
+    if docker run --rm --entrypoint test "$PREVIOUS_IMAGE" -f /app/worker/verification-worker.mjs; then
+      docker compose up -d --no-deps verification-worker >/dev/null 2>&1 \
+        || echo "WARNING: the previous verification worker image could not be restored automatically." >&2
+    fi
     docker compose stop integration-worker >/dev/null 2>&1 || true
     if docker run --rm --entrypoint test "$PREVIOUS_IMAGE" -f /app/worker/integration-worker.mjs; then
       docker compose up -d --no-deps integration-worker >/dev/null 2>&1 || true
@@ -313,7 +324,7 @@ echo "==> Ensuring the database and Supabase services are up"
 docker compose up -d db auth rest storage meta studio
 
 echo "==> Refreshing database roles and guard rails"
-docker compose exec -T db bash -s < postgres/init/00-prospect-bootstrap.sh
+docker compose exec -T -e VERIFICATION_WORKER_DB_PASSWORD db bash -s < postgres/init/00-prospect-bootstrap.sh
 
 echo "==> Applying pending backward-compatible migrations"
 ./scripts/migrate.sh
@@ -344,6 +355,20 @@ if ! wait_for_container prospect-integration-worker 18; then
   echo "Integration worker did not become healthy." >&2
   docker compose logs --tail 30 integration-worker >&2 || true
   rollback_on_error 1
+fi
+
+if [[ "$ROLLBACK_REQUESTED" == "1" ]] \
+  && ! docker run --rm --entrypoint test "$NEW_IMAGE" -f /app/worker/verification-worker.mjs; then
+  echo "==> Rolled-back image predates email verification; stopping its newer worker safely"
+  docker compose stop verification-worker >/dev/null 2>&1 || true
+else
+  echo "==> Starting the disabled-by-default email verification worker on ${NEW_IMAGE}"
+  docker compose up -d --no-deps --pull always verification-worker
+  if ! wait_for_container prospect-verification-worker 18; then
+    echo "Verification worker did not become healthy. Provider dispatch remains disabled." >&2
+    docker compose logs --tail 30 verification-worker >&2 || true
+    rollback_on_error 1
+  fi
 fi
 
 echo "==> Starting ${CANDIDATE_SERVICE} without touching ${ACTIVE_SLOT}"

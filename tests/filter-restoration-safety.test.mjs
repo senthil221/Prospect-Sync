@@ -35,6 +35,19 @@ test('valid draft rows, legacy scalar values, numeric ranges and set transport r
   assert.equal(parseFilters(JSON.stringify([{ ...valid, operator: 'equals', values: [], setId: uuid }]))[0].setId, uuid);
 });
 
+test('Last Verified operators require strict timezone-aware bounds and cannot target other fields', () => {
+  const field = '__work_email_verified_at';
+  assert.deepEqual(parseFilters(JSON.stringify([{ field, operator: 'never', values: [] }]))[0], { field, operator: 'never', values: [] });
+  assert.equal(parseFilters(JSON.stringify([{ field, operator: 'before', values: ['2026-09-27T18:30:00.000Z'] }])).length, 1);
+  assert.equal(parseFilters(JSON.stringify([{ field, operator: 'on', values: ['2026-09-27T18:30:00.000Z', '2026-09-28T18:30:00.000Z'] }])).length, 1);
+  assert.throws(() => parseFilters(JSON.stringify([{ field: '__title', operator: 'before', values: ['2026-09-27T18:30:00.000Z'] }])), /only available/);
+  assert.throws(() => parseFilters(JSON.stringify([{ field, operator: 'contains', values: ['2026'] }])), /date operator/);
+  assert.throws(() => parseFilters(JSON.stringify([{ field, operator: 'before', values: ['2026-09-28'] }])), /ISO timestamp/);
+  assert.throws(() => parseFilters(JSON.stringify([{ field, operator: 'before', values: [] }])), /requires 1 date boundary/);
+  assert.throws(() => parseFilters(JSON.stringify([{ field, operator: 'on', values: ['2026-09-28T18:30:00Z'] }])), /2 date boundaries/);
+  assert.throws(() => parseFilters(JSON.stringify([{ field, operator: 'between', values: ['2026-09-29T18:30:00Z', '2026-09-28T18:30:00Z'] }])), /after/);
+});
+
 test('invalid filter or scope links return a blocking restoration error without throwing during render', () => {
   for (const key of ['pf', 'cf', 'cscope', 'pscope']) {
     for (const raw of ['{', 'null', '"broken"']) {

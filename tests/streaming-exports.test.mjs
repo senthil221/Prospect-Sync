@@ -61,6 +61,15 @@ test("the projection is derived from the renderer, so it cannot name the wrong c
   assert.equal(csvRowsBody([projected], columns), csvRowsBody([row], columns));
 });
 
+test("work-email status projection reads both email and verification status", () => {
+  assert.deepEqual(exportRowKeys([], ["__work_email_status"]),
+    ["created_at", "id", "verification_status", "work_email"]);
+  const columns = buildExportColumns([], ["__work_email_status"]);
+  assert.equal(csvRowsBody([{ work_email: "a@example.test", verification_status: "valid" }], columns), '"valid"');
+  assert.equal(csvRowsBody([{ work_email: "a@example.test" }], columns), '"Not checked"');
+  assert.equal(csvRowsBody([{}], columns), '"No work email"');
+});
+
 test("the direct-versus-background choice is made on bytes as well as rows", () => {
   // Two exports of the same size in rows, one of which is an order of magnitude
   // bigger as a file. A row count alone cannot tell them apart.
@@ -401,7 +410,7 @@ test("both export pickers offer a fixed set, ticked by default, in the order the
   ]);
 
   assert.deepEqual(prospectExportPickerFields.map((field) => field.label),
-    ["First Name", "Last Name", "Job Title", "Email", "Mobile Number",
+    ["First Name", "Last Name", "Job Title", "Email", "Work Email Status", "Last Verified", "Mobile Number",
      "Personal LinkedIn URL", "Company Name", "Website",
      "# Employees", "Company City", "Company State", "Company Country",
      "Company Industry", "Company Keywords", "Company Description",
@@ -422,7 +431,7 @@ test("both export pickers offer a fixed set, ticked by default, in the order the
     companyExportColumns.map((column) => column.header));
   const peopleHeaders = standardExportColumns.filter((column) => peopleDefaults.includes(column.id)).map((column) => column.header);
   assert.deepEqual(peopleHeaders,
-    ["First Name", "Last Name", "Title", "Work Email", "Mobile Number", "LinkedIn", "Company", "Website",
+    ["First Name", "Last Name", "Title", "Work Email", "Work Email Status", "Last Verified", "Mobile Number", "LinkedIn", "Company", "Website",
      "# Employees", "Company City", "Company State", "Company Country",
      "Company Industry", "Company Keywords", "Company Description",
      "Company Founded Year", "Company Technologies", "Company Total Funding"]);

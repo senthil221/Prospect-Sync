@@ -25,5 +25,5 @@ export async function POST(request: Request) {
       logServerEvent({ level: "error", source: "imports", message: "Post-import ANALYZE failed", detail: analyzeError });
     }
   });
-  return Response.json({ summary: completed.summary });
+  return Response.json({ summary: completed.summary, verificationRunId: completed.verificationRunId });
 }

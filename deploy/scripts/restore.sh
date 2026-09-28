@@ -13,6 +13,10 @@ set -eEuo pipefail
 cd "$(dirname "$0")/.."
 source "$(dirname "$0")/_env.sh"
 load_env .env
+if [[ -z "${VERIFICATION_WORKER_DB_PASSWORD:-}" ]]; then
+  echo "VERIFICATION_WORKER_DB_PASSWORD is required. Generate a dedicated value; do not reuse POSTGRES_PASSWORD." >&2
+  exit 1
+fi
 
 [[ "$POSTGRES_DB" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
   || { echo "POSTGRES_DB is not a safe PostgreSQL identifier." >&2; exit 1; }
@@ -233,7 +237,7 @@ zstd -dc "${BACKUP}/database.dump.zst" \
   | sed '/warning\|already exists/Id'
 
 echo "Re-applying role passwords and settings"
-docker compose exec -T db bash -s < postgres/init/00-prospect-bootstrap.sh
+docker compose exec -T -e VERIFICATION_WORKER_DB_PASSWORD db bash -s < postgres/init/00-prospect-bootstrap.sh
 
 echo "Restarting services"
 docker compose up -d

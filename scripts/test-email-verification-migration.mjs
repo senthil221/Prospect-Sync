@@ -104,4 +104,5 @@ ${body}`;
   psql(name, `begin; set local lock_timeout='5s'; set local statement_timeout='5min';\n${body}\ncommit;`);
 }
 psql('verification runtime behavior', contract);
+await import('./check-email-verification-concurrency.mjs');
 process.stdout.write('Email verification schema, concurrency fences, filters, lifecycle, quota, imports, and grants passed.\n');

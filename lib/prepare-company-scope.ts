@@ -29,5 +29,8 @@ export async function prepareCompanyScope(supabase: ReturnType<typeof createAdmi
   if (!row?.set_id) return { response: Response.json({ error: 'Unable to prepare this company search.' }, { status: 500 }) };
   if (row.status === 'failed') return { response: Response.json({ error: 'The company search could not finish. Please retry in a moment or adjust the search.' }, { status: 500 }) };
   if (row.status !== 'ready') return { response: preparationResponse(row.status, Number(row.row_count ?? 0)) };
-  return { scope: { ...scope, _prepared_set_id: String(row.set_id), _prepared_owner: owner } };
+  return {
+    scope: { ...scope, _prepared_set_id: String(row.set_id), _prepared_owner: owner },
+    matchedCompanies: Number(row.row_count ?? 0),
+  };
 }

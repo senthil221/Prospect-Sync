@@ -2,7 +2,8 @@ import { compileBooleanSearch } from "./boolean-search.ts";
 
 export type ProspectFilterOperator =
   | "contains" | "equals" | "not_contains" | "not_equals"
-  | "empty" | "not_empty" | "boolean" | "number_ranges";
+  | "empty" | "not_empty" | "boolean" | "number_ranges"
+  | "never" | "before" | "on" | "after" | "between";
 
 export type ProspectFilter = { field: string; operator: ProspectFilterOperator; values: string[]; scopes?: string[]; setId?: string };
 
@@ -17,7 +18,10 @@ export function filterSetIds(filters: ProspectFilter[]) {
 
 const allowedOperators = new Set<string>([
   "contains", "equals", "not_contains", "not_equals", "empty", "not_empty", "boolean", "number_ranges",
+  "never", "before", "on", "after", "between",
 ]);
+const verificationDateOperators = new Set(["never", "before", "on", "after", "between"]);
+const zonedIsoTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 const companyKeywordScopes = new Set(["name", "keywords", "description"]);
 const defaultCompanyKeywordScopes = ["name", "keywords", "description"];
@@ -134,6 +138,8 @@ export function parseFilters(value: string | null, options: { compileBoolean?: b
     // Field-catalogue validation remains the compiler's responsibility.
     if (!field || field.length > 160) throw new Error('A filter field must contain 1–160 characters.');
     if (typeof operator !== 'string' || !allowedOperators.has(operator)) throw new Error('Unsupported filter operator.');
+    if (verificationDateOperators.has(operator) && field !== "__work_email_verified_at") throw new Error('Date operators are only available for Last Verified.');
+    if (field === "__work_email_verified_at" && !verificationDateOperators.has(String(operator))) throw new Error('Last Verified requires a date operator.');
 
     // Set-backed: the values live in the database, so none of the size caps
     // below apply - nothing is being carried. Only equality is expressible
@@ -166,7 +172,13 @@ export function parseFilters(value: string | null, options: { compileBoolean?: b
           : "Check for a pasted cell that ran together with the next one; each value must be a single entry.");
     }
     let values = trimmed.filter(Boolean);
-    if (!["empty", "not_empty"].includes(operator) && !values.length) return [];
+    if (field === "__work_email_verified_at") {
+      const expectedValues = operator === "never" ? 0 : operator === "on" || operator === "between" ? 2 : 1;
+      if (values.length !== expectedValues) throw new Error(`Last Verified ${operator} requires ${expectedValues} date ${expectedValues === 1 ? "boundary" : "boundaries"}.`);
+      if (values.some((value) => !zonedIsoTimestamp.test(value) || !Number.isFinite(Date.parse(value)))) throw new Error('Last Verified dates must be valid ISO timestamps with a timezone.');
+      if (values.length === 2 && Date.parse(values[1]) <= Date.parse(values[0])) throw new Error('Last Verified end date must be after its start date.');
+    }
+    if (!["empty", "not_empty", "never"].includes(operator) && !values.length) return [];
     if (operator === "boolean") {
       if (values.length !== 1) throw new Error('A Boolean filter must contain exactly one expression.');
       const compiled = compileBooleanSearch(values[0]);

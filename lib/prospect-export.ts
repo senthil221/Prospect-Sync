@@ -53,6 +53,12 @@ export const standardExportColumns: Array<{ id: string; header: string; value: (
   // offers come out in the order the picker lists them.
   { id: "__title", header: "Title", value: (row) => row.title },
   { id: "__work_email", header: "Work Email", value: (row) => row.work_email },
+  { id: "__work_email_status", header: "Work Email Status", value: (row) => {
+    const workEmail = row.work_email;
+    const verificationStatus = row.verification_status;
+    return workEmail ? (verificationStatus ?? "Not checked") : "No work email";
+  } },
+  { id: "__work_email_verified_at", header: "Last Verified", value: (row) => row.verification_checked_at },
   { id: "__personal_email", header: "Personal Email", value: (row) => row.personal_email },
   { id: "__mobile_number", header: "Mobile Number", value: (row) => row.mobile_number },
   { id: "__linkedin", header: "LinkedIn", value: (row) => row.linkedin_url },

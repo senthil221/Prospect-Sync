@@ -11,6 +11,7 @@ DB="${POSTGRES_DB:-postgres}"
 # update or restore the same idempotent script runs against the live cluster,
 # whose pg_hba requires the password already supplied to the db container.
 export PGPASSWORD="${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
+VERIFICATION_WORKER_DB_PASSWORD="${VERIFICATION_WORKER_DB_PASSWORD:-}"
 
 # Connect as supabase_admin, NOT postgres.
 #
@@ -22,7 +23,7 @@ export PGPASSWORD="${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
 #
 # PGPASSWORD is harmless during trust-based initialization and required when
 # this script is intentionally rerun against an existing data directory.
-psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
+psql -v ON_ERROR_STOP=1 -v verification_worker_password="$VERIFICATION_WORKER_DB_PASSWORD" --username supabase_admin --dbname "$DB" <<-EOSQL
 	-- Role logins ----------------------------------------------------------
 	-- The supabase/postgres image already sets these from POSTGRES_PASSWORD.
 	-- Re-asserting is harmless and covers an image that stops doing it, but a
@@ -154,6 +155,26 @@ psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname "$DB" <<-EOSQL
 	alter role prospect_integration_worker set statement_timeout='10s';
 	alter role prospect_integration_worker set lock_timeout='3s';
 	alter role prospect_integration_worker set idle_in_transaction_session_timeout='15s';
+
+	-- Mail verification has its own capability and login.  It can only execute
+	-- the fenced queue functions granted by the verification migration; it
+	-- cannot read prospect data or reuse the application's service role.
+	do \$\$
+	begin
+	  if not exists(select 1 from pg_roles where rolname='prospect_verifier') then create role prospect_verifier nologin noinherit; end if;
+	  if not exists(select 1 from pg_roles where rolname='prospect_verification_worker') then create role prospect_verification_worker nologin; end if;
+	end
+	\$\$;
+	alter role prospect_verification_worker nosuperuser nocreatedb nocreaterole nobypassrls connection limit 2;
+	select nullif(:'verification_worker_password','') is not null as has_verification_worker_password \gset
+	\if :has_verification_worker_password
+	alter role prospect_verification_worker with login password :'verification_worker_password';
+	\endif
+	grant prospect_verifier to prospect_verification_worker;
+	revoke service_role from prospect_verification_worker;
+	alter role prospect_verification_worker set statement_timeout='30s';
+	alter role prospect_verification_worker set lock_timeout='3s';
+	alter role prospect_verification_worker set idle_in_transaction_session_timeout='30s';
 
 	-- JWT settings PostgREST and legacy helpers read from the database ------
 	alter database "${DB}" set "app.settings.jwt_secret" to '${JWT_SECRET}';

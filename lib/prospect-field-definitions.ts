@@ -10,6 +10,8 @@ export const standardProspectFields = [
   { id: "__name", label: "Name" },
   { id: "__company", label: "Company Name" },
   { id: "__email", label: "Email" },
+  { id: "__work_email_status", label: "Work Email Status" },
+  { id: "__work_email_verified_at", label: "Last Verified" },
   { id: "__linkedin", label: "Personal LinkedIn URL" },
   { id: "__title", label: "Job Title" },
   { id: "__mobile_number", label: "Mobile Number" },
@@ -26,11 +28,12 @@ export const standardProspectFields = [
 // beside the uploaded Seniority/Departments columns rather than replacing them, and
 // showing both pairs at once makes the default table needlessly wide; Tags is empty
 // for most rows until it has been used.
-const optionalColumnIds = new Set(["__title_seniority_tier", "__title_department", "__title_sub_department", "__tags"]);
+const optionalColumnIds = new Set(["__title_seniority_tier", "__title_department", "__title_sub_department", "__tags", "__work_email_status", "__work_email_verified_at"]);
 export const defaultProspectColumns = standardProspectFields.map((field) => field.id).filter((id) => !optionalColumnIds.has(id));
 export const standardProspectExportFields = [
   { id: "__name", label: "Full Name" }, { id: "__first_name", label: "First Name" }, { id: "__last_name", label: "Last Name" },
   { id: "__work_email", label: "Email" }, { id: "__mobile_number", label: "Mobile Number" },
+  { id: "__work_email_status", label: "Work Email Status" }, { id: "__work_email_verified_at", label: "Last Verified" },
   { id: "__linkedin", label: "LinkedIn" }, { id: "__title", label: "Title" },
   { id: "__title_seniority_tier", label: "Seniority Tier (from title)" }, { id: "__title_department", label: "Department (from title)" }, { id: "__title_sub_department", label: "Sub-department (from title)" },
   { id: "__company", label: "Company" }, { id: "__website", label: "Website" }, { id: "__employee_count", label: "# Employees" },
@@ -86,6 +89,8 @@ export const prospectExportPickerFields = [
   { id: "__last_name", label: "Last Name" },
   { id: "__title", label: "Job Title" },
   { id: "__work_email", label: "Email" },
+  { id: "__work_email_status", label: "Work Email Status" },
+  { id: "__work_email_verified_at", label: "Last Verified" },
   { id: "__mobile_number", label: "Mobile Number" },
   { id: "__linkedin", label: "Personal LinkedIn URL" },
   { id: "__company", label: "Company Name" },

@@ -230,9 +230,9 @@ export function ProspectDrawer({ prospect, onClose }: { prospect: Prospect; onCl
  * no hydration pass to mismatch. The guard is only so the module stays safe to
  * render on the server at all.
  */
-function DialogBackdrop({ children }: { children: ReactNode }) {
+export function DialogBackdrop({ children, className = "" }: { children: ReactNode; className?: string }) {
   if (typeof document === "undefined") return null;
-  return createPortal(<div className="modal-backdrop" role="presentation">{children}</div>, document.body);
+  return createPortal(<div className={`modal-backdrop ${className}`.trim()} role="presentation">{children}</div>, document.body);
 }
 
 export function ExportDialogShell({ titleId, busy = false, onClose, children }: {

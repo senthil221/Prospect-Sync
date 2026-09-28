@@ -401,6 +401,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
   const [dateContacted, setDateContacted] = useState(localIsoDate);
   const [noDateContacted, setNoDateContacted] = useState(false);
   const [mergeMode, setMergeMode] = useState<CompanyMergeMode>(defaultCompanyMergeMode);
+  const [verifyWorkEmails, setVerifyWorkEmails] = useState(false);
   const fixedColumns = fileAudit ? fixedImportColumns(fileAudit.headers, fieldMap, suggestedPersonImportField, personImportFields) : [];
   const hasSource = inputMode === "paste" ? Boolean(pastedText.trim() && pastedTable) : Boolean(file);
   const canSubmit = hasSource && fileAudit && fixedColumns.length > 0 && fileAudit.invalidRows === 0 && dataSource && (noDateContacted || dateContacted) && listName.trim() && (clientId || newClient.trim()) && phase === "idle";
@@ -527,7 +528,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
         const keptHeaders = keptColumns.map(({ header }) => header);
         const resolvedFieldMap = Object.fromEntries(keptColumns.map(({ header, field }) => [header, field]));
         const withoutClient = clientId === unassignedClientId;
-        const started = await api<{ importId: string; listId: string; clientId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: `Pasted people ${localIsoDate()}`, totalRows: pastedTable.rows.length, headers: keptHeaders, sourceHeaders: pastedTable.headers, fieldMap: resolvedFieldMap, mergeMode }) });
+        const started = await api<{ importId: string; listId: string; clientId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: `Pasted people ${localIsoDate()}`, totalRows: pastedTable.rows.length, headers: keptHeaders, sourceHeaders: pastedTable.headers, fieldMap: resolvedFieldMap, mergeMode, verifyWorkEmails }) });
         await uploadProspectRows(pastedTable, { ...started, listName }, keptColumns, keptHeaders, resolvedFieldMap, 0);
         return;
       }
@@ -550,7 +551,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
             clientId: withoutClient ? undefined : clientId || undefined,
             clientName: newClient || undefined, withoutClient, listName, dataSource,
             fileName: file.name, headers: keptHeaders, sourceHeaders, fieldMap, dateContacted: noDateContacted ? null : dateContacted,
-            mergeMode, background: true,
+            mergeMode, background: true, verifyWorkEmails,
             storageObjectPath: upload.objectPath, fileSizeBytes: file.size,
           }),
         });
@@ -568,7 +569,7 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
       const keptHeaders = keptColumns.map(({ header }) => header);
       const resolvedFieldMap = Object.fromEntries(keptColumns.map(({ header, field }) => [header, field]));
       const withoutClient = clientId === unassignedClientId;
-      const started = await api<{ importId: string; listId: string; clientId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, sourceHeaders: parsed.headers, fieldMap, mergeMode }) });
+      const started = await api<{ importId: string; listId: string; clientId: string }>("/api/imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: withoutClient ? undefined : clientId || undefined, clientName: newClient || undefined, withoutClient, listName, dataSource, dateContacted: noDateContacted ? null : dateContacted, fileName: file.name, totalRows: parsed.rows.length, headers: keptHeaders, sourceHeaders: parsed.headers, fieldMap, mergeMode, verifyWorkEmails }) });
       await uploadProspectRows(parsed, { ...started, listName }, keptColumns, keptHeaders, resolvedFieldMap, 0);
     } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Import failed."); setPhase("idle"); }
   }
@@ -674,6 +675,8 @@ function ProspectImportView({ clients, onComplete, dataSource, step, onStep, res
         <MergeModeChooser kind="prospect" legend="When a person is already in the database"
           hint="Matched by work email first, then personal email, then LinkedIn, then name plus company."
           labels={prospectMergeModeLabels} mode={mergeMode} disabled={phase !== "idle"} onChange={setMergeMode}/>
+        <label className="inline-checkbox" htmlFor="verify-work-emails-after-import"><input id="verify-work-emails-after-import" type="checkbox" checked={verifyWorkEmails} disabled={phase !== "idle"} onChange={(event) => setVerifyWorkEmails(event.target.checked)}/> Verify work emails after a successful import</label>
+        <p className="privacy-note">Verification runs asynchronously after the import commits. Existing results for unchanged addresses are reused; importing never waits on the provider.</p>
         {/* IMPORT-05: a real progressbar. The background phase has no known
             total until the server reports one, and omitting valuenow is what
             marks it indeterminate rather than stuck at zero. */}
