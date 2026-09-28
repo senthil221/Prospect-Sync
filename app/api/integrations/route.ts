@@ -3,7 +3,8 @@ import { getAuthorizedUser } from '../../../lib/auth';
 import { readBoundedJson } from '../../../lib/bounded-json';
 import { createAdminClient } from '../../../lib/supabase/admin';
 import { integrationAdmin, integrationWriteAllowed, isProvider, openCredential, sealCredential } from '../../../lib/integrations/credentials';
-import { checkProvider, ProviderError } from '../../../lib/integrations/provider-api';
+import { checkProvider, ProviderError, retryDelay } from '../../../lib/integrations/provider-api';
+import { readSmartleadInboxPage } from '../../../lib/integrations/smartlead-inbox.mjs';
 
 export const runtime = 'nodejs';
 const reply = (body: unknown, status = 200, extra: Record<string, string> = {}) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...extra } });
@@ -23,16 +24,17 @@ export async function GET() {
     if (error) return storageError();
     let management = {};
     if (canManage) {
-      const [catalog, clients, destinations, jobs, progress] = await Promise.all([
+      const [catalog, clients, destinations, jobs, progress, inbox] = await Promise.all([
         db.from('integration_connections').select('campaigns').eq('provider','smartlead').abortSignal(AbortSignal.timeout(5000)).single(),
         db.from('clients').select('id,name').order('name').limit(1001).abortSignal(AbortSignal.timeout(5000)),
         db.rpc('integration_destinations_v1').abortSignal(AbortSignal.timeout(5000)),
         db.rpc('integration_job_status_v1',{p_actor:user.id}).abortSignal(AbortSignal.timeout(5000)),
         db.rpc('smartlead_progress_v1',{p_actor:user.id}).abortSignal(AbortSignal.timeout(5000)),
+        db.rpc('smartlead_inbox_status_v1').abortSignal(AbortSignal.timeout(5000)),
       ]);
-      if (catalog.error || clients.error || destinations.error || jobs.error || progress.error) return storageError();
+      if (catalog.error || clients.error || destinations.error || jobs.error || progress.error || inbox.error) return storageError();
       if ((clients.data?.length ?? 0)>1000) return reply({ error: 'Integration client selector exceeds 1,000 clients. A paginated selector is required.' },503);
-      management = { campaigns: catalog.data.campaigns, clients: clients.data, destinations: destinations.data, jobs:jobs.data, progress:progress.data };
+      management = { campaigns: catalog.data.campaigns, clients: clients.data, destinations: destinations.data, jobs:jobs.data, progress:progress.data, inbox:inbox.data };
     }
     return reply({ connections: data, canManage, ...management, encryptionReady: /^[a-fA-F0-9]{64}$/.test(process.env.INTEGRATION_ENCRYPTION_KEY ?? ''), dispatchEnabled: canManage && await deliveryReady() });
   } catch { return storageError(); }
@@ -50,9 +52,48 @@ export async function POST(request: Request) {
     if (decoded.response) return decoded.response;
     const payload = decoded.value as Record<string, unknown> | null;
     if (!payload || Array.isArray(payload) || !isProvider(payload.provider)
-      || !['connect', 'check', 'disconnect', 'map', 'unmap', 'cancel', 'enqueue', 'create_campaign'].includes(String(payload.action))) return reply({ error: 'Invalid connection request.' }, 400);
-    const { provider, action } = payload;
+      || !['connect', 'check', 'disconnect', 'map', 'unmap', 'cancel', 'enqueue', 'create_campaign',
+        'validate_inbox', 'enable_inbox', 'disable_inbox', 'sync_inbox', 'map_inbox', 'unmap_inbox'].includes(String(payload.action))) return reply({ error: 'Invalid connection request.' }, 400);
+    const provider = payload.provider;
+    const action = String(payload.action);
     const db = createAdminClient();
+    if (['enable_inbox','disable_inbox','sync_inbox','map_inbox','unmap_inbox'].includes(action)) {
+      if (provider !== 'smartlead') return reply({error:'Smartlead is required.'},400);
+      if (action === 'enable_inbox' || action === 'disable_inbox') {
+        const {data,error}=await db.rpc('set_smartlead_inbox_enabled_v1',{p_actor:user.id,p_enabled:action==='enable_inbox'}).abortSignal(AbortSignal.timeout(5000));
+        return !error && data ? reply({saved:true}) : reply({error:action==='enable_inbox'?'Validate the current Smartlead inbox contract before enabling sync.':'Unable to pause inbox sync.'},409);
+      }
+      if (action === 'sync_inbox') {
+        const {data,error}=await db.rpc('request_smartlead_inbox_sync_v1',{p_actor:user.id}).abortSignal(AbortSignal.timeout(5000));
+        return !error && data ? reply({queued:true}) : reply({error:'Enable inbox sync and wait for any current page to finish.'},409);
+      }
+      if (typeof payload.prefix !== 'string' || !payload.prefix.trim() || payload.prefix.length>200
+        || typeof payload.clientId !== 'string' || !payload.clientId || payload.clientId.length>200) return reply({error:'Choose a campaign prefix and client.'},400);
+      const {data,error}=await db.rpc('set_smartlead_inbox_mapping_v1',{p_actor:user.id,p_prefix:payload.prefix,p_client:payload.clientId,p_enabled:action==='map_inbox'}).abortSignal(AbortSignal.timeout(5000));
+      return !error && data ? reply({saved:true}) : reply({error:'Unable to save the inbox client mapping.'},409);
+    }
+    if (action === 'validate_inbox') {
+      if (provider !== 'smartlead') return reply({error:'Smartlead is required.'},400);
+      const key=process.env.INTEGRATION_ENCRYPTION_KEY ?? '';
+      if(!/^[a-fA-F0-9]{64}$/.test(key))return reply({error:'The server encryption key must be configured.'},503);
+      const {data:token,error:reserveError}=await db.rpc('reserve_integration_read_v1',{p_provider:'smartlead'}).abortSignal(AbortSignal.timeout(5000));
+      if(reserveError)return storageError();
+      if(!token)return reply({error:'Smartlead is busy or cooling down. Try again shortly.'},429,{'Retry-After':'15'});
+      const {data,error}=await db.from('integration_connections').select('credential_ciphertext,connected,generation').eq('provider','smartlead').eq('attempt_token',token).abortSignal(AbortSignal.timeout(5000)).maybeSingle();
+      if(error)return storageError();
+      if(!data?.connected || !data.credential_ciphertext || !data.generation)return reply({error:'Connect Smartlead first.'},409);
+      const result=await readSmartleadInboxPage(0,openCredential('smartlead',data.credential_ciphertext,key),fetch,5);
+      if(!result.ok){
+        const status=typeof result.status==='number'?result.status:0;
+        const retryAfter=result.retryAfter ? retryDelay(result.retryAfter) : 0;
+        if(retryAfter>0)await db.from('integration_connections').update({next_request_at:new Date(Date.now()+Math.min(86400,Math.max(1,retryAfter))*1000).toISOString()}).eq('provider','smartlead').eq('attempt_token',token).abortSignal(AbortSignal.timeout(5000));
+        return reply({error:[401,403].includes(status)?'Smartlead rejected the saved credential.':status===429?'Smartlead rate limit reached. Try again after the cooldown.':'Smartlead did not return a supported Master Inbox response.'},[401,403].includes(status)?422:status===429?429:502,retryAfter?{'Retry-After':String(retryAfter)}:{});
+      }
+      const page=result.page;
+      if(!page)return reply({error:'Smartlead did not return a supported Master Inbox response.'},502);
+      const {data:saved,error:savedError}=await db.rpc('confirm_smartlead_inbox_contract_v1',{p_actor:user.id,p_generation:data.generation,p_contract:page.contract}).abortSignal(AbortSignal.timeout(5000));
+      return !savedError && saved ? reply({validated:true,contract:page.contract,sampleCount:page.count}) : reply({error:'The Smartlead connection changed during validation. Retry.'},409);
+    }
     if(action==='enqueue' || action==='create_campaign') {
       if(provider!=='smartlead' || payload.confirm!==true)return reply({error:'Explicit Smartlead confirmation is required.'},400);
       if(!await deliveryReady())return reply({error:'The delivery worker is unavailable. Please retry later.'},503);
@@ -83,6 +124,7 @@ export async function POST(request: Request) {
     }
     if (action === 'disconnect') {
       const { error } = await db.from('integration_connections').update({ credential_ciphertext: null, connected: false, checked_at: null, campaigns: [], generation: randomUUID(), updated_by: user.id, attempt_token: randomUUID() }).eq('provider', provider).abortSignal(AbortSignal.timeout(5000));
+      if (!error && provider==='smartlead') await db.rpc('set_smartlead_inbox_enabled_v1',{p_actor:user.id,p_enabled:false}).abortSignal(AbortSignal.timeout(5000));
       return error ? storageError() : reply({ disconnected: true });
     }
     const key = process.env.INTEGRATION_ENCRYPTION_KEY ?? '';
@@ -109,6 +151,7 @@ export async function POST(request: Request) {
       const { data, error } = await db.from('integration_connections').update(update).eq('provider', provider).eq('attempt_token', token).select('provider').abortSignal(AbortSignal.timeout(5000));
       if (error) return storageError();
       if (!data?.length) return reply({ error: 'The connection changed during this check. Reload its status.' }, 409);
+      if (provider==='smartlead' && action==='connect') await db.rpc('set_smartlead_inbox_enabled_v1',{p_actor:user.id,p_enabled:false}).abortSignal(AbortSignal.timeout(5000));
       return reply({ connected: true, ...result });
     } catch (error) {
       if (error instanceof ProviderError) {
