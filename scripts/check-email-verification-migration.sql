@@ -123,11 +123,16 @@ begin
   -- Company pivot scope and per-company cap freeze the same set as the grid.
   v_run3:=(public.request_email_verification_v1('10000000-0000-4000-8000-000000000006',
     '{"scope":"filtered","filters":[],"companyScope":{"search":"Verification Scope A","filters":[],"limit":250000},"forceReverify":false}'::jsonb,null)->>'id')::uuid;
-  perform public.prepare_email_verification_run_v1(v_run3,100);
+  v_json:=public.prepare_email_verification_run_v1(v_run3,100);
+  if v_json->>'status'='failed' then raise exception 'company-scope preparation failed: %',v_json->>'last_error'; end if;
   if (select total_count from prospect_verification.runs where id=v_run3)<>2 then raise exception 'company scope did not freeze exactly its two people'; end if;
   v_run3:=(public.request_email_verification_v1('10000000-0000-4000-8000-000000000007',
     '{"scope":"filtered","filters":[{"field":"__max_people_per_company","operator":"equals","values":["1"]}],"companyScope":{},"forceReverify":false}'::jsonb,null)->>'id')::uuid;
-  perform public.prepare_email_verification_run_v1(v_run3,100);
+  -- The migration replay fixture includes disposable rows for historical
+  -- migration proofs. Admit them here so this assertion tests the company cap,
+  -- rather than the unrelated preparation-overflow guard below.
+  v_json:=public.prepare_email_verification_run_v1(v_run3,2000);
+  if v_json->>'status'='failed' then raise exception 'max-people preparation failed: %',v_json->>'last_error'; end if;
   if (select count(*) from prospect_verification.run_targets where run_id=v_run3 and prospect_id in('verify-p1','verify-p2'))<>1 then
     raise exception 'max-people-per-company path did not cap the shared company';
   end if;

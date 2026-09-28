@@ -77,6 +77,26 @@ for (let index = 0; index < migrations.length; index += 1) {
       body = body.replace(from, to);
     }
   }
+  if (name === '20260926170000_a_bulk_action_reindexes_a_bounded_slice_inline.sql') {
+    // This historical migration proves its 200-inline / remainder-queued
+    // contract with 1,200 real rows. The reviewed schema fixture deliberately
+    // contains only a tiny data sample, so add disposable rows to this isolated
+    // database before replaying the proof. Keep the shipped migration intact:
+    // changing its expected cardinalities would stop exercising the queue path.
+    body = `
+insert into public.prospects(id,full_name,work_email)
+select 'verification-history-' || g::text,
+       'Verification history ' || g::text,
+       'verification-history-' || g::text || '@example.test'
+from generate_series(1,1200) g
+on conflict(id) do nothing;
+insert into public.prospect_index(id,full_name,work_email)
+select p.id,p.full_name,p.work_email
+from public.prospects p
+where p.id like 'verification-history-%'
+on conflict(id) do nothing;
+${body}`;
+  }
   const meaningful = body.split(/\r?\n/u).map(line => line.trim()).filter(line => line && !line.startsWith('--'));
   if (meaningful[0]?.toLowerCase() === 'begin;' || meaningful.at(-1)?.toLowerCase() === 'commit;') {
     throw new Error(`${name} must not own its transaction.`);
