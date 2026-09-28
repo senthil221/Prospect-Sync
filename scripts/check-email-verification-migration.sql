@@ -2,18 +2,19 @@ set statement_timeout='4min';
 
 insert into public.companies(id,name,normalized_name,domain,normalized_domain)
 values ('verify-company-a','Verification Scope A','verification scope a','scope-a.test','scope-a.test'),
-       ('verify-company-b','Verification Scope B','verification scope b','scope-b.test','scope-b.test')
+       ('verify-company-b','Verification Scope B','verification scope b','scope-b.test','scope-b.test'),
+       ('verify-company-limit','Bounded Verification Fixture','bounded verification fixture','bounded-verification.test','bounded-verification.test')
 on conflict(id) do nothing;
 insert into public.prospects(id,full_name,work_email,personal_email,company_id)
 values ('verify-p1','Verify One','shared-check@corp.test','personal1@example.test','verify-company-a'),
        ('verify-p2','Verify Two','shared-check@corp.test','personal2@example.test','verify-company-a'),
        ('verify-p3','Verify Three','mutation@corp.test','','verify-company-b'),
        ('verify-p4','Personal Only','','personal4@example.test','verify-company-b'),
-       ('verify-limit-a1','Limit A One','bounded-manual-a@corp.test','','verify-company-a'),
-       ('verify-limit-a2','Limit A Two','BOUNDED-MANUAL-A@corp.test','','verify-company-a'),
-       ('verify-limit-b','Limit B','bounded-manual-b@corp.test','','verify-company-a'),
-       ('verify-limit-c','Limit C','bounded-manual-c@corp.test','','verify-company-a'),
-       ('verify-limit-d','Limit D','bounded-manual-d@corp.test','','verify-company-a')
+       ('verify-limit-a1','Limit A One','bounded-manual-a@corp.test','','verify-company-limit'),
+       ('verify-limit-a2','Limit A Two','BOUNDED-MANUAL-A@corp.test','','verify-company-limit'),
+       ('verify-limit-b','Limit B','bounded-manual-b@corp.test','','verify-company-limit'),
+       ('verify-limit-c','Limit C','bounded-manual-c@corp.test','','verify-company-limit'),
+       ('verify-limit-d','Limit D','bounded-manual-d@corp.test','','verify-company-limit')
 on conflict(id) do nothing;
 select public.reindex_prospects(array[
   'verify-p1','verify-p2','verify-p3','verify-p4','verify-limit-a1',
