@@ -21,6 +21,7 @@ const migrations = [
   '20260928100000_master_email_verification.sql',
   '20260928110000_bound_manual_email_verification.sql',
   '20260929220000_allocation_reuses_a_check_completed_while_it_waited.sql',
+  '20260930110000_verification_claim_walks_an_index.sql',
 ];
 const sqlFiles = await Promise.all(migrations.map(name => readFile(new URL(`../supabase/migrations/${name}`, import.meta.url), 'utf8')));
 const contract = await readFile(new URL('./check-email-verification-migration.sql', import.meta.url), 'utf8');
