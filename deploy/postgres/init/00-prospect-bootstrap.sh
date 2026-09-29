@@ -176,6 +176,23 @@ psql -v ON_ERROR_STOP=1 -v verification_worker_password="$VERIFICATION_WORKER_DB
 	alter role prospect_verification_worker set lock_timeout='3s';
 	alter role prospect_verification_worker set idle_in_transaction_session_timeout='30s';
 
+	-- ICP validator worker: calls OpenRouter with company text it leases
+	-- through claim_icp_validation_batch_v1. The capability role is granted
+	-- exactly four functions by 20260929200000_icp_validator.sql; the login
+	-- cannot read tables or use the application's service role.
+	do \$\$
+	begin
+	  if not exists(select 1 from pg_roles where rolname='prospect_icp_validator') then create role prospect_icp_validator nologin noinherit; end if;
+	  if not exists(select 1 from pg_roles where rolname='prospect_icp_worker') then create role prospect_icp_worker login; end if;
+	end
+	\$\$;
+	alter role prospect_icp_worker with login password '${POSTGRES_PASSWORD}' nosuperuser nocreatedb nocreaterole nobypassrls connection limit 3;
+	grant prospect_icp_validator to prospect_icp_worker;
+	revoke service_role from prospect_icp_worker;
+	alter role prospect_icp_worker set statement_timeout='15s';
+	alter role prospect_icp_worker set lock_timeout='3s';
+	alter role prospect_icp_worker set idle_in_transaction_session_timeout='15s';
+
 	-- JWT settings PostgREST and legacy helpers read from the database ------
 	alter database "${DB}" set "app.settings.jwt_secret" to '${JWT_SECRET}';
 	alter database "${DB}" set "app.settings.jwt_exp" to '${JWT_EXP:-3600}';

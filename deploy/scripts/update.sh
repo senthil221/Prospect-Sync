@@ -297,6 +297,10 @@ rollback_on_error() {
     if docker run --rm --entrypoint test "$PREVIOUS_IMAGE" -f /app/worker/integration-worker.mjs; then
       docker compose up -d --no-deps integration-worker >/dev/null 2>&1 || true
     fi
+    docker compose stop icp-worker >/dev/null 2>&1 || true
+    if docker run --rm --entrypoint test "$PREVIOUS_IMAGE" -f /app/worker/icp-worker.mjs; then
+      docker compose up -d --no-deps icp-worker >/dev/null 2>&1 || true
+    fi
   fi
   exit "$status"
 }
@@ -367,6 +371,21 @@ else
   if ! wait_for_container prospect-verification-worker 18; then
     echo "Verification worker did not become healthy. Provider dispatch remains disabled." >&2
     docker compose logs --tail 30 verification-worker >&2 || true
+    rollback_on_error 1
+  fi
+fi
+
+# The ICP validator worker. An image from before it existed has no such file,
+# so a rollback to one stops the worker instead of failing the release.
+if ! docker run --rm --entrypoint test "$NEW_IMAGE" -f /app/worker/icp-worker.mjs; then
+  echo "==> This image predates the ICP validator; stopping its worker"
+  docker compose stop icp-worker >/dev/null 2>&1 || true
+else
+  echo "==> Starting the ICP validator worker on ${NEW_IMAGE}"
+  docker compose up -d --no-deps --pull always icp-worker
+  if ! wait_for_container prospect-icp-worker 18; then
+    echo "ICP worker did not become healthy." >&2
+    docker compose logs --tail 30 icp-worker >&2 || true
     rollback_on_error 1
   fi
 fi

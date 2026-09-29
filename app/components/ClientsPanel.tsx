@@ -10,6 +10,7 @@ import { AppIcon, ConfirmDialog, EmptyCompact, EmptyState, TabPanel } from "./Da
 import { CompanyTable } from "./CompaniesWorkspace";
 import BlocklistPanel from "./BlocklistPanel";
 import ClientIcpPanel from "./ClientIcpPanel";
+import IcpValidatorPanel from "./IcpValidatorPanel";
 import ListsPanel from "./ListsPanel";
 import ProspectTable from "./ProspectTable";
 import RecentlyAddedPanel from "./RecentlyAddedPanel";
@@ -337,7 +338,7 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
   const [cooldown, setCooldown] = useState(client.cooldown_days ?? 90);
   const [savedCooldown, setSavedCooldown] = useState(client.cooldown_days ?? 90);
   const [cooldownState, setCooldownState] = useState("");
-  const [tab, setTab] = useState<"lists" | "prospects" | "recent" | "by_icp" | "companies" | "incomplete" | "icp" | "blocklist">(() => listPivot?.target ?? "lists");
+  const [tab, setTab] = useState<"lists" | "prospects" | "recent" | "by_icp" | "companies" | "incomplete" | "icp" | "icp_validator" | "blocklist">(() => listPivot?.target ?? "lists");
   const [listSearch, setListSearch] = useState("");
   const deferredListSearch = useDeferredValue(listSearch);
   const [searchedLists, setSearchedLists] = useState<ListRecord[]>([]);
@@ -413,6 +414,7 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
         { id: "companies" as const, label: "Company DB", count: formatNumber(client.company_count ?? 0), icon: <AppIcon name="company" size={15}/> },
         { id: "incomplete" as const, label: "Incomplete Info", icon: <AppIcon name="quality" size={15}/> },
         { id: "icp" as const, label: "ICPs", icon: <AppIcon name="target" size={15}/> },
+        { id: "icp_validator" as const, label: "ICP Validator", icon: <AppIcon name="target" size={15}/> },
         { id: "blocklist" as const, label: "Blocklist", count: client.blocked_count ? formatNumber(client.blocked_count) : undefined, icon: <AppIcon name="quality" size={15}/> },
       ]}
     />
@@ -447,6 +449,7 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
     {/* Mounted only while open, like the blocklist: the ICP list is its own
         fetch and there is no reason to pay for it on every client screen. */}
     <TabPanel id="icp" active={tab === "icp"} keepMounted className="client-tab-panel">{tab === "icp" ? <ClientIcpPanel client={client}/> : null}</TabPanel>
+    <TabPanel id="icp_validator" active={tab === "icp_validator"} keepMounted className="client-tab-panel">{tab === "icp_validator" ? <IcpValidatorPanel client={client}/> : null}</TabPanel>
     <TabPanel id="blocklist" active={tab === "blocklist"} keepMounted className="client-tab-panel">{tab === "blocklist" ? <BlocklistPanel client={client} onChanged={onRefreshClients}/> : null}</TabPanel>
   </>;
 }

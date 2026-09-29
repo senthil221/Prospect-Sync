@@ -1745,3 +1745,63 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 .client-filter-actions { display: flex; gap: var(--space-1); flex: none; }
 .client-filter-actions button { padding: 2px var(--space-2); border: 1px solid var(--ph-border); border-radius: var(--radius-full); background: var(--surface); color: var(--text-secondary); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
 .client-filter-actions button.active { border-color: var(--ph-brand); background: var(--accent-soft); color: var(--accent-text); }
+
+/* ============================================================
+   ICP validator
+   ============================================================ */
+
+.icpv-panel .panel-head { flex-wrap: wrap; }
+.icpv-picker { display: grid; gap: var(--space-1); min-width: 240px; }
+.icpv-picker .form-field { margin: 0; }
+.icpv-count, .icpv-note, .icpv-sub, .icpv-muted { color: var(--ph-muted); font-size: var(--text-2xs); }
+.icpv-sub { display: block; }
+.icpv-body { display: grid; gap: var(--space-5); padding: var(--space-4) var(--space-5) var(--space-5); }
+.icpv-section { display: grid; gap: var(--space-3); min-width: 0; padding-top: var(--space-4); border-top: 1px solid var(--ph-border); }
+.icpv-body > .icpv-section:first-of-type { padding-top: 0; border-top: 0; }
+.icpv-section h4, .icpv-details summary { margin: 0; color: var(--text-primary); font-size: var(--text-sm); font-weight: var(--weight-bold); }
+.icpv-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.icpv-inline-field { margin: 0; display: flex; align-items: center; gap: var(--space-2); }
+.icpv-details summary { cursor: pointer; }
+.icpv-details[open] > summary { margin-bottom: var(--space-2); }
+.icpv-details > * + * { margin-top: var(--space-3); }
+.icpv-banner { padding: var(--space-2) var(--space-3); border: 1px solid var(--warning-line); border-radius: var(--radius-lg); background: var(--warning-soft); color: var(--warning); font-size: var(--text-xs); }
+.icpv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--space-4); align-items: start; }
+.icpv-fieldset { margin: 0; padding: var(--space-3); display: grid; gap: var(--space-2); border: 1px solid var(--ph-border); border-radius: var(--radius-lg); min-width: 0; }
+.icpv-fieldset legend { padding: 0 var(--space-1); color: var(--ph-muted); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
+.icpv-source-picker { grid-auto-flow: column; grid-auto-columns: max-content; overflow-x: auto; }
+.icpv-check { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; font-size: var(--text-xs); color: var(--text-primary); }
+.icpv-number { width: 90px; }
+.icpv-paste { width: 100%; min-height: 120px; max-height: 300px; padding: var(--space-2); border: 1px solid var(--ph-border-strong); border-radius: var(--radius-md); background: var(--surface); color: var(--text-primary); font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: var(--text-2xs); line-height: 1.55; resize: vertical; }
+.icpv-actions, .icpv-toolbar, .icpv-row-actions { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.icpv-row-actions { gap: var(--space-2); }
+.icpv-row-actions .secondary { min-height: var(--control-dense); font-size: var(--text-2xs); }
+.icpv-estimate { color: var(--text-primary); font-size: var(--text-xs); font-weight: var(--weight-bold); }
+.icpv-link { padding: 0; border: 0; background: transparent; color: var(--accent-text); text-decoration: underline; cursor: pointer; font-size: inherit; }
+.icpv-result { display: grid; gap: var(--space-2); font-size: var(--text-xs); }
+.icpv-result p { margin: 0; }
+.icpv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.icpv-loading { min-height: 80px; }
+.icpv-download { text-decoration: none; }
+.data-pill.icpv-bad { background: var(--ph-danger-soft); color: var(--ph-danger); }
+.data-pill.icpv-warn { background: var(--ph-warning-soft); color: var(--ph-warning); }
+.data-pill.icpv-running { background: var(--accent-soft); color: var(--accent-text); }
+.icpv-progress { width: 120px; height: 8px; display: block; accent-color: var(--ph-brand); }
+.icpv-stale { color: var(--ph-warning); }
+.icpv-stale-pill { margin-left: var(--space-1); }
+.icpv-has-message td { border-bottom: 0; }
+.icpv-message-row td { padding-top: 0; color: var(--ph-warning); font-size: var(--text-2xs); }
+/* A lost lead is the costly error - a good prospect passed over - so the cell
+   is loud whenever it is non-zero. */
+.icpv-lost { background: var(--ph-danger-soft); color: var(--ph-danger); font-weight: var(--weight-bold); }
+.icpv-reason { display: block; max-width: 34ch; margin-top: var(--space-1); color: var(--ph-muted); font-size: var(--text-2xs); line-height: 1.4; }
+.icpv-desc { margin-top: var(--space-1); font-size: var(--text-2xs); color: var(--text-secondary); }
+.icpv-desc summary { cursor: pointer; }
+.icpv-desc p { max-width: 60ch; margin: var(--space-1) 0 0; }
+.icpv-results td { vertical-align: top; }
+
+@media (max-width: 860px) {
+  .icpv-body { padding: var(--space-3); }
+  .icpv-picker { width: 100%; }
+}
+.icpv-strong { font-weight: var(--weight-bold); }
+.icpv-strong small { display: inline; font-weight: normal; }

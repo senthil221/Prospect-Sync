@@ -494,6 +494,41 @@ services:
     stop_grace_period: 100s
     networks: [internal]
 
+  # ICP validator: asks an OpenRouter model whether each of a client's
+  # companies fits that client's ICP brief. Its own login can execute four
+  # queue functions and nothing else. An empty OPENROUTER_API_KEY is a
+  # healthy, idle configuration; queued checks wait and the page says so.
+  icp-worker:
+    image: ${APP_IMAGE}
+    container_name: prospect-icp-worker
+    <<: [*default-restart]
+    logging: *default-logging
+    command: ["node", "worker/icp-worker.mjs"]
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB}
+      PGUSER: prospect_icp_worker
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ICP_CONCURRENCY: ${ICP_CONCURRENCY:-4}
+      ICP_TIMEOUT_MS: ${ICP_TIMEOUT_MS:-150000}
+      ICP_APP_URL: ${APP_PUBLIC_URL:-}
+      NODE_OPTIONS: "--max-old-space-size=128"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9094/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    mem_limit: 192m
+    cpus: "0.25"
+    stop_grace_period: 60s
+    networks: [internal]
+
   # Stable internal proxy between the public Caddy listener and the two app
   # slots. Its configuration reload is graceful, so ports 80/443 and existing
   # public connections are never bounced during an application release.
