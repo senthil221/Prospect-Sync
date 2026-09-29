@@ -177,6 +177,51 @@ try {
     throw new Error('completion during allocation did not converge through reconciliation');
   }
 
+  // The same meeting, forced into its worst order instead of left to timing:
+  // the completion holds the check row uncommitted, allocation's in-flight
+  // lookup blocks on it, and only then does the completion commit. Allocation
+  // must attach the target to that now-completed check - never queue a second
+  // paid check for the address (20260929220000).
+  stage = `iteration ${iteration}: allocation waits on a committing completion`;
+  const waitProspect = fixtureId('wait-settle');
+  const waitEmail = fixtureEmail('wait-settle');
+  await makeProspect(waitProspect, waitEmail);
+  const waitRun = await makeRun();
+  await addTarget(waitRun, waitProspect, waitEmail);
+  const waitCheck = randomUUID();
+  const waitToken = randomUUID();
+  await query(`insert into prospect_verification.email_checks
+    (id,normalized_email,generation,execution_state,attempts,lease_token,lease_expires_at)
+    values($1,$2,1,'running',1,$3,now()+interval '2 minutes')`, [waitCheck, waitEmail, waitToken]);
+  const completer = await pool.connect();
+  const allocator = await pool.connect();
+  try {
+    await completer.query('begin');
+    await completer.query(`select public.complete_email_verification_check_v1($1,$2,'valid','Accepted','mailtester_ninja',now())`, [waitCheck, waitToken]);
+    const allocating = allocator.query('select public.allocate_email_verification_targets_v1($1,500)', [waitRun]);
+    await waitForBlock(await backendPid(allocator), 'allocation behind a committing completion', await backendPid(completer));
+    await completer.query('commit');
+    await allocating;
+  } catch (error) {
+    await completer.query('rollback').catch(() => {});
+    throw error;
+  } finally {
+    completer.release();
+    allocator.release();
+  }
+  const attached = await query(`select t.check_id,t.reuse_result,
+      (select count(*)::int from prospect_verification.email_checks c where c.normalized_email=$2) checks
+    from prospect_verification.run_targets t where t.run_id=$1`, [waitRun, waitEmail]);
+  if (attached.rows[0]?.check_id !== waitCheck || attached.rows[0].reuse_result !== true || attached.rows[0].checks !== 1) {
+    throw new Error(`allocation behind a committing completion queued a duplicate check: ${JSON.stringify(attached.rows[0])}`);
+  }
+  await query('select public.reconcile_email_verification_run_v1($1,500)', [waitRun]);
+  const waited = await query(`select r.status,p.verification_status from prospect_verification.runs r
+    cross join public.prospects p where r.id=$1 and p.id=$2`, [waitRun, waitProspect]);
+  if (waited.rows[0].status !== 'completed' || waited.rows[0].verification_status !== 'valid') {
+    throw new Error('allocation behind a committing completion did not converge through reconciliation');
+  }
+
   // A deleted and recreated public id has a newer deletion epoch. Its old
   // snapshot is skipped and can never project onto the replacement person.
   stage = `iteration ${iteration}: delete versus reconciliation epoch fence`;
