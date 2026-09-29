@@ -198,10 +198,16 @@ try {
   try {
     await completer.query('begin');
     await completer.query(`select public.complete_email_verification_check_v1($1,$2,'valid','Accepted','mailtester_ninja',now())`, [waitCheck, waitToken]);
-    const allocating = allocator.query('select public.allocate_email_verification_targets_v1($1,500)', [waitRun]);
-    await waitForBlock(await backendPid(allocator), 'allocation behind a committing completion', await backendPid(completer));
+    // Settled into a value at once, so an allocation error surfaces here with
+    // its stage instead of crashing the process as an unhandled rejection.
+    const allocatorPid = await backendPid(allocator);
+    const completerPid = await backendPid(completer);
+    const allocating = allocator.query('select public.allocate_email_verification_targets_v1($1,500)', [waitRun])
+      .then(() => null, error => error);
+    await waitForBlock(allocatorPid, 'allocation behind a committing completion', completerPid);
     await completer.query('commit');
-    await allocating;
+    const allocationError = await allocating;
+    if (allocationError) throw allocationError;
   } catch (error) {
     await completer.query('rollback').catch(() => {});
     throw error;
