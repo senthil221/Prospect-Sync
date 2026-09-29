@@ -19,18 +19,47 @@ const defaultCatalog: IcpModelOption[] = ICP_MODELS.map((model) => ({
 
 // Every OpenRouter model that can run a check (the server filters to JSON
 // output + reasoning). The three defaults until it loads, or if it can't.
-export function useIcpModelCatalog(clientId: string) {
-  const [catalog, setCatalog] = useState<IcpModelOption[]>(defaultCatalog);
+// ...and the team's default models (pre-ticked, listed first), which anyone
+// can change with saveDefaults. Until the server answers, the built-in three.
+export type IcpModelCatalog = {
+  catalog: IcpModelOption[];
+  defaults: string[];
+  loaded: boolean;
+  saveDefaults: (models: string[]) => Promise<void>;
+};
+
+export function useIcpModelCatalog(clientId: string): IcpModelCatalog {
+  const [state, setState] = useState<{ catalog: IcpModelOption[]; defaults: string[]; loaded: boolean }>(
+    { catalog: defaultCatalog, defaults: defaultCatalog.map((model) => model.id), loaded: false });
+  const base = `/api/clients/${encodeURIComponent(clientId)}/icp-validator`;
   useEffect(() => {
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      api<{ models: IcpModelOption[] }>(`/api/clients/${encodeURIComponent(clientId)}/icp-validator?view=models`)
-        .then((result) => { if (!cancelled && result.models?.length) setCatalog(result.models); })
+      api<{ models: IcpModelOption[]; defaults?: string[] }>(`${base}?view=models`, { cache: "no-store" })
+        .then((result) => {
+          if (cancelled || !result.models?.length) return;
+          setState({ catalog: result.models, defaults: result.defaults?.length ? result.defaults : defaultCatalog.map((model) => model.id), loaded: true });
+        })
         .catch(() => {});
     }, 0);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [clientId]);
-  return catalog;
+  }, [base]);
+
+  const saveDefaults = async (models: string[]) => {
+    const result = await api<{ defaults: string[] }>(base, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set_default_models", models }),
+    });
+    setState((current) => {
+      const saved = result.defaults;
+      const byId = new Map(current.catalog.map((model) => [model.id, model]));
+      const first = saved.map((id) => ({ ...(byId.get(id) ?? { id, label: sourceLabel(id), inputPerM: 0, outputPerM: 0, contextLength: null }), recommended: true }));
+      const rest = current.catalog.filter((model) => !saved.includes(model.id)).map((model) => ({ ...model, recommended: false }));
+      return { catalog: [...first, ...rest], defaults: saved, loaded: true };
+    });
+  };
+
+  return { ...state, saveDefaults };
 }
 
 export function modelName(catalog: IcpModelOption[], id: string) {
@@ -49,11 +78,28 @@ const price = (model: IcpModelOption) => `$${model.inputPerM} in / $${model.outp
 // The three defaults, plus any other OpenRouter model added from the search
 // box. At most MAX_MODELS_PER_CHECK are ticked; they all judge the same
 // companies.
-export function ModelPicker({ catalog, selected, onChange, idPrefix }: {
+export function ModelPicker({ catalog, selected, onChange, idPrefix, defaults, onSaveDefaults }: {
   catalog: IcpModelOption[]; selected: string[]; onChange: (next: string[]) => void; idPrefix: string;
+  defaults?: string[]; onSaveDefaults?: (models: string[]) => Promise<void>;
 }) {
   const [added, setAdded] = useState<string[]>([]);
   const [query, setQuery] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  // Offered only when the ticks differ from what the team saved.
+  const differs = Boolean(defaults && selected.length
+    && (selected.length !== defaults.length || selected.some((id) => !defaults.includes(id))));
+
+  async function saveAsDefaults() {
+    if (!onSaveDefaults) return;
+    setSaving(true); setSaveState(null);
+    try {
+      await onSaveDefaults(selected);
+      setSaveState({ tone: "ok", text: "Saved. New checks start with these models for everyone." });
+    } catch (caught) {
+      setSaveState({ tone: "error", text: caught instanceof Error ? caught.message : "Unable to save the default models." });
+    } finally { setSaving(false); }
+  }
   const shown = useMemo(() => {
     const ids = [...catalog.filter((model) => model.recommended).map((model) => model.id), ...added, ...selected];
     return [...new Set(ids)].map((id) => catalog.find((model) => model.id === id)
@@ -106,6 +152,13 @@ export function ModelPicker({ catalog, selected, onChange, idPrefix }: {
       </ul> : query.trim() ? <p className="icpx-help">No OpenRouter model matching &ldquo;{query.trim()}&rdquo; supports JSON output and reasoning.</p> : null}
       {full ? <p className="icpx-help">Untick a model to swap in a different one.</p> : null}
     </div>
+    {onSaveDefaults && (differs || saveState) ? <div className="icpx-defaults">
+      {differs ? <button type="button" className="icpx-link-button" disabled={saving} onClick={() => void saveAsDefaults()}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true"><path d="m12 3 2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/></svg>
+        {saving ? "Saving…" : `Make ${selected.length === 1 ? "this the default model" : "these the default models"}`}
+      </button> : null}
+      {saveState ? <span className={`icpx-defaults-note is-${saveState.tone}`} role={saveState.tone === "error" ? "alert" : "status"}>{saveState.text}</span> : null}
+    </div> : null}
   </fieldset>;
 }
 
@@ -165,10 +218,13 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
   onClose: () => void;
   onStarted: (message: string) => void;
 }) {
-  const catalog = useIcpModelCatalog(clientId);
+  const modelCatalog = useIcpModelCatalog(clientId);
+  const catalog = modelCatalog.catalog;
   const [profiles, setProfiles] = useState<ClientIcpProfile[] | null>(null);
   const [icpId, setIcpId] = useState("");
-  const [models, setModels] = useState<string[]>(() => ICP_MODELS.map((model) => model.id));
+  // The team defaults until the user changes the ticks.
+  const [picked, setModels] = useState<string[] | null>(null);
+  const models = picked ?? modelCatalog.defaults;
   const [effort, setEffort] = useState("low");
   const [reuse, setReuse] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -219,7 +275,7 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
               {usable.map((profile) => <option key={profile.id} value={profile.id}>{profile.name.trim() || "Untitled ICP"}</option>)}
             </select>
           </div>
-          <ModelPicker catalog={catalog} selected={models} onChange={setModels} idPrefix="icpv-dialog"/>
+          <ModelPicker catalog={catalog} selected={models} onChange={setModels} idPrefix="icpv-dialog" defaults={modelCatalog.defaults} onSaveDefaults={modelCatalog.saveDefaults}/>
           <div className="form-field">
             <label htmlFor="icpv-dialog-effort">Reasoning effort</label>
             <select id="icpv-dialog-effort" value={effort} onChange={(event) => setEffort(event.target.value)}>

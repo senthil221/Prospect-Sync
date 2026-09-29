@@ -24,6 +24,7 @@ import { ICP_MODELS, MAX_MODELS_PER_CHECK, REASONING_EFFORTS, estimateRunCost, s
 //                                                    a Company DB selection
 // POST {action:"clear_selection", icpId?, <same selection>}
 //                                                    take the ICP check labels off a selection
+// POST {action:"set_default_models", models[]}         the team's pre-selected models
 // POST {action:"pause"|"resume"|"cancel"|"retry_failed", runId}
 // POST {action:"delete_source", icpId, source}
 
@@ -76,7 +77,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const supabase = createAdminClient();
 
   if (view === "models") {
-    return Response.json({ models: await icpModelCatalog(), maxPerCheck: MAX_MODELS_PER_CHECK }, { headers: { "Cache-Control": "no-store" } });
+    const [catalog, defaults] = await Promise.all([icpModelCatalog(), teamDefaultModels()]);
+    // The team's defaults are the ones marked "default" and listed first, in
+    // the order they were saved; a default the catalog no longer lists is
+    // still shown (by slug) so it can be unticked.
+    const byId = new Map(catalog.map((model) => [model.id, model]));
+    const first = defaults.map((id) => ({ ...(byId.get(id) ?? { id, label: sourceLabel(id), inputPerM: 0, outputPerM: 0, contextLength: null }), recommended: true }));
+    const rest = catalog.filter((model) => !defaults.includes(model.id)).map((model) => ({ ...model, recommended: false }));
+    return Response.json({ models: [...first, ...rest], defaults, maxPerCheck: MAX_MODELS_PER_CHECK }, { headers: { "Cache-Control": "no-store" } });
   }
 
   // Not per ICP: a Company DB row shows every ICP's verdicts.
@@ -148,6 +156,15 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
 // One to three models, each one OpenRouter can run with JSON output and
 // reasoning (lib/openrouter-models.ts). The defaults always pass.
+// The models pre-ticked for a new check: the team's saved choice
+// (icp_validator_settings), or the built-in three when none is saved or the
+// table is not there yet.
+async function teamDefaultModels(): Promise<string[]> {
+  const { data, error } = await createAdminClient().from("icp_validator_settings").select("default_models").eq("id", true).maybeSingle();
+  const saved = !error && Array.isArray(data?.default_models) ? (data.default_models as unknown[]).map(String).filter(Boolean) : [];
+  return saved.length ? saved.slice(0, MAX_MODELS_PER_CHECK) : ICP_MODELS.map((model) => model.id);
+}
+
 async function readModels(value: unknown): Promise<{ models: string[]; error?: never } | { models?: never; error: Response }> {
   const models = Array.isArray(value) ? [...new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean))] : [];
   if (!models.length || models.length > MAX_MODELS_PER_CHECK) return { error: bad(`Choose one to ${MAX_MODELS_PER_CHECK} models.`) };
@@ -305,6 +322,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (action === "start") return startRuns(id, body, actor);
   if (action === "start_selection") return startSelection(id, body, user?.id ?? "", actor);
   if (action === "clear_selection") return clearSelection(id, body, user?.id ?? "");
+
+  // Team-wide: the models every new check starts with, for every client.
+  if (action === "set_default_models") {
+    const chosen = await readModels(body.models);
+    if (chosen.error) return chosen.error;
+    const { error } = await supabase.from("icp_validator_settings").upsert(
+      { id: true, default_models: chosen.models, updated_by: actor, updated_at: new Date().toISOString() },
+      { onConflict: "id" },
+    );
+    if (error) return failure(error);
+    return Response.json({ defaults: chosen.models });
+  }
 
   if (action === "pause" || action === "resume" || action === "cancel" || action === "retry_failed") {
     const runId = String(body.runId ?? "").trim();

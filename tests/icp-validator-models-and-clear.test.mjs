@@ -68,3 +68,22 @@ test("companies with no description and no keywords are never sent to a model", 
   assert.match(migration, /ICP no-text proof passed and was rolled back/);
   assert.doesNotMatch(migration, /(update|insert into|delete from)\s+public\.(companies|clients|client_companies|client_company_icp_validations)\b/i);
 });
+
+test("the team chooses the default models, validated like any check", async () => {
+  const migration = await read("../supabase/migrations/20260930140000_icp_validator_default_models.sql");
+  assert.match(migration, /check \(cardinality\(default_models\) between 1 and 3/);
+  assert.match(migration, /revoke all on public\.icp_validator_settings from public, anon, authenticated;/);
+
+  const route = await read("../app/api/clients/[id]/icp-validator/route.ts");
+  // Saving goes through the same model check as starting a run.
+  assert.match(route, /if \(action === "set_default_models"\) \{\s+const chosen = await readModels\(body\.models\);/);
+  // No saved choice, or no table yet: the built-in three.
+  assert.match(route, /return saved\.length \? saved\.slice\(0, MAX_MODELS_PER_CHECK\) : ICP_MODELS\.map\(\(model\) => model\.id\);/);
+
+  // Both pickers start from the team defaults until the user changes them.
+  for (const file of ["../app/components/IcpCheck.tsx", "../app/components/IcpValidatorPanel.tsx"]) {
+    const source = await read(file);
+    assert.match(source, /const \[picked, setModels\] = useState<string\[\] \| null>\(null\);/);
+    assert.match(source, /onSaveDefaults=\{/);
+  }
+});

@@ -54,7 +54,8 @@ export default function IcpValidatorPanel({ client }: { client: ClientRecord }) 
   const [busyRun, setBusyRun] = useState("");
   const [runError, setRunError] = useState("");
 
-  const catalog = useIcpModelCatalog(client.id);
+  const modelCatalog = useIcpModelCatalog(client.id);
+  const catalog = modelCatalog.catalog;
   const labelFor = useCallback((source: string) => modelName(catalog, source), [catalog]);
   const usable = useMemo(() => profiles.filter((profile) => profile.description.trim()), [profiles]);
   const icpId = usable.some((profile) => profile.id === chosenIcp) ? chosenIcp : usable[0]?.id ?? "";
@@ -175,7 +176,7 @@ export default function IcpValidatorPanel({ client }: { client: ClientRecord }) 
             </section>
 
             <div className="icpx-split">
-              <Composer base={base} icpId={icpId} overview={overview} catalog={catalog} efforts={current?.efforts ?? REASONING_EFFORTS} onStarted={(message) => changed(message)}/>
+              <Composer base={base} icpId={icpId} overview={overview} catalog={catalog} defaults={modelCatalog.defaults} onSaveDefaults={modelCatalog.saveDefaults} efforts={current?.efforts ?? REASONING_EFFORTS} onStarted={(message) => changed(message)}/>
               <section className="icpx-card icpx-activity" aria-labelledby="icpx-runs">
                 <div className="icpx-section-head"><div><h4 id="icpx-runs">Runs</h4><p>{hasActive ? "Live - updating every few seconds." : "Latest first."}</p></div>
                   {hasActive ? <span className="icpx-live" aria-hidden="true"><span className="icpx-pulse"/>Live</span> : null}</div>
@@ -195,10 +196,13 @@ export default function IcpValidatorPanel({ client }: { client: ClientRecord }) 
   </article>;
 }
 
-export function Composer({ base, icpId, overview, catalog, efforts, onStarted }: {
-  base: string; icpId: string; overview: Overview; catalog: IcpModelOption[]; efforts: string[]; onStarted: (message: string) => void;
+export function Composer({ base, icpId, overview, catalog, defaults = ICP_MODELS.map((model) => model.id), onSaveDefaults, efforts, onStarted }: {
+  base: string; icpId: string; overview: Overview; catalog: IcpModelOption[]; defaults?: string[];
+  onSaveDefaults?: (models: string[]) => Promise<void>; efforts: string[]; onStarted: (message: string) => void;
 }) {
-  const [models, setModels] = useState<string[]>(() => ICP_MODELS.map((model) => model.id));
+  // The team defaults until the user changes the ticks.
+  const [picked, setModels] = useState<string[] | null>(null);
+  const models = picked ?? defaults;
   const [effort, setEffort] = useState("low");
   const [scope, setScope] = useState<StartScope>("all");
   const [sample, setSample] = useState("200");
@@ -230,7 +234,7 @@ export function Composer({ base, icpId, overview, catalog, efforts, onStarted }:
   return <section className="icpx-card icpx-composer" aria-labelledby="icpx-new">
     <div className="icpx-section-head"><div><h4 id="icpx-new">New check</h4><p>Pick up to three models. They all judge the same companies.</p></div></div>
 
-    <ModelPicker catalog={catalog} selected={models} onChange={setModels} idPrefix="icpx"/>
+    <ModelPicker catalog={catalog} selected={models} onChange={setModels} idPrefix="icpx" defaults={defaults} onSaveDefaults={onSaveDefaults}/>
 
     <div className="icpx-field">
       <span className="icpx-label">Companies</span>
