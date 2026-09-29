@@ -54,3 +54,17 @@ test("clearing an ICP check removes labels only, and keeps them off", async () =
   assert.match(table, /<AppIcon name="close" size=\{14\}\/> Clear ICP check<\/button>/);
   assert.match(table, /action: "clear_selection", \.\.\.companySelectionPayload\(\)/);
 });
+
+test("companies with no description and no keywords are never sent to a model", async () => {
+  const migration = await read("../supabase/migrations/20260930100000_icp_checks_skip_companies_with_no_text.sql");
+  // The same predicate the Incomplete Info partition uses (20260929120000).
+  assert.match(migration, /select not \(btrim\(coalesce\(public\.tag_array_text_v1\(p_keywords\), ''\)\) = ''\s+and btrim\(coalesce\(p_short_description, ''\)\) = ''\)/);
+  const partition = await read("../supabase/migrations/20260929120000_segregate_incomplete_client_records.sql");
+  assert.match(partition, /btrim\(coalesce\(public\.tag_array_text_v1\(c\.keywords\), ''''\)\) = ''''/);
+  assert.match(partition, /btrim\(coalesce\(c\.short_description, ''''\)\) = ''''\)/);
+  // One guard on the queue covers every way a check is started.
+  assert.match(migration, /create or replace trigger skip_icp_item_without_text\s+before insert on public\.icp_validation_items/);
+  assert.match(migration, /delete from public\.client_company_icp_verdicts v\s+using public\.companies c/);
+  assert.match(migration, /ICP no-text proof passed and was rolled back/);
+  assert.doesNotMatch(migration, /(update|insert into|delete from)\s+public\.(companies|clients|client_companies|client_company_icp_validations)\b/i);
+});

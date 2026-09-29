@@ -202,7 +202,7 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
     <section className="confirm-modal icpv-dialog" role="dialog" aria-modal="true" aria-labelledby="icpv-dialog-title">
       <p className="eyebrow">ICP VALIDATOR</p>
       <h2 id="icpv-dialog-title">Validate {formatNumber(selectedCount)} {selectedCount === 1 ? "company" : "companies"}</h2>
-      <p>Each model reads the company&apos;s description and keywords and labels it FIT or NON_FIT for {clientName}&apos;s ICP. Labels only - nothing is hidden or removed.</p>
+      <p>Each model reads the company&apos;s description and keywords and labels it FIT or NON_FIT for {clientName}&apos;s ICP. Labels only - nothing is hidden or removed. Companies with no description and no keywords are skipped.</p>
       {profiles === null ? <div className="workspace-loading">Loading ICPs…</div> : !usable.length
         ? <p className="form-error" role="alert">None of {clientName}&apos;s ICPs has a brief yet. Add one on the ICPs tab first.</p>
         : <>

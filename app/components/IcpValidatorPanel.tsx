@@ -289,7 +289,7 @@ function LauncherSection({ base, icpId, overview, catalog, efforts, onStarted }:
 
     <fieldset className="icpv-fieldset">
       <legend>Which companies</legend>
-      <label className="icpv-check"><input type="radio" name="icpv-scope" checked={scope === "all"} onChange={() => setScope("all")} /> <span>All {formatNumber(companyCount)} companies</span></label>
+      <label className="icpv-check"><input type="radio" name="icpv-scope" checked={scope === "all"} onChange={() => setScope("all")} /> <span>All {formatNumber(companyCount)} companies <small className="icpv-sub">Incomplete Info companies (no description or keywords) are skipped - there is nothing to judge.</small></span></label>
       <label className="icpv-check"><input type="radio" name="icpv-scope" checked={scope === "unchecked"} onChange={() => setScope("unchecked")} /> <span>Only companies without a current verdict from the chosen model(s)</span></label>
       <label className="icpv-check"><input type="radio" name="icpv-scope" checked={scope === "sample"} onChange={() => setScope("sample")} />
         <span>Random sample of</span>
