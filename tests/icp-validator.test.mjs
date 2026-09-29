@@ -169,8 +169,8 @@ test("a Company DB selection is validated through the shared resolver, never wid
   assert.doesNotMatch(migration, /(update|insert into|delete from)\s+public\.(companies|clients|client_companies|client_company_icp_validations)\b/i);
 
   const route = await read("../app/api/clients/[id]/icp-validator/route.ts");
-  assert.match(route, /p_filters: widening \? filters : \[\]/);
-  assert.match(route, /authorizeFilterSets\(supabase, filters, userId, "company", clientId/);
+  assert.match(route, /p_filters: widening \? parsedFilters : \[\]/);
+  assert.match(route, /authorizeFilterSets\(createAdminClient\(\), parsedFilters, userId, "company", clientId/);
 
   const table = await read("../app/components/CompaniesWorkspace.tsx");
   assert.match(table, /onClick=\{\(\) => setValidateOpen\(true\)\}><AppIcon name="target" size=\{14\}\/> Validate ICP<\/button>/);

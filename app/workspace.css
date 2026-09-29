@@ -1817,3 +1817,11 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 .data-pill.icpv-verdict-non_fit { background: var(--ph-danger-soft); color: var(--ph-danger); }
 .data-pill.icpv-verdict-mixed { background: var(--ph-warning-soft); color: var(--ph-warning); }
 .data-pill.icpv-verdict-stale { color: var(--ph-muted); }
+
+/* ICP validator model picker */
+.icpv-tag { margin-left: 6px; padding: 0 6px; border-radius: var(--radius-full); background: var(--surface-sunken); color: var(--ph-muted); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.icpv-model-search { display: grid; gap: var(--space-1); margin-top: var(--space-2); }
+.icpv-model-search label { color: var(--ph-muted); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
+.icpv-model-results { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; max-height: 220px; overflow-y: auto; border: 1px solid var(--ph-border); border-radius: var(--radius-lg); }
+.icpv-model-results button { width: 100%; display: grid; gap: 2px; padding: var(--space-2); border: 0; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.icpv-model-results button:hover, .icpv-model-results button:focus-visible { background: var(--surface-sunken); }

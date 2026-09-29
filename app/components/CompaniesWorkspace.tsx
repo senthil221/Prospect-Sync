@@ -194,6 +194,9 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   // The ICP validator: verdicts on the rows, and "Validate ICP" for the selection.
   const icpLabels = useIcpLabels(clientId, companies);
   const [validateOpen, setValidateOpen] = useState(false);
+  const [clearIcpOpen, setClearIcpOpen] = useState(false);
+  const [clearingIcp, setClearingIcp] = useState(false);
+  const [clearIcpError, setClearIcpError] = useState("");
   const [pushClientId, setPushClientId] = useState("");
   const [pushing, setPushing] = useState(false);
   const selectionKey = JSON.stringify({ search: search.trim(), filters: filters.map(({ field, operator, values, scopes }) => ({ field, operator, values, ...(scopes?.length ? { scopes } : {}) })), peopleScope });
@@ -316,6 +319,28 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
       setRemoveRequest(null); clearSelection(); onRefresh?.();
     } catch (caught) { setCompanyError(caught instanceof Error ? caught.message : "Unable to remove these companies from the client."); }
     finally { setRemovingFromClient(false); }
+  }
+
+  // Takes the ICP validator's FIT / NON_FIT labels off the selection (every
+  // ICP, every model) and skips any checks still queued for those companies,
+  // so the labels stay off. Companies and "ICP verified" are untouched.
+  async function clearIcpCheck() {
+    if (!clientId || !selectedCount) return;
+    setClearingIcp(true); setClearIcpError("");
+    try {
+      const response = await api<{ result: { selected: number; cleared: number; skipped: number } }>(`/api/clients/${encodeURIComponent(clientId)}/icp-validator`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear_selection", ...companySelectionPayload() }),
+      });
+      const result = response.result;
+      setCompanyNotice(result.cleared || result.skipped
+        ? `Cleared the ICP check on ${formatNumber(result.selected)} ${result.selected === 1 ? "company" : "companies"}: ${formatNumber(result.cleared)} ${result.cleared === 1 ? "label" : "labels"} removed${result.skipped ? `, ${formatNumber(result.skipped)} queued ${result.skipped === 1 ? "check" : "checks"} skipped` : ""}.`
+        : `None of the ${formatNumber(result.selected)} selected ${result.selected === 1 ? "company has" : "companies have"} an ICP check to clear.`);
+      setClearIcpOpen(false);
+      clearSelection();
+      onRefresh?.();
+    } catch (caught) { setClearIcpError(caught instanceof Error ? caught.message : "Unable to clear the ICP check."); }
+    finally { setClearingIcp(false); }
   }
 
   // One shape for the preview and the removal, so the two can never describe
@@ -634,6 +659,7 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
         {canDelete ? <div className="bulk-action-group bulk-action-group-danger"><button className="row-danger bulk-delete" disabled={deleting || pushing} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? formatNumber(selectedCount) : "selected"}</button></div> : <>
           <div className="bulk-action-group bulk-action-group-primary">
           <button className="bulk-verify" disabled={updatingIcp} title={selectionMode === "all_matching" ? "Ask the AI models whether every matching company fits one of this client's ICPs" : "Ask the AI models whether the selected companies fit one of this client's ICPs"} onClick={() => setValidateOpen(true)}><AppIcon name="target" size={14}/> Validate ICP</button>
+          <button disabled={updatingIcp || clearingIcp} title="Remove the AI models' FIT / NON_FIT labels from these companies" onClick={() => { setClearIcpError(""); setClearIcpOpen(true); }}><AppIcon name="close" size={14}/> Clear ICP check</button>
           </div>
           <div className="bulk-action-group bulk-action-group-primary">
           <button className="bulk-verify" disabled={updatingIcp} onClick={() => void setCompanyIcpValidation(true)}><AppIcon name="check" size={14}/> Mark ICP verified</button>
@@ -659,6 +685,11 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
     </article>
     {onFilters && filtersOpen ? <CompanyFilterPanel filters={displayFilters} clients={clients} clientId={clientId} onChange={onFilters} /> : null}
     </div>
+    {clearIcpOpen && clientId ? <ConfirmDialog
+      title={`Clear the ICP check on ${formatNumber(selectedCount)} ${selectedCount === 1 ? "company" : "companies"}?`}
+      body="Removes every model's FIT / NON_FIT label from these companies, for all of this client's ICPs, and skips checks still queued for them. Companies, their people and ICP verification are not touched. Run history and cost stay on the ICP Validator tab."
+      error={clearIcpError} confirmLabel="Clear ICP check" busy={clearingIcp}
+      onCancel={() => { setClearIcpOpen(false); setClearIcpError(""); }} onConfirm={() => void clearIcpCheck()}/> : null}
     {validateOpen && clientId ? <IcpValidateDialog clientId={clientId} clientName={clients.find((candidate) => candidate.id === clientId)?.name ?? "this client"} selectedCount={selectedCount} selection={companySelectionPayload()} onClose={() => setValidateOpen(false)} onStarted={(message) => { setValidateOpen(false); setCompanyNotice(message); clearSelection(); }}/> : null}
     {removeRequest && clientId ? <ConfirmDialog
       title={removeRequest.people

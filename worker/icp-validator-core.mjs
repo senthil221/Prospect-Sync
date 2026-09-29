@@ -30,8 +30,13 @@ export function sourceLabel(source) {
 // call spread over the batch, ~300 tokens per company in, ~60 out plus
 // reasoning that grows with effort.
 const reasoningTokensPerRow = { minimal: 20, low: 120, medium: 300, high: 700 };
-export function estimateRunCost(modelId, companies, { effort = 'low', batchSize = 20, briefLength = 800 } = {}) {
-  const model = icpModel(modelId);
+// One check runs at most this many models side by side.
+export const MAX_MODELS_PER_CHECK = 3;
+
+// modelOrId: a catalog entry ({inputPerM, outputPerM}) for any OpenRouter
+// model, or the id of one of the defaults.
+export function estimateRunCost(modelOrId, companies, { effort = 'low', batchSize = 20, briefLength = 800 } = {}) {
+  const model = typeof modelOrId === 'string' ? icpModel(modelOrId) : modelOrId;
   if (!model || !companies) return null;
   const perCallInput = 900 + Math.ceil(briefLength / 4);
   const input = companies * 300 + Math.ceil(companies / batchSize) * perCallInput;

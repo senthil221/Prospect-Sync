@@ -3,10 +3,11 @@ import { readBoundedJson } from "../../../../../lib/bounded-json.ts";
 import { withClientWorkspaceCompleteness } from "../../../../../lib/client-workspace-completeness.ts";
 import { csvCell } from "../../../../../lib/csv.ts";
 import { authorizeFilterSets } from "../../../../../lib/filter-sets.ts";
+import { icpModelCatalog, unknownIcpModels } from "../../../../../lib/openrouter-models.ts";
 import { filterErrorResponse, parseFilters } from "../../../../../lib/prospect-filters.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { parsePeopleScope } from "../../../../../lib/workspace-scopes.ts";
-import { ICP_MODELS, REASONING_EFFORTS, estimateRunCost, icpModel, sourceLabel } from "../../../../../worker/icp-validator-core.mjs";
+import { ICP_MODELS, MAX_MODELS_PER_CHECK, REASONING_EFFORTS, estimateRunCost, sourceLabel } from "../../../../../worker/icp-validator-core.mjs";
 
 // The ICP validator's API. The model calls happen in the ICP worker, never
 // here: this route starts and steers runs and reads results. Comparing with
@@ -16,10 +17,13 @@ import { ICP_MODELS, REASONING_EFFORTS, estimateRunCost, icpModel, sourceLabel }
 // GET  ?icp=…&view=rows&sources=a,b&filter=…&page=…  companies with verdicts side by side
 // GET  ?icp=…&view=csv&sources=a,b&filter=…          the same rows as a CSV download
 // GET  ?view=labels&ids=a,b,…                        verdicts for one page of Company DB rows
+// GET  ?view=models                                  every OpenRouter model that can run a check
 // POST {action:"start", icpId, models[], effort, scope, sampleSize, reuse}
 // POST {action:"start_selection", icpId, models[], effort, reuse, companyIds[] |
 //        allMatching + search + filters + peopleScope + excludedIds}
 //                                                    a Company DB selection
+// POST {action:"clear_selection", icpId?, <same selection>}
+//                                                    take the ICP check labels off a selection
 // POST {action:"pause"|"resume"|"cancel"|"retry_failed", runId}
 // POST {action:"delete_source", icpId, source}
 
@@ -70,6 +74,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const url = new URL(request.url);
   const view = url.searchParams.get("view") ?? "overview";
   const supabase = createAdminClient();
+
+  if (view === "models") {
+    return Response.json({ models: await icpModelCatalog(), maxPerCheck: MAX_MODELS_PER_CHECK }, { headers: { "Cache-Control": "no-store" } });
+  }
 
   // Not per ICP: a Company DB row shows every ICP's verdicts.
   if (view === "labels") {
@@ -138,6 +146,17 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   return bad("Unknown view.");
 }
 
+// One to three models, each one OpenRouter can run with JSON output and
+// reasoning (lib/openrouter-models.ts). The defaults always pass.
+async function readModels(value: unknown): Promise<{ models: string[]; error?: never } | { models?: never; error: Response }> {
+  const models = Array.isArray(value) ? [...new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean))] : [];
+  if (!models.length || models.length > MAX_MODELS_PER_CHECK) return { error: bad(`Choose one to ${MAX_MODELS_PER_CHECK} models.`) };
+  const defaults = new Set(ICP_MODELS.map((model) => model.id));
+  const unknown = await unknownIcpModels(models.filter((model) => !defaults.has(model)));
+  if (unknown.length) return { error: bad(`${unknown.join(", ")} is not an OpenRouter model that supports JSON output and reasoning.`) };
+  return { models };
+}
+
 type StartBody = {
   icpId?: unknown; models?: unknown; effort?: unknown; scope?: unknown; sampleSize?: unknown; reuse?: unknown;
 };
@@ -145,9 +164,9 @@ type StartBody = {
 async function startRuns(clientId: string, body: StartBody, actor: string) {
   const icpId = String(body.icpId ?? "").trim();
   if (!icpId) return bad("Which ICP?");
-  const models = Array.isArray(body.models) ? [...new Set(body.models.map(String))] : [];
-  if (!models.length || models.length > ICP_MODELS.length) return bad("Choose one to three models.");
-  if (models.some((model) => !icpModel(model))) return bad("Unknown model.");
+  const chosen = await readModels(body.models);
+  if (chosen.error) return chosen.error;
+  const models = chosen.models;
   const effort = REASONING_EFFORTS.includes(String(body.effort)) ? String(body.effort) : "low";
   const scope = String(body.scope ?? "all");
   if (!scopes.has(scope)) return bad("Unknown scope.");
@@ -187,59 +206,88 @@ async function startRuns(clientId: string, body: StartBody, actor: string) {
   return Response.json({ runs });
 }
 
+type SelectionArgs = {
+  p_company_ids: string[] | null; p_search: string; p_filters: unknown; p_people_scope: unknown; p_excluded_ids: string[] | null;
+};
+
 // A Company DB selection: the ticked ids, or everything matching the
 // workspace's search and filters. Parsed and checked exactly as the Company
 // DB's other bulk actions are (app/api/clients/[id]/companies), and resolved
-// once in the database so every model judges the same companies.
-async function startSelection(clientId: string, body: Record<string, unknown>, userId: string, actor: string) {
-  const icpId = String(body.icpId ?? "").trim();
-  if (!icpId) return bad("Which ICP?");
-  const models = Array.isArray(body.models) ? [...new Set(body.models.map(String))] : [];
-  if (!models.length || models.length > ICP_MODELS.length) return bad("Choose one to three models.");
-  if (models.some((model) => !icpModel(model))) return bad("Unknown model.");
-  const effort = REASONING_EFFORTS.includes(String(body.effort)) ? String(body.effort) : "low";
+// once in the database.
+async function readSelection(clientId: string, body: Record<string, unknown>, userId: string, verb: string): Promise<
+  { args: SelectionArgs; error?: never } | { args?: never; error: Response }
+> {
   const companyIds = Array.isArray(body.companyIds)
     ? [...new Set(body.companyIds.map((value) => String(value ?? "").trim()).filter(Boolean))].slice(0, 50000)
     : [];
   const allMatching = body.allMatching === true;
-  if (!companyIds.length && !allMatching) return bad("Select companies to validate.");
+  if (!companyIds.length && !allMatching) return { error: bad(`Select companies to ${verb}.`) };
 
-  let filters;
+  let parsedFilters;
   let peopleScope;
   try {
-    filters = withClientWorkspaceCompleteness(parseFilters(JSON.stringify(body.filters ?? [])), clientId);
+    parsedFilters = withClientWorkspaceCompleteness(parseFilters(JSON.stringify(body.filters ?? [])), clientId);
     peopleScope = body.peopleScope ? parsePeopleScope(JSON.stringify(body.peopleScope)) : null;
   } catch (error) {
-    return filterErrorResponse(error, "Invalid company selection.");
+    return { error: filterErrorResponse(error, "Invalid company selection.") };
   }
   const excludedIds = Array.isArray(body.excludedIds)
     ? [...new Set(body.excludedIds.map((value) => String(value ?? "").trim()).filter(Boolean))].slice(0, 50000)
     : [];
-  const supabase = createAdminClient();
   const widening = allMatching && !companyIds.length;
   if (widening) {
-    const setDenial = await authorizeFilterSets(supabase, filters, userId, "company", clientId,
+    const setDenial = await authorizeFilterSets(createAdminClient(), parsedFilters, userId, "company", clientId,
       peopleScope ? [{ entityType: "prospect", clientScope: clientId, filters: peopleScope.filters }] : []);
-    if (setDenial) return setDenial;
+    if (setDenial) return { error: setDenial };
   }
+  return {
+    args: {
+      p_company_ids: companyIds.length ? companyIds : null,
+      // Empty unless this is an all-matching request, so an explicit selection
+      // can never be widened by a filter left in the payload.
+      p_search: widening ? String(body.search ?? "").trim().slice(0, 300) : "",
+      p_filters: widening ? parsedFilters : [],
+      p_people_scope: widening ? peopleScope : null,
+      p_excluded_ids: widening && excludedIds.length ? excludedIds : null,
+    },
+  };
+}
 
-  const { data, error } = await supabase.rpc("start_icp_validation_selection_v1", {
+// Every chosen model judges the same companies: the selection is resolved once.
+async function startSelection(clientId: string, body: Record<string, unknown>, userId: string, actor: string) {
+  const icpId = String(body.icpId ?? "").trim();
+  if (!icpId) return bad("Which ICP?");
+  const chosen = await readModels(body.models);
+  if (chosen.error) return chosen.error;
+  const effort = REASONING_EFFORTS.includes(String(body.effort)) ? String(body.effort) : "low";
+  const selection = await readSelection(clientId, body, userId, "validate");
+  if (selection.error) return selection.error;
+  const { data, error } = await createAdminClient().rpc("start_icp_validation_selection_v1", {
     p_client_id: clientId,
     p_icp_profile_id: icpId,
-    p_models: models,
+    p_models: chosen.models,
     p_reasoning_effort: effort,
-    p_company_ids: companyIds.length ? companyIds : null,
-    // Empty unless this is an all-matching request, so an explicit selection
-    // can never be widened by a filter left in the payload.
-    p_search: widening ? String(body.search ?? "").trim().slice(0, 300) : "",
-    p_filters: widening ? filters : [],
-    p_people_scope: widening ? peopleScope : null,
-    p_excluded_ids: widening && excludedIds.length ? excludedIds : null,
+    ...selection.args,
     p_reuse: body.reuse !== false,
     p_created_by: actor,
   });
   if (error) return failure(error);
   return Response.json(data);
+}
+
+// Takes the ICP check labels off a selection (every ICP, or just icpId), and
+// skips checks still queued for those companies so the labels stay off.
+async function clearSelection(clientId: string, body: Record<string, unknown>, userId: string) {
+  const icpId = String(body.icpId ?? "").trim();
+  const selection = await readSelection(clientId, body, userId, "clear");
+  if (selection.error) return selection.error;
+  const { data, error } = await createAdminClient().rpc("clear_icp_verdicts_selection_v1", {
+    p_client_id: clientId,
+    ...selection.args,
+    p_icp_profile_id: icpId || null,
+  });
+  if (error) return failure(error);
+  return Response.json({ result: data });
 }
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -256,6 +304,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   if (action === "start") return startRuns(id, body, actor);
   if (action === "start_selection") return startSelection(id, body, user?.id ?? "", actor);
+  if (action === "clear_selection") return clearSelection(id, body, user?.id ?? "");
 
   if (action === "pause" || action === "resume" || action === "cancel" || action === "retry_failed") {
     const runId = String(body.runId ?? "").trim();

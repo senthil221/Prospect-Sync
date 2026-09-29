@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../lib/dashboard-api";
 import { formatNumber } from "../../lib/dashboard-helpers";
 import type { ClientIcpProfile, ClientRecord } from "../../lib/types";
-import { ICP_MODELS, estimateRunCost, sourceLabel } from "../../worker/icp-validator-core.mjs";
+import { ICP_MODELS, sourceLabel } from "../../worker/icp-validator-core.mjs";
+import type { IcpModelOption } from "../../lib/openrouter-models";
+import { ModelPicker, estimateModels, useIcpModelCatalog } from "./IcpCheck";
 import { AppIcon, ConfirmDialog, EmptyCompact } from "./DashboardUi";
 
 // The ICP validator: an LLM (run by the ICP worker, never in the browser)
@@ -95,6 +97,7 @@ export default function IcpValidatorPanel({ client }: { client: ClientRecord }) 
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
+  const catalog = useIcpModelCatalog(client.id);
   const usable = useMemo(() => profiles.filter((profile) => profile.description.trim()), [profiles]);
   const icpId = usable.some((profile) => profile.id === chosenIcp) ? chosenIcp : usable[0]?.id ?? "";
   const profile = profiles.find((item) => item.id === icpId) ?? null;
@@ -198,7 +201,7 @@ export default function IcpValidatorPanel({ client }: { client: ClientRecord }) 
                 : null}
 
             <SourcesSection sources={overview.sources} onDelete={(source) => { setDeleteError(""); setPendingDelete(source); }} />
-            <LauncherSection base={base} icpId={icpId} overview={overview} efforts={current?.efforts ?? []} onStarted={(message) => changed(message)} />
+            <LauncherSection base={base} icpId={icpId} overview={overview} catalog={catalog} efforts={current?.efforts ?? []} onStarted={(message) => changed(message)} />
             <RunsSection base={base} runs={overview.runs} onChanged={() => changed()} onNotice={setNotice} />
             <ResultsSection base={base} icpId={icpId} sources={overview.sources} refresh={`${version}|${settledSignature}`} />
           </div>}
@@ -233,8 +236,8 @@ function SourcesSection({ sources, onDelete }: { sources: Source[]; onDelete: (s
   </section>;
 }
 
-function LauncherSection({ base, icpId, overview, efforts, onStarted }: {
-  base: string; icpId: string; overview: Overview; efforts: string[]; onStarted: (message: string) => void;
+function LauncherSection({ base, icpId, overview, catalog, efforts, onStarted }: {
+  base: string; icpId: string; overview: Overview; catalog: IcpModelOption[]; efforts: string[]; onStarted: (message: string) => void;
 }) {
   const [models, setModels] = useState<string[]>(() => ICP_MODELS.map((model) => model.id));
   const [effort, setEffort] = useState("low");
@@ -249,13 +252,9 @@ function LauncherSection({ base, icpId, overview, efforts, onStarted }: {
   const sampleValid = Number.isFinite(sampleSize) && sampleSize >= 1 && sampleSize <= 5000;
   const scopeCount = scope === "sample" ? (sampleValid ? sampleSize : 0)
     : companyCount;
-  const estimate = models.reduce((sum, model) => sum + (estimateRunCost(model, scopeCount, { effort, briefLength: overview.profile.description_length }) ?? 0), 0);
+  const estimate = estimateModels(catalog, models, scopeCount, effort, overview.profile.description_length);
   const effortOptions = efforts.length ? efforts : ["minimal", "low", "medium", "high"];
   const canStart = models.length > 0 && !busy && (scope !== "sample" || sampleValid);
-
-  function toggleModel(id: string) {
-    setModels((currentModels) => currentModels.includes(id) ? currentModels.filter((item) => item !== id) : [...currentModels, id]);
-  }
 
   async function start() {
     setBusy(true); setError("");
@@ -278,13 +277,7 @@ function LauncherSection({ base, icpId, overview, efforts, onStarted }: {
   return <section className="icpv-section" aria-labelledby="icpv-launch-title">
     <h4 id="icpv-launch-title">Run a check</h4>
     <div className="icpv-grid">
-      <fieldset className="icpv-fieldset">
-        <legend>Models (up to three, run on the same companies)</legend>
-        {ICP_MODELS.map((model) => <label key={model.id} className="icpv-check">
-          <input type="checkbox" checked={models.includes(model.id)} onChange={() => toggleModel(model.id)} />
-          <span className="icpv-strong">{model.label} <small className="icpv-sub">{model.id}</small></span>
-        </label>)}
-      </fieldset>
+      <ModelPicker catalog={catalog} selected={models} onChange={setModels} idPrefix="icpv-launch"/>
       <div className="form-field">
         <label htmlFor="icpv-effort">Reasoning effort</label>
         <select id="icpv-effort" value={effort} onChange={(event) => setEffort(event.target.value)}>
