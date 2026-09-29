@@ -333,3 +333,5 @@
 @media (prefers-reduced-motion: reduce) {
   .icpx *, .icpx *::before, .icpx *::after, .rbx *, .rbx *::before, .rbx *::after { animation: none !important; transition: none !important; }
 }
+.icpx-duration { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-full); color: var(--text-secondary); font-size: 11px; font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.icpx-duration.is-live { border-color: var(--accent-line); color: var(--accent-text); }

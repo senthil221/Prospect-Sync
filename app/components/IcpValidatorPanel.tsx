@@ -30,7 +30,7 @@ type Overview = {
 };
 type OverviewResponse = { overview: Overview; efforts: string[] };
 type StartScope = "all" | "unchecked" | "sample";
-type Filter = "all" | "disagree" | "non_fit" | "fit";
+type Filter = "all" | "fit" | "all_non_fit" | "disagree";
 
 const pageSize = 100;
 const maxColumns = 8;
@@ -312,16 +312,16 @@ function Results({ base, icpId, sources, labelFor, refresh }: {
 
   return <section className="icpx-card icpx-results" aria-labelledby="icpx-results-title">
     <div className="icpx-section-head">
-      <div><h4 id="icpx-results-title">Companies</h4><p>{current ? `${formatNumber(current.total)} ${current.total === 1 ? "company" : "companies"}${filter === "disagree" ? " where the models disagree" : ""}` : "Every model's verdict, side by side."}</p></div>
+      <div><h4 id="icpx-results-title">Companies</h4><p>{current ? `${formatNumber(current.total)} ${current.total === 1 ? "company" : "companies"}${filter === "disagree" ? " where the models disagree" : filter === "fit" ? " every model calls FIT" : filter === "all_non_fit" ? " every model calls NON_FIT" : ""}` : "Every model's verdict, side by side."}</p></div>
       {sourcesParam ? <a className="icpx-ghost" href={`${base}?${query}&view=csv`} download><AppIcon name="download" size={15}/> Export CSV</a> : null}
     </div>
     {!sources.length ? <div className="icpx-empty is-quiet"><AppIcon name="rows" size={20}/><div><strong>Nothing to show yet</strong><p>Verdicts appear here as soon as a run produces them.</p></div></div> : <>
       <div className="icpx-toolbar">
         <Segmented<Filter> label="Show" value={filter} onChange={(value) => { setFilter(value); setPage(1); }} options={[
           { value: "all", label: "All" },
-          { value: "disagree", label: "Disagreements" },
-          { value: "non_fit", label: "Any NON_FIT" },
-          { value: "fit", label: "All FIT" },
+          { value: "fit", label: "All FIT", hint: "Every chosen model says FIT" },
+          { value: "all_non_fit", label: "All NON_FIT", hint: "Every chosen model says NON_FIT" },
+          { value: "disagree", label: "Disagreements", hint: "The chosen models do not agree" },
         ]}/>
         <label className="icpx-search"><AppIcon name="search" size={15}/><input aria-label="Search companies by name or domain" value={search} placeholder="Search name or domain" onChange={(event) => setSearch(event.target.value)}/></label>
       </div>

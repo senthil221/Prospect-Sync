@@ -37,6 +37,19 @@ export function relativeTime(value: string | null, now = Date.now()) {
   return new Date(value).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 }
 
+// "12m 30s", "1h 04m", "45s" - how long a run took, or has been running.
+export function durationText(fromIso: string | null, toIso: string | null, now = Date.now()) {
+  if (!fromIso) return "";
+  const from = new Date(fromIso).getTime();
+  const to = toIso ? new Date(toIso).getTime() : now;
+  if (Number.isNaN(from) || Number.isNaN(to) || to < from) return "";
+  const seconds = Math.round((to - from) / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
 export function Segmented<T extends string>({ label, value, options, onChange }: {
   label: string; value: T; options: Array<{ value: T; label: ReactNode; hint?: string }>; onChange: (value: T) => void;
 }) {
@@ -153,10 +166,15 @@ export function RunTimeline({ runs, labelFor, busyRun, onAction }: {
     const total = num(run.total_items), done = num(run.done_items), failed = num(run.failed_items), calls = num(run.request_count);
     const active = run.status === "queued" || run.status === "running";
     const busy = busyRun === run.id;
+    // Completed and cancelled runs have a finish time; a paused one is shown
+    // as time spent so far, a live one as running time.
+    const took = durationText(run.started_at, run.finished_at);
     return <li key={run.id} className={`icpx-run is-${run.status}`}>
       <ProgressRing done={done} total={total} status={run.status}/>
       <div className="icpx-run-main">
         <div className="icpx-run-title"><strong>{labelFor(run.model)}</strong><span className={`icpx-status is-${run.status}`}>{statusText[run.status]}</span>
+          {took ? <span className={`icpx-duration${active ? " is-live" : ""}`} title={run.finished_at ? `${new Date(run.started_at ?? run.created_at).toLocaleString()} → ${new Date(run.finished_at).toLocaleString()}` : undefined}>
+            <AppIcon name="calendar" size={12}/>{run.finished_at ? `Took ${took}` : active ? `Running ${took}` : `${took} so far`}</span> : null}
           {!run.icp_current ? <span className="icpx-chip is-warn" title="The ICP brief changed after this run">older brief</span> : null}</div>
         <div className="icpx-run-meta">
           <span>{scopeText(run)}</span>

@@ -31,7 +31,7 @@ const missingCodes = new Set(["PGRST202", "PGRST205", "42883", "42P01"]);
 const pageSize = 100;
 const csvLimit = 100_000;
 const scopes = new Set(["all", "unchecked", "sample"]);
-const filters = new Set(["all", "disagree", "non_fit", "fit"]);
+const filters = new Set(["all", "disagree", "non_fit", "fit", "all_non_fit"]);
 
 function failure(error: { code?: string; message: string }) {
   const missing = Boolean(error.code && missingCodes.has(error.code));

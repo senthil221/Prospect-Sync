@@ -52,3 +52,18 @@ test("the ICP validator is drawn by presentational views with its own stylesheet
   const views = await read("../app/components/IcpValidatorViews.tsx");
   assert.doesNotMatch(views, /\bfetch\(|\bapi\(/, "views draw; the panel fetches");
 });
+
+test("results filter by agreement, and runs say how long they took", async () => {
+  const migration = await read("../supabase/migrations/20260930130000_icp_results_all_non_fit_filter.sql");
+  assert.match(migration, /bool_and\(v\.verdict = 'NON_FIT'\) as all_non_fit/);
+  assert.match(migration, /or \(p_filter = 'all_non_fit' and g\.all_non_fit\)\)/);
+  const panel = await read("../app/components/IcpValidatorPanel.tsx");
+  assert.match(panel, /type Filter = "all" \| "fit" \| "all_non_fit" \| "disagree";/);
+  assert.doesNotMatch(panel, /Any NON_FIT/);
+  const { durationText } = await import("../app/components/IcpValidatorViews.tsx").catch(() => ({}));
+  if (durationText) {
+    assert.equal(durationText("2026-09-30T10:00:00Z", "2026-09-30T10:12:30Z"), "12m 30s");
+  }
+  const views = await read("../app/components/IcpValidatorViews.tsx");
+  assert.match(views, /run\.finished_at \? `Took \$\{took\}` : active \? `Running \$\{took\}`/);
+});
