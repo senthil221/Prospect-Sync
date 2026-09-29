@@ -159,7 +159,7 @@ export default function ReplyBlocklistPanel({ onOpenIntegrations }: { onOpenInte
         <div className="reply-blocklist-overview-main">
           <div className="reply-blocklist-status-row"><span className={`reply-blocklist-state ${inbox.settings.enabled ? 'is-on' : 'is-off'}`}><span aria-hidden="true"/>{inbox.settings.enabled ? 'Sync on' : 'Sync paused'}</span><span className="reply-blocklist-status-detail">{plainStatus(inbox.settings.status)}</span></div>
           <h3>{inbox.settings.enabled ? 'Replies are being monitored' : 'Reply monitoring is paused'}</h3>
-          <p>Last successful page: {timeLabel(inbox.settings.last_synced_at)}<span aria-hidden="true"> · </span>{inbox.settings.initial_backfill_complete ? 'Historical scan complete' : 'Historical scan in progress'}</p>
+          <p>Last successful page: {timeLabel(inbox.settings.last_synced_at)}<span aria-hidden="true"> · </span>{inbox.settings.initial_backfill_complete ? 'Historical scan complete' : !inbox.settings.last_synced_at && !inbox.settings.enabled ? 'Ready for first scan' : inbox.settings.enabled ? 'Historical scan in progress' : 'Historical scan paused'}</p>
           {inbox.settings.last_error_code && <p className="reply-blocklist-inline-alert" role="status">Needs attention: {plainStatus(inbox.settings.last_error_code)}</p>}
         </div>
         <div className="reply-blocklist-overview-actions">
