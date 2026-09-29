@@ -26,6 +26,20 @@ test('parses the observed flat response and permits pending categorization', () 
   assert.equal(page.rows[0].categoryId, null);
 });
 
+test('parses the live flat lead_email field without changing the observed contract', () => {
+  const row = { email_lead_map_id: '3628763479', email_campaign_id: 3882520,
+    email_campaign_name: 'Client - Campaign', lead_email: 'Lead@Example.test', lead_category_id: null,
+    last_reply_time: '2026-09-25T15:55:32.000Z' };
+  const page = parseSmartleadInboxPage({ ok: true, data: [row], offset: 0, limit: 5 }, 0, 5);
+  assert.equal(page.contract, 'observed-flat-v1');
+  assert.equal(page.rows[0].email, 'lead@example.test');
+  assert.equal(page.rows[0].categoryId, null);
+  assert.equal(parseSmartleadInboxPage({ ok: true, data: [{ ...row, email: 'lead@example.test' }] }, 0, 5).rows[0].email, 'lead@example.test');
+  assert.throws(() => parseSmartleadInboxPage({ ok: true, data: [{ ...row, email: 'other@example.test' }] }, 0, 5), /Unexpected Smartlead inbox item/);
+  assert.throws(() => parseSmartleadInboxPage({ ok: true, data: [{ ...row, lead_email: 'bad-address' }] }, 0, 5), /Unexpected Smartlead inbox item/);
+  assert.throws(() => parseSmartleadInboxPage({ ok: true, data: [{ ...row, lead_email: null }] }, 0, 5), /Unexpected Smartlead inbox item/);
+});
+
 test('rejects unknown response shapes, duplicate items and oversized pages', () => {
   assert.throws(() => parseSmartleadInboxPage({ data: [] }, 0), /Unexpected/);
   assert.throws(() => parseSmartleadInboxPage({ ...official, messages: [official.messages[0], official.messages[0]], total_count: 2 }, 0), /Duplicate/);
@@ -51,6 +65,19 @@ test('uses the fixed no-history POST endpoint and bounded page contract', async 
     assert.deepEqual(JSON.parse(init.body).filters, { replyTimeBetween: window });
     return new Response(JSON.stringify({ messages: [], total_count: 0, offset: 0, limit: 5 }), { status: 200, headers: { 'content-type': 'application/json' } });
   }, 5, window);
+});
+
+test('accepts the live flat shape from a successful HTTP response', async () => {
+  const row = { email_lead_map_id: '3628763479', email_campaign_id: 3882520,
+    email_campaign_name: 'Client - Campaign', lead_email: 'lead@example.test', lead_category_id: 6,
+    last_reply_time: '2026-09-25T15:55:32.000Z' };
+  const result = await readSmartleadInboxPage(0, 'secret', async () => new Response(
+    JSON.stringify({ ok: true, data: [row], offset: 0, limit: 5 }),
+    { status: 200, headers: { 'content-type': 'application/json; charset=utf-8' } },
+  ), 5);
+  assert.equal(result.ok, true);
+  assert.equal(result.page.rows[0].email, 'lead@example.test');
+  assert.equal(result.page.rows[0].categoryId, 6);
 });
 
 test('worker pauses on an unknown contract and honors provider cooldowns', async () => {
