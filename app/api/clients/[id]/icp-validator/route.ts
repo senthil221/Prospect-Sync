@@ -1,7 +1,11 @@
 import { authorizeApi, getAuthorizedUser } from "../../../../../lib/auth.ts";
 import { readBoundedJson } from "../../../../../lib/bounded-json.ts";
+import { withClientWorkspaceCompleteness } from "../../../../../lib/client-workspace-completeness.ts";
 import { csvCell } from "../../../../../lib/csv.ts";
+import { authorizeFilterSets } from "../../../../../lib/filter-sets.ts";
+import { filterErrorResponse, parseFilters } from "../../../../../lib/prospect-filters.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
+import { parsePeopleScope } from "../../../../../lib/workspace-scopes.ts";
 import { ICP_MODELS, REASONING_EFFORTS, estimateRunCost, icpModel, sourceLabel } from "../../../../../worker/icp-validator-core.mjs";
 
 // The ICP validator's API. The model calls happen in the ICP worker, never
@@ -11,7 +15,11 @@ import { ICP_MODELS, REASONING_EFFORTS, estimateRunCost, icpModel, sourceLabel }
 // GET  ?icp=<profile id>                             overview (runs, sources, worker)
 // GET  ?icp=…&view=rows&sources=a,b&filter=…&page=…  companies with verdicts side by side
 // GET  ?icp=…&view=csv&sources=a,b&filter=…          the same rows as a CSV download
+// GET  ?view=labels&ids=a,b,…                        verdicts for one page of Company DB rows
 // POST {action:"start", icpId, models[], effort, scope, sampleSize, reuse}
+// POST {action:"start_selection", icpId, models[], effort, reuse, companyIds[] |
+//        allMatching + search + filters + peopleScope + excludedIds}
+//                                                    a Company DB selection
 // POST {action:"pause"|"resume"|"cancel"|"retry_failed", runId}
 // POST {action:"delete_source", icpId, source}
 
@@ -60,10 +68,20 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
   const url = new URL(request.url);
-  const icpId = (url.searchParams.get("icp") ?? "").trim();
-  if (!icpId) return bad("Which ICP?");
   const view = url.searchParams.get("view") ?? "overview";
   const supabase = createAdminClient();
+
+  // Not per ICP: a Company DB row shows every ICP's verdicts.
+  if (view === "labels") {
+    const ids = [...new Set((url.searchParams.get("ids") ?? "").split(",").map((value) => value.trim()).filter(Boolean))].slice(0, 200);
+    if (!ids.length) return Response.json({ labels: [] });
+    const { data, error } = await supabase.rpc("icp_verdict_labels_v1", { p_client_id: id, p_company_ids: ids });
+    if (error) return failure(error);
+    return Response.json({ labels: data ?? [] }, { headers: { "Cache-Control": "no-store" } });
+  }
+
+  const icpId = (url.searchParams.get("icp") ?? "").trim();
+  if (!icpId) return bad("Which ICP?");
 
   if (view === "overview") {
     const { data, error } = await supabase.rpc("icp_validator_overview_v1", { p_client_id: id, p_icp_profile_id: icpId });
@@ -169,6 +187,61 @@ async function startRuns(clientId: string, body: StartBody, actor: string) {
   return Response.json({ runs });
 }
 
+// A Company DB selection: the ticked ids, or everything matching the
+// workspace's search and filters. Parsed and checked exactly as the Company
+// DB's other bulk actions are (app/api/clients/[id]/companies), and resolved
+// once in the database so every model judges the same companies.
+async function startSelection(clientId: string, body: Record<string, unknown>, userId: string, actor: string) {
+  const icpId = String(body.icpId ?? "").trim();
+  if (!icpId) return bad("Which ICP?");
+  const models = Array.isArray(body.models) ? [...new Set(body.models.map(String))] : [];
+  if (!models.length || models.length > ICP_MODELS.length) return bad("Choose one to three models.");
+  if (models.some((model) => !icpModel(model))) return bad("Unknown model.");
+  const effort = REASONING_EFFORTS.includes(String(body.effort)) ? String(body.effort) : "low";
+  const companyIds = Array.isArray(body.companyIds)
+    ? [...new Set(body.companyIds.map((value) => String(value ?? "").trim()).filter(Boolean))].slice(0, 50000)
+    : [];
+  const allMatching = body.allMatching === true;
+  if (!companyIds.length && !allMatching) return bad("Select companies to validate.");
+
+  let filters;
+  let peopleScope;
+  try {
+    filters = withClientWorkspaceCompleteness(parseFilters(JSON.stringify(body.filters ?? [])), clientId);
+    peopleScope = body.peopleScope ? parsePeopleScope(JSON.stringify(body.peopleScope)) : null;
+  } catch (error) {
+    return filterErrorResponse(error, "Invalid company selection.");
+  }
+  const excludedIds = Array.isArray(body.excludedIds)
+    ? [...new Set(body.excludedIds.map((value) => String(value ?? "").trim()).filter(Boolean))].slice(0, 50000)
+    : [];
+  const supabase = createAdminClient();
+  const widening = allMatching && !companyIds.length;
+  if (widening) {
+    const setDenial = await authorizeFilterSets(supabase, filters, userId, "company", clientId,
+      peopleScope ? [{ entityType: "prospect", clientScope: clientId, filters: peopleScope.filters }] : []);
+    if (setDenial) return setDenial;
+  }
+
+  const { data, error } = await supabase.rpc("start_icp_validation_selection_v1", {
+    p_client_id: clientId,
+    p_icp_profile_id: icpId,
+    p_models: models,
+    p_reasoning_effort: effort,
+    p_company_ids: companyIds.length ? companyIds : null,
+    // Empty unless this is an all-matching request, so an explicit selection
+    // can never be widened by a filter left in the payload.
+    p_search: widening ? String(body.search ?? "").trim().slice(0, 300) : "",
+    p_filters: widening ? filters : [],
+    p_people_scope: widening ? peopleScope : null,
+    p_excluded_ids: widening && excludedIds.length ? excludedIds : null,
+    p_reuse: body.reuse !== false,
+    p_created_by: actor,
+  });
+  if (error) return failure(error);
+  return Response.json(data);
+}
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
@@ -182,6 +255,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const supabase = createAdminClient();
 
   if (action === "start") return startRuns(id, body, actor);
+  if (action === "start_selection") return startSelection(id, body, user?.id ?? "", actor);
 
   if (action === "pause" || action === "resume" || action === "cancel" || action === "retry_failed") {
     const runId = String(body.runId ?? "").trim();

@@ -149,3 +149,30 @@ test("the ICP worker ships with the release and idles without a key", async () =
   assert.match(worker, /while \(apiKey && !stopping/);
   assert.match(await read("../deploy/.env.example"), /^OPENROUTER_API_KEY=$/m);
 });
+
+test("a Company DB row reads one summary per ICP, with stale verdicts kept apart", async () => {
+  const { summarizeIcpLabels } = await import("../lib/icp-labels.ts");
+  const label = (source, verdict, extra = {}) => ({ company_id: "c", icp_profile_id: "icp-1", icp_name: "Agri", source, verdict, reason: "", current: true, ...extra });
+  assert.equal(summarizeIcpLabels([label("a/x", "FIT"), label("b/y", "FIT")])[0].verdict, "FIT");
+  assert.equal(summarizeIcpLabels([label("a/x", "NON_FIT"), label("b/y", "NON_FIT")])[0].verdict, "NON_FIT");
+  const mixed = summarizeIcpLabels([label("a/x", "NON_FIT"), label("b/y", "FIT"), label("c/z", "NON_FIT", { current: false })])[0];
+  assert.deepEqual([mixed.verdict, mixed.fit, mixed.nonFit, mixed.stale], ["MIXED", 1, 1, 1]);
+  assert.equal(summarizeIcpLabels([label("a/x", "FIT", { current: false })])[0].verdict, "STALE");
+  assert.equal(summarizeIcpLabels([label("a/x", "FIT"), label("a/x", "FIT", { icp_profile_id: "icp-2", icp_name: "" })]).length, 2);
+});
+
+test("a Company DB selection is validated through the shared resolver, never widened", async () => {
+  const migration = await read("../supabase/migrations/20260929210000_icp_validation_from_a_company_selection.sql");
+  assert.match(migration, /from public\.resolve_company_action_selection_v1\(\s*p_client_id, p_company_ids/);
+  assert.match(migration, /'selection'/);
+  assert.match(migration, /ICP selection proof passed and was rolled back/);
+  assert.doesNotMatch(migration, /(update|insert into|delete from)\s+public\.(companies|clients|client_companies|client_company_icp_validations)\b/i);
+
+  const route = await read("../app/api/clients/[id]/icp-validator/route.ts");
+  assert.match(route, /p_filters: widening \? filters : \[\]/);
+  assert.match(route, /authorizeFilterSets\(supabase, filters, userId, "company", clientId/);
+
+  const table = await read("../app/components/CompaniesWorkspace.tsx");
+  assert.match(table, /onClick=\{\(\) => setValidateOpen\(true\)\}><AppIcon name="target" size=\{14\}\/> Validate ICP<\/button>/);
+  assert.match(table, /selection=\{companySelectionPayload\(\)\}/);
+});

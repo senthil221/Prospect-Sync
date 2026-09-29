@@ -20,6 +20,7 @@ import { useDebouncedValue } from "./useDebouncedValue";
 import { needsCompanyPreparation, type PreparationProgress } from "../../lib/prepared-search";
 import SearchPreparation from './SearchPreparation';
 import { useClientIcps } from "./use-client-icps";
+import { IcpValidateDialog, useIcpLabels } from "./IcpCheck";
 import { incompleteCompanyProfileField } from "../../lib/client-workspace-completeness";
 
 export function useCompaniesWorkspaceController({ active, search, filters, peopleScope, initialPage, onLoading, onError }: { active: boolean; search: string; filters: ProspectFilter[]; peopleScope: PeopleScope | null; initialPage?: number; onLoading: (loading: boolean) => void; onError: (error: string) => void }) {
@@ -190,6 +191,9 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   const [removingFromClient, setRemovingFromClient] = useState(false);
   const [bulkTagId, setBulkTagId] = useState("");
   const clientIcps = useClientIcps(clientId);
+  // The ICP validator: verdicts on the rows, and "Validate ICP" for the selection.
+  const icpLabels = useIcpLabels(clientId, companies);
+  const [validateOpen, setValidateOpen] = useState(false);
   const [pushClientId, setPushClientId] = useState("");
   const [pushing, setPushing] = useState(false);
   const selectionKey = JSON.stringify({ search: search.trim(), filters: filters.map(({ field, operator, values, scopes }) => ({ field, operator, values, ...(scopes?.length ? { scopes } : {}) })), peopleScope });
@@ -629,6 +633,9 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
         </div>
         {canDelete ? <div className="bulk-action-group bulk-action-group-danger"><button className="row-danger bulk-delete" disabled={deleting || pushing} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? formatNumber(selectedCount) : "selected"}</button></div> : <>
           <div className="bulk-action-group bulk-action-group-primary">
+          <button className="bulk-verify" disabled={updatingIcp} title={selectionMode === "all_matching" ? "Ask the AI models whether every matching company fits one of this client's ICPs" : "Ask the AI models whether the selected companies fit one of this client's ICPs"} onClick={() => setValidateOpen(true)}><AppIcon name="target" size={14}/> Validate ICP</button>
+          </div>
+          <div className="bulk-action-group bulk-action-group-primary">
           <button className="bulk-verify" disabled={updatingIcp} onClick={() => void setCompanyIcpValidation(true)}><AppIcon name="check" size={14}/> Mark ICP verified</button>
           <button disabled={updatingIcp} onClick={() => void setCompanyIcpValidation(false)}><AppIcon name="close" size={14}/> Remove ICP verification</button>
           {/* Apply one of this client's ICPs, to the selection or to everything
@@ -648,10 +655,11 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
         </>}
         <button className="bulk-clear" disabled={updatingIcp || deleting || pushing} onClick={clearSelection}>Clear</button>
       </div> : null}
-      {companies.length ? <><div className="table-wrap"><table className="company-table"><thead><tr>{showSelection ? <th className="select-column"><input aria-label="Select all companies on this page" title="Select all companies on this page" type="checkbox" checked={companies.length > 0 && companies.every((company) => isSelected(company.id))} onChange={togglePageSelection}/></th> : null}<th>Company</th><th>Website</th><th className="numeric-cell">Prospects</th><th className="numeric-cell">Client coverage</th><th>Added</th><th>Status</th>{clientId ? <th className="company-icp-column">ICP verified</th> : null}{canDelete ? <th className="row-detail-column">Actions</th> : null}</tr></thead><tbody>{companies.map((company) => <CompanyTableRow key={company.id} company={company} selected={isSelected(company.id)} showSelection={showSelection} canDelete={canDelete} clientScoped={Boolean(clientId)} onOpen={openCompany} onToggleSelected={toggleSelected} onDelete={deleteCompany}/>)}</tbody></table></div><div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}><AppIcon name="back" size={14}/> Previous</button><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button></div></div></> : <WorkspaceEmpty state={emptyWorkspaceState({ entity: "companies", search, filterCount: activeFilterCount, scoped: Boolean(peopleScope), clientScoped: Boolean(clientId) })} onClearSearch={onClearSearch} onClearFilters={onFilters ? () => onFilters([]) : undefined} onClearScope={onClearPeopleScope} onImport={onImport} />}
+      {companies.length ? <><div className="table-wrap"><table className="company-table"><thead><tr>{showSelection ? <th className="select-column"><input aria-label="Select all companies on this page" title="Select all companies on this page" type="checkbox" checked={companies.length > 0 && companies.every((company) => isSelected(company.id))} onChange={togglePageSelection}/></th> : null}<th>Company</th><th>Website</th><th className="numeric-cell">Prospects</th><th className="numeric-cell">Client coverage</th><th>Added</th><th>Status</th>{clientId ? <th className="company-icp-column">ICP verified</th> : null}{clientId ? <th className="icpv-check-column" title="FIT / NON_FIT from the ICP validator's models. Hover a label for each model's reason.">ICP check</th> : null}{canDelete ? <th className="row-detail-column">Actions</th> : null}</tr></thead><tbody>{companies.map((company) => <CompanyTableRow key={company.id} company={company} selected={isSelected(company.id)} showSelection={showSelection} canDelete={canDelete} clientScoped={Boolean(clientId)} icpLabels={icpLabels.get(company.id)} onOpen={openCompany} onToggleSelected={toggleSelected} onDelete={deleteCompany}/>)}</tbody></table></div><div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}><AppIcon name="back" size={14}/> Previous</button><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button></div></div></> : <WorkspaceEmpty state={emptyWorkspaceState({ entity: "companies", search, filterCount: activeFilterCount, scoped: Boolean(peopleScope), clientScoped: Boolean(clientId) })} onClearSearch={onClearSearch} onClearFilters={onFilters ? () => onFilters([]) : undefined} onClearScope={onClearPeopleScope} onImport={onImport} />}
     </article>
     {onFilters && filtersOpen ? <CompanyFilterPanel filters={displayFilters} clients={clients} clientId={clientId} onChange={onFilters} /> : null}
     </div>
+    {validateOpen && clientId ? <IcpValidateDialog clientId={clientId} clientName={clients.find((candidate) => candidate.id === clientId)?.name ?? "this client"} selectedCount={selectedCount} selection={companySelectionPayload()} onClose={() => setValidateOpen(false)} onStarted={(message) => { setValidateOpen(false); setCompanyNotice(message); clearSelection(); }}/> : null}
     {removeRequest && clientId ? <ConfirmDialog
       title={removeRequest.people
         ? `Remove ${formatNumber(removeRequest.companies)} compan${removeRequest.companies === 1 ? "y" : "ies"} and its people from this client?`

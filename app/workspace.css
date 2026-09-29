@@ -1805,3 +1805,15 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 }
 .icpv-strong { font-weight: var(--weight-bold); }
 .icpv-strong small { display: inline; font-weight: normal; }
+
+/* ICP validator verdicts on client Company DB rows */
+.icpv-check-column { min-width: 110px; white-space: nowrap; }
+.icpv-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.icpv-verdict { cursor: help; }
+.icpv-verdict small { font-weight: var(--weight-regular); }
+.data-pill.icpv-verdict-fit { border-color: var(--success-line); background: var(--success-soft); color: var(--success); }
+.icpv-dialog { max-width: 520px; text-align: left; }
+.icpv-dialog .form-field, .icpv-dialog .icpv-fieldset { margin-top: var(--space-3); }
+.data-pill.icpv-verdict-non_fit { background: var(--ph-danger-soft); color: var(--ph-danger); }
+.data-pill.icpv-verdict-mixed { background: var(--ph-warning-soft); color: var(--ph-warning); }
+.data-pill.icpv-verdict-stale { color: var(--ph-muted); }
