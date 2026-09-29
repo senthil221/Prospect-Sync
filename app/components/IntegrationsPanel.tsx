@@ -46,6 +46,7 @@ export default function IntegrationsPanel({ onOpenReplyBlocklist }: { onOpenRepl
         : action === 'cancel' ? 'Future batches cancelled. Already uploaded leads are not removed; in-flight work may finish.'
         : action === 'create_campaign' ? 'Campaign creation queued. It will be created as a draft and mapped to the chosen client.'
         : action === 'enqueue' ? 'Delivery queued. Follow progress below; closing the browser does not stop it.'
+        : provider === 'smartlead' && action === 'connect' ? 'Smartlead key saved. Reply sync is paused; review mappings, validate the new inbox, then enable sync. Re-approve campaign destinations before sending leads.'
         : 'Connection checked successfully. No leads were sent.');
       await refresh();
     } catch (e) { setError(e instanceof Error ? e.message : 'Connection check failed.'); }
@@ -67,9 +68,9 @@ export default function IntegrationsPanel({ onOpenReplyBlocklist }: { onOpenRepl
       return <section className="panel integration-card" key={provider} aria-labelledby={`${provider}-title`}>
         <h3 id={`${provider}-title`}>{provider === 'smartlead' ? 'Smartlead' : 'No2Ninja Verifier'}</h3>
         <p>{connection?.connected ? 'Credential saved' : 'Not connected'}</p>
-        <p>{provider === 'smartlead' ? 'Connect your agency account to discover campaigns. Campaign destinations will be mapped to each client.' : 'Connect the service API on app.betterlanebase.link. Your verification engine stays on its own VPS.'}</p>
+        <p>{provider === 'smartlead' ? 'Account connection and reply-sync safety checks now live together in Reply blocklist. This page remains for campaigns and lead delivery.' : 'Connect the service API on app.betterlanebase.link. Your verification engine stays on its own VPS.'}</p>
         {connection?.checked_at && <p>Last successful check: {new Date(connection.checked_at).toLocaleString()}</p>}
-        {status?.canManage && <form onSubmit={event => {
+        {status?.canManage && provider !== 'smartlead' && <form onSubmit={event => {
           event.preventDefault();
           const form = event.currentTarget;
           const secret = String(new FormData(form).get('secret') ?? '');
@@ -81,10 +82,10 @@ export default function IntegrationsPanel({ onOpenReplyBlocklist }: { onOpenRepl
           <p>Encrypted on the server. Never displayed after saving.</p>
           <button className="primary" disabled={!!busy || !status.encryptionReady}>{busy === provider ? 'Checking…' : 'Test and save connection'}</button>
         </form>}
-        {provider === 'smartlead' && <button type="button" onClick={onOpenReplyBlocklist}>Open reply blocklist →</button>}
+        {provider === 'smartlead' && <button type="button" className="primary" onClick={onOpenReplyBlocklist}>{connection?.connected ? 'Manage Smartlead connection & replies' : 'Connect Smartlead'} →</button>}
         {status?.canManage && connection?.connected && <div className="integration-actions">
           <button disabled={!!busy} onClick={() => void act(provider, 'check')}>{provider === 'smartlead' ? 'Check and load campaigns' : 'Check connection'}</button>
-          <button disabled={!!busy} onClick={() => { if (window.confirm('Remove this saved credential? No provider data will be deleted.')) void act(provider, 'disconnect'); }}>Disconnect</button>
+          {provider !== 'smartlead' && <button disabled={!!busy} onClick={() => { if (window.confirm('Remove this saved credential? No provider data will be deleted.')) void act(provider, 'disconnect'); }}>Disconnect</button>}
         </div>}
       </section>;
     })}</div>

@@ -3,8 +3,9 @@ import { getAuthorizedUser } from '../../../lib/auth';
 import { readBoundedJson } from '../../../lib/bounded-json';
 import { createAdminClient } from '../../../lib/supabase/admin';
 import { integrationAdmin, integrationWriteAllowed, isProvider, openCredential, sealCredential } from '../../../lib/integrations/credentials';
-import { checkProvider, ProviderError, retryDelay } from '../../../lib/integrations/provider-api';
+import { checkProvider, ProviderError, readSmartleadCategories, retryDelay } from '../../../lib/integrations/provider-api';
 import { readSmartleadInboxPage } from '../../../lib/integrations/smartlead-inbox.mjs';
+import { inboxConnectionCurrent } from '../../../lib/integrations/inbox-connection';
 
 export const runtime = 'nodejs';
 const reply = (body: unknown, status = 200, extra: Record<string, string> = {}) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...extra } });
@@ -25,7 +26,7 @@ export async function GET() {
     let management = {};
     if (canManage) {
       const [catalog, clients, destinations, jobs, progress, inbox] = await Promise.all([
-        db.from('integration_connections').select('campaigns').eq('provider','smartlead').abortSignal(AbortSignal.timeout(5000)).single(),
+        db.from('integration_connections').select('campaigns,generation').eq('provider','smartlead').abortSignal(AbortSignal.timeout(5000)).single(),
         db.from('clients').select('id,name').order('name').limit(1001).abortSignal(AbortSignal.timeout(5000)),
         db.rpc('integration_destinations_v1').abortSignal(AbortSignal.timeout(5000)),
         db.rpc('integration_job_status_v1',{p_actor:user.id}).abortSignal(AbortSignal.timeout(5000)),
@@ -34,7 +35,13 @@ export async function GET() {
       ]);
       if (catalog.error || clients.error || destinations.error || jobs.error || progress.error || inbox.error) return storageError();
       if ((clients.data?.length ?? 0)>1000) return reply({ error: 'Integration client selector exceeds 1,000 clients. A paginated selector is required.' },503);
-      management = { campaigns: catalog.data.campaigns, clients: clients.data, destinations: destinations.data, jobs:jobs.data, progress:progress.data, inbox:inbox.data };
+      const smartleadConnected = data?.some(connection => connection.provider === 'smartlead' && connection.connected) ?? false;
+      const inboxSettings = inbox.data?.settings;
+      management = { campaigns: catalog.data.campaigns, clients: clients.data, destinations: destinations.data, jobs:jobs.data, progress:progress.data,
+        inbox: inbox.data ? { ...inbox.data, settings: { ...inboxSettings,
+          connection_current: typeof inboxSettings?.connection_current === 'boolean' ? inboxSettings.connection_current
+            : inboxConnectionCurrent(smartleadConnected, catalog.data.generation, inboxSettings?.verified_generation, inboxSettings?.verified_at),
+        } } : null };
     }
     return reply({ connections: data, canManage, ...management, encryptionReady: /^[a-fA-F0-9]{64}$/.test(process.env.INTEGRATION_ENCRYPTION_KEY ?? ''), dispatchEnabled: canManage && await deliveryReady() });
   } catch { return storageError(); }
@@ -82,7 +89,8 @@ export async function POST(request: Request) {
       const {data,error}=await db.from('integration_connections').select('credential_ciphertext,connected,generation').eq('provider','smartlead').eq('attempt_token',token).abortSignal(AbortSignal.timeout(5000)).maybeSingle();
       if(error)return storageError();
       if(!data?.connected || !data.credential_ciphertext || !data.generation)return reply({error:'Connect Smartlead first.'},409);
-      const result=await readSmartleadInboxPage(0,openCredential('smartlead',data.credential_ciphertext,key),fetch,5);
+      const secret=openCredential('smartlead',data.credential_ciphertext,key);
+      const result=await readSmartleadInboxPage(0,secret,fetch,5);
       if(!result.ok){
         const status=typeof result.status==='number'?result.status:0;
         const retryAfter=result.retryAfter ? retryDelay(result.retryAfter) : 0;
@@ -91,7 +99,15 @@ export async function POST(request: Request) {
       }
       const page=result.page;
       if(!page)return reply({error:'Smartlead did not return a supported Master Inbox response.'},502);
-      const {data:saved,error:savedError}=await db.rpc('confirm_smartlead_inbox_contract_v1',{p_actor:user.id,p_generation:data.generation,p_contract:page.contract}).abortSignal(AbortSignal.timeout(5000));
+      let categories;
+      try { categories=await readSmartleadCategories(secret); }
+      catch (error) {
+        if (error instanceof ProviderError) return reply({error:error.message},error.status,error.retryAfter?{'Retry-After':String(error.retryAfter)}:{});
+        throw error;
+      }
+      const {data:saved,error:savedError}=await db.rpc('confirm_smartlead_inbox_contract_v2',{
+        p_actor:user.id,p_generation:data.generation,p_contract:page.contract,p_categories:categories,
+      }).abortSignal(AbortSignal.timeout(5000));
       return !savedError && saved ? reply({validated:true,contract:page.contract,sampleCount:page.count}) : reply({error:'The Smartlead connection changed during validation. Retry.'},409);
     }
     if(action==='enqueue' || action==='create_campaign') {
@@ -123,8 +139,13 @@ export async function POST(request: Request) {
       return data ? reply({saved:true}) : reply({error:'Destination changed. Reload connections.'},409);
     }
     if (action === 'disconnect') {
+      if (provider==='smartlead') {
+        const {data,error}=await db.rpc('disconnect_smartlead_connection_v1',{
+          p_actor:user.id,p_new_generation:randomUUID(),
+        }).abortSignal(AbortSignal.timeout(5000));
+        return error ? storageError() : data ? reply({disconnected:true}) : reply({error:'Unable to disconnect Smartlead.'},409);
+      }
       const { error } = await db.from('integration_connections').update({ credential_ciphertext: null, connected: false, checked_at: null, campaigns: [], generation: randomUUID(), updated_by: user.id, attempt_token: randomUUID() }).eq('provider', provider).abortSignal(AbortSignal.timeout(5000));
-      if (!error && provider==='smartlead') await db.rpc('set_smartlead_inbox_enabled_v1',{p_actor:user.id,p_enabled:false}).abortSignal(AbortSignal.timeout(5000));
       return error ? storageError() : reply({ disconnected: true });
     }
     const key = process.env.INTEGRATION_ENCRYPTION_KEY ?? '';
@@ -145,13 +166,21 @@ export async function POST(request: Request) {
     }
     try {
       const result = await checkProvider(provider, secret);
+      if (provider==='smartlead' && action==='connect') {
+        const categories=await readSmartleadCategories(secret);
+        const {data,error}=await db.rpc('rotate_smartlead_connection_v1',{
+          p_actor:user.id,p_attempt_token:token,p_ciphertext:sealCredential(provider,secret,key),
+          p_campaigns:result.campaigns,p_categories:categories,p_new_generation:randomUUID(),
+        }).abortSignal(AbortSignal.timeout(5000));
+        if(error)return storageError();
+        return data ? reply({connected:true,...result}) : reply({error:'The connection changed during this check. Reload its status.'},409);
+      }
       const update = { connected: true, checked_at: new Date().toISOString(), updated_by: user.id,
         campaigns: result.campaigns,
         ...(action === 'connect' ? { credential_ciphertext: sealCredential(provider, secret, key), generation: randomUUID() } : {}) };
       const { data, error } = await db.from('integration_connections').update(update).eq('provider', provider).eq('attempt_token', token).select('provider').abortSignal(AbortSignal.timeout(5000));
       if (error) return storageError();
       if (!data?.length) return reply({ error: 'The connection changed during this check. Reload its status.' }, 409);
-      if (provider==='smartlead' && action==='connect') await db.rpc('set_smartlead_inbox_enabled_v1',{p_actor:user.id,p_enabled:false}).abortSignal(AbortSignal.timeout(5000));
       return reply({ connected: true, ...result });
     } catch (error) {
       if (error instanceof ProviderError) {

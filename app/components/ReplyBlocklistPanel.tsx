@@ -4,9 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import { AppIcon } from './DashboardUi';
 import { readIntegrationStatus, type IntegrationStatus } from './integration-status';
 
-type InboxAction = 'validate_inbox' | 'enable_inbox' | 'disable_inbox' | 'sync_inbox' | 'map_inbox' | 'unmap_inbox';
+type InboxAction = 'connect' | 'check' | 'disconnect' | 'validate_inbox' | 'enable_inbox' | 'disable_inbox' | 'sync_inbox' | 'map_inbox' | 'unmap_inbox';
 
 const actionNotices: Record<InboxAction, string> = {
+  connect: 'Smartlead API key saved. Reply sync is paused until this account is validated.',
+  check: 'Smartlead connection checked and campaigns refreshed.',
+  disconnect: 'Smartlead disconnected. Existing client blocklist entries were kept.',
   validate_inbox: 'Master Inbox connection validated. You can now enable the sync.',
   enable_inbox: 'Sync enabled. Historical replies will be processed in the background.',
   disable_inbox: 'Sync paused. Existing blocklist entries are unchanged.',
@@ -33,6 +36,8 @@ export default function ReplyBlocklistPanel({ onOpenIntegrations }: { onOpenInte
   const [clientId, setClientId] = useState('');
   const [search, setSearch] = useState('');
   const [showAll, setShowAll] = useState(false);
+  const [showKeyForm, setShowKeyForm] = useState(false);
+  const [apiKey, setApiKey] = useState('');
   const prefixInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -74,7 +79,7 @@ export default function ReplyBlocklistPanel({ onOpenIntegrations }: { onOpenInte
     }
   }
 
-  async function act(action: InboxAction, options?: { prefix?: string; clientId?: string }) {
+  async function act(action: InboxAction, options?: { prefix?: string; clientId?: string; secret?: string }) {
     setBusy(action);
     setError('');
     setNotice('');
@@ -90,6 +95,7 @@ export default function ReplyBlocklistPanel({ onOpenIntegrations }: { onOpenInte
       setStatus(await readIntegrationStatus());
       setNotice(actionNotices[action]);
       if (action === 'map_inbox') { setPrefix(''); setClientId(''); }
+      if (action === 'connect') { setApiKey(''); setShowKeyForm(false); }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Action failed.');
     } finally {
@@ -120,6 +126,35 @@ export default function ReplyBlocklistPanel({ onOpenIntegrations }: { onOpenInte
     {status?.canManage && !inbox && <section className="panel reply-blocklist-empty"><h3>Reply sync is unavailable</h3><p>Check the Smartlead integration configuration, then refresh this page.</p><button type="button" onClick={onOpenIntegrations}>Open integrations</button></section>}
 
     {status?.canManage && inbox && <>
+      <section className="panel reply-blocklist-connection" aria-labelledby="smartlead-connection-heading">
+        <div className="reply-blocklist-connection-copy">
+          <div className="reply-blocklist-status-row">
+            <span className={`reply-blocklist-state ${smartleadConnected ? 'is-on' : 'is-off'}`}><span aria-hidden="true"/>{smartleadConnected ? 'Connected' : 'Not connected'}</span>
+            {smartleadConnected && <span className="reply-blocklist-status-detail">API key stored securely</span>}
+          </div>
+          <h3 id="smartlead-connection-heading">Smartlead account</h3>
+          <p>Use the API key from Smartlead Settings. Browser JWTs are not supported or stored.</p>
+          {smartleadConnected && <p className="reply-blocklist-connection-checks">
+            <span>{inbox.settings.category_ready ? 'Category rules ready' : 'Category rules need review'}</span>
+            <span>{inbox.settings.connection_current ? 'Inbox validated' : 'Inbox validation required'}</span>
+          </p>}
+        </div>
+        <div className="reply-blocklist-connection-actions">
+          {(!smartleadConnected || showKeyForm) && <form onSubmit={event => { event.preventDefault(); void act('connect', { secret: apiKey }); }}>
+            <label htmlFor="smartlead-reply-key">{smartleadConnected ? 'Replacement API key' : 'Smartlead API key'}</label>
+            <div><input id="smartlead-reply-key" type="password" autoComplete="off" spellCheck={false} minLength={16} maxLength={2048}
+              value={apiKey} onChange={event => setApiKey(event.target.value)} required disabled={!!busy || !status.encryptionReady}
+              placeholder="Paste API key"/><button type="submit" className="primary" disabled={!!busy || !status.encryptionReady || apiKey.length<16}>{busy === 'connect' ? 'Testing…' : 'Test & save'}</button></div>
+            {smartleadConnected && <button type="button" className="reply-blocklist-text-action" disabled={!!busy} onClick={() => { setApiKey(''); setShowKeyForm(false); }}>Cancel</button>}
+          </form>}
+          {smartleadConnected && !showKeyForm && <div className="reply-blocklist-connection-buttons">
+            <button type="button" className="primary" disabled={!!busy} onClick={() => setShowKeyForm(true)}>Change API key</button>
+            <button type="button" disabled={!!busy} onClick={() => void act('check')}>{busy === 'check' ? 'Checking…' : 'Refresh campaigns'}</button>
+            <button type="button" disabled={!!busy} onClick={() => { if (window.confirm('Disconnect Smartlead? Reply sync will stop, but existing blocklist entries will stay.')) void act('disconnect'); }}>Disconnect</button>
+          </div>}
+        </div>
+      </section>
+
       <section className="panel reply-blocklist-overview" aria-label="Reply sync overview">
         <div className="reply-blocklist-overview-main">
           <div className="reply-blocklist-status-row"><span className={`reply-blocklist-state ${inbox.settings.enabled ? 'is-on' : 'is-off'}`}><span aria-hidden="true"/>{inbox.settings.enabled ? 'Sync on' : 'Sync paused'}</span><span className="reply-blocklist-status-detail">{plainStatus(inbox.settings.status)}</span></div>
@@ -128,14 +163,16 @@ export default function ReplyBlocklistPanel({ onOpenIntegrations }: { onOpenInte
           {inbox.settings.last_error_code && <p className="reply-blocklist-inline-alert" role="status">Needs attention: {plainStatus(inbox.settings.last_error_code)}</p>}
         </div>
         <div className="reply-blocklist-overview-actions">
-          {!inbox.settings.verified_at && <button type="button" onClick={() => void act('validate_inbox')} disabled={!!busy || !smartleadConnected}>Validate inbox</button>}
+          {!inbox.settings.connection_current && <button type="button" onClick={() => void act('validate_inbox')} disabled={!!busy || !smartleadConnected}>{inbox.settings.verified_at ? 'Revalidate inbox' : 'Validate inbox'}</button>}
           {inbox.settings.enabled
             ? <button type="button" onClick={() => void act('disable_inbox')} disabled={!!busy}>{busy === 'disable_inbox' ? 'Pausing…' : 'Pause sync'}</button>
-            : <button type="button" className="primary" onClick={() => void act('enable_inbox')} disabled={!!busy || !inbox.settings.verified_at}>{busy === 'enable_inbox' ? 'Enabling…' : 'Enable sync'}</button>}
+            : <button type="button" className="primary" onClick={() => void act('enable_inbox')} disabled={!!busy || !inbox.settings.connection_current}>{busy === 'enable_inbox' ? 'Enabling…' : 'Enable sync'}</button>}
         </div>
       </section>
 
-      {!smartleadConnected && <div className="reply-blocklist-message" role="status">Smartlead is not connected. <button type="button" onClick={onOpenIntegrations}>Open integrations</button> to add a key.</div>}
+      {!status.encryptionReady && <div className="reply-blocklist-message" role="status">Server encryption is not configured, so API keys cannot be saved yet.</div>}
+      {smartleadConnected && !inbox.settings.connection_current && !!inbox.settings.verified_at && <div className="reply-blocklist-message" role="status">The Smartlead key changed. Revalidate the new account before enabling reply sync.</div>}
+      {smartleadConnected && !inbox.settings.connection_current && !inbox.settings.verified_at && <div className="reply-blocklist-message" role="status">Validate this Smartlead account before enabling reply sync. Old-account inbox data is retained separately and is not shown here.</div>}
 
       <section className="reply-blocklist-metrics" aria-label="Reply sync totals">
         <div className="panel"><span>Replies observed</span><strong>{inbox.counts.observed.toLocaleString()}</strong><small>Tagged inbox replies seen</small></div>
@@ -177,7 +214,7 @@ export default function ReplyBlocklistPanel({ onOpenIntegrations }: { onOpenInte
 
       <details className="panel reply-blocklist-details"><summary>Sync details and rules <AppIcon name="chevron" size={16}/></summary><div className="reply-blocklist-details-content">
         <div><h3>Reconciliation</h3><p>{inbox.settings.rows_observed.toLocaleString()} observations across {inbox.settings.pages_scanned.toLocaleString()} pages. {inbox.settings.initial_backfill_complete ? 'Historical scan complete.' : 'Historical scan still in progress.'}</p><button type="button" onClick={() => void act('sync_inbox')} disabled={!!busy || !inbox.settings.enabled || inbox.settings.status === 'running'}>Reconcile all replies now</button></div>
-        <div><h3>Blocking rules</h3><p>All assigned categories except Out of Office add the reply email to its matched client blocklist. “Not the right fit” also adds the domain. Existing manual entries and reasons are preserved.</p><p>{inbox.counts.manualRemoved.toLocaleString()} manually removed Smartlead entries will remain removed. Changing a reply to Out of Office does not undo an earlier block.</p></div>
+        <div><h3>Blocking rules</h3><p>All assigned categories except Out of Office add the reply email to its matched client blocklist. “Not the right fit” also adds the domain. Category IDs are discovered from the connected account and sync cannot start when these names are uncertain.</p><p>{inbox.counts.manualRemoved.toLocaleString()} manually removed Smartlead entries will remain removed. Changing a reply to Out of Office does not undo an earlier block.</p><button type="button" onClick={onOpenIntegrations}>Open campaign delivery settings</button></div>
       </div></details>
     </>}
   </div>;

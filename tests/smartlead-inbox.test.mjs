@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSmartleadInboxPage, readSmartleadInboxPage, SMARTLEAD_INBOX_CATEGORY_IDS } from '../lib/integrations/smartlead-inbox.mjs';
+import { parseSmartleadInboxPage, readSmartleadInboxPage } from '../lib/integrations/smartlead-inbox.mjs';
 import { executeSmartleadInboxUnit } from '../worker/smartlead-inbox-sync.mjs';
 import { sealCredential } from '../lib/integrations/credentials.ts';
 
@@ -115,8 +115,4 @@ test('worker refuses to checkpoint an incremental page outside its requested win
   });
   assert.equal(outcomes[0][0], 'needs_review');
   assert.equal(outcomes[0][1].reason, 'provider_reply_window_not_enforced');
-});
-
-test('category allowlist includes every supplied category and preserves OOO identity', () => {
-  for (const id of [1,2,3,4,5,6,7,8,9,115247,115248,120097,163624,171350]) assert.equal(SMARTLEAD_INBOX_CATEGORY_IDS.has(id), true);
 });

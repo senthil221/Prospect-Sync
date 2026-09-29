@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sealCredential, openCredential, integrationAdmin, integrationWriteAllowed as originAllowed } from '../lib/integrations/credentials.ts';
-import { checkProvider, parseCampaigns, providerRead, retryDelay } from '../lib/integrations/provider-api.ts';
+import { checkProvider, parseCampaigns, parseSmartleadCategories, providerRead, readSmartleadCategories, retryDelay } from '../lib/integrations/provider-api.ts';
 import { readWorkspaceUrl } from '../lib/workspace-url.ts';
 
 const key = 'ab'.repeat(32);
@@ -45,6 +45,26 @@ test('proxy origin validation uses configured public URL and rejects header spoo
 test('campaign parser rejects malformed or duplicate records', () => {
   assert.deepEqual(parseCampaigns([{ id: 1, name: 'Draft', status: 'DRAFTED', client_id: 2 }]), [{ id: 1, name: 'Draft', status: 'DRAFTED', clientId: 2 }]);
   for (const value of [{ data: [] }, [{ id: '1', name: 'x', status: 'ACTIVE' }], [{ id: 1, name: 'x', status: 'ACTIVE', client_id: -1 }], [{ id: 1, name: 'x', status: 'ACTIVE' }, { id: 1, name: 'x', status: 'ACTIVE' }]]) assert.throws(() => parseCampaigns(value));
+});
+test('discovers account category IDs by exact normalized names', async () => {
+  const response = [{ id: 44, name: 'Interested' }, { id: 91, name: ' Out   of Office ' },
+    { category_id: 712, category_name: 'Not the right fit' }];
+  assert.deepEqual(parseSmartleadCategories(response), [
+    { id: 44, name: 'Interested' }, { id: 91, name: 'Out of Office' }, { id: 712, name: 'Not the right fit' },
+  ]);
+  let requestUrl = '';
+  const categories = await readSmartleadCategories('sensitive-key', async url => {
+    requestUrl = String(url);
+    return Response.json({ data: response });
+  });
+  assert.equal(new URL(requestUrl).pathname, '/api/v1/leads/fetch-categories');
+  assert.equal(new URL(requestUrl).searchParams.get('api_key'), 'sensitive-key');
+  assert.equal(categories[2].id, 712);
+});
+test('fails closed when category identities are missing, duplicated or ambiguous', () => {
+  assert.throws(() => parseSmartleadCategories([{ id: 1, name: 'Interested' }, { id: 2, name: 'Out of Office' }]));
+  assert.throws(() => parseSmartleadCategories([{ id: 1, name: 'Out of Office' }, { id: 2, name: 'Not the right fit' }, { id: 3, name: 'out of office' }]));
+  assert.throws(() => parseSmartleadCategories([{ id: 1, name: 'Out of Office' }, { id: 1, name: 'Not the right fit' }]));
 });
 test('provider check uses only fixed read endpoint and never follows redirects', async () => {
   let calls = 0;

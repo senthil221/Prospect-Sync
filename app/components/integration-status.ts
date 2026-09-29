@@ -9,11 +9,12 @@ export type IntegrationStatus = { connections: Connection[]; canManage: boolean;
   jobs?: { id: string; client_id: string; campaign_id: number; status: string; total: number; created_at: string }[];
   progress?: { creations: { id: string; name: string; status: string; campaign_id: number | null; error_code: string | null }[];
     deliveries: { id: string; status: string; added: number; skipped: number; suppressed: number; error_code: string | null }[] };
-  inbox?: { settings: { enabled: boolean; verified_at: string | null; verified_contract: string | null; initial_backfill_complete: boolean;
-      scan_offset: number; status: string; pages_scanned: number; rows_observed: number; last_synced_at: string | null; last_error_code: string | null };
+  inbox?: { settings: { enabled: boolean; verified_at: string | null; connection_current: boolean; category_ready: boolean; verified_contract: string | null; initial_backfill_complete: boolean;
+       scan_offset: number; status: string; pages_scanned: number; rows_observed: number; last_synced_at: string | null; last_error_code: string | null };
     counts: { observed: number; unmatched: number; pending: number; applied: number; manualRemoved: number };
     unmatched: { campaign_name: string; mapping_status: string; replies: number }[];
-    mappings: { prefix: string; client_id: string; client_name: string }[] } };
+    mappings: { prefix: string; client_id: string; client_name: string }[];
+    categories: { category_id: number; category_name: string; behavior: 'email' | 'email_and_domain' | 'ignore' }[] } };
 
 export async function readIntegrationStatus(signal?: AbortSignal): Promise<IntegrationStatus> {
   const response = await fetch('/api/integrations', { cache: 'no-store', signal });

@@ -41,6 +41,7 @@ const input = ['BEGIN; SET LOCAL statement_timeout=\'5s\';', fixture,
   await read('../supabase/migrations/20260906005651_integration_selection_preview.sql'),
   await read('../supabase/migrations/20260906012316_smartlead_durable_dispatch.sql'),
   await read('../supabase/migrations/20260928212351_smartlead_inbox_blocklist_sync.sql'),
+  await read('../supabase/migrations/20260929173000_smartlead_account_scoped_inbox.sql'),
   await read('./check-integration-connections.sql'), await read('./check-integration-ledger.sql'),
   await read('./check-integration-destinations.sql'), await read('./check-integration-preview.sql'),
   await read('./check-smartlead-dispatch.sql'), await read('./check-smartlead-inbox.sql'), 'ROLLBACK;'].join('\n');
