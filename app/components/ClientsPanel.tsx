@@ -21,6 +21,10 @@ import { useDismiss } from "../use-dismiss";
 import { needsCompanyPreparation, type PreparationProgress } from "../../lib/prepared-search";
 import SearchPreparation from './SearchPreparation';
 import { prospectCursorShapeSupported } from "../../lib/prospect-pagination-policy";
+import {
+  forceClientWorkspaceCompleteness,
+  incompleteCompanyProfileField,
+} from "../../lib/client-workspace-completeness";
 
 function distinctSourceFile(list: ListRecord) {
   const filename = list.source_file_name?.trim() ?? "";
@@ -444,18 +448,25 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
   </>;
 }
 
-const incompleteCompanyFilters: ProspectFilter[] = [
-  { id: "incomplete:keywords", field: "__keywords", operator: "empty", values: [] },
-  { id: "incomplete:description", field: "__short_description", operator: "empty", values: [] },
-];
-const incompletePeopleFilters: ProspectFilter[] = [
-  { id: "incomplete:company-profile", field: "__incomplete_company_profile", operator: "equals", values: ["true"] },
-];
+const completeClientProfileFilter: ProspectFilter = {
+  id: "client-profile:complete",
+  field: incompleteCompanyProfileField,
+  operator: "equals",
+  values: ["false"],
+};
+const incompleteClientProfileFilter: ProspectFilter = {
+  id: "client-profile:incomplete",
+  field: incompleteCompanyProfileField,
+  operator: "equals",
+  values: ["true"],
+};
+const incompleteCompanyFilters: ProspectFilter[] = [incompleteClientProfileFilter];
+const incompletePeopleFilters: ProspectFilter[] = [incompleteClientProfileFilter];
 
 function IncompleteInfoPanel({ client, clients, onSelect, onImport }: { client: ClientRecord; clients: ClientRecord[]; onSelect: (prospect: Prospect) => void; onImport: () => void }) {
   const [entity, setEntity] = useState<"people" | "companies">("companies");
   return <section className="incomplete-info-panel">
-    <p className="incomplete-scope">Companies missing both keywords and a short description. Linked people appear in the People view.</p>
+    <p className="incomplete-scope">Companies missing both keywords and a short description, plus their linked people. These records stay out of the normal client databases until either company field is enriched.</p>
     <div className="icp-quick-filters" role="group" aria-label="Choose incomplete information record type"><button className={entity === "companies" ? "active" : ""} aria-pressed={entity === "companies"} onClick={() => setEntity("companies")}>Companies</button><button className={entity === "people" ? "active" : ""} aria-pressed={entity === "people"} onClick={() => setEntity("people")}>People</button></div>
     {entity === "people" ? <ClientMasterDatabase client={client} clients={clients} active companyScope={null} onClearCompanyScope={() => {}} onSeeCompanies={() => {}} onSelect={onSelect} onImport={onImport} initialFilters={incompletePeopleFilters} forcedFilters={incompletePeopleFilters} allowEntityPivot={false}/> : <ClientCompanyDatabase client={client} clients={clients} peopleScope={null} onClearPeopleScope={() => {}} onSelectListScope={() => {}} onSeePeople={() => {}} onImport={onImport} initialFilters={incompleteCompanyFilters} forcedFilters={incompleteCompanyFilters} allowEntityPivot={false}/>}
   </section>;
@@ -472,10 +483,15 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
   // the filter is then editable and clearable like any other. Each tab passes a
   // distinct key so switching remounts with its own seed rather than inheriting
   // whatever the previous tab was left showing.
-  const [filters, setFilters] = useState<ProspectFilter[]>(initialFilters);
-  const enforceForcedFilters = useCallback((next: ProspectFilter[]) => forcedFilters.length
-    ? [...next.filter((candidate) => !forcedFilters.some((forced) => forced.field === candidate.field)), ...forcedFilters]
-    : next, [forcedFilters]);
+  const profileFilter = forcedFilters.find((filter) => filter.field === incompleteCompanyProfileField)
+    ?? completeClientProfileFilter;
+  const effectiveForcedFilters = forcedFilters.some((filter) => filter.field === incompleteCompanyProfileField)
+    ? forcedFilters : [...forcedFilters, profileFilter];
+  const [filters, setFilters] = useState<ProspectFilter[]>(() => forceClientWorkspaceCompleteness(initialFilters, profileFilter));
+  const enforceForcedFilters = (next: ProspectFilter[]) => [
+    ...next.filter((candidate) => !effectiveForcedFilters.some((forced) => forced.field === candidate.field)),
+    ...effectiveForcedFilters,
+  ];
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState("created_at");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
@@ -566,10 +582,15 @@ function ClientCompanyDatabase({ client, clients, peopleScope, onClearPeopleScop
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [filters, setFilters] = useState<ProspectFilter[]>(initialFilters);
-  const enforceForcedFilters = useCallback((next: ProspectFilter[]) => forcedFilters.length
-    ? [...next.filter((candidate) => !forcedFilters.some((forced) => forced.field === candidate.field)), ...forcedFilters]
-    : next, [forcedFilters]);
+  const profileFilter = forcedFilters.find((filter) => filter.field === incompleteCompanyProfileField)
+    ?? completeClientProfileFilter;
+  const effectiveForcedFilters = forcedFilters.some((filter) => filter.field === incompleteCompanyProfileField)
+    ? forcedFilters : [...forcedFilters, profileFilter];
+  const [filters, setFilters] = useState<ProspectFilter[]>(() => forceClientWorkspaceCompleteness(initialFilters, profileFilter));
+  const enforceForcedFilters = (next: ProspectFilter[]) => [
+    ...next.filter((candidate) => !effectiveForcedFilters.some((forced) => forced.field === candidate.field)),
+    ...effectiveForcedFilters,
+  ];
   const [refresh, setRefresh] = useState(0);
   const deferredSearch = useDeferredValue(search);
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);

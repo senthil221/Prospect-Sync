@@ -20,6 +20,7 @@ import { useDebouncedValue } from "./useDebouncedValue";
 import { needsCompanyPreparation, type PreparationProgress } from "../../lib/prepared-search";
 import SearchPreparation from './SearchPreparation';
 import { useClientIcps } from "./use-client-icps";
+import { incompleteCompanyProfileField } from "../../lib/client-workspace-completeness";
 
 export function useCompaniesWorkspaceController({ active, search, filters, peopleScope, initialPage, onLoading, onError }: { active: boolean; search: string; filters: ProspectFilter[]; peopleScope: PeopleScope | null; initialPage?: number; onLoading: (loading: boolean) => void; onError: (error: string) => void }) {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -131,7 +132,8 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   const [bulkSelectOpen, setBulkSelectOpen] = useState(false);
   const [bulkSelectValues, setBulkSelectValues] = useState("");
   const [bulkSelecting, setBulkSelecting] = useState(false);
-  const activeFilterCount = filters.reduce((count, filter) => count + (filter.operator === "empty" || filter.operator === "not_empty" ? 1 : filter.values.length), 0);
+  const displayFilters = filters.filter((filter) => filter.field !== incompleteCompanyProfileField);
+  const activeFilterCount = displayFilters.reduce((count, filter) => count + (filter.operator === "empty" || filter.operator === "not_empty" ? 1 : filter.values.length), 0);
   const icpFilter = clientId ? filters.find((filter) => filter.field === "__company_icp_verified" && filter.values.includes(clientId)) : undefined;
   const icpStatus = !icpFilter ? "all" : icpFilter.operator === "contains" ? "verified" : "unverified";
   // Deliberately scope-relative: inside a client this reads that client's people
@@ -648,7 +650,7 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
       </div> : null}
       {companies.length ? <><div className="table-wrap"><table className="company-table"><thead><tr>{showSelection ? <th className="select-column"><input aria-label="Select all companies on this page" title="Select all companies on this page" type="checkbox" checked={companies.length > 0 && companies.every((company) => isSelected(company.id))} onChange={togglePageSelection}/></th> : null}<th>Company</th><th>Website</th><th className="numeric-cell">Prospects</th><th className="numeric-cell">Client coverage</th><th>Added</th><th>Status</th>{clientId ? <th className="company-icp-column">ICP verified</th> : null}{canDelete ? <th className="row-detail-column">Actions</th> : null}</tr></thead><tbody>{companies.map((company) => <CompanyTableRow key={company.id} company={company} selected={isSelected(company.id)} showSelection={showSelection} canDelete={canDelete} clientScoped={Boolean(clientId)} onOpen={openCompany} onToggleSelected={toggleSelected} onDelete={deleteCompany}/>)}</tbody></table></div><div className="company-pagination"><span>Page {page} of {totalPages}</span><div><button disabled={page <= 1} onClick={() => onPageChange(page - 1)}><AppIcon name="back" size={14}/> Previous</button><button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button></div></div></> : <WorkspaceEmpty state={emptyWorkspaceState({ entity: "companies", search, filterCount: activeFilterCount, scoped: Boolean(peopleScope), clientScoped: Boolean(clientId) })} onClearSearch={onClearSearch} onClearFilters={onFilters ? () => onFilters([]) : undefined} onClearScope={onClearPeopleScope} onImport={onImport} />}
     </article>
-    {onFilters && filtersOpen ? <CompanyFilterPanel filters={filters} clients={clients} clientId={clientId} onChange={onFilters} /> : null}
+    {onFilters && filtersOpen ? <CompanyFilterPanel filters={displayFilters} clients={clients} clientId={clientId} onChange={onFilters} /> : null}
     </div>
     {removeRequest && clientId ? <ConfirmDialog
       title={removeRequest.people

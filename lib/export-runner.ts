@@ -4,6 +4,7 @@ import { planExport, type ExportPlan } from "./export-plan.ts";
 import { buildExportColumns, csvHeaderLine, csvRowsBody, type ProspectRow } from "./prospect-export.ts";
 import type { ProspectFilter } from "./prospect-filters.ts";
 import type { CompanyScope, PeopleScope } from "./workspace-scopes.ts";
+import { withClientWorkspaceCompleteness } from "./client-workspace-completeness.ts";
 
 const BOM = "﻿";
 const CRLF = "\r\n";
@@ -308,7 +309,7 @@ export function withWebsiteFilter(filters: ProspectFilter[], websitesOnly: boole
 // (__company_client_ids, 20260915140000).
 function withClientFilter(filters: ProspectFilter[], clientId: string | null | undefined): ProspectFilter[] {
   if (!clientId) return filters;
-  return [...filters, { field: "__company_client_ids", operator: "contains", values: [clientId] }];
+  return [...withClientWorkspaceCompleteness(filters, clientId), { field: "__company_client_ids", operator: "contains", values: [clientId] }];
 }
 
 export async function runCompanyExport(options: CompanyExportOptions): Promise<ExportResult> {
@@ -475,24 +476,27 @@ async function runBackgroundExport(options: BackgroundExportInput, plan: ExportP
 export async function runProspectExport(options: ExportOptions): Promise<ExportResult> {
   if (options.mode === "selected") return runSelectedExport(options);
 
+  const filters = withClientWorkspaceCompleteness(options.filters, options.clientId);
+  const scopedOptions = filters === options.filters ? options : { ...options, filters };
+
   const plan = planExport({
-    customFieldNames: options.customFieldNames,
-    requestedFields: options.fields,
-    rows: options.totalRows ?? null,
+    customFieldNames: scopedOptions.customFieldNames,
+    requestedFields: scopedOptions.fields,
+    rows: scopedOptions.totalRows ?? null,
   });
-  if (plan.mode === "direct") return runDirectExport(options, plan);
+  if (plan.mode === "direct") return runDirectExport(scopedOptions, plan);
   return runBackgroundExport({
     entityType: "prospect",
-    requestId: options.requestId,
-    clientScope: options.clientId ?? "",
-    search: options.search,
-    filters: options.filters,
-    companyScope: options.companyScope,
-    fields: options.fields,
-    excludedIds: options.excludedIds,
-    fileBaseName: options.fileBaseName,
-    signal: options.signal,
-    onProgress: options.onProgress,
+    requestId: scopedOptions.requestId,
+    clientScope: scopedOptions.clientId ?? "",
+    search: scopedOptions.search,
+    filters: scopedOptions.filters,
+    companyScope: scopedOptions.companyScope,
+    fields: scopedOptions.fields,
+    excludedIds: scopedOptions.excludedIds,
+    fileBaseName: scopedOptions.fileBaseName,
+    signal: scopedOptions.signal,
+    onProgress: scopedOptions.onProgress,
   }, plan);
 }
 

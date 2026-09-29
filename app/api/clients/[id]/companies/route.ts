@@ -4,6 +4,7 @@ import { MAX_BULK_COMPANY_MATCHES, parseCompanyBulkSelection } from "../../../..
 import { filterErrorResponse, parseFilters } from "../../../../../lib/prospect-filters.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { parsePeopleScope } from "../../../../../lib/workspace-scopes.ts";
+import { withClientWorkspaceCompleteness } from "../../../../../lib/client-workspace-completeness.ts";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883", "42P01"]);
 
@@ -79,7 +80,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     let tagFilters;
     let tagPeopleScope;
     try {
-      tagFilters = parseFilters(JSON.stringify(payload.filters ?? []));
+      tagFilters = withClientWorkspaceCompleteness(parseFilters(JSON.stringify(payload.filters ?? [])), clientId);
       tagPeopleScope = payload.peopleScope ? parsePeopleScope(JSON.stringify(payload.peopleScope)) : null;
     } catch (error) {
       return filterErrorResponse(error, "Invalid company selection.");
@@ -146,7 +147,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     let removeFilters;
     let removePeopleScope;
     try {
-      removeFilters = parseFilters(JSON.stringify(payload.filters ?? []));
+      removeFilters = withClientWorkspaceCompleteness(parseFilters(JSON.stringify(payload.filters ?? [])), clientId);
       removePeopleScope = payload.peopleScope ? parsePeopleScope(JSON.stringify(payload.peopleScope)) : null;
     } catch (error) {
       return filterErrorResponse(error, "Invalid company selection.");
@@ -213,7 +214,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   let filters;
   let peopleScope;
   try {
-    filters = parseFilters(JSON.stringify(payload.filters ?? []));
+    filters = withClientWorkspaceCompleteness(
+      parseFilters(JSON.stringify(payload.filters ?? [])),
+      action === "push" ? sourceClientId : clientId,
+    );
     peopleScope = payload.peopleScope ? parsePeopleScope(JSON.stringify(payload.peopleScope)) : null;
   } catch (error) {
     return filterErrorResponse(error, "Invalid company selection.");

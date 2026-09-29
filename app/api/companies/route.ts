@@ -10,6 +10,7 @@ import { parsePeopleScope, type PeopleScope } from "../../../lib/workspace-scope
 import { needsCompanyPreparation } from "../../../lib/prepared-search";
 import { prepareCompanyScope, preparationResponse } from "../../../lib/prepare-company-scope";
 import { ownerIdentity } from "../../../lib/result-sets";
+import { withClientWorkspaceCompleteness } from "../../../lib/client-workspace-completeness";
 
 // One keyset page. It was 1,000 when each page was a fresh OFFSET scan and
 // making them larger made the quadratic worse; a keyset page costs the same
@@ -276,6 +277,7 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
   let filters: ProspectFilter[];
   try { filters = parseFilters(url.searchParams.get("filters")); }
   catch (error) { return filterErrorResponse(error, "Invalid company filters."); }
+  filters = withClientWorkspaceCompleteness(filters, clientId);
 
   let peopleScope: PeopleScope | null;
   try { peopleScope = parsePeopleScope(url.searchParams.get("peopleScope")); }

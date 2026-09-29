@@ -10,6 +10,7 @@ import { ownerIdentity } from "../../../lib/result-sets";
 import { prepareCompanyScope, preparationResponse } from "../../../lib/prepare-company-scope";
 import { prospectQueryFamily, recordQueryPhase, type QueryPhaseOutcome } from "../../../lib/observability";
 import { decodeProspectCursor, encodeProspectCursor, isProspectCursorEligible, prospectCursorQueryHash, type ProspectCursor } from "../../../lib/prospect-pagination";
+import { withClientWorkspaceCompleteness } from "../../../lib/client-workspace-completeness";
 
 type WorkspaceQuery = {
   search: string;
@@ -117,6 +118,7 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   let filters: ProspectFilter[];
   try { filters = parseFilters(url.searchParams.get("filters")); }
   catch (error) { return filterErrorResponse(error, "Invalid Boolean filter."); }
+  filters = withClientWorkspaceCompleteness(filters, clientId);
   const requestedCursorMode = url.searchParams.get("pagination") === "cursor";
   const rawCursor = (url.searchParams.get("cursor") ?? "").trim();
   const cursorEligible = isProspectCursorEligible({

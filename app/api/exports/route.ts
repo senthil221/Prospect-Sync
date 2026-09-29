@@ -7,6 +7,7 @@ import { availableExportFieldIds, exportRowKeys } from "../../../lib/prospect-ex
 import { ownerIdentity, resultSetContentHash } from "../../../lib/result-sets";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { parseCompanyScope, scopeRestricts } from "../../../lib/workspace-scopes";
+import { withClientWorkspaceCompleteness } from "../../../lib/client-workspace-completeness";
 
 export const runtime = "nodejs";
 
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
   let filters;
   try { filters = parseFilters(JSON.stringify(payload.filters ?? [])); }
   catch (error) { return filterErrorResponse(error, "Invalid filters."); }
+  filters = withClientWorkspaceCompleteness(filters, clientScope);
 
   let companyScope;
   try { companyScope = parseCompanyScope(payload.companyScope ? JSON.stringify(payload.companyScope) : null); }

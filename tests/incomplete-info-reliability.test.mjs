@@ -10,7 +10,7 @@ test("Incomplete Info People uses one linked-company predicate and no global piv
     read("../supabase/migrations/20260925212546_incomplete_company_people_single_pass.sql"),
   ]);
 
-  assert.match(clients, /field: "__incomplete_company_profile", operator: "equals", values: \["true"\]/);
+  assert.match(clients, /incompletePeopleFilters: ProspectFilter\[\] = \[incompleteClientProfileFilter\]/);
   assert.doesNotMatch(clients, /const incompleteCompanyScope/);
   assert.match(clients, /entity === "people" \? <ClientMasterDatabase[^\n]+active companyScope=\{null\}[^\n]+initialFilters=\{incompletePeopleFilters\}/);
 

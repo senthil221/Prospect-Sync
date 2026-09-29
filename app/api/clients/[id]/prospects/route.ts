@@ -5,6 +5,7 @@ import { beginOperation, freezeFromResultSet, freezeSelection, parseRequestId, r
 import { filterErrorResponse } from "../../../../../lib/prospect-filters.ts";
 import { ownerIdentity } from "../../../../../lib/result-sets.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
+import { withClientWorkspaceCompleteness } from "../../../../../lib/client-workspace-completeness.ts";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883", "42P01"]);
 
@@ -45,6 +46,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   let selection;
   try { selection = parseBulkSelection(payload); }
   catch (error) { return filterErrorResponse(error, "Invalid filter."); }
+  const selectionScope = action === "push" ? selection.sourceClientId : id;
+  selection = {
+    ...selection,
+    filters: withClientWorkspaceCompleteness(selection.filters, selectionScope),
+  };
 
   // Validated before the job is created, not inside the branch that runs it: a
   // job that runs in the background carries its own parameters, and the worker
