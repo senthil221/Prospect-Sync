@@ -1,5 +1,5 @@
 import type { CompanyMergeMode } from "./company-merge-mode.ts";
-export type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" | "quality" | "imports" | "integrations" | "reply-blocklist" | "logs";
+export type Section = "overview" | "prospects" | "companies" | "clients" | "coverage" | "quality" | "imports" | "integrations" | "reply-blocklist" | "verification" | "logs";
 
 export type ProspectFilterOperator = "contains" | "equals" | "not_contains" | "not_equals" | "empty" | "not_empty" | "boolean" | "number_ranges" | "never" | "before" | "on" | "after" | "between";
 export type CompanyKeywordScope = "name" | "keywords" | "description";

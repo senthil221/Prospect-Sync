@@ -15,6 +15,7 @@ import { AppIcon, DeleteConfirmation, LoadingState, ProspectDrawer, type IconNam
 import ImportsPanel, { type ImportDestination } from "./components/ImportsPanel";
 import IntegrationsPanel from "./components/IntegrationsPanel";
 import ReplyBlocklistPanel from "./components/ReplyBlocklistPanel";
+import EmailVerificationWorkspace from "./components/EmailVerificationWorkspace";
 import LogsPanel from "./components/LogsPanel";
 import ThemeToggle from "./components/ThemeToggle";
 import MobileNav from "./components/MobileNav";
@@ -37,6 +38,7 @@ const baseNavGroups: Array<{ label: string; items: Array<{ id: Section; label: s
       { id: "coverage", label: "Coverage checker", mark: "coverage" },
       { id: "quality", label: "Data quality", mark: "quality" },
       { id: "imports", label: "Import CSV", mark: "upload" },
+      { id: "verification", label: "Email verification", mark: "check" },
       { id: "integrations", label: "Integrations", mark: "grid" },
       { id: "reply-blocklist", label: "Reply blocklist", mark: "quality" },
     ],
@@ -388,6 +390,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
       <section className="content" aria-busy={loading || workspaceLoading}>
         {!loading && section === "integrations" && <IntegrationsPanel onOpenReplyBlocklist={() => navigate("reply-blocklist")}/>}
         {!loading && section === "reply-blocklist" && <ReplyBlocklistPanel onOpenIntegrations={() => navigate("integrations")}/>}
+        {!loading && section === "verification" && <EmailVerificationWorkspace isAdmin={isAdmin}/>}
         {!loading && section === "logs" && isAdmin && <LogsPanel/>}
         {loading ? <LoadingState/> : null}
         {!loading && workspaceLoading ? <div className="workspace-progress" role="status"><span/>Updating {title.toLowerCase()}…</div> : null}
