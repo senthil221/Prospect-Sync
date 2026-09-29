@@ -444,6 +444,18 @@ revoke execute on function prospect_integrations.replace_smartlead_inbox_categor
   from public,anon,authenticated,service_role,prospect_integrator;
 revoke execute on function prospect_integrations.resolve_smartlead_inbox_client_v2(uuid,text)
   from public,anon,authenticated,service_role,prospect_integrator;
+revoke execute on function prospect_integrations.resolve_smartlead_inbox_client_v1(text)
+  from public,anon,authenticated;
+revoke execute on function prospect_integrations.finish_smartlead_inbox_sync_v1(uuid,text,jsonb,integer)
+  from public,anon,authenticated;
+revoke execute on function public.confirm_smartlead_inbox_contract_v1(text,uuid,text)
+  from public,anon,authenticated;
+revoke execute on function public.set_smartlead_inbox_enabled_v1(text,boolean)
+  from public,anon,authenticated;
+revoke execute on function public.set_smartlead_inbox_mapping_v1(text,text,text,boolean)
+  from public,anon,authenticated;
+revoke execute on function public.smartlead_inbox_status_v1()
+  from public,anon,authenticated;
 revoke execute on function public.rotate_smartlead_connection_v1(text,uuid,text,jsonb,jsonb,uuid)
   from public,anon,authenticated;
 revoke execute on function public.disconnect_smartlead_connection_v1(text,uuid)
