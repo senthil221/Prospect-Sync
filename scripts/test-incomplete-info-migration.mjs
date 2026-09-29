@@ -15,13 +15,15 @@ if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
 
 const prerequisiteName = "20260926190000_company_blank_filters_read_an_index.sql";
 const migrationName = "20260929120000_segregate_incomplete_client_records.sql";
-const [prerequisite, migration, fixture] = await Promise.all([
+const summaryHotfixName = "20260929160000_client_summaries_subtract_incomplete_only.sql";
+const [prerequisite, migration, summaryHotfix, fixture] = await Promise.all([
   readFile(new URL(`../supabase/migrations/${prerequisiteName}`, import.meta.url), "utf8"),
   readFile(new URL(`../supabase/migrations/${migrationName}`, import.meta.url), "utf8"),
+  readFile(new URL(`../supabase/migrations/${summaryHotfixName}`, import.meta.url), "utf8"),
   readFile(new URL("../supabase/tests/incomplete_info_segregation.sql", import.meta.url), "utf8"),
 ]);
 
-for (const [name, sql] of [[prerequisiteName, prerequisite], [migrationName, migration]]) {
+for (const [name, sql] of [[prerequisiteName, prerequisite], [migrationName, migration], [summaryHotfixName, summaryHotfix]]) {
   const meaningful = sql.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line && !line.startsWith("--"));
   if (meaningful[0]?.toLowerCase() === "begin;" || meaningful.at(-1)?.toLowerCase() === "commit;") {
     throw new Error(`${name} must not own its transaction.`);
@@ -91,8 +93,10 @@ psql(prerequisiteName, `begin; set local lock_timeout='5s'; set local statement_
 // First prove the candidate is transaction-safe, then apply it for behavior.
 psql(`${migrationName} rollback`, `begin; set local lock_timeout='5s'; set local statement_timeout='5min';\n${migration}\nrollback;`);
 psql(migrationName, `begin; set local lock_timeout='5s'; set local statement_timeout='5min';\n${migration}\ncommit;`);
+psql(`${summaryHotfixName} rollback`, `begin; set local lock_timeout='5s'; set local statement_timeout='5min';\n${summaryHotfix}\nrollback;`);
+psql(summaryHotfixName, `begin; set local lock_timeout='5s'; set local statement_timeout='5min';\n${summaryHotfix}\ncommit;`);
 
-psql("least-privilege and one-pass summary contract", String.raw`
+psql("least-privilege and bounded summary contract", String.raw`
 do $$
 declare v_view text := pg_get_viewdef('public.client_summaries'::regclass, true);
 begin
@@ -101,8 +105,12 @@ begin
      or not has_function_privilege('service_role', 'public.set_icp_verified_v1(text,boolean,text,jsonb,text[],text[],text)', 'EXECUTE') then
     raise exception 'ICP mutation grants widened or service execution was lost';
   end if;
-  if position('people_counts AS' in v_view) = 0 or position('company_counts AS' in v_view) = 0 then
-    raise exception 'client_summaries lost its one-pass aggregate plan: %', v_view;
+  if position('incomplete_company_ids AS MATERIALIZED' in v_view) = 0
+     or position('incomplete_prospect_ids AS MATERIALIZED' in v_view) = 0
+     or position('active_client_memberships AS MATERIALIZED' in v_view) = 0
+     or position('incomplete_people_counts.prospect_count' in v_view) = 0
+     or position('incomplete_company_counts.company_count' in v_view) = 0 then
+    raise exception 'client_summaries lost indexed totals minus incomplete slices: %', v_view;
   end if;
 end $$;
 `);

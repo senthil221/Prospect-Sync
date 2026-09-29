@@ -35,8 +35,9 @@ test("client UI locks both normal and incomplete partitions and hides the intern
 });
 
 test("additive migration partitions compilers, counts, exports and explicit ICP writes", async () => {
-  const [migration, fixture, runner, workflow] = await Promise.all([
+  const [migration, summaryHotfix, fixture, runner, workflow] = await Promise.all([
     read("../supabase/migrations/20260929120000_segregate_incomplete_client_records.sql"),
+    read("../supabase/migrations/20260929160000_client_summaries_subtract_incomplete_only.sql"),
     read("../supabase/tests/incomplete_info_segregation.sql"),
     read("../scripts/test-incomplete-info-migration.mjs"),
     read("../.github/workflows/ci.yml"),
@@ -46,13 +47,33 @@ test("additive migration partitions compilers, counts, exports and explicit ICP 
   assert.match(migration, /create or replace function public\.set_icp_verified_v1/);
   assert.match(migration, /create or replace function public\.set_company_icp_verified_v2/);
   assert.match(migration, /grant execute on function public\.set_company_icp_verified_v2[\s\S]*to service_role/);
+  assert.match(summaryHotfix, /incomplete_company_ids as materialized/);
+  assert.match(summaryHotfix, /from public\.client_prospects membership[\s\S]*membership\.status = 'active'/);
+  assert.match(summaryHotfix, /- coalesce\(incomplete_people_counts\.prospect_count, 0\)/);
+  assert.doesNotMatch(summaryHotfix, /create (?:table|function|index|trigger)/);
   assert.match(fixture, /push_prospects_to_client_v2/);
   assert.match(fixture, /push_companies_to_client_v2/);
   assert.match(fixture, /People partitions overlap or do not cover/);
   assert.match(fixture, /Company partitions overlap or do not cover/);
   assert.match(fixture, /Enrichment did not promote/);
+  assert.match(fixture, /Client summary did not subtract only the incomplete slice/);
+  assert.match(fixture, /Client summary did not promote enriched memberships/);
   assert.match(runner, /push, disjoint-union, and enrichment behavior/);
-  assert.match(runner, /least-privilege and one-pass summary contract/);
+  assert.match(runner, /least-privilege and bounded summary contract/);
+  assert.match(runner, /20260929160000_client_summaries_subtract_incomplete_only\.sql/);
   assert.match(workflow, /incomplete-info-contract:/);
   assert.match(workflow, /node scripts\/test-incomplete-info-migration\.mjs/);
+});
+
+test("a failed client-directory request is recoverable and never becomes an empty directory", async () => {
+  const [dashboard, clients] = await Promise.all([
+    read("../app/DashboardApp.tsx"),
+    read("../app/components/ClientsPanel.tsx"),
+  ]);
+  assert.match(dashboard, /const \[clientLoadError, setClientLoadError\] = useState\(""\)/);
+  assert.match(dashboard, /Promise\.allSettled/);
+  assert.match(dashboard, /return null;[\s\S]*A failed directory read is not an empty directory|A failed directory read is not an empty directory[\s\S]*return null;/);
+  assert.match(clients, /Client directory unavailable/);
+  assert.match(clients, /no clients or client data were removed/i);
+  assert.match(clients, /onClick=\{onRefresh\}>Retry/);
 });

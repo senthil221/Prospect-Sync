@@ -38,6 +38,10 @@ select public.push_companies_to_client_v2(
   p_client_id => 'segregation-destination',
   p_company_ids => array['segregation-incomplete-company','segregation-complete-company'],
   p_actor => 'fixture', p_request_id => 'segregation-company-push');
+update public.client_prospects
+set icp_verified = true
+where client_id = 'segregation-destination'
+  and prospect_id in ('segregation-incomplete-person', 'segregation-complete-person');
 
 do $$
 declare
@@ -51,6 +55,7 @@ declare
   v_complete_people text[];
   v_incomplete_companies text[];
   v_complete_companies text[];
+  v_summary record;
 begin
   select * into v_people_incomplete from public.search_prospect_workspace_v13(
     '', v_incomplete, 'created_at', 'desc', 50, 0,
@@ -85,6 +90,15 @@ begin
   if v_incomplete_companies && v_complete_companies or cardinality(v_incomplete_companies) + cardinality(v_complete_companies) <> 2 then
     raise exception 'Company partitions overlap or do not cover the client membership.';
   end if;
+
+  select * into strict v_summary
+  from public.client_summaries where id = 'segregation-destination';
+  if v_summary.prospect_count <> 2 or v_summary.company_count <> 1
+    or v_summary.icp_verified_count <> 1 or v_summary.blocked_count <> 0 then
+    raise exception 'Client summary did not subtract only the incomplete slice: people %, companies %, ICP %, blocked %',
+      v_summary.prospect_count, v_summary.company_count,
+      v_summary.icp_verified_count, v_summary.blocked_count;
+  end if;
 end $$;
 
 -- Enrich one of the two defining fields. No membership move or re-push is
@@ -99,6 +113,7 @@ declare
   v_complete jsonb := '[{"field":"__incomplete_company_profile","operator":"equals","values":["false"]}]'::jsonb;
   v_people record;
   v_companies record;
+  v_summary record;
 begin
   select * into v_people from public.search_prospect_workspace_v13(
     '', v_incomplete, 'created_at', 'desc', 50, 0,
@@ -121,6 +136,32 @@ begin
     'segregation-destination', '', v_complete, null, 50, 0);
   if v_companies.total_count <> 2 then
     raise exception 'Enrichment did not promote both normal Company rows: %', v_companies.total_count;
+  end if;
+  select * into strict v_summary
+  from public.client_summaries where id = 'segregation-destination';
+  if v_summary.prospect_count <> 3 or v_summary.company_count <> 2 then
+    raise exception 'Client summary did not promote enriched memberships: people %, companies %',
+      v_summary.prospect_count, v_summary.company_count;
+  end if;
+end $$;
+
+-- Blocked counts keep their historical meaning and companyless people remain
+-- in the normal client partition. Neither may be confused with incomplete.
+insert into public.prospects(id, full_name, work_email, company_id)
+values ('segregation-blocked-person', 'Blocked Fixture Person', 'blocked@fixture.test', null);
+insert into public.client_prospects(client_id, prospect_id, status, added_via)
+values ('segregation-destination', 'segregation-blocked-person', 'blocked', 'manual');
+
+do $$
+declare v_summary record;
+begin
+  select * into strict v_summary
+  from public.client_summaries where id = 'segregation-destination';
+  if v_summary.prospect_count <> 3 or v_summary.company_count <> 2
+    or v_summary.icp_verified_count <> 2 or v_summary.blocked_count <> 1 then
+    raise exception 'Client summary changed blocked/companyless semantics: people %, companies %, ICP %, blocked %',
+      v_summary.prospect_count, v_summary.company_count,
+      v_summary.icp_verified_count, v_summary.blocked_count;
   end if;
 end $$;
 

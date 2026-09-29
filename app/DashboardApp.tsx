@@ -97,6 +97,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
   const [loading, setLoading] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [error, setError] = useState("");
+  const [clientLoadError, setClientLoadError] = useState("");
   const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -195,17 +196,25 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
   }, [encodedProspectFilters, prospectDirection, prospectSort, prospectsController.fieldsLoaded, restoreError]);
 
   const refreshDashboard = useCallback(async () => {
-    try {
-      const [dashboard, clientData] = await Promise.all([
-        api<{ stats: typeof emptyStats; recentImports: ImportRecord[] }>("/api/dashboard"),
-        api<{ clients: ClientRecord[] }>("/api/clients"),
-      ]);
-      setStats(dashboard.stats); setRecentImports(dashboard.recentImports); setClients(clientData.clients);
-      return clientData.clients;
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to load data.");
-      return [];
+    const [dashboardResult, clientsResult] = await Promise.allSettled([
+      api<{ stats: typeof emptyStats; recentImports: ImportRecord[] }>("/api/dashboard"),
+      api<{ clients: ClientRecord[] }>("/api/clients"),
+    ]);
+    if (dashboardResult.status === "fulfilled") {
+      setStats(dashboardResult.value.stats);
+      setRecentImports(dashboardResult.value.recentImports);
+    } else {
+      setError(dashboardResult.reason instanceof Error ? dashboardResult.reason.message : "Unable to load dashboard data.");
     }
+    if (clientsResult.status === "fulfilled") {
+      setClients(clientsResult.value.clients);
+      setClientLoadError("");
+      return clientsResult.value.clients;
+    }
+    setClientLoadError(clientsResult.reason instanceof Error ? clientsResult.reason.message : "Unable to load the client directory.");
+    // A failed directory read is not an empty directory. Keep any previously
+    // loaded clients and let callers distinguish failure from a real [] result.
+    return null;
   }, []);
 
   useEffect(() => {
@@ -256,7 +265,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
       setCompanyFilters([{ id: `__company_import_id:${destination.importId}`, field: "__company_import_id", operator: "equals", values: [destination.importId] }]);
       return;
     }
-    const client = refreshed.find((item) => item.id === destination.clientId)
+    const client = refreshed?.find((item) => item.id === destination.clientId)
       ?? (await api<{ client: ClientRecord }>(`/api/clients/${encodeURIComponent(destination.clientId)}`, { cache: "no-store" })).client;
     const list = (await api<{ list: ListRecord }>(`/api/lists/${encodeURIComponent(destination.listId)}?clientId=${encodeURIComponent(client.id)}`, { cache: "no-store" })).list;
     navigate("clients");
@@ -344,7 +353,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
       await api(`/api/${endpoint}/${encodeURIComponent(deleteRequest.id)}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
       const refreshedClients = await refreshDashboard();
       if (deleteRequest.kind === "client") setSelectedClient(null);
-      else if (selectedClient) {
+      else if (selectedClient && refreshedClients) {
         const updatedClient = refreshedClients.find((client) => client.id === selectedClient.id) ?? null;
         setSelectedClient(updatedClient);
         if (updatedClient) {
@@ -387,6 +396,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
         {!loading && section === "companies" && <CompaniesWorkspace controller={companiesController} clients={clients} filters={companyFilters} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onClearSearch={() => setSearch("")} onSeePeople={seePeople} onFilters={setCompanyFilters} onImport={() => navigate("imports")}/>}
         {!loading && section === "clients" && <ClientsPanel
           clients={clients}
+          clientLoadError={clientLoadError}
           selectedClient={selectedClient}
           selectedList={selectedList}
           lists={lists}
@@ -403,7 +413,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
           onDeleteList={(list) => setDeleteRequest({ kind: "list", id: list.id, name: list.name, context: `${list.source_file_name} · ${list.prospect_count} linked prospects` })}
           onRefreshClients={() => {
             void refreshDashboard().then((refreshed) => setSelectedClient((current) =>
-              current ? refreshed.find((client) => client.id === current.id) ?? current : current));
+              current && refreshed ? refreshed.find((client) => client.id === current.id) ?? current : current));
           }}
         />}
         {!loading && section === "coverage" && <CoveragePanel onViewCompanies={viewCoverageCompanies}/>}
