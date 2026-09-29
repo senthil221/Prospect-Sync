@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AppIcon } from './DashboardUi';
 import { readIntegrationStatus, type IntegrationStatus } from './integration-status';
+import ReplyBlocksSummary from './ReplyBlocksSummary';
 
 type InboxAction = 'connect' | 'check' | 'disconnect' | 'validate_inbox' | 'enable_inbox' | 'disable_inbox' | 'sync_inbox' | 'map_inbox' | 'unmap_inbox';
 
@@ -180,6 +181,9 @@ export default function ReplyBlocklistPanel({ onOpenIntegrations }: { onOpenInte
         <div className="panel"><span>Pending actions</span><strong>{inbox.counts.pending.toLocaleString()}</strong><small>Waiting to be processed</small></div>
         <div className="panel is-review"><span>Needs review</span><strong>{inbox.counts.unmatched.toLocaleString()}</strong><small>Replies without a client match</small></div>
       </section>
+
+      {/* What those block actions were: per client, per reason, and the log. */}
+      <ReplyBlocksSummary refreshKey={inbox.counts.applied}/>
 
       <div className="reply-blocklist-main-grid">
         <section className="panel reply-blocklist-review" aria-labelledby="reply-review-heading">

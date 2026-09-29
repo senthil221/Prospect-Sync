@@ -4,6 +4,7 @@ import "./globals.css";
 import "./design-system.css";
 import "./workspace.css";
 import "./components.css";
+import "./icp-validator.css";
 import "./typography.css";
 
 export async function generateMetadata(): Promise<Metadata> {

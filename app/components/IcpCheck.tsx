@@ -76,28 +76,35 @@ export function ModelPicker({ catalog, selected, onChange, idPrefix }: {
     setQuery("");
   }
 
-  return <fieldset className="icpv-fieldset icpv-model-picker">
-    <legend>Models - up to {MAX_MODELS_PER_CHECK}, each judges the same companies ({selected.length} chosen)</legend>
-    {shown.map((model) => {
+  return <fieldset className="icpx-models">
+    <legend><span>Models</span><small>{selected.length} of {MAX_MODELS_PER_CHECK} chosen</small></legend>
+    <div className="icpx-model-grid">{shown.map((model) => {
       const checked = selected.includes(model.id);
-      return <label key={model.id} className="icpv-check">
+      return <label key={model.id} className={`icpx-model-option${checked ? " is-on" : ""}${!checked && full ? " is-disabled" : ""}`}>
         <input type="checkbox" checked={checked} disabled={!checked && full} onChange={() => toggle(model.id)}/>
-        <span>{model.label}{model.recommended ? <small className="icpv-tag">default</small> : null}
-          <small className="icpv-sub">{model.id}{model.inputPerM || model.outputPerM ? ` · ${price(model)}` : ""}</small></span>
+        <span className="icpx-check" aria-hidden="true"/>
+        <span className="icpx-model-option-copy">
+          <strong>{model.label}{model.recommended ? <em>default</em> : null}</strong>
+          <code>{model.id}</code>
+          {model.inputPerM || model.outputPerM ? <small>${model.inputPerM} in · ${model.outputPerM} out / 1M</small> : null}
+        </span>
       </label>;
-    })}
-    <div className="icpv-model-search">
-      <label htmlFor={`${idPrefix}-model-search`}>Add another OpenRouter model</label>
-      <input id={`${idPrefix}-model-search`} type="search" value={query} placeholder="Search e.g. claude, gemini, qwen, llama…"
-        onChange={(event) => setQuery(event.target.value)}/>
-      {matches.length ? <ul className="icpv-model-results" role="listbox" aria-label="Matching models">
+    })}</div>
+    <div className="icpx-model-search">
+      <label className="icpx-search">
+        <span className="sr-only">Add another OpenRouter model</span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id={`${idPrefix}-model-search`} type="search" value={query} placeholder="Add any OpenRouter model - claude, gemini, qwen…"
+          onChange={(event) => setQuery(event.target.value)}/>
+      </label>
+      {matches.length ? <ul className="icpx-model-results" role="listbox" aria-label="Matching models">
         {matches.map((model) => <li key={model.id}>
-          <button type="button" onClick={() => add(model)}>
-            <strong>{model.label}</strong><small className="icpv-sub">{model.id} · {price(model)}</small>
+          <button type="button" onClick={() => add(model)} title={price(model)}>
+            <span><strong>{model.label}</strong><code>{model.id}</code></span><small>${model.inputPerM} / ${model.outputPerM}</small>
           </button>
         </li>)}
-      </ul> : query.trim() ? <small className="icpv-sub">No OpenRouter model matching &ldquo;{query.trim()}&rdquo; supports JSON output and reasoning.</small> : null}
-      {full ? <small className="icpv-sub">Untick a model to choose a different one.</small> : null}
+      </ul> : query.trim() ? <p className="icpx-help">No OpenRouter model matching &ldquo;{query.trim()}&rdquo; supports JSON output and reasoning.</p> : null}
+      {full ? <p className="icpx-help">Untick a model to swap in a different one.</p> : null}
     </div>
   </fieldset>;
 }
