@@ -1,31 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
-import type { Campaign } from '../../lib/integrations/provider-api';
 import type { Provider } from '../../lib/integrations/credentials';
+import { readIntegrationStatus, type IntegrationStatus } from './integration-status';
 
-type Connection = { provider: Provider; connected: boolean; checked_at: string | null };
-type Destination = { client_id: string; campaign_id: number; campaign_name: string; connection_current: boolean };
-type Status = { connections: Connection[]; canManage: boolean; encryptionReady: boolean;dispatchEnabled:boolean;
-  campaigns?: Campaign[]; clients?: {id:string;name:string}[]; destinations?: Destination[];
-  jobs?: {id:string;client_id:string;campaign_id:number;status:string;total:number;created_at:string}[];
-  progress?: {creations:{id:string;name:string;status:string;campaign_id:number|null;error_code:string|null}[];
-    deliveries:{id:string;status:string;added:number;skipped:number;suppressed:number;error_code:string|null}[]};
-  inbox?: {settings:{enabled:boolean;verified_at:string|null;verified_contract:string|null;initial_backfill_complete:boolean;
-      scan_offset:number;status:string;pages_scanned:number;rows_observed:number;last_synced_at:string|null;last_error_code:string|null};
-    counts:{observed:number;unmatched:number;pending:number;applied:number;manualRemoved:number};
-    unmatched:{campaign_name:string;mapping_status:string;replies:number}[];
-    mappings:{prefix:string;client_id:string;client_name:string}[]} };
-
-async function readStatus(signal?: AbortSignal): Promise<Status> {
-  const response = await fetch('/api/integrations', { cache: 'no-store', signal });
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error ?? 'Unable to load connections.');
-  return body;
-}
-
-export default function IntegrationsPanel() {
-  const [status, setStatus] = useState<Status | null>(null);
+export default function IntegrationsPanel({ onOpenReplyBlocklist }: { onOpenReplyBlocklist: () => void }) {
+  const [status, setStatus] = useState<IntegrationStatus | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState<Provider | null>(null);
@@ -33,31 +13,28 @@ export default function IntegrationsPanel() {
   const [clientId, setClientId] = useState('');
   const [campaignId, setCampaignId] = useState('');
   const [newName,setNewName]=useState('');
-  const [inboxPrefix,setInboxPrefix]=useState('');
-  const [inboxClientId,setInboxClientId]=useState('');
   const [progressWarning,setProgressWarning]=useState('');
   const createRequest=useRef<string|null>(null);
 
   async function refresh(signal?: AbortSignal) {
-    setStatus(await readStatus(signal));
+    setStatus(await readIntegrationStatus(signal));
   }
   useEffect(() => {
     const controller = new AbortController();
-    void readStatus(controller.signal).then(setStatus).catch(e => { if (!controller.signal.aborted) setError(e.message); });
+    void readIntegrationStatus(controller.signal).then(setStatus).catch(e => { if (!controller.signal.aborted) setError(e.message); });
     return () => controller.abort();
   }, []);
-  const pending=!!status?.jobs?.some(j=>['queued','running'].includes(j.status)) || !!status?.progress?.creations.some(j=>['queued','sending'].includes(j.status))
-    || !!status?.inbox?.settings.enabled && (['queued','running'].includes(status.inbox.settings.status) || status.inbox.counts.pending>0);
+  const pending=!!status?.jobs?.some(j=>['queued','running'].includes(j.status)) || !!status?.progress?.creations.some(j=>['queued','sending'].includes(j.status));
   useEffect(()=>{
     if(!pending)return;
     const controller=new AbortController();
     let timer:ReturnType<typeof setTimeout>;
-    const poll=async()=>{try{setStatus(await readStatus(controller.signal));setProgressWarning('');}catch{if(!controller.signal.aborted)setProgressWarning('Progress refresh failed. The worker may still be running; use Refresh progress to check again.');}finally{if(!controller.signal.aborted)timer=setTimeout(poll,5000);}};
+    const poll=async()=>{try{setStatus(await readIntegrationStatus(controller.signal));setProgressWarning('');}catch{if(!controller.signal.aborted)setProgressWarning('Progress refresh failed. The worker may still be running; use Refresh progress to check again.');}finally{if(!controller.signal.aborted)timer=setTimeout(poll,5000);}};
     timer=setTimeout(poll,5000);
     return ()=>{clearTimeout(timer);controller.abort();};
   },[pending]);
 
-  async function act(provider: Provider, action: string, secret?: string, destination?: {clientId?:string;campaignId?:number;jobId?:string;requestId?:string;name?:string;confirm?:boolean;allowActive?:boolean;prefix?:string}) {
+  async function act(provider: Provider, action: string, secret?: string, destination?: {clientId?:string;campaignId?:number;jobId?:string;requestId?:string;name?:string;confirm?:boolean;allowActive?:boolean}) {
     setBusy(provider); setError(''); setNotice('');
     try {
       const response = await fetch('/api/integrations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, action, ...destination, ...(secret ? { secret } : {}) }), signal: AbortSignal.timeout(25000) });
@@ -69,12 +46,6 @@ export default function IntegrationsPanel() {
         : action === 'cancel' ? 'Future batches cancelled. Already uploaded leads are not removed; in-flight work may finish.'
         : action === 'create_campaign' ? 'Campaign creation queued. It will be created as a draft and mapped to the chosen client.'
         : action === 'enqueue' ? 'Delivery queued. Follow progress below; closing the browser does not stop it.'
-        : action === 'validate_inbox' ? 'Master Inbox contract verified. Review mappings, then enable sync.'
-        : action === 'enable_inbox' ? 'Master Inbox sync enabled. Historical replies will be reconciled in the background.'
-        : action === 'disable_inbox' ? 'Master Inbox sync paused. Saved blocklist entries are unchanged.'
-        : action === 'sync_inbox' ? 'A full Master Inbox reconciliation was queued.'
-        : action === 'map_inbox' ? 'Campaign prefix mapped. A fresh reconciliation was queued.'
-        : action === 'unmap_inbox' ? 'Campaign prefix mapping removed. Existing blocklist entries are unchanged.'
         : 'Connection checked successfully. No leads were sent.');
       await refresh();
     } catch (e) { setError(e instanceof Error ? e.message : 'Connection check failed.'); }
@@ -110,6 +81,7 @@ export default function IntegrationsPanel() {
           <p>Encrypted on the server. Never displayed after saving.</p>
           <button className="primary" disabled={!!busy || !status.encryptionReady}>{busy === provider ? 'Checking…' : 'Test and save connection'}</button>
         </form>}
+        {provider === 'smartlead' && <button type="button" onClick={onOpenReplyBlocklist}>Open reply blocklist →</button>}
         {status?.canManage && connection?.connected && <div className="integration-actions">
           <button disabled={!!busy} onClick={() => void act(provider, 'check')}>{provider === 'smartlead' ? 'Check and load campaigns' : 'Check connection'}</button>
           <button disabled={!!busy} onClick={() => { if (window.confirm('Remove this saved credential? No provider data will be deleted.')) void act(provider, 'disconnect'); }}>Disconnect</button>
@@ -151,43 +123,6 @@ export default function IntegrationsPanel() {
       </form>
       <ul>{status.progress?.creations.map(c=><li key={c.id}>{c.name} · {c.status}{c.campaign_id?` · Campaign ${c.campaign_id}`:''}{c.error_code?` · ${c.error_code}`:''}</li>)}</ul>
       <p>If creation needs review, check Smartlead before creating another campaign—the first request may have succeeded.</p>
-    </section>}
-    {status?.canManage && status.inbox && <section className="panel integration-card" aria-labelledby="smartlead-inbox-title">
-      <h3 id="smartlead-inbox-title">Smartlead reply blocklist</h3>
-      <p>Reads Master Inbox categories only. Every assigned category except Out of Office adds the email to the matching client. “Not the right fit” also adds its domain. Existing manual entries and reasons are preserved.</p>
-      <p><strong>{status.inbox.settings.enabled ? 'Sync enabled' : 'Sync paused'}</strong> · {status.inbox.settings.status.replaceAll('_',' ')}
-        {status.inbox.settings.initial_backfill_complete ? ' · historical backfill complete' : ' · historical backfill pending'}</p>
-      <p>Observed {status.inbox.counts.observed} · Applied {status.inbox.counts.applied} · Pending {status.inbox.counts.pending} · Needs mapping {status.inbox.counts.unmatched} · Kept removed {status.inbox.counts.manualRemoved}</p>
-      {status.inbox.settings.last_synced_at && <p>Last successful page: {new Date(status.inbox.settings.last_synced_at).toLocaleString()} · {status.inbox.settings.rows_observed} observations across {status.inbox.settings.pages_scanned} pages</p>}
-      {status.inbox.settings.last_error_code && <p role="status">Attention: {status.inbox.settings.last_error_code.replaceAll('_',' ')}</p>}
-      {!status.inbox.settings.verified_at && <p>Validation is required once for the current Smartlead key. It reads up to five reply summaries and writes nothing to any blocklist.</p>}
-      <div className="integration-actions">
-        <button disabled={!!busy} onClick={()=>void act('smartlead','validate_inbox')}>Validate Master Inbox</button>
-        {status.inbox.settings.enabled
-          ? <button disabled={!!busy} onClick={()=>void act('smartlead','disable_inbox')}>Pause sync</button>
-          : <button className="primary" disabled={!!busy || !status.inbox.settings.verified_at} onClick={()=>void act('smartlead','enable_inbox')}>Enable sync</button>}
-        <button disabled={!!busy || !status.inbox.settings.enabled || status.inbox.settings.status==='running'} onClick={()=>void act('smartlead','sync_inbox')}>Reconcile all replies now</button>
-      </div>
-      <h4>Campaign prefix mappings</h4>
-      <p>Client names already match automatically when the campaign starts with the exact client name followed by a space or delimiter. Add a mapping only for unmatched campaign prefixes.</p>
-      <form onSubmit={event=>{event.preventDefault();void act('smartlead','map_inbox',undefined,{prefix:inboxPrefix,clientId:inboxClientId});}}>
-        <label htmlFor="inbox-prefix">Exact campaign prefix</label>
-        <input id="inbox-prefix" value={inboxPrefix} maxLength={200} required disabled={!!busy} onChange={event=>setInboxPrefix(event.target.value)}/>
-        <label htmlFor="inbox-client">Prospect Sync client</label>
-        <select id="inbox-client" value={inboxClientId} required disabled={!!busy} onChange={event=>setInboxClientId(event.target.value)}>
-          <option value="">Choose client</option>{status.clients?.map(client=><option key={client.id} value={client.id}>{client.name}</option>)}
-        </select>
-        <button className="primary" disabled={!!busy || !inboxPrefix.trim() || !inboxClientId}>Save prefix mapping</button>
-      </form>
-      {!!status.inbox.mappings.length && <ul>{status.inbox.mappings.map(mapping=><li key={mapping.prefix}>
-        {mapping.prefix} → {mapping.client_name}{' '}
-        <button disabled={!!busy} onClick={()=>void act('smartlead','unmap_inbox',undefined,{prefix:mapping.prefix,clientId:mapping.client_id})}>Remove mapping</button>
-      </li>)}</ul>}
-      {!!status.inbox.unmatched.length && <><h4>Needs mapping or review</h4><ul>{status.inbox.unmatched.map(item=><li key={`${item.campaign_name}:${item.mapping_status}`}>
-        {item.campaign_name} · {item.mapping_status.replaceAll('_',' ')} · {item.replies} repl{item.replies===1?'y':'ies'}{' '}
-        {item.mapping_status==='unmatched' && <button onClick={()=>setInboxPrefix(item.campaign_name)}>Use as prefix</button>}
-      </li>)}</ul></>}
-      <p>Removing a Smartlead-created blocklist entry is permanent for that client/value. Later scans do not recreate it. Changing a reply to Out of Office also does not retract an entry that was already added.</p>
     </section>}
     {status?.canManage && <section className="panel integration-card"><h3>Your Smartlead deliveries</h3>
       <button disabled={!!busy} onClick={()=>void refresh().catch(e=>setError(e.message))}>Refresh progress</button>

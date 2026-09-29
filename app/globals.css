@@ -26,6 +26,81 @@ button {
 .integration-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .integration-mapping-row { grid-template-columns: 1fr; } }
 .integration-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+/* Smartlead reply routing is a workspace of its own, not another integration form. */
+.reply-blocklist-workspace { display: grid; gap: 20px; max-width: 1440px; margin-inline: auto; color: var(--text-primary); }
+.reply-blocklist-header, .reply-blocklist-section-head, .reply-blocklist-overview, .reply-blocklist-status-row, .reply-blocklist-overview-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.reply-blocklist-header { align-items: flex-start; padding: 2px 0 6px; }
+.reply-blocklist-header h2 { margin: 5px 0 7px; font-size: clamp(25px, 3vw, 34px); line-height: 1.12; letter-spacing: -.045em; }
+.reply-blocklist-header p:last-child { max-width: 670px; margin: 0; color: var(--text-secondary); line-height: 1.5; }
+.reply-blocklist-header .eyebrow, .reply-blocklist-section-head .eyebrow, .reply-blocklist-mapper .eyebrow { margin: 0; }
+.reply-blocklist-refresh { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.reply-blocklist-workspace .panel { min-width: 0; }
+.reply-blocklist-overview { align-items: flex-start; padding: 22px 24px; border-color: var(--accent-line); background: linear-gradient(120deg, var(--surface-raised), var(--accent-soft)); }
+.reply-blocklist-overview-main { min-width: 0; }
+.reply-blocklist-status-row { justify-content: flex-start; gap: 10px; flex-wrap: wrap; }
+.reply-blocklist-state { display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px; border: 1px solid var(--border-default); border-radius: 999px; background: var(--surface-raised); color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+.reply-blocklist-state > span { width: 7px; height: 7px; border-radius: 50%; background: var(--text-secondary); }
+.reply-blocklist-state.is-on { border-color: var(--accent-line); color: var(--accent-text); }
+.reply-blocklist-state.is-on > span { background: var(--accent); }
+.reply-blocklist-status-detail { color: var(--text-secondary); font-size: 12px; text-transform: capitalize; }
+.reply-blocklist-overview h3 { margin: 12px 0 5px; font-size: 19px; letter-spacing: -.02em; }
+.reply-blocklist-overview p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+.reply-blocklist-overview .reply-blocklist-inline-alert { margin-top: 10px; color: var(--text-primary); font-weight: 650; }
+.reply-blocklist-overview-actions { justify-content: flex-end; flex-wrap: wrap; flex: none; }
+.reply-blocklist-message { padding: 11px 14px; border: 1px solid var(--accent-line); border-radius: 10px; background: var(--accent-soft); color: var(--text-primary); font-size: 13px; }
+.reply-blocklist-message.is-error { border-color: var(--border-default); background: var(--surface-sunken); }
+.reply-blocklist-message button { margin-left: 6px; }
+.reply-blocklist-empty { padding: 30px; }
+.reply-blocklist-empty h3 { margin: 0 0 6px; }
+.reply-blocklist-empty p { color: var(--text-secondary); }
+.reply-blocklist-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.reply-blocklist-metrics > .panel { display: grid; gap: 5px; padding: 18px 20px; }
+.reply-blocklist-metrics span { color: var(--text-secondary); font-size: 12px; font-weight: 650; }
+.reply-blocklist-metrics strong { font-size: clamp(23px, 2.4vw, 29px); letter-spacing: -.04em; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.reply-blocklist-metrics small { color: var(--text-secondary); font-size: 11px; }
+.reply-blocklist-metrics .is-review { border-color: var(--accent-line); }
+.reply-blocklist-main-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(290px, 1fr); align-items: start; gap: 16px; }
+.reply-blocklist-review, .reply-blocklist-mapper, .reply-blocklist-mappings { padding: 23px; }
+.reply-blocklist-review { min-height: 320px; }
+.reply-blocklist-side { display: grid; gap: 16px; min-width: 0; }
+.reply-blocklist-section-head { align-items: flex-start; }
+.reply-blocklist-section-head h3, .reply-blocklist-mapper h3 { margin: 5px 0 6px; font-size: 18px; letter-spacing: -.025em; }
+.reply-blocklist-section-head p:not(.eyebrow), .reply-blocklist-mapper > p:not(.eyebrow), .reply-blocklist-mappings > p, .reply-blocklist-form-note { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
+.reply-blocklist-count { padding: 5px 9px; border-radius: 999px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 11px; font-weight: 650; white-space: nowrap; }
+.reply-blocklist-search { display: flex; align-items: center; gap: 9px; margin: 19px 0 8px; padding: 0 12px; border: 1px solid var(--border-default); border-radius: 10px; color: var(--text-secondary); background: var(--surface-raised); }
+.reply-blocklist-search:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.reply-blocklist-search input { width: 100%; min-height: 40px; border: 0; outline: 0; background: transparent; color: var(--text-primary); }
+.reply-blocklist-review-list, .reply-blocklist-mappings ul { list-style: none; margin: 0; padding: 0; }
+.reply-blocklist-review-list li, .reply-blocklist-mappings li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--border-subtle); }
+.reply-blocklist-review-list li:last-child, .reply-blocklist-mappings li:last-child { border-bottom: 0; }
+.reply-blocklist-review-list li > div, .reply-blocklist-mappings li > div { display: grid; gap: 4px; min-width: 0; }
+.reply-blocklist-review-list strong, .reply-blocklist-mappings strong { overflow-wrap: anywhere; font-size: 13px; font-weight: 650; }
+.reply-blocklist-review-list span, .reply-blocklist-mappings li span { color: var(--text-secondary); font-size: 11px; text-transform: capitalize; }
+.reply-blocklist-review-list button { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.reply-blocklist-quiet { display: flex; align-items: flex-start; gap: 13px; margin-top: 22px; padding: 17px; border-radius: 12px; background: var(--surface-sunken); }
+.reply-blocklist-quiet > svg { flex: none; color: var(--accent-text); }
+.reply-blocklist-quiet strong { font-size: 13px; }
+.reply-blocklist-quiet p, .reply-blocklist-bounded-note, .reply-blocklist-no-results { margin: 4px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.reply-blocklist-show-more { margin-top: 10px; }
+.reply-blocklist-bounded-note { margin-top: 12px; }
+.reply-blocklist-mapper form { display: grid; gap: 8px; margin-top: 19px; }
+.reply-blocklist-mapper form label { margin-top: 5px; color: var(--text-primary); font-size: 12px; font-weight: 650; }
+.reply-blocklist-mapper input, .reply-blocklist-mapper select { width: 100%; min-height: 42px; padding: 8px 11px; border: 1px solid var(--border-default); border-radius: 9px; background: var(--surface-raised); color: var(--text-primary); }
+.reply-blocklist-mapper form button { margin-top: 7px; }
+.reply-blocklist-mapper .reply-blocklist-form-note { margin-top: 12px; }
+.reply-blocklist-mappings ul { max-height: 280px; overflow: auto; }
+.reply-blocklist-details { padding: 0 22px; }
+.reply-blocklist-details summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 17px 0; cursor: pointer; font-weight: 650; list-style: none; }
+.reply-blocklist-details summary::-webkit-details-marker { display: none; }
+.reply-blocklist-details[open] summary svg { transform: rotate(180deg); }
+.reply-blocklist-details-content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; padding: 2px 0 22px; border-top: 1px solid var(--border-subtle); }
+.reply-blocklist-details-content h3 { margin: 17px 0 6px; font-size: 14px; }
+.reply-blocklist-details-content p { margin: 0 0 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.55; }
+.reply-blocklist-workspace button:focus-visible, .reply-blocklist-workspace input:focus-visible, .reply-blocklist-workspace select:focus-visible, .reply-blocklist-workspace summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 1050px) { .reply-blocklist-main-grid { grid-template-columns: 1fr; } .reply-blocklist-side { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+@media (max-width: 700px) { .reply-blocklist-header, .reply-blocklist-overview { flex-direction: column; align-items: stretch; } .reply-blocklist-overview-actions { justify-content: flex-start; } .reply-blocklist-metrics, .reply-blocklist-side { grid-template-columns: repeat(2, minmax(0, 1fr)); } .reply-blocklist-details-content { grid-template-columns: 1fr; gap: 0; } }
+@media (max-width: 520px) { .reply-blocklist-workspace { gap: 14px; } .reply-blocklist-metrics, .reply-blocklist-side { grid-template-columns: 1fr; } .reply-blocklist-review, .reply-blocklist-mapper, .reply-blocklist-mappings { padding: 18px; } .reply-blocklist-review-list li { align-items: flex-start; } .reply-blocklist-review-list button { white-space: nowrap; } }
 .verification-backdrop { z-index: 70; padding: 24px; }
 .verification-modal { position: relative; width: min(820px, 100%); max-height: min(900px, calc(100dvh - 48px)); overflow-y: auto; display: grid; align-content: start; gap: 18px; padding: 26px; border: 1px solid var(--border-default); border-radius: 20px; background: var(--surface-raised); color: var(--text-primary); box-shadow: 0 24px 80px rgba(15, 23, 42, .24); scrollbar-gutter: stable; }
 .verification-modal > header, .verification-modal > footer, .verification-runs-head, .verification-run-title, .verification-run-title > div, .verification-run-controls, .verification-provider, .verification-provider > div:first-child, .verification-section-heading, .verification-setup-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

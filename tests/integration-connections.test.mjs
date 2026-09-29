@@ -81,4 +81,5 @@ test('rate delay is bounded and accepts HTTP-date', () => {
 });
 test('integration tab survives URL restoration', () => {
   assert.equal(readWorkspaceUrl(new URLSearchParams('s=integrations')).section, 'integrations');
+  assert.equal(readWorkspaceUrl(new URLSearchParams('s=reply-blocklist')).section, 'reply-blocklist');
 });

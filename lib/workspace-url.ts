@@ -42,7 +42,7 @@ export type WorkspaceUrlState = {
   restoreError?: string;
 };
 
-const sections = new Set<Section>(["overview", "prospects", "companies", "clients", "coverage", "quality", "imports", "integrations"]);
+const sections = new Set<Section>(["overview", "prospects", "companies", "clients", "coverage", "quality", "imports", "integrations", "reply-blocklist"]);
 
 export const defaultWorkspaceState: WorkspaceUrlState = {
   section: "overview",
