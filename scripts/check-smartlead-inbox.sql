@@ -10,14 +10,23 @@ declare
   categories_two jsonb:='[{"id":11,"name":"Interested"},{"id":33,"name":"Not Interested"},{"id":600,"name":"Out of Office"},{"id":700,"name":"Not the right fit"}]'::jsonb;
 begin
   if (select enabled from prospect_integrations.smartlead_inbox_settings) then raise exception 'Inbox sync must default disabled'; end if;
+  if exists(select 1 from prospect_integrations.smartlead_inbox_settings
+    where pages_scanned<>0 or rows_observed<>0 or last_synced_at is not null)
+    then raise exception 'Stale pre-account telemetry was not repaired'; end if;
   update public.integration_connections set attempt_token=reserve_one,next_request_at='-infinity' where provider='smartlead';
   if not public.rotate_smartlead_connection_v1('fixture',reserve_one,'fixture','[]'::jsonb,categories_one,generation_one)
     then raise exception 'Initial account rotation failed'; end if;
   if (select enabled from prospect_integrations.smartlead_inbox_settings) then raise exception 'Rotation must leave inbox paused'; end if;
   if public.confirm_smartlead_inbox_contract_v1('fixture',generation_one,'official-v1') then
     raise exception 'Legacy validation bypassed category readiness'; end if;
+  update prospect_integrations.smartlead_inbox_settings
+    set pages_scanned=17,rows_observed=29,last_synced_at=now()
+    where singleton;
   if not public.confirm_smartlead_inbox_contract_v2('fixture',generation_one,'official-v1',categories_one)
     then raise exception 'Generation-scoped contract validation failed'; end if;
+  if exists(select 1 from prospect_integrations.smartlead_inbox_settings
+    where pages_scanned<>0 or rows_observed<>0 or last_synced_at is not null)
+    then raise exception 'Validation did not reset account telemetry'; end if;
   if not public.set_smartlead_inbox_mapping_v1('fixture','Legacy Prefix','fixture-other',true)
     then raise exception 'Generation-scoped mapping failed'; end if;
   if not public.set_smartlead_inbox_enabled_v1('fixture',true) then raise exception 'Enable failed'; end if;
@@ -99,7 +108,10 @@ do $$ begin
     or has_table_privilege('authenticated','prospect_integrations.smartlead_inbox_actions','SELECT')
     or has_table_privilege('service_role','prospect_integrations.smartlead_inbox_categories','SELECT')
     or has_function_privilege('anon','public.smartlead_inbox_status_v1()','EXECUTE')
+    or has_function_privilege('anon','public.confirm_smartlead_inbox_contract_v2(text,uuid,text,jsonb)','EXECUTE')
+    or has_function_privilege('authenticated','public.confirm_smartlead_inbox_contract_v2(text,uuid,text,jsonb)','EXECUTE')
     or has_function_privilege('authenticated','public.rotate_smartlead_connection_v1(text,uuid,text,jsonb,jsonb,uuid)','EXECUTE')
+    or not has_function_privilege('service_role','public.confirm_smartlead_inbox_contract_v2(text,uuid,text,jsonb)','EXECUTE')
     or not has_function_privilege('service_role','public.rotate_smartlead_connection_v1(text,uuid,text,jsonb,jsonb,uuid)','EXECUTE')
     or has_function_privilege('service_role','prospect_integrations.claim_smartlead_inbox_sync_v1()','EXECUTE')
     or not has_function_privilege('prospect_integrator','prospect_integrations.claim_smartlead_inbox_sync_v1()','EXECUTE') then

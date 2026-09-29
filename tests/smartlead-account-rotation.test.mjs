@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { inboxConnectionCurrent } from '../lib/integrations/inbox-connection.ts';
 
 const migration = await readFile(new URL('../supabase/migrations/20260929173000_smartlead_account_scoped_inbox.sql', import.meta.url), 'utf8');
+const telemetryMigration = await readFile(new URL('../supabase/migrations/20260929180000_smartlead_inbox_validation_telemetry_reset.sql', import.meta.url), 'utf8');
 const route = await readFile(new URL('../app/api/integrations/route.ts', import.meta.url), 'utf8');
 const panel = await readFile(new URL('../app/components/ReplyBlocklistPanel.tsx', import.meta.url), 'utf8');
 
@@ -49,6 +50,16 @@ test('category behavior is discovered per account and uncertain IDs fail closed'
   assert.doesNotMatch(migration, /v_category\s*=\s*120097/i);
   assert.match(route, /readSmartleadCategories/);
   assert.match(route, /confirm_smartlead_inbox_contract_v2/);
+});
+
+test('validation resets telemetry and narrowly repairs a paused pre-migration account', () => {
+  assert.match(telemetryMigration, /pages_scanned=0,rows_observed=0,last_synced_at=null/i);
+  assert.match(telemetryMigration, /not s\.enabled/i);
+  assert.match(telemetryMigration, /s\.verified_generation=c\.generation/i);
+  assert.match(telemetryMigration, /s\.last_synced_at<s\.verified_at/i);
+  assert.match(telemetryMigration, /o\.connection_generation=c\.generation/i);
+  assert.match(telemetryMigration, /revoke execute on function public\.confirm_smartlead_inbox_contract_v2\(text,uuid,text,jsonb\)[\s\S]*from public,anon,authenticated/i);
+  assert.match(telemetryMigration, /grant execute on function public\.confirm_smartlead_inbox_contract_v2\(text,uuid,text,jsonb\)[\s\S]*to service_role/i);
 });
 
 test('Smartlead credential rotation is managed beside reply sync, not duplicated in Integrations', async () => {
