@@ -8,7 +8,7 @@ test("screens other than Overview, People and Companies load on demand, then pre
   const app = await read("../app/DashboardApp.tsx");
   for (const screen of ["ClientsPanel", "CoveragePanel", "DataQualityPanel", "ImportsPanel", "IntegrationsPanel", "ReplyBlocklistPanel", "EmailVerificationWorkspace", "LogsPanel"]) {
     assert.doesNotMatch(app, new RegExp(`^import ${screen} from`, "m"), `${screen} must not be a static import`);
-    assert.match(app, new RegExp(`const ${screen} = dynamic\(`));
+    assert.ok(app.includes(`const ${screen} = dynamic(`), `${screen} must load through next/dynamic`);
   }
   assert.match(app, /requestIdleCallback/);
   assert.match(app, /usePreloadScreens\(isAdmin\);/);
