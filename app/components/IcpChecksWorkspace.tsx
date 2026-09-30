@@ -5,7 +5,7 @@ import { api } from "../../lib/dashboard-api";
 import { formatNumber } from "../../lib/dashboard-helpers";
 import type { ClientIcpProfile, ClientRecord } from "../../lib/types";
 import { sourceLabel } from "../../worker/icp-validator-core.mjs";
-import { AppIcon } from "./DashboardUi";
+import { AppIcon, ConfirmDialog } from "./DashboardUi";
 import { StrategyPicker, estimateStrategy, hasObservedCost, strategies, strategyLabel, type CostPerCompany, type StrategyId } from "./IcpStrategyPicker";
 import { ProgressRing, Segmented, Switch, WorkerBadge, durationText, money, relativeTime, type RunStatus, type WorkerState } from "./IcpValidatorViews";
 
@@ -24,6 +24,7 @@ export type Check = {
   id: string; client_id: string; client_name: string; icp_profile_id: string; icp_name: string; icp_current: boolean;
   strategy: StrategyId; scope: string; provider_mode: "cheapest" | "default"; total_items: number; created_by: string; created_at: string;
   forced?: boolean; skipped_items?: number;
+  verified_at?: string | null; verified_by?: string; verified_items?: number;
   status: RunStatus; status_message: string; started_at: string | null; finished_at: string | null; cost_usd: number; failed_items: number;
   passes: Pass[]; outcome: { fit: number; non_fit: number; pending: number; split: number };
 };
@@ -105,7 +106,7 @@ export default function IcpChecksWorkspace({ clients, client }: { clients: Clien
       </section>
     </div>
 
-    {selected ? <Results check={selected}/> : null}
+    {selected ? <Results check={selected} onChanged={(message) => { setNotice(message); setVersion((value) => value + 1); }}/> : null}
   </article>;
 }
 
@@ -278,6 +279,7 @@ export function CheckItem({ check, selected, onSelect, onChanged, showClient = t
         </button>
         <span className={`icpx-status is-${check.status}`}>{check.status === "completed" ? "Done" : check.status.charAt(0).toUpperCase() + check.status.slice(1)}</span>
         {!check.icp_current ? <span className="icpx-chip is-warn" title="The ICP brief changed after this check started">Older brief</span> : null}
+        {check.verified_at ? <span className="icpx-chip is-ok" title={`${formatNumber(num(check.verified_items))} FIT marked ICP verified ${relativeTime(check.verified_at)}${check.verified_by ? ` by ${check.verified_by}` : ""}`}>FIT verified</span> : null}
       </div>
       <div className="icpx-run-meta">
         <span>{formatNumber(num(check.total_items))} companies{num(check.skipped_items) ? <small className="icpx-muted"> · {formatNumber(num(check.skipped_items))} skipped</small> : null}{check.forced ? <small className="icpx-muted"> · forced</small> : null}</span>
@@ -308,8 +310,11 @@ export function CheckItem({ check, selected, onSelect, onChanged, showClient = t
   </li>;
 }
 
-function Results({ check }: { check: Check }) {
+function Results({ check, onChanged }: { check: Check; onChanged: (message: string) => void }) {
   const [filter, setFilter] = useState<Filter>("all");
+  const [confirmVerify, setConfirmVerify] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState("");
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -341,6 +346,19 @@ function Results({ check }: { check: Check }) {
   const pages = Math.max(1, Math.ceil(num(shown?.total) / pageSize));
   const csv = `${base}?${new URLSearchParams({ view: "csv", client: check.client_id, check: check.id, filter, search: query })}`;
   const strategy = strategies.find((item) => item.id === check.strategy);
+  const fit = num(check.outcome.fit);
+
+  async function markFitVerified() {
+    setVerifying(true); setVerifyError("");
+    try {
+      const response = await post<{ result: { fit?: number; updated?: number } }>({ action: "mark_fit_verified", clientId: check.client_id, checkId: check.id });
+      const marked = num(response.result.fit);
+      const newly = num(response.result.updated);
+      setConfirmVerify(false);
+      onChanged(`${formatNumber(marked)} FIT ${marked === 1 ? "company is" : "companies are"} ICP verified for ${check.client_name}${newly < marked ? ` (${formatNumber(marked - newly)} already were)` : ""}. They now show under ICP Verified in the Company DB.`);
+    } catch (caught) { setVerifyError(failure(caught, "Unable to mark the FIT companies verified.")); }
+    finally { setVerifying(false); }
+  }
 
   const filterOptions: Array<{ value: Filter; label: ReactNode; hint?: string }> = [
     { value: "all", label: <>All <b>{formatNumber(num(check.total_items))}</b></> },
@@ -354,8 +372,22 @@ function Results({ check }: { check: Check }) {
     <div className="icpx-section-head">
       <div><h4 id="icc-results">{strategyLabel(check.strategy)} · {check.client_name} · {check.icp_name || "ICP"}</h4>
         <p>{strategy?.rule}{check.provider_mode === "cheapest" ? " Cheapest providers." : ""}</p></div>
-      <a className="icpx-ghost" href={csv} download><AppIcon name="download" size={14}/> CSV</a>
+      <div className="icc-results-actions">
+        {fit ? <button type="button" className="icpx-ghost is-accent" onClick={() => { setVerifyError(""); setConfirmVerify(true); }}
+          title={check.verified_at ? `Last marked ${relativeTime(check.verified_at)}${check.verified_by ? ` by ${check.verified_by}` : ""}` : undefined}>
+          <AppIcon name="check" size={14}/> {check.verified_at ? "Marked verified · mark again" : `Mark ${formatNumber(fit)} FIT as ICP verified`}
+        </button> : null}
+        <a className="icpx-ghost" href={csv} download><AppIcon name="download" size={14}/> CSV</a>
+      </div>
     </div>
+    {confirmVerify ? <ConfirmDialog
+      title={`Mark ${formatNumber(fit)} FIT ${fit === 1 ? "company" : "companies"} ICP verified?`}
+      body={`They move to ICP Verified for ${check.client_name}, exactly like "Mark ICP verified" in the Company DB, and their people follow. NON_FIT and undecided companies are not touched.${isActive(check) ? " The check is still running: only the companies decided FIT so far are marked." : ""}`}
+      confirmLabel={verifying ? "Marking…" : "Mark ICP verified"}
+      busy={verifying}
+      error={verifyError}
+      onCancel={() => setConfirmVerify(false)}
+      onConfirm={() => void markFitVerified()}/> : null}
     <div className="icpx-toolbar">
       <Segmented label="Show" value={filter} options={filterOptions} onChange={(value) => { setFilter(value); setPage(1); }}/>
       <label className="icpx-search">

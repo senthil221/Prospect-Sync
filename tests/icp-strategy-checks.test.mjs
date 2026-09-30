@@ -165,3 +165,30 @@ test("a downloaded check is named after its method, client, ICP and view", async
   assert.match(route, /"ICP check", method, client\?\.name, check\?\.icp_name, view/);
   assert.match(route, /"Content-Disposition": attachmentDisposition\(await csvFileName\(clientId, checkId, url\)\)/);
 });
+
+test("the Company DB filters by ICP check result, and a check's FIT can be marked ICP verified", async () => {
+  const migration = await read("../supabase/migrations/20260930230000_icp_check_filter_and_mark_fit_verified.sql");
+  // One helper for the compiled filter and the row matcher, so they agree.
+  assert.match(migration, /format\('public\.company_icp_check_matches_v1\(c\.id, %L, %L\)'/);
+  assert.match(migration, /where public\.company_icp_check_matches_v1\(\(p_row\)\.id, split_part\(selected\.value, '\|', 1\)/);
+  // Latest current result per ICP; an edited brief does not count.
+  assert.match(migration, /order by v\.icp_profile_id, v\.decided_at desc\) latest/);
+  assert.match(migration, /v\.source like 'strategy:%' and v\.icp_hash = md5\(p\.description\)/);
+  // Inlinable: no SET clause on the helper.
+  assert.doesNotMatch(migration.split("company_icp_check_matches_v1(p_company_id text")[1].split("$$")[0], /set search_path/);
+  // FIT -> ICP verified through the Company DB's own path.
+  assert.match(migration, /public\.set_company_icp_verified_v2\(p_client_id, true, v_ids, '', '\[\]'::jsonb, null, null, p_actor\)/);
+  assert.match(migration, /ICP check filter proof passed and was rolled back/);
+
+  const table = await read("../app/components/CompaniesWorkspace.tsx");
+  assert.match(table, /field: "__company_icp_check",/);
+  assert.match(table, /\["UNCHECKED", "Not checked"\]/);
+  const { filterChipValue } = await import("../lib/dashboard-helpers.ts");
+  assert.equal(filterChipValue("__company_icp_check", "client-1|FIT"), "ICP check FIT");
+  assert.equal(filterChipValue("__company_icp_check", "client-1|UNCHECKED"), "ICP not checked");
+
+  const route = await read("../app/api/icp-checks/route.ts");
+  assert.match(route, /rpc\("mark_icp_check_fit_verified_v1"/);
+  const screen = await read("../app/components/IcpChecksWorkspace.tsx");
+  assert.match(screen, /action: "mark_fit_verified"/);
+});

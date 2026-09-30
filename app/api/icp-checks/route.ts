@@ -19,6 +19,7 @@ import { PROVIDER_MODES, icpStrategy, sourceLabel } from "../../../worker/icp-va
 //       scope:"unverified"|"all"|"selection", companyIds[] | allMatching + search + filters + …}
 //       Companies with a current ICP check result for this ICP are skipped unless force.
 // POST {action:"pause"|"resume"|"cancel"|"retry_failed", clientId, checkId}
+// POST {action:"mark_fit_verified", clientId, checkId}      the check's FIT companies -> ICP verified
 
 const missingCodes = new Set(["PGRST202", "PGRST205", "42883", "42P01"]);
 const pageSize = 100;
@@ -211,6 +212,18 @@ async function handlePOST(request: Request) {
     });
     if (error) return failure(error);
     return Response.json({ check: data });
+  }
+
+  // The check's FIT companies become ICP verified for the client, the same way
+  // the Company DB's "Mark ICP verified" does it (prospects follow).
+  if (action === "mark_fit_verified") {
+    const checkId = String(body.checkId ?? "").trim();
+    if (!uuid.test(checkId)) return bad("Which check?");
+    const { data, error } = await supabase.rpc("mark_icp_check_fit_verified_v1", {
+      p_client_id: clientId, p_check_id: checkId, p_actor: actor,
+    });
+    if (error) return failure(error);
+    return Response.json({ result: data });
   }
 
   if (action === "pause" || action === "resume" || action === "cancel" || action === "retry_failed") {
