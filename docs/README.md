@@ -7,6 +7,11 @@ measurement more than once.
 
 ## Current
 
+**[Database production-readiness programme](database-production-readiness.md)** —
+the current dependency map, regression matrix, measured baseline and phased
+release gates for evolving the core People/Companies product and its addons.
+It is an active engineering programme, not a production-capacity certificate.
+
 **[Scalability and reliability v8](prospect-sync-scalability-plan-v8-systemwide.md)** —
 the current forward implementation plan, based on repository `417f67c` and
 the measured description-search release. Covers all query consumers, fair

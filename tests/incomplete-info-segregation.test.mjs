@@ -55,10 +55,17 @@ test("additive migration partitions compilers, counts, exports and explicit ICP 
   assert.match(fixture, /push_companies_to_client_v2/);
   assert.match(fixture, /People partitions overlap or do not cover/);
   assert.match(fixture, /Company partitions overlap or do not cover/);
+  assert.equal(fixture.match(/public\.request_result_set_v1\(/g)?.length, 5);
+  assert.equal(fixture.match(/prospect_results\.build_batch_v1\(/g)?.length, 5);
+  assert.match(fixture, /Complete client People result set differs from the interactive workspace/);
+  assert.match(fixture, /Incomplete client Company result set differs from the interactive workspace/);
+  assert.match(fixture, /segregation-outsider-incomplete-company/);
+  assert.match(fixture, /__company_client_ids filter already used by streamed company exports/);
+  assert.match(fixture, /Master result set was partitioned or differs from the interactive workspace/);
   assert.match(fixture, /Enrichment did not promote/);
   assert.match(fixture, /Client summary did not subtract only the incomplete slice/);
   assert.match(fixture, /Client summary did not promote enriched memberships/);
-  assert.match(runner, /push, disjoint-union, and enrichment behavior/);
+  assert.match(runner, /push, result-set parity, disjoint-union, and enrichment behavior/);
   assert.match(runner, /least-privilege and bounded summary contract/);
   assert.match(runner, /20260929160000_client_summaries_subtract_incomplete_only\.sql/);
   assert.match(workflow, /incomplete-info-contract:/);

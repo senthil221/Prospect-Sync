@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { withClientWorkspaceCompleteness } from "./client-workspace-completeness.ts";
+import type { ProspectFilter } from "./prospect-filters.ts";
 
 // Durable result sets (migration 20260902000120, reachable since
 // 20260902000160). A result set is the answer to a question, frozen: the ids
@@ -43,6 +45,41 @@ export function resultSetContentHash(input: {
     filters: input.filters ?? [],
     companyScope: input.companyScope ?? null,
   })).digest("hex");
+}
+
+// Apply server-owned client workspace predicates before a result-set question
+// is authorized, hashed and stored. Callers do not see the completeness filter
+// in the normal client workspace UI, so trusting only the submitted filters can
+// freeze a broader set than the listing that launched the action.
+//
+// Keep parent companyScope untouched here. The live People listing currently
+// carries that scope exactly as submitted, so changing it only for a background
+// result would create a different answer. Parent-scope parity is tracked as a
+// separate query-contract gap rather than silently changed in this helper.
+export function normalizeResultSetQuestion<T extends {
+  entityType: string;
+  clientScope: string;
+  filters: ProspectFilter[];
+  companyScope?: unknown;
+}>(question: T): T {
+  let filters = withClientWorkspaceCompleteness(question.filters, question.clientScope);
+  if (question.entityType === "company" && question.clientScope && !filters.some((filter) =>
+    filter.field === "__company_client_ids"
+      && filter.operator === "contains"
+      && filter.values.length === 1
+      && filter.values[0] === question.clientScope)) {
+    // The durable Company builder compiles filters but does not independently
+    // consume client_scope. Express the established membership contract in the
+    // same filter language as streaming company exports. A contradictory
+    // caller filter remains in place and is intersected with this server-owned
+    // predicate, so it can narrow to zero but can never widen to another client.
+    filters = [...filters, {
+      field: "__company_client_ids",
+      operator: "contains",
+      values: [question.clientScope],
+    }];
+  }
+  return filters === question.filters ? question : { ...question, filters };
 }
 
 // Who owns a result set, and who acts on an operation, have to be the same

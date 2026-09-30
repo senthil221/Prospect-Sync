@@ -115,5 +115,5 @@ begin
 end $$;
 `);
 
-psql("push, disjoint-union, and enrichment behavior", `begin; set local statement_timeout='5min';\n${fixture}\nrollback;`);
-process.stdout.write("Incomplete Info migration rollback, grants, partition, push and enrichment contracts passed.\n");
+psql("push, result-set parity, disjoint-union, and enrichment behavior", `begin; set local statement_timeout='5min';\n${fixture}\nrollback;`);
+process.stdout.write("Incomplete Info migration rollback, grants, partition, result-set parity, push and enrichment contracts passed.\n");

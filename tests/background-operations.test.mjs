@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { resultSetContentHash, ownerIdentity } from "../lib/result-sets.ts";
+import { normalizeResultSetQuestion, resultSetContentHash, ownerIdentity } from "../lib/result-sets.ts";
 
 // Release 2 items 2 and 3, finally reachable: a question answered in the
 // background, and a bulk action that runs over exactly the ids the user chose.
@@ -128,6 +128,75 @@ test("a result set is identified by the question, not by who asked it", () => {
   assert.equal(resultSetContentHash(question), resultSetContentHash({ ...question, search: "  cto  " }));
   assert.notEqual(resultSetContentHash(question), resultSetContentHash({ ...question, clientScope: "client-1" }));
   assert.notEqual(resultSetContentHash(question), resultSetContentHash({ ...question, filters: [] }));
+});
+
+test("client result sets normalize the same completeness partition before hashing and storage", async () => {
+  const ordinary = [{ field: "__title", operator: "contains", values: ["Founder"] }];
+  const companyScope = { search: "software", filters: [], limit: 250000 };
+  const master = { entityType: "prospect", clientScope: "", search: "", filters: ordinary, companyScope };
+  assert.equal(normalizeResultSetQuestion(master), master, "Master questions must remain byte-for-byte unchanged");
+
+  const requested = { entityType: "prospect", clientScope: "client-a", search: "", filters: ordinary, companyScope };
+  const normalized = normalizeResultSetQuestion(requested);
+  assert.notEqual(normalized, requested);
+  assert.equal(normalized.companyScope, companyScope, "the parent scope must keep listing semantics");
+  assert.deepEqual(normalized.filters, [
+    ...ordinary,
+    { id: "client-profile:complete", field: "__incomplete_company_profile", operator: "equals", values: ["false"] },
+  ]);
+  assert.equal(normalizeResultSetQuestion(normalized), normalized, "normalization must be idempotent");
+  assert.notEqual(resultSetContentHash(requested), resultSetContentHash(normalized),
+    "the final server predicate must be part of result-set identity");
+
+  const incomplete = {
+    entityType: "prospect",
+    clientScope: "client-a",
+    search: "",
+    filters: [{ field: "__incomplete_company_profile", operator: "equals", values: ["true"] }],
+    companyScope,
+  };
+  assert.equal(normalizeResultSetQuestion(incomplete), incomplete,
+    "an explicit Incomplete Info partition must not be replaced");
+
+  const companyMaster = { entityType: "company", clientScope: "", search: "", filters: ordinary };
+  assert.equal(normalizeResultSetQuestion(companyMaster), companyMaster,
+    "Master Company questions must remain byte-for-byte unchanged");
+  const conflictingCompany = {
+    entityType: "company",
+    clientScope: "client-a",
+    search: "",
+    filters: [{ field: "__company_client_ids", operator: "contains", values: ["client-b"] }],
+  };
+  const companyNormalized = normalizeResultSetQuestion(conflictingCompany);
+  assert.deepEqual(companyNormalized.filters, [
+    conflictingCompany.filters[0],
+    { id: "client-profile:complete", field: "__incomplete_company_profile", operator: "equals", values: ["false"] },
+    { field: "__company_client_ids", operator: "contains", values: ["client-a"] },
+  ], "the server-owned Company membership must intersect a contradictory caller filter");
+  assert.equal(normalizeResultSetQuestion(companyNormalized), companyNormalized,
+    "Company membership normalization must be idempotent");
+  assert.notEqual(resultSetContentHash(conflictingCompany), resultSetContentHash(companyNormalized),
+    "Company membership must be part of result-set identity");
+
+  const route = await read("../app/api/result-sets/route.ts");
+  const guard = route.indexOf("if (!search && !filters.length && !scopePayload)");
+  const normalization = route.indexOf("normalizeResultSetQuestion({");
+  const authorization = route.indexOf("authorizeFilterSets(supabase, filters");
+  const persistence = route.indexOf("p_filters: filters");
+  const identity = route.indexOf("resultSetContentHash({ entityType, clientScope, search, filters");
+  assert.ok(guard >= 0 && guard < normalization,
+    "the no-filter guard must evaluate caller intent before a server predicate is injected");
+  assert.ok(normalization < authorization && normalization < persistence && normalization < identity,
+    "authorization, hashing and persistence must all use the normalized filters");
+
+  const exportsRoute = await read("../app/api/exports/route.ts");
+  const exportNormalization = exportsRoute.indexOf("normalizeResultSetQuestion({");
+  const exportAuthorization = exportsRoute.indexOf("authorizeFilterSets(supabase, filters");
+  const exportPersistence = exportsRoute.indexOf("p_filters: filters");
+  const exportIdentity = exportsRoute.indexOf("resultSetContentHash({ entityType, clientScope, search, filters");
+  assert.ok(exportNormalization >= 0 && exportNormalization < exportAuthorization
+      && exportNormalization < exportPersistence && exportNormalization < exportIdentity,
+    "background exports must authorize, hash and persist the normalized question too");
 });
 
 test("a capped count can be turned into a real one, and is dropped when the question changes", async () => {

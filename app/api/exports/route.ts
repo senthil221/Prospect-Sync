@@ -4,10 +4,9 @@ import { authorizeFilterSets } from "../../../lib/filter-sets";
 import { filterErrorResponse, parseFilters } from "../../../lib/prospect-filters";
 import { availableCompanyExportFieldIds, companyExportKeys, companyExportRowKeys } from "../../../lib/company-export";
 import { availableExportFieldIds, exportRowKeys } from "../../../lib/prospect-export";
-import { ownerIdentity, resultSetContentHash } from "../../../lib/result-sets";
+import { normalizeResultSetQuestion, ownerIdentity, resultSetContentHash } from "../../../lib/result-sets";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { parseCompanyScope, scopeRestricts } from "../../../lib/workspace-scopes";
-import { withClientWorkspaceCompleteness } from "../../../lib/client-workspace-completeness";
 
 export const runtime = "nodejs";
 
@@ -62,7 +61,6 @@ async function handlePOST(request: Request) {
   let filters;
   try { filters = parseFilters(JSON.stringify(payload.filters ?? [])); }
   catch (error) { return filterErrorResponse(error, "Invalid filters."); }
-  filters = withClientWorkspaceCompleteness(filters, clientScope);
 
   let companyScope;
   try { companyScope = parseCompanyScope(payload.companyScope ? JSON.stringify(payload.companyScope) : null); }
@@ -75,6 +73,12 @@ async function handlePOST(request: Request) {
   if (entityType === "company" && scopePayload) {
     return Response.json({ error: "A company export cannot carry a company scope." }, { status: 400 });
   }
+  ({ filters } = normalizeResultSetQuestion({
+    entityType,
+    clientScope,
+    filters,
+    companyScope: scopePayload,
+  }));
 
   const requestedFields = Array.isArray(payload.fields)
     ? [...new Set(payload.fields.map((field) => String(field).trim()).filter(Boolean))].slice(0, 600)

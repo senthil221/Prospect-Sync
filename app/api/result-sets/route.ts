@@ -2,7 +2,7 @@ import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { backgroundAdmissionResponse } from '../../../lib/operations-health';
 import { authorizeFilterSets } from "../../../lib/filter-sets";
 import { filterErrorResponse, parseFilters } from "../../../lib/prospect-filters";
-import { ownerIdentity, resultSetContentHash } from "../../../lib/result-sets";
+import { normalizeResultSetQuestion, ownerIdentity, resultSetContentHash } from "../../../lib/result-sets";
 import { parseCompanyScope, scopeRestricts } from "../../../lib/workspace-scopes";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
@@ -58,13 +58,24 @@ async function handlePOST(request: Request) {
   }
   const scopePayload = scopeRestricts(companyScope) ? companyScope : null;
 
-  // Without a search term and without filters this would freeze the entire
+  // Without a search term and without caller-supplied filters this would freeze the entire
   // database. That is a real thing to want, but not by accident. A pivot is a
   // narrowing in its own right, so a scoped request has already said which
   // rows it means.
   if (!search && !filters.length && !scopePayload) {
     return Response.json({ error: "Apply a filter or a search term before building a result set." }, { status: 400 });
   }
+
+  // The guard above deliberately runs first: the server-owned completeness
+  // predicate must not turn an otherwise unfiltered click into permission to
+  // freeze a whole client database. From this point forward the normalized
+  // question is authoritative for authorization, hashing and persistence.
+  ({ filters } = normalizeResultSetQuestion({
+    entityType,
+    clientScope,
+    filters,
+    companyScope: scopePayload,
+  }));
 
   const supabase = createAdminClient();
   // A set id is not authorization, and neither is a filter-set id inside it.
