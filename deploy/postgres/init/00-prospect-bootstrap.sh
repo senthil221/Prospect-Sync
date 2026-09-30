@@ -186,7 +186,7 @@ psql -v ON_ERROR_STOP=1 -v verification_worker_password="$VERIFICATION_WORKER_DB
 	  if not exists(select 1 from pg_roles where rolname='prospect_icp_worker') then create role prospect_icp_worker login; end if;
 	end
 	\$\$;
-	alter role prospect_icp_worker with login password '${POSTGRES_PASSWORD}' nosuperuser nocreatedb nocreaterole nobypassrls connection limit 3;
+	alter role prospect_icp_worker with login password '${POSTGRES_PASSWORD}' nosuperuser nocreatedb nocreaterole nobypassrls connection limit 4;
 	grant prospect_icp_validator to prospect_icp_worker;
 	revoke service_role from prospect_icp_worker;
 	alter role prospect_icp_worker set statement_timeout='15s';

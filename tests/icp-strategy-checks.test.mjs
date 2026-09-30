@@ -98,7 +98,8 @@ test("the ICP checks route is measured, and starts, steers and reads checks", as
   const route = await read("../app/api/icp-checks/route.ts");
   assert.match(route, /export const GET = observed\("\/api\/icp-checks", handleGET\);/);
   assert.match(route, /export const POST = observed\("\/api\/icp-checks", handlePOST\);/);
-  assert.match(route, /rpc\("start_icp_strategy_check_v2"/);
+  assert.match(route, /rpc\("start_icp_strategy_check_v3"/);
+  assert.match(route, /p_auto_apply: body\.autoApply !== false,/);
   assert.match(route, /p_force: body\.force === true,/);
   assert.match(route, /rpc\("icp_strategy_scope_counts_v2"/);
   assert.match(route, /rpc\("set_icp_strategy_check_state_v1"/);

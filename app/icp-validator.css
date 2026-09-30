@@ -502,3 +502,7 @@
 .icc-review button.is-on.is-non-fit { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger); }
 .icc-review button.is-undo { border-style: dashed; }
 .icc-review button:disabled { cursor: wait; }
+/* What an auto-applying check did */
+.icc-applied { color: var(--text-secondary); }
+.icc-applied-chip { margin-left: 4px; }
+.icpx-chip.is-bad { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger); }

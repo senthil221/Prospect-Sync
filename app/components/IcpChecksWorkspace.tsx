@@ -24,9 +24,10 @@ export type Check = {
   id: string; client_id: string; client_name: string; icp_profile_id: string; icp_name: string; icp_current: boolean;
   strategy: StrategyId; scope: string; provider_mode: "cheapest" | "default"; total_items: number; created_by: string; created_at: string;
   forced?: boolean; skipped_items?: number;
-  verified_at?: string | null; verified_by?: string; verified_items?: number;
+  verified_at?: string | null; verified_by?: string; verified_items?: number; auto_apply?: boolean;
   status: RunStatus; status_message: string; started_at: string | null; finished_at: string | null; cost_usd: number; failed_items: number;
-  passes: Pass[]; outcome: { fit: number; non_fit: number; pending: number; split: number; reviewed?: number; split_unreviewed?: number };
+  passes: Pass[]; outcome: { fit: number; non_fit: number; pending: number; split: number; reviewed?: number; split_unreviewed?: number;
+    applied_verified?: number; applied_blocked?: number; kept_not_blocked?: number; apply_pending?: number };
 };
 type Vote = { pass_no: number; model: string; reasoning_effort: string; state: string; verdict: "FIT" | "NON_FIT" | null; reason: string };
 export type ResultRow = {
@@ -34,6 +35,8 @@ export type ResultRow = {
   verdict: "FIT" | "NON_FIT" | null; reason: string; fit_votes: number; non_fit_votes: number; votes: Vote[];
   // What the method's rule decides from the votes alone, and who (if anyone) set the result by hand.
   rule_verdict?: "FIT" | "NON_FIT" | null; reviewed_by?: string; reviewed_at?: string | null;
+  // What an auto-applying check has done to the client for this company.
+  applied?: "FIT" | "NON_FIT" | null; applied_blocked?: boolean; applied_verified?: boolean; apply_pending?: boolean;
 };
 type Scope = "unverified" | "all" | "paste";
 type Filter = "all" | "fit" | "non_fit" | "pending" | "split" | "reviewed";
@@ -123,6 +126,7 @@ function NewCheck({ clients, fixedClient, onStarted }: { clients: ClientRecord[]
   // Newly pushed companies are ICP unverified, so that is where a check starts.
   const [scope, setScope] = useState<Scope>("unverified");
   const [force, setForce] = useState(false);
+  const [autoApply, setAutoApply] = useState(true);
   const [pasted, setPasted] = useState("");
   const [cheapest, setCheapest] = useState(true);
   const [counts, setCounts] = useState<{ key: string; value: ScopeCounts; cost: CostPerCompany } | null>(null);
@@ -178,7 +182,7 @@ function NewCheck({ clients, fixedClient, onStarted }: { clients: ClientRecord[]
         selection = { scope: "selection", companyIds: resolved.companyIds };
       }
       const result = await post<{ check: { id: string; total_items: number; skipped_items?: number } }>({
-        action: "start", clientId: client.id, icpId: icp.id, strategy, providerMode: cheapest ? "cheapest" : "default", force, ...selection,
+        action: "start", clientId: client.id, icpId: icp.id, strategy, providerMode: cheapest ? "cheapest" : "default", force, autoApply, ...selection,
       });
       const skipped = num(result.check.skipped_items);
       onStarted(`${strategyLabel(strategy)} check started on ${formatNumber(result.check.total_items)} ${result.check.total_items === 1 ? "company" : "companies"} for ${client.name}${skipped ? ` - ${formatNumber(skipped)} already checked were skipped` : ""}. Companies with no description and no keywords are never checked.`, result.check.id);
@@ -234,6 +238,9 @@ function NewCheck({ clients, fixedClient, onStarted }: { clients: ClientRecord[]
         hint={force ? "Companies that already have an ICP check result for this ICP are checked again."
           : skippedHere ? `Off: ${formatNumber(skippedHere)} already checked for this ICP will be skipped.` : "Off: companies already checked for this ICP are skipped."}/>
 
+      <Switch checked={autoApply} onChange={setAutoApply} label="Apply results automatically"
+        hint={autoApply ? `FIT → ICP verified. NON_FIT → domain added to ${client?.name ?? "the client"}'s blocklist (not if already ICP verified). Reviewing a result later updates it.` : "Off: results are labels only. Act on them from the Company DB or with Mark FIT as ICP verified."}/>
+
       <Switch checked={cheapest} onChange={setCheapest} label="Cheapest providers"
         hint="OpenRouter picks the lowest-priced provider that supports JSON output and reasoning, skipping 4-bit hosts. Usually well under list price for DeepSeek."/>
     </>}
@@ -288,6 +295,10 @@ export function CheckItem({ check, selected, onSelect, onChanged, showClient = t
         <span>{formatNumber(num(check.total_items))} companies{num(check.skipped_items) ? <small className="icpx-muted"> · {formatNumber(num(check.skipped_items))} skipped</small> : null}{check.forced ? <small className="icpx-muted"> · forced</small> : null}</span>
         <span className="icpx-run-split"><b className="is-fit">{formatNumber(num(check.outcome.fit))}</b> FIT <b className="is-non-fit">{formatNumber(num(check.outcome.non_fit))}</b> NON_FIT</span>
         {num(check.outcome.pending) ? <span>{formatNumber(num(check.outcome.pending))} {finished ? "undecided" : "pending"}</span> : null}
+        {check.auto_apply ? <span className="icc-applied" title="Applied to the client automatically">
+          {formatNumber(num(check.outcome.applied_verified))} verified · {formatNumber(num(check.outcome.applied_blocked))} blocked
+          {num(check.outcome.kept_not_blocked) ? ` · ${formatNumber(num(check.outcome.kept_not_blocked))} kept (already verified)` : ""}
+          {num(check.outcome.apply_pending) ? ` · applying ${formatNumber(num(check.outcome.apply_pending))}…` : ""}</span> : null}
         <span>{money(num(check.cost_usd))}</span>
         {took ? <span className={`icpx-duration${active ? " is-live" : ""}`}>{active ? "Running " : "Took "}{took}</span> : null}
         <span>{relativeTime(check.created_at)}{check.created_by ? ` · ${check.created_by}` : ""}</span>
@@ -388,9 +399,9 @@ function Results({ check, onChanged, onRefresh }: { check: Check; onChanged: (me
   return <section className="icpx-card" aria-labelledby="icc-results">
     <div className="icpx-section-head">
       <div><h4 id="icc-results">{strategyLabel(check.strategy)} · {check.client_name} · {check.icp_name || "ICP"}</h4>
-        <p>{strategy?.rule}{check.provider_mode === "cheapest" ? " Cheapest providers." : ""}</p></div>
+        <p>{strategy?.rule}{check.provider_mode === "cheapest" ? " Cheapest providers." : ""}{check.auto_apply ? " Results applied: FIT → ICP verified, NON_FIT → blocklist." : ""}</p></div>
       <div className="icc-results-actions">
-        {fit ? <button type="button" className="icpx-ghost is-accent" onClick={() => { setVerifyError(""); setConfirmVerify(true); }}
+        {fit && !check.auto_apply ? <button type="button" className="icpx-ghost is-accent" onClick={() => { setVerifyError(""); setConfirmVerify(true); }}
           title={check.verified_at ? `Last marked ${relativeTime(check.verified_at)}${check.verified_by ? ` by ${check.verified_by}` : ""}` : undefined}>
           <AppIcon name="check" size={14}/> {check.verified_at ? "Marked verified · mark again" : `Mark ${formatNumber(fit)} FIT as ICP verified`}
         </button> : null}
@@ -439,6 +450,10 @@ export function StrategyResultsTable({ rows, finished, onReview, busyId = "" }: 
       <td>{row.verdict
         ? <span className={`icpx-verdict ${row.verdict === "FIT" ? "is-fit" : "is-non-fit"}`}>{row.verdict}</span>
         : <span className="icpx-chip">{finished ? "Undecided" : "Pending"}</span>}
+        {row.apply_pending ? <span className="icpx-chip icc-applied-chip">Applying…</span>
+          : row.applied === "FIT" ? <span className="icpx-chip is-ok icc-applied-chip" title={row.applied_verified ? "Marked ICP verified by this check" : "Was already ICP verified"}>ICP verified</span>
+          : row.applied === "NON_FIT" ? <span className={`icpx-chip icc-applied-chip${row.applied_blocked ? " is-bad" : ""}`} title={row.applied_blocked ? "Domain added to the client's blocklist by this check" : "Not blocked: already ICP verified, a free-mail domain, or already on the blocklist"}>{row.applied_blocked ? "Blocked" : "Not blocked"}</span>
+          : null}
         {row.reviewed_at ? <span className="icpx-chip is-ok icc-reviewed" title={`Set by ${row.reviewed_by || "a teammate"} ${relativeTime(row.reviewed_at)}`}>Reviewed</span> : null}
         <small className="icc-tally">{row.fit_votes} FIT · {row.non_fit_votes} NON_FIT
           {row.reviewed_at && row.rule_verdict && row.rule_verdict !== row.verdict ? <> · runs said {row.rule_verdict}</> : null}</small>

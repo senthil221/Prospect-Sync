@@ -28,7 +28,9 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 process.on('SIGTERM', () => { stopping = true; });
 process.on('SIGINT', () => { stopping = true; });
 
-const db = new pg.Pool({ max: 2, application_name: 'prospect-icp-worker', connectionTimeoutMillis: 10_000 });
+// Three connections: claiming, saving batches, and applying check results
+// (which can hold one for a few seconds while a blocklist sweep runs).
+const db = new pg.Pool({ max: 3, application_name: 'prospect-icp-worker', connectionTimeoutMillis: 10_000 });
 db.on('error', () => { connected = false; fault = 'database_connection_failed'; stopping = true; process.exitCode = 1; });
 
 const health = createServer((request, response) => {
@@ -101,6 +103,29 @@ async function processBatch(unit) {
   }
 }
 
+// ICP checks with "apply results" on: FIT -> ICP verified, NON_FIT -> client
+// blocklist. The database decides and records what to do
+// (apply_icp_check_results_v1, 50 results of one check per call); this loop
+// only keeps calling it, apart from the model calls, so a blocklist sweep never
+// holds up a batch. A failure is logged and retried - it never stops the worker.
+async function applyLoop() {
+  while (!stopping) {
+    let applied = 0;
+    let pause = 5_000;
+    try {
+      const { rows } = await query('select public.apply_icp_check_results_v1($1) as result', [50], 3);
+      const result = rows[0]?.result ?? {};
+      applied = Number(result.applied ?? 0) || 0;
+      if (applied) log({ event: 'icp_apply', ...result });
+    } catch (error) {
+      // Undefined function: the database is older than this worker; check rarely.
+      pause = error?.code === '42883' ? 60_000 : 15_000;
+      log({ event: 'icp_apply_failed', code: error?.code ?? '', message: String(error?.message ?? error).slice(0, 300) });
+    }
+    await wait(applied ? 250 : pause);
+  }
+}
+
 async function claim() {
   const { rows } = await query('select public.claim_icp_validation_batch_v1($1, $2) as unit', [workerId, leaseSeconds]);
   const unit = rows[0]?.unit ?? null;
@@ -115,6 +140,7 @@ async function main() {
   connected = true;
   log({ event: 'icp_worker_started', configured: Boolean(apiKey), concurrency, timeoutMs });
 
+  const applier = applyLoop();
   let lastHeartbeat = Date.now();
   while (!stopping) {
     if (Date.now() - lastHeartbeat > 30_000) {
@@ -137,7 +163,7 @@ async function main() {
   }
   // In-flight calls get the stop grace period to land; anything still leased
   // after that expires and is retried, never lost.
-  await Promise.race([Promise.allSettled([...inFlight]), wait(50_000)]);
+  await Promise.race([Promise.allSettled([...inFlight, applier]), wait(50_000)]);
 }
 
 await new Promise((resolve, reject) => { health.once('error', reject); health.listen(9094, '0.0.0.0', resolve); });

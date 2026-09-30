@@ -15,7 +15,7 @@ import { PROVIDER_MODES, icpStrategy, sourceLabel } from "../../../worker/icp-va
 // GET  ?view=csv&client=&check=&filter=&search=           the same as a CSV download
 // GET  ?view=scope&client=&icp=                           how many companies each scope would check,
 //                                                         and the observed cost per company per model
-// POST {action:"start", clientId, icpId, strategy, providerMode, force,
+// POST {action:"start", clientId, icpId, strategy, providerMode, force, autoApply,
 //       scope:"unverified"|"all"|"selection", companyIds[] | allMatching + search + filters + …}
 //       Companies with a current ICP check result for this ICP are skipped unless force.
 // POST {action:"pause"|"resume"|"cancel"|"retry_failed", clientId, checkId}
@@ -202,7 +202,7 @@ async function handlePOST(request: Request) {
       if (read.error) return read.error;
       selection = read.args;
     }
-    const { data, error } = await supabase.rpc("start_icp_strategy_check_v2", {
+    const { data, error } = await supabase.rpc("start_icp_strategy_check_v3", {
       p_client_id: clientId,
       p_icp_profile_id: icpId,
       p_strategy: strategy.id,
@@ -210,6 +210,8 @@ async function handlePOST(request: Request) {
       ...selection,
       p_force: body.force === true,
       p_provider_mode: providerMode,
+      // FIT -> ICP verified, NON_FIT -> client blocklist, applied by the ICP worker.
+      p_auto_apply: body.autoApply !== false,
       p_created_by: actor,
     });
     if (error) return failure(error);

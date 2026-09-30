@@ -236,6 +236,7 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
   const [cheapest, setCheapest] = useState(true);
   // Companies already checked for this ICP are skipped unless forced.
   const [force, setForce] = useState(false);
+  const [autoApply, setAutoApply] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -260,7 +261,7 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
       try {
         const result = await api<{ check: { total_items: number; skipped_items?: number } }>("/api/icp-checks", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "start", clientId, icpId: chosen.id, strategy, providerMode: cheapest ? "cheapest" : "default", force, scope: "selection", ...selection }),
+          body: JSON.stringify({ action: "start", clientId, icpId: chosen.id, strategy, providerMode: cheapest ? "cheapest" : "default", force, autoApply, scope: "selection", ...selection }),
         });
         const skipped = Number(result.check.skipped_items ?? 0);
         onStarted(`${strategyLabel(strategy)} check started on ${formatNumber(result.check.total_items)} ${result.check.total_items === 1 ? "company" : "companies"} against ${chosen.name || "the ICP"}${skipped ? ` (${formatNumber(skipped)} already checked were skipped)` : ""}. Results fill the ICP check column as the votes decide them; follow progress on the client's ICP checks tab.`);
@@ -306,6 +307,7 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
           ]}/>
           {method === "strategy" ? <>
             <StrategyPicker name="icpv-dialog-strategy" value={strategy} onChange={setStrategy} companies={selectedCount} briefLength={chosen?.description.length}/>
+            <Switch checked={autoApply} onChange={setAutoApply} label="Apply results automatically" hint={autoApply ? "FIT → ICP verified. NON_FIT → domain added to the client's blocklist (not if already ICP verified)." : "Off: results are labels only."}/>
             <Switch checked={force} onChange={setForce} label="Force re-check" hint={force ? "Companies already checked for this ICP are checked again." : "Off: companies already checked for this ICP are skipped."}/>
             <Switch checked={cheapest} onChange={setCheapest} label="Cheapest providers" hint="Lowest-priced OpenRouter provider that supports JSON output and reasoning, no 4-bit hosts."/>
           </> : <>
