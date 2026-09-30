@@ -44,11 +44,11 @@ Forward releases require the worker file and health endpoint. An explicit rollba
 
 ## Operational controls
 
-Defaults stay below the 200,000/day account maximum. MailTester sustains about 100-110 checks a minute (~140,000/day): on 2026-09-30 a 150/minute pace (400 ms, 25 per 10 s, concurrency 12) was throttled with repeated HTTP 429 after a few minutes, so the pace went back (20260930180000):
+The account is on MailTester Ninja's Ultimate plan, documented as 200,000/day and "23 emails every 10 seconds" (one per 430 ms; https://mailtester.ninja/api/). The pace sits just under that (20260930190000); a 25-per-10-second pace was throttled with HTTP 429 on 2026-09-30:
 
-- daily rolling limit: 190,000 starts (retries included) - a ceiling this pace does not reach;
-- start spacing: 500 ms, with an 18-per-10-second rolling guard (~100/minute sustained);
-- HTTP concurrency: 8;
+- daily rolling limit: 190,000 starts (retries included);
+- start spacing: 450 ms, with a 22-per-10-second rolling guard (~132/minute = ~190,000/day);
+- HTTP concurrency: 12 (starts are what the plan limits; 12 in flight sustains 132/minute at ~4.4 s a check);
 - provider timeout: 45 seconds;
 - maximum attempts: 4.
 

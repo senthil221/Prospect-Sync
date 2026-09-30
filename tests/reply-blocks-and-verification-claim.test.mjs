@@ -82,16 +82,19 @@ test("reconciliation reads flagged ready targets, and every finish path flags th
   assert.match(harness, /'20260930160000_reconcile_reads_ready_targets\.sql'/);
 });
 
-test("verification runs at the pace MailTester sustains, under a 190,000 daily ceiling", async () => {
-  const raised = await read("../supabase/migrations/20260930170000_verification_paced_for_190k_a_day.sql");
-  assert.ok(raised.includes("set daily_limit = 190000"));
-  const current = await read("../supabase/migrations/20260930180000_verification_back_to_the_sustained_pace.sql");
-  assert.ok(current.includes("if v_rolling>=18 then"));
-  assert.ok(current.includes("next_dispatch_at=now()+interval '500 milliseconds'"));
+test("verification is paced just under MailTester's documented 23-per-10s plan limit", async () => {
+  const current = await read("../supabase/migrations/20260930190000_verification_paced_to_the_documented_plan_limit.sql");
+  const rolling = Number(current.match(/if v_rolling>=(\d+) then/)[1]);
+  const spacing = Number(current.match(/next_dispatch_at=now\(\)\+interval '(\d+) milliseconds'/)[1]);
+  assert.ok(rolling < 23, "rolling guard stays under the plan's 23 per 10 seconds");
+  assert.ok(spacing > 430, "start spacing stays above the plan's one per 430ms");
   const { PROVIDER_START_SPACING_MS } = await import("../worker/verification-scheduler.mjs");
-  assert.equal(PROVIDER_START_SPACING_MS, 500, "the worker and the claim use the same gap");
+  assert.equal(PROVIDER_START_SPACING_MS, spacing, "the worker and the claim use the same gap");
+  // Fast enough for the 190,000 daily ceiling (132/min), no faster.
+  const perMinute = Math.min(rolling * 6, 60_000 / spacing);
+  assert.ok(perMinute >= 130 && perMinute < 138, `${perMinute}/min`);
   const compose = await read("../deploy/docker-compose.yml");
-  assert.ok(compose.includes("MTN_CONCURRENCY: ${MTN_CONCURRENCY:-8}"));
+  assert.ok(compose.includes("MTN_CONCURRENCY: ${MTN_CONCURRENCY:-12}"));
   const harness = await read("../scripts/test-email-verification-migration.mjs");
-  assert.ok(harness.includes("20260930180000_verification_back_to_the_sustained_pace.sql"));
+  assert.ok(harness.includes("20260930190000_verification_paced_to_the_documented_plan_limit.sql"));
 });

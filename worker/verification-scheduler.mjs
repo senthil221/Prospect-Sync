@@ -1,6 +1,7 @@
-// 500ms, with the claim's 18-per-10s guard: the pace MailTester sustains without
-// HTTP 429 (~100/min). 400ms / 25 per 10s was throttled - see 20260930180000.
-export const PROVIDER_START_SPACING_MS = 500;
+// 450ms, with the claim's 22-per-10s guard: just under MailTester Ninja's
+// documented Ultimate-plan limit of 23 per 10s / one per 430ms (~132/min,
+// ~190k/day). 400ms / 25 per 10s exceeded it - see 20260930190000.
+export const PROVIDER_START_SPACING_MS = 450;
 
 export function claimDelayMilliseconds(lastClaimAt, now = Date.now(), spacingMs = PROVIDER_START_SPACING_MS) {
   if (!Number.isFinite(lastClaimAt) || lastClaimAt <= 0) return 0;
