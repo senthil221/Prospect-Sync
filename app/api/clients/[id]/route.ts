@@ -9,21 +9,22 @@ async function handleGET(_request: Request, context: { params: Promise<{ id: str
   const { id } = await context.params;
   const supabase = createAdminClient();
   const [summary, setting, folder] = await Promise.all([
-    supabase.from("client_summaries").select("*").eq("id", id).maybeSingle(),
+    supabase.rpc("client_summaries_v1", { p_client_id: id }),
     supabase.from("client_settings").select("cooldown_days").eq("client_id", id).maybeSingle(),
     supabase.from("clients").select("folder_id").eq("id", id).maybeSingle(),
   ]);
   const error = summary.error ?? setting.error ?? folder.error;
   if (error) return Response.json({ error: error.message }, { status: 500 });
-  if (!summary.data) return Response.json({ error: "Client not found." }, { status: 404 });
-  const folderId = folder.data?.folder_id ?? summary.data.folder_id ?? null;
+  const client = ((summary.data ?? []) as Array<{ id: string; folder_id: string | null }>)[0];
+  if (!client) return Response.json({ error: "Client not found." }, { status: 404 });
+  const folderId = folder.data?.folder_id ?? client.folder_id ?? null;
   const folderName = folderId
     ? await supabase.from("client_folders").select("name").eq("id", folderId).maybeSingle()
     : null;
   if (folderName?.error) return Response.json({ error: folderName.error.message }, { status: 500 });
   return Response.json({
     client: {
-      ...summary.data,
+      ...client,
       folder_id: folderId,
       folder_name: folderName?.data?.name ?? null,
       cooldown_days: setting.data?.cooldown_days ?? 90,

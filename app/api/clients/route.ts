@@ -8,7 +8,8 @@ async function handleGET() {
   if (unauthorized) return unauthorized;
   const supabase = createAdminClient();
   const [summaries, settings, folders] = await Promise.all([
-    supabase.from("client_summaries").select("*").order("name"),
+    // Cached until memberships or company text change (20260930250000).
+    supabase.rpc("client_summaries_v1", { p_client_id: null }),
     supabase.from("client_settings").select("client_id,cooldown_days"),
     supabase.from("client_folders").select("id,name,created_at").order("name"),
   ]);
@@ -17,7 +18,7 @@ async function handleGET() {
   const cooldowns = new Map((settings.data ?? []).map((setting) => [setting.client_id, setting.cooldown_days]));
   const folderNames = new Map((folders.data ?? []).map((folder) => [folder.id, folder.name]));
   return Response.json({
-    clients: (summaries.data ?? []).map((client) => ({ ...client, folder_name: client.folder_id ? folderNames.get(client.folder_id) ?? null : null, cooldown_days: cooldowns.get(client.id) ?? 90 })),
+    clients: ((summaries.data ?? []) as Array<{ id: string; folder_id: string | null }>).map((client) => ({ ...client, folder_name: client.folder_id ? folderNames.get(client.folder_id) ?? null : null, cooldown_days: cooldowns.get(client.id) ?? 90 })),
     folders: folders.data ?? [],
   });
 }

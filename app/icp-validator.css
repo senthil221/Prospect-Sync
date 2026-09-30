@@ -492,3 +492,13 @@
 .icpx-ghost.is-accent { border-color: var(--success-line); color: var(--success); }
 .icpx-ghost.is-accent:hover { background: var(--success-soft); }
 .icpx-chip.is-ok { border-color: var(--success-line); background: var(--success-soft); color: var(--success); }
+/* Review a result by hand */
+.icc-reviewed { margin-left: 4px; }
+.icc-review { display: flex; gap: 3px; margin-top: 6px; }
+.icc-review button { height: 22px; padding: 0 7px; border: 1px solid var(--border-subtle); border-radius: var(--radius-full); background: var(--surface); color: var(--text-tertiary); font-size: 10.5px; font-weight: var(--weight-bold); cursor: pointer; opacity: .75; transition: opacity var(--duration-instant) var(--ease), border-color var(--duration-instant) var(--ease); }
+.icpx-table tbody tr:hover .icc-review button, .icc-review button:focus-visible, .icc-review button.is-on { opacity: 1; }
+.icc-review button:hover:not(:disabled) { border-color: var(--border-default); color: var(--text-primary); }
+.icc-review button.is-on.is-fit { border-color: var(--success-line); background: var(--success-soft); color: var(--success); }
+.icc-review button.is-on.is-non-fit { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger); }
+.icc-review button.is-undo { border-style: dashed; }
+.icc-review button:disabled { cursor: wait; }

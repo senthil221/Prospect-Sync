@@ -26,15 +26,17 @@ export type Check = {
   forced?: boolean; skipped_items?: number;
   verified_at?: string | null; verified_by?: string; verified_items?: number;
   status: RunStatus; status_message: string; started_at: string | null; finished_at: string | null; cost_usd: number; failed_items: number;
-  passes: Pass[]; outcome: { fit: number; non_fit: number; pending: number; split: number };
+  passes: Pass[]; outcome: { fit: number; non_fit: number; pending: number; split: number; reviewed?: number; split_unreviewed?: number };
 };
 type Vote = { pass_no: number; model: string; reasoning_effort: string; state: string; verdict: "FIT" | "NON_FIT" | null; reason: string };
 export type ResultRow = {
   company_id: string; name: string; domain: string; industry: string; short_description: string;
   verdict: "FIT" | "NON_FIT" | null; reason: string; fit_votes: number; non_fit_votes: number; votes: Vote[];
+  // What the method's rule decides from the votes alone, and who (if anyone) set the result by hand.
+  rule_verdict?: "FIT" | "NON_FIT" | null; reviewed_by?: string; reviewed_at?: string | null;
 };
 type Scope = "unverified" | "all" | "paste";
-type Filter = "all" | "fit" | "non_fit" | "pending" | "split";
+type Filter = "all" | "fit" | "non_fit" | "pending" | "split" | "reviewed";
 type ScopeCounts = { all: number; all_unchecked: number; unverified: number; unverified_unchecked: number };
 
 const base = "/api/icp-checks";
@@ -106,7 +108,8 @@ export default function IcpChecksWorkspace({ clients, client }: { clients: Clien
       </section>
     </div>
 
-    {selected ? <Results check={selected} onChanged={(message) => { setNotice(message); setVersion((value) => value + 1); }}/> : null}
+    {selected ? <Results check={selected} onChanged={(message) => { setNotice(message); setVersion((value) => value + 1); }}
+      onRefresh={() => setVersion((value) => value + 1)}/> : null}
   </article>;
 }
 
@@ -310,7 +313,8 @@ export function CheckItem({ check, selected, onSelect, onChanged, showClient = t
   </li>;
 }
 
-function Results({ check, onChanged }: { check: Check; onChanged: (message: string) => void }) {
+function Results({ check, onChanged, onRefresh }: { check: Check; onChanged: (message: string) => void; onRefresh: () => void }) {
+  const [reviewing, setReviewing] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [confirmVerify, setConfirmVerify] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -348,6 +352,17 @@ function Results({ check, onChanged }: { check: Check; onChanged: (message: stri
   const strategy = strategies.find((item) => item.id === check.strategy);
   const fit = num(check.outcome.fit);
 
+  // Set one company's result by hand ("" puts back what the runs decided).
+  async function review(companyId: string, verdict: "FIT" | "NON_FIT" | "") {
+    setReviewing(companyId); setError("");
+    try {
+      const response = await post<{ result: Partial<ResultRow> & { company_id: string } }>({ action: "review", clientId: check.client_id, checkId: check.id, companyId, verdict });
+      setData((current) => current ? { ...current, rows: current.rows.map((row) => row.company_id === companyId ? { ...row, ...response.result } : row) } : current);
+      onRefresh();
+    } catch (caught) { setError(failure(caught, "Unable to save the review.")); }
+    finally { setReviewing(""); }
+  }
+
   async function markFitVerified() {
     setVerifying(true); setVerifyError("");
     try {
@@ -364,7 +379,9 @@ function Results({ check, onChanged }: { check: Check; onChanged: (message: stri
     { value: "all", label: <>All <b>{formatNumber(num(check.total_items))}</b></> },
     { value: "fit", label: <>FIT <b>{formatNumber(num(check.outcome.fit))}</b></> },
     { value: "non_fit", label: <>NON_FIT <b>{formatNumber(num(check.outcome.non_fit))}</b></> },
-    { value: "split", label: <>Split votes <b>{formatNumber(num(check.outcome.split))}</b></>, hint: "The runs disagreed - the borderline companies" },
+    { value: "split", label: <>Split votes <b>{formatNumber(num(check.outcome.split))}</b></>,
+      hint: `The runs disagreed - the borderline companies. ${formatNumber(num(check.outcome.split_unreviewed))} not reviewed yet.` },
+    ...(num(check.outcome.reviewed) ? [{ value: "reviewed" as Filter, label: <>Reviewed <b>{formatNumber(num(check.outcome.reviewed))}</b></>, hint: "Results set by hand" }] : []),
     ...(num(check.outcome.pending) ? [{ value: "pending" as Filter, label: <>{finished ? "Undecided" : "Pending"} <b>{formatNumber(num(check.outcome.pending))}</b></> }] : []),
   ];
 
@@ -399,7 +416,7 @@ function Results({ check, onChanged }: { check: Check; onChanged: (message: stri
     {error ? <p className="form-error" role="alert">{error}</p> : null}
     {!shown ? <div className="icpx-skeleton is-rows" aria-busy="true"><span/><span/><span/><span/></div>
       : !shown.rows.length ? <div className="icpx-empty is-quiet"><AppIcon name="search" size={18}/><div><strong>Nothing here</strong><p>{filter === "all" && !query ? "The first votes land within a minute or two." : "No company matches this view."}</p></div></div>
-      : <StrategyResultsTable rows={shown.rows} finished={finished}/>}
+      : <StrategyResultsTable rows={shown.rows} finished={finished} busyId={reviewing} onReview={(companyId, verdict) => void review(companyId, verdict)}/>}
     {shown && pages > 1 ? <div className="icpx-pager">
       <span>Page {page} of {formatNumber(pages)} · {formatNumber(shown.total)} companies</span>
       <span><button type="button" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>Previous</button>{" "}
@@ -408,7 +425,9 @@ function Results({ check, onChanged }: { check: Check; onChanged: (message: stri
   </section>;
 }
 
-export function StrategyResultsTable({ rows, finished }: { rows: ResultRow[]; finished: boolean }) {
+export function StrategyResultsTable({ rows, finished, onReview, busyId = "" }: {
+  rows: ResultRow[]; finished: boolean; onReview?: (companyId: string, verdict: "FIT" | "NON_FIT" | "") => void; busyId?: string;
+}) {
   return <div className="icpx-table-wrap"><table className="icpx-table icc-table">
     <thead><tr><th>Company</th><th>Result</th><th>Votes</th><th>Why</th></tr></thead>
     <tbody>{rows.map((row) => <tr key={row.company_id} className={row.fit_votes > 0 && row.non_fit_votes > 0 ? "is-split" : undefined}>
@@ -420,7 +439,16 @@ export function StrategyResultsTable({ rows, finished }: { rows: ResultRow[]; fi
       <td>{row.verdict
         ? <span className={`icpx-verdict ${row.verdict === "FIT" ? "is-fit" : "is-non-fit"}`}>{row.verdict}</span>
         : <span className="icpx-chip">{finished ? "Undecided" : "Pending"}</span>}
-        <small className="icc-tally">{row.fit_votes} FIT · {row.non_fit_votes} NON_FIT</small></td>
+        {row.reviewed_at ? <span className="icpx-chip is-ok icc-reviewed" title={`Set by ${row.reviewed_by || "a teammate"} ${relativeTime(row.reviewed_at)}`}>Reviewed</span> : null}
+        <small className="icc-tally">{row.fit_votes} FIT · {row.non_fit_votes} NON_FIT
+          {row.reviewed_at && row.rule_verdict && row.rule_verdict !== row.verdict ? <> · runs said {row.rule_verdict}</> : null}</small>
+        {onReview ? <div className="icc-review" role="group" aria-label={`Set the result for ${row.name}`}>
+          {(["FIT", "NON_FIT"] as const).map((value) => <button key={value} type="button" disabled={busyId === row.company_id}
+            className={row.reviewed_at && row.verdict === value ? `is-on is-${value === "FIT" ? "fit" : "non-fit"}` : undefined}
+            aria-pressed={Boolean(row.reviewed_at) && row.verdict === value}
+            onClick={() => onReview(row.company_id, value)}>{value}</button>)}
+          {row.reviewed_at ? <button type="button" className="is-undo" disabled={busyId === row.company_id} onClick={() => onReview(row.company_id, "")}>Undo</button> : null}
+        </div> : null}</td>
       <td><div className="icc-votes">{row.votes.map((vote) => <span key={vote.pass_no} title={vote.reason || undefined}
         className={`icc-vote ${vote.verdict === "FIT" ? "is-fit" : vote.verdict === "NON_FIT" ? "is-non-fit" : "is-waiting"}`}>
         <b>#{vote.pass_no}</b> {sourceLabel(vote.model).split(" ")[0]} {vote.verdict ?? (vote.state === "failed" ? "failed" : vote.state === "skipped" ? "skipped" : "waiting")}

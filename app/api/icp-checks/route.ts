@@ -20,11 +20,12 @@ import { PROVIDER_MODES, icpStrategy, sourceLabel } from "../../../worker/icp-va
 //       Companies with a current ICP check result for this ICP are skipped unless force.
 // POST {action:"pause"|"resume"|"cancel"|"retry_failed", clientId, checkId}
 // POST {action:"mark_fit_verified", clientId, checkId}      the check's FIT companies -> ICP verified
+// POST {action:"review", clientId, checkId, companyId, verdict:"FIT"|"NON_FIT"|""}   set a result by hand / undo
 
 const missingCodes = new Set(["PGRST202", "PGRST205", "42883", "42P01"]);
 const pageSize = 100;
 const csvLimit = 100_000;
-const filters = new Set(["all", "fit", "non_fit", "pending", "split"]);
+const filters = new Set(["all", "fit", "non_fit", "pending", "split", "reviewed"]);
 const scopes = new Set(["all", "unverified", "selection"]);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -43,6 +44,7 @@ type Vote = { pass_no: number; model: string; reasoning_effort: string; state: s
 type ResultRow = {
   company_id: string; name: string; domain: string; industry: string; short_description: string;
   verdict: "FIT" | "NON_FIT" | null; reason: string; fit_votes: number; non_fit_votes: number; votes: Vote[];
+  reviewed_by?: string; reviewed_at?: string | null;
 };
 
 function resultsArgs(url: URL, clientId: string, checkId: string, limit: number, offset: number) {
@@ -86,7 +88,7 @@ async function costPerCompany() {
   return Object.fromEntries([...totals].map(([key, total]) => [key, total.cost / total.companies]));
 }
 
-const filterNames: Record<string, string> = { fit: "FIT", non_fit: "NON_FIT", split: "Split votes", pending: "Pending" };
+const filterNames: Record<string, string> = { fit: "FIT", non_fit: "NON_FIT", split: "Split votes", pending: "Pending", reviewed: "Reviewed" };
 
 // "ICP check - Balanced - Testing ICP - Krishify - FIT - 2026-09-30.csv":
 // the method first, then whose and which ICP, the view if it is not
@@ -148,7 +150,7 @@ async function handleGET(request: Request) {
   }
 
   if (view === "csv") {
-    const header = ["Company", "Domain", "Industry", "Final verdict", "FIT votes", "NON_FIT votes", "Reason", "Votes", "Short description"];
+    const header = ["Company", "Domain", "Industry", "Final verdict", "FIT votes", "NON_FIT votes", "Reviewed by", "Reason", "Votes", "Short description"];
     const lines = [header.map(csvCell).join(",")];
     for (let offset = 0; offset < csvLimit; offset += 1000) {
       const { data, error } = await supabase.rpc("icp_strategy_results_v1", resultsArgs(url, clientId, checkId, 1000, offset));
@@ -156,7 +158,7 @@ async function handleGET(request: Request) {
       const rows = (data as { rows?: ResultRow[] })?.rows ?? [];
       for (const row of rows) {
         const votes = row.votes.map((vote) => `#${vote.pass_no} ${sourceLabel(vote.model)} (${vote.reasoning_effort}): ${vote.verdict ?? vote.state}`).join("; ");
-        lines.push([row.name, row.domain, row.industry, row.verdict ?? "Pending", row.fit_votes, row.non_fit_votes, row.reason, votes, row.short_description]
+        lines.push([row.name, row.domain, row.industry, row.verdict ?? "Pending", row.fit_votes, row.non_fit_votes, row.reviewed_at ? row.reviewed_by || "yes" : "", row.reason, votes, row.short_description]
           .map(csvCell).join(","));
       }
       if (rows.length < 1000) break;
@@ -212,6 +214,20 @@ async function handlePOST(request: Request) {
     });
     if (error) return failure(error);
     return Response.json({ check: data });
+  }
+
+  // One company's result set by hand; verdict "" puts back what the runs decided.
+  if (action === "review") {
+    const checkId = String(body.checkId ?? "").trim();
+    const companyId = String(body.companyId ?? "").trim();
+    const verdict = String(body.verdict ?? "");
+    if (!uuid.test(checkId) || !companyId) return bad("Which check and company?");
+    if (!["FIT", "NON_FIT", ""].includes(verdict)) return bad("Choose FIT or NON_FIT.");
+    const { data, error } = await supabase.rpc("review_icp_check_company_v1", {
+      p_client_id: clientId, p_check_id: checkId, p_company_id: companyId, p_verdict: verdict, p_actor: actor,
+    });
+    if (error) return failure(error);
+    return Response.json({ result: data });
   }
 
   // The check's FIT companies become ICP verified for the client, the same way

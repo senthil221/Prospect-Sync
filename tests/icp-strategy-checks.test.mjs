@@ -192,3 +192,37 @@ test("the Company DB filters by ICP check result, and a check's FIT can be marke
   const screen = await read("../app/components/IcpChecksWorkspace.tsx");
   assert.match(screen, /action: "mark_fit_verified"/);
 });
+
+test("a result can be set by hand, survives later votes, and undoes back to the rule", async () => {
+  const migration = await read("../supabase/migrations/20260930240000_icp_check_review.sql");
+  assert.match(migration, /select \* into v_check from public\.icp_strategy_checks\s+where id = p_check_id and client_id = p_client_id\s+for update;/);
+  // Undo recomputes the rule from the votes.
+  assert.match(migration, /v_rule := case when v_row\.fit_votes >= v_need then 'FIT'\s+when v_row\.non_fit_votes > v_passes - v_need then 'NON_FIT' end;/);
+  assert.match(migration, /when 'reviewed' then s\.reviewed_at is not null/);
+  assert.match(migration, /'split_unreviewed', count\(\*\) filter/);
+  assert.match(migration, /ICP review proof passed and was rolled back/);
+  // settle_ still decides only undecided rows, so a review is never overwritten.
+  const settle = await read("../supabase/migrations/20260930210000_icp_strategy_checks.sql");
+  assert.match(settle, /and s\.verdict is null\s+and \(s\.fit_votes >= v_need/);
+
+  const route = await read("../app/api/icp-checks/route.ts");
+  assert.match(route, /rpc\("review_icp_check_company_v1"/);
+  assert.match(route, /if \(!\["FIT", "NON_FIT", ""\]\.includes\(verdict\)\) return bad/);
+  const screen = await read("../app/components/IcpChecksWorkspace.tsx");
+  assert.match(screen, /action: "review", clientId: check\.client_id, checkId: check\.id, companyId, verdict/);
+});
+
+test("the Clients list reuses its counts until memberships or company text change", async () => {
+  const migration = await read("../supabase/migrations/20260930250000_client_summaries_cached.sql");
+  for (const table of ["client_prospects", "client_companies"]) {
+    assert.ok(migration.includes(`after insert or update or delete on public.${table}\n  for each statement execute function public.bump_data_version_client_counts();`), table);
+  }
+  assert.match(migration, /after update of keywords, short_description on public\.companies/);
+  assert.match(migration, /after update of company_id or delete on public\.prospects/);
+  assert.match(migration, /v_cache\.computed_at > now\(\) - interval '5 minutes'/);
+  assert.match(migration, /Client summaries proof passed and was rolled back/);
+  const list = await read("../app/api/clients/route.ts");
+  assert.match(list, /supabase\.rpc\("client_summaries_v1", \{ p_client_id: null \}\)/);
+  const one = await read("../app/api/clients/[id]/route.ts");
+  assert.match(one, /supabase\.rpc\("client_summaries_v1", \{ p_client_id: id \}\)/);
+});
