@@ -82,9 +82,9 @@ test('auth, quota-shaped body, malformed JSON and timeouts never become invalid 
 
 test('claim pacing waits only for the provider start gap', () => {
   assert.equal(claimDelayMilliseconds(0, 10_000), 0);
-  assert.equal(claimDelayMilliseconds(10_000, 10_100), 300);
-  assert.equal(claimDelayMilliseconds(10_000, 10_399), 1);
-  assert.equal(claimDelayMilliseconds(10_000, 10_400), 0);
+  assert.equal(claimDelayMilliseconds(10_000, 10_100), 400);
+  assert.equal(claimDelayMilliseconds(10_000, 10_499), 1);
+  assert.equal(claimDelayMilliseconds(10_000, 10_500), 0);
   assert.equal(claimDelayMilliseconds(10_000, 12_000), 0);
 });
 
@@ -104,7 +104,7 @@ test('fast provider completions cannot starve the outer maintenance cadence', as
   });
   assert.equal(result.started, 8);
   assert.equal(claims, 8, 'one outer tick has a hard dispatch budget even when slots instantly reopen');
-  assert.deepEqual(delays, [400, 400, 400, 400, 400, 400, 400]);
+  assert.deepEqual(delays, [500, 500, 500, 500, 500, 500, 500]);
 });
 
 test('a permanent result-save failure closes the dispatch gate before another paid start', async () => {

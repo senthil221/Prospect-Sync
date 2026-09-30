@@ -44,11 +44,11 @@ Forward releases require the worker file and health endpoint. An explicit rollba
 
 ## Operational controls
 
-Defaults stay below the 200,000/day account maximum. They were raised on 2026-09-30 (20260930170000) from the launch values - 150,000/day, 500 ms, 18 per 10 s, concurrency 8 - after 48 hours with no HTTP 429:
+Defaults stay below the 200,000/day account maximum. MailTester sustains about 100-110 checks a minute (~140,000/day): on 2026-09-30 a 150/minute pace (400 ms, 25 per 10 s, concurrency 12) was throttled with repeated HTTP 429 after a few minutes, so the pace went back (20260930180000):
 
-- daily rolling limit: 190,000 starts (retries included);
-- start spacing: 400 ms, with a 25-per-10-second rolling guard (150/minute ceiling);
-- HTTP concurrency: 12;
+- daily rolling limit: 190,000 starts (retries included) - a ceiling this pace does not reach;
+- start spacing: 500 ms, with an 18-per-10-second rolling guard (~100/minute sustained);
+- HTTP concurrency: 8;
 - provider timeout: 45 seconds;
 - maximum attempts: 4.
 
