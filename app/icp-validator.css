@@ -411,3 +411,8 @@
 .icpx-defaults-note.is-ok { color: var(--success); }
 .icpx-defaults-note.is-error { color: var(--danger); }
 @media (max-width: 900px) { .evx-legend { grid-template-columns: 1fr; } }
+/* Beside the chart, the status legend is one column. */
+.evx-grid .evx-legend { grid-template-columns: 1fr; max-width: none; gap: var(--space-3); }
+.evx-grid .evx-results-body { gap: var(--space-6); }
+.evx-peak { color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); white-space: nowrap; }
+.evx-throughput .evx-bars { height: 150px; }

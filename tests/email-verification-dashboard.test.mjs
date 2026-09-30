@@ -33,7 +33,11 @@ test("the page is a section with its own nav entry and live polling", async () =
 
 test("the page keeps to what an operator acts on", async () => {
   const page = await read("../app/components/EmailVerificationWorkspace.tsx");
-  assert.doesNotMatch(page, /EvThroughput|Segmented/);
+  // The hourly chart and the all-time / 24h switch earn their place; long
+  // explanations stay in hover titles.
+  assert.ok(page.includes("export function EvThroughput"));
+  assert.ok(page.includes('label="Period" value={period}'));
+  assert.ok(!page.includes("<small>{outcome.hint}</small>"));
   assert.ok(page.includes('<h4 id="evx-results-title">Email status</h4>'));
 });
 

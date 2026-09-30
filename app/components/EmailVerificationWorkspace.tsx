@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AppIcon } from "./DashboardUi";
-import { durationText, relativeTime } from "./IcpValidatorViews";
+import { Segmented, durationText, relativeTime } from "./IcpValidatorViews";
 
 // Email verification, watched: is MailTester being called right now, how fast,
 // how long until the queue is empty, what the results look like, and every
@@ -124,11 +124,13 @@ function Donut({ values }: { values: Array<{ tone: string; value: number }> }) {
 }
 
 export function EvResults({ data }: { data: EvDashboard }) {
-  const source = data.results;
+  const [period, setPeriod] = useState<"all" | "24h">("all");
+  const source = period === "all" ? data.results : data.results_24h;
   const total = outcomes.reduce((sum, outcome) => sum + n(source[outcome.key]), 0);
   const valid = n(source.valid);
   return <section className="icpx-card evx-results" aria-labelledby="evx-results-title">
-    <div className="icpx-section-head"><div><h4 id="evx-results-title">Email status</h4></div></div>
+    <div className="icpx-section-head"><div><h4 id="evx-results-title">Email status</h4></div>
+      <Segmented<"all" | "24h"> label="Period" value={period} onChange={setPeriod} options={[{ value: "all", label: "All time" }, { value: "24h", label: "Last 24h" }]}/></div>
     <div className="evx-results-body">
       <div className="evx-donut-wrap">
         <Donut values={outcomes.map((outcome) => ({ tone: outcome.tone, value: n(source[outcome.key]) }))}/>
@@ -142,6 +144,24 @@ export function EvResults({ data }: { data: EvDashboard }) {
           <b>{fmt(value)}</b><em>{total ? `${pct(value, total).toFixed(1)}%` : "-"}</em>
         </li>;
       })}</ul>
+    </div>
+  </section>;
+}
+
+export function EvThroughput({ data }: { data: EvDashboard }) {
+  const hours = data.throughput.hourly ?? [];
+  const max = Math.max(1, ...hours.map((hour) => n(hour.checks)));
+  return <section className="icpx-card evx-throughput" aria-labelledby="evx-throughput-title">
+    <div className="icpx-section-head"><div><h4 id="evx-throughput-title">Checks per hour</h4></div><span className="evx-peak">peak {fmt(max)}/h</span></div>
+    <div className="evx-bars" role="img" aria-label={`Checks per hour for the last 24 hours, peak ${fmt(max)}`}>
+      {hours.map((hour, index) => {
+        const value = n(hour.checks);
+        const label = new Date(hour.hour).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+        return <div key={hour.hour} className={`evx-bar${index === hours.length - 1 ? " is-now" : ""}`} title={`${label} - ${fmt(value)} checks`}>
+          <i style={{ height: `${Math.max(value ? 3 : 0, (value / max) * 100)}%` }}/>
+          {index % 6 === 0 || index === hours.length - 1 ? <span>{index === hours.length - 1 ? "now" : label}</span> : null}
+        </div>;
+      })}
     </div>
   </section>;
 }
@@ -242,7 +262,10 @@ export default function EmailVerificationWorkspace({ isAdmin }: { isAdmin: boole
       <EvHero data={data} isAdmin={isAdmin} busy={busy}
         onProvider={(action) => void act("provider", "/api/verifications/provider", { action }, action === "pause" ? "Dispatch paused. Calls in flight finish; nothing new starts." : action === "stop" ? "Dispatch stopped." : "Dispatch is running.")}/>
       <EvKpis data={data}/>
-      <EvResults data={data}/>
+      <div className="evx-grid">
+        <EvResults data={data}/>
+        <EvThroughput data={data}/>
+      </div>
       <section className="icpx-card" aria-labelledby="evx-runs-title">
         <div className="icpx-section-head"><div><h4 id="evx-runs-title">Runs</h4></div></div>
         <EvRuns runs={data.runs} busy={busy} onRun={(run, action) => void act(run.id, `/api/verifications/${run.id}`, { action },
