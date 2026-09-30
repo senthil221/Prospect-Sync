@@ -1,26 +1,61 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { api, companyApiPath, encodeFilters, prefetchApi, prospectApiPath } from "../lib/dashboard-api";
 import { initials } from "../lib/dashboard-helpers";
 import { scopeRestricts, type CompanyScope, type PeopleScope } from "../lib/workspace-scopes";
 import { readWorkspaceUrl, writeWorkspaceUrl, type WorkspaceUrlState } from "../lib/workspace-url";
 import { emptyStats, type ClientRecord, type DeleteRequest, type ImportRecord, type ListRecord, type Prospect, type ProspectFilter, type Section } from "../lib/types";
-import ClientsPanel from "./components/ClientsPanel";
 import CompaniesWorkspace, { useCompaniesWorkspaceController } from "./components/CompaniesWorkspace";
-import CoveragePanel from "./components/CoveragePanel";
-import DataQualityPanel from "./components/DataQualityPanel";
 import { AppIcon, DeleteConfirmation, LoadingState, ProspectDrawer, type IconName } from "./components/DashboardUi";
-import ImportsPanel, { type ImportDestination } from "./components/ImportsPanel";
-import IntegrationsPanel from "./components/IntegrationsPanel";
-import ReplyBlocklistPanel from "./components/ReplyBlocklistPanel";
-import EmailVerificationWorkspace from "./components/EmailVerificationWorkspace";
-import LogsPanel from "./components/LogsPanel";
+import type { ImportDestination } from "./components/ImportsPanel";
 import ThemeToggle from "./components/ThemeToggle";
 import MobileNav from "./components/MobileNav";
 import OverviewWorkspace from "./components/OverviewWorkspace";
 import ProspectsWorkspace, { useProspectsWorkspaceController } from "./components/ProspectsWorkspace";
+
+// Screens other than Overview, People and Companies load on demand, each in its
+// own chunk, so the first page ships only what it shows (all fourteen screens
+// used to arrive in one ~530 KB bundle). People and Companies stay eager: this
+// shell calls their controller hooks. Once the first page is up and the
+// browser is idle, the rest are fetched in the background, so opening one
+// later is still instant. See node_modules/next/dist/docs/01-app/02-guides/lazy-loading.md.
+const screenImports = {
+  clients: () => import("./components/ClientsPanel"),
+  coverage: () => import("./components/CoveragePanel"),
+  quality: () => import("./components/DataQualityPanel"),
+  imports: () => import("./components/ImportsPanel"),
+  integrations: () => import("./components/IntegrationsPanel"),
+  replyBlocklist: () => import("./components/ReplyBlocklistPanel"),
+  verification: () => import("./components/EmailVerificationWorkspace"),
+  logs: () => import("./components/LogsPanel"),
+};
+const screenLoading = () => <LoadingState label="Loading this screen"/>;
+const ClientsPanel = dynamic(screenImports.clients, { loading: screenLoading });
+const CoveragePanel = dynamic(screenImports.coverage, { loading: screenLoading });
+const DataQualityPanel = dynamic(screenImports.quality, { loading: screenLoading });
+const ImportsPanel = dynamic(screenImports.imports, { loading: screenLoading });
+const IntegrationsPanel = dynamic(screenImports.integrations, { loading: screenLoading });
+const ReplyBlocklistPanel = dynamic(screenImports.replyBlocklist, { loading: screenLoading });
+const EmailVerificationWorkspace = dynamic(screenImports.verification, { loading: screenLoading });
+const LogsPanel = dynamic(screenImports.logs, { loading: screenLoading });
+
+function usePreloadScreens(isAdmin: boolean) {
+  useEffect(() => {
+    const load = () => {
+      for (const [name, load] of Object.entries(screenImports)) {
+        if (name === "logs" && !isAdmin) continue;
+        void load().catch(() => {});
+      }
+    };
+    const idle = (globalThis as { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number }).requestIdleCallback;
+    if (idle) { const handle = idle(load, { timeout: 4000 }); return () => (globalThis as { cancelIdleCallback?: (handle: number) => void }).cancelIdleCallback?.(handle); }
+    const timer = window.setTimeout(load, 2500);
+    return () => window.clearTimeout(timer);
+  }, [isAdmin]);
+}
 
 const baseNavGroups: Array<{ label: string; items: Array<{ id: Section; label: string; mark: IconName }> }> = [
   {
@@ -68,6 +103,7 @@ export default function DashboardApp(props: { currentUserEmail: string; isAdmin:
 
 function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: string; isAdmin: boolean }) {
   const navGroups = useMemo(() => navGroupsFor(isAdmin), [isAdmin]);
+  usePreloadScreens(isAdmin);
   const navItems = useMemo(() => navGroups.flatMap((group) => group.items), [navGroups]);
   const searchParams = useSearchParams();
   // Read once. After mount the URL is written FROM state, and popstate is what
