@@ -67,3 +67,17 @@ test("results filter by agreement, and runs say how long they took", async () =>
   const views = await read("../app/components/IcpValidatorViews.tsx");
   assert.match(views, /run\.finished_at \? `Took \$\{took\}` : active \? `Running \$\{took\}`/);
 });
+
+test("reconciliation reads flagged ready targets, and every finish path flags them", async () => {
+  const migration = await read("../supabase/migrations/20260930160000_reconcile_reads_ready_targets.sql");
+  assert.match(migration, /on prospect_verification\.run_targets \(run_id, prospect_id\)\s+where state = 'waiting' and reconcile_ready;/);
+  // Any check reaching completed or error flags its waiting targets...
+  assert.match(migration, /after update of execution_state on prospect_verification\.email_checks[\s\S]*?when \(new\.execution_state in \('completed', 'error'\)/);
+  // ...and a target attached to an already-finished check is flagged as it is attached.
+  assert.match(migration, /before insert or update of check_id on prospect_verification\.run_targets/);
+  // The pick still joins the check state, so the flag only narrows it.
+  assert.match(migration, /t\.state='waiting' and t\.reconcile_ready and c\.execution_state in \('completed','error'\)/);
+  assert.match(migration, /update prospect_verification\.run_targets t\s+set reconcile_ready = true/);
+  const harness = await read("../scripts/test-email-verification-migration.mjs");
+  assert.match(harness, /'20260930160000_reconcile_reads_ready_targets\.sql'/);
+});
