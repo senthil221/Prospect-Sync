@@ -44,11 +44,11 @@ Forward releases require the worker file and health endpoint. An explicit rollba
 
 ## Operational controls
 
-Defaults are intentionally below the advertised 200,000/day account maximum:
+Defaults stay below the 200,000/day account maximum. They were raised on 2026-09-30 (20260930170000) from the launch values - 150,000/day, 500 ms, 18 per 10 s, concurrency 8 - after 48 hours with no HTTP 429:
 
-- daily rolling limit: 150,000 starts;
-- start spacing: 500 ms, with an 18-per-10-second rolling guard;
-- HTTP concurrency: 8;
+- daily rolling limit: 190,000 starts (retries included);
+- start spacing: 400 ms, with a 25-per-10-second rolling guard (150/minute ceiling);
+- HTTP concurrency: 12;
 - provider timeout: 45 seconds;
 - maximum attempts: 4.
 

@@ -1,4 +1,6 @@
-export const PROVIDER_START_SPACING_MS = 500;
+// 400ms: 150 starts a minute at most - paced with the claim's 25-per-10s guard
+// for 190,000 checks a day (20260930170000).
+export const PROVIDER_START_SPACING_MS = 400;
 
 export function claimDelayMilliseconds(lastClaimAt, now = Date.now(), spacingMs = PROVIDER_START_SPACING_MS) {
   if (!Number.isFinite(lastClaimAt) || lastClaimAt <= 0) return 0;
