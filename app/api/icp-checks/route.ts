@@ -15,15 +15,16 @@ import { PROVIDER_MODES, icpStrategy, sourceLabel } from "../../../worker/icp-va
 // GET  ?view=csv&client=&check=&filter=&search=           the same as a CSV download
 // GET  ?view=scope&client=&icp=                           how many companies each scope would check,
 //                                                         and the observed cost per company per model
-// POST {action:"start", clientId, icpId, strategy, providerMode,
-//       scope:"all"|"unchecked"|"selection", companyIds[] | allMatching + search + filters + …}
+// POST {action:"start", clientId, icpId, strategy, providerMode, force,
+//       scope:"unverified"|"all"|"selection", companyIds[] | allMatching + search + filters + …}
+//       Companies with a current ICP check result for this ICP are skipped unless force.
 // POST {action:"pause"|"resume"|"cancel"|"retry_failed", clientId, checkId}
 
 const missingCodes = new Set(["PGRST202", "PGRST205", "42883", "42P01"]);
 const pageSize = 100;
 const csvLimit = 100_000;
 const filters = new Set(["all", "fit", "non_fit", "pending", "split"]);
-const scopes = new Set(["all", "unchecked", "selection"]);
+const scopes = new Set(["all", "unverified", "selection"]);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function failure(error: { code?: string; message: string }) {
@@ -107,7 +108,7 @@ async function handleGET(request: Request) {
     const icpId = (url.searchParams.get("icp") ?? "").trim();
     if (!icpId) return bad("Which ICP?");
     const [{ data, error }, perCompany] = await Promise.all([
-      supabase.rpc("icp_strategy_scope_counts_v1", { p_client_id: clientId, p_icp_profile_id: icpId }),
+      supabase.rpc("icp_strategy_scope_counts_v2", { p_client_id: clientId, p_icp_profile_id: icpId }),
       costPerCompany(),
     ]);
     if (error) return failure(error);
@@ -168,7 +169,7 @@ async function handlePOST(request: Request) {
     if (!icpId) return bad("Which ICP?");
     const strategy = icpStrategy(String(body.strategy ?? ""));
     if (!strategy) return bad("Choose Strict, Balanced or Lenient.");
-    const scope = String(body.scope ?? "all");
+    const scope = String(body.scope ?? "unverified");
     if (!scopes.has(scope)) return bad("Unknown scope.");
     const providerMode = PROVIDER_MODES.includes(String(body.providerMode)) ? String(body.providerMode) : "cheapest";
     let selection = { p_company_ids: null as string[] | null, p_search: "", p_filters: [] as unknown, p_people_scope: null as unknown, p_excluded_ids: null as string[] | null };
@@ -177,12 +178,13 @@ async function handlePOST(request: Request) {
       if (read.error) return read.error;
       selection = read.args;
     }
-    const { data, error } = await supabase.rpc("start_icp_strategy_check_v1", {
+    const { data, error } = await supabase.rpc("start_icp_strategy_check_v2", {
       p_client_id: clientId,
       p_icp_profile_id: icpId,
       p_strategy: strategy.id,
       p_scope: scope,
       ...selection,
+      p_force: body.force === true,
       p_provider_mode: providerMode,
       p_created_by: actor,
     });

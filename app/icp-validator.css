@@ -482,3 +482,9 @@
 
 @media (max-width: 640px) { .icc-row { grid-template-columns: 1fr; } .icc-votes { min-width: 140px; } }
 @media (prefers-reduced-motion: reduce) { .icc *, .icc *::before, .icc *::after { animation: none !important; transition: none !important; } }
+.icc-row.is-single { grid-template-columns: minmax(0, 1fr); }
+/* ICP validator as a Data tool: client picker above the bench */
+.icpv-workspace { display: grid; gap: var(--space-4); }
+.icpv-client-picker { display: inline-flex; align-items: center; gap: var(--space-3); width: fit-content; }
+.icpv-client-picker span { color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-bold); text-transform: uppercase; letter-spacing: var(--tracking-wide); }
+.icpv-client-picker select { height: var(--control-standard); min-width: 240px; padding: 0 var(--space-3); border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: var(--surface); color: var(--text-primary); font-size: var(--text-sm); font-weight: var(--weight-semibold); box-shadow: var(--elevation-1); }

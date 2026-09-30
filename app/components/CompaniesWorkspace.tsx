@@ -687,7 +687,7 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
     </div>
     {clearIcpOpen && clientId ? <ConfirmDialog
       title={`Clear the ICP check on ${formatNumber(selectedCount)} ${selectedCount === 1 ? "company" : "companies"}?`}
-      body="Removes every model's FIT / NON_FIT label from these companies, for all of this client's ICPs, and skips checks still queued for them. Companies, their people and ICP verification are not touched. Run history and cost stay on the ICP Validator tab."
+      body="Removes every model's FIT / NON_FIT label from these companies, for all of this client's ICPs, and skips checks still queued for them. Companies, their people and ICP verification are not touched. Run history and cost stay on the ICP checks tab and the ICP validator page."
       error={clearIcpError} confirmLabel="Clear ICP check" busy={clearingIcp}
       onCancel={() => { setClearIcpOpen(false); setClearIcpError(""); }} onConfirm={() => void clearIcpCheck()}/> : null}
     {validateOpen && clientId ? <IcpValidateDialog clientId={clientId} clientName={clients.find((candidate) => candidate.id === clientId)?.name ?? "this client"} selectedCount={selectedCount} selection={companySelectionPayload()} onClose={() => setValidateOpen(false)} onStarted={(message) => { setValidateOpen(false); setCompanyNotice(message); clearSelection(); }}/> : null}

@@ -27,10 +27,9 @@ const screenImports = {
   coverage: () => import("./components/CoveragePanel"),
   quality: () => import("./components/DataQualityPanel"),
   imports: () => import("./components/ImportsPanel"),
-  integrations: () => import("./components/IntegrationsPanel"),
   replyBlocklist: () => import("./components/ReplyBlocklistPanel"),
   verification: () => import("./components/EmailVerificationWorkspace"),
-  icpChecks: () => import("./components/IcpChecksWorkspace"),
+  icpValidator: () => import("./components/IcpValidatorWorkspace"),
   logs: () => import("./components/LogsPanel"),
 };
 const screenLoading = () => <LoadingState label="Loading this screen"/>;
@@ -38,10 +37,9 @@ const ClientsPanel = dynamic(screenImports.clients, { loading: screenLoading });
 const CoveragePanel = dynamic(screenImports.coverage, { loading: screenLoading });
 const DataQualityPanel = dynamic(screenImports.quality, { loading: screenLoading });
 const ImportsPanel = dynamic(screenImports.imports, { loading: screenLoading });
-const IntegrationsPanel = dynamic(screenImports.integrations, { loading: screenLoading });
 const ReplyBlocklistPanel = dynamic(screenImports.replyBlocklist, { loading: screenLoading });
 const EmailVerificationWorkspace = dynamic(screenImports.verification, { loading: screenLoading });
-const IcpChecksWorkspace = dynamic(screenImports.icpChecks, { loading: screenLoading });
+const IcpValidatorWorkspace = dynamic(screenImports.icpValidator, { loading: screenLoading });
 const LogsPanel = dynamic(screenImports.logs, { loading: screenLoading });
 
 function usePreloadScreens(isAdmin: boolean) {
@@ -76,8 +74,7 @@ const baseNavGroups: Array<{ label: string; items: Array<{ id: Section; label: s
       { id: "quality", label: "Data quality", mark: "quality" },
       { id: "imports", label: "Import CSV", mark: "upload" },
       { id: "verification", label: "Email verification", mark: "check" },
-      { id: "icp-checks", label: "ICP checks", mark: "target" },
-      { id: "integrations", label: "Integrations", mark: "grid" },
+      { id: "icp-validator", label: "ICP validator", mark: "target" },
       { id: "reply-blocklist", label: "Reply blocklist", mark: "quality" },
     ],
   },
@@ -427,10 +424,9 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
     <main id="main-content"><header className="topbar"><div><p className="eyebrow">DATABASE WORKSPACE</p><h1>{selectedClient ? selectedClient.name : title}</h1></div><div className="top-actions">{(section === "prospects" || section === "companies") && <label className="search"><span><AppIcon name="search" size={16}/></span><input aria-label="Search" value={search} onChange={(event) => { setSearch(event.target.value); if (section === "prospects") setProspectPage(1); if (section === "companies") setCompanyPage(1); }} placeholder={`Search ${section}...`}/></label>}{section !== "reply-blocklist" && <button className="primary" onClick={() => navigate("imports")}><AppIcon name="plus" size={15}/> Import list</button>}</div></header>
       {error && <div className="alert"><span>!</span><p>{error}</p>{canResetQuery ? <button className="alert-reset" onClick={resetQuery}>Clear filters and start over</button> : null}<button aria-label="Dismiss" onClick={() => setError("")}><AppIcon name="close" size={14}/></button></div>}
       <section className="content" aria-busy={loading || workspaceLoading}>
-        {!loading && section === "integrations" && <IntegrationsPanel onOpenReplyBlocklist={() => navigate("reply-blocklist")}/>}
-        {!loading && section === "reply-blocklist" && <ReplyBlocklistPanel onOpenIntegrations={() => navigate("integrations")}/>}
+        {!loading && section === "reply-blocklist" && <ReplyBlocklistPanel/>}
         {!loading && section === "verification" && <EmailVerificationWorkspace isAdmin={isAdmin}/>}
-        {!loading && section === "icp-checks" && <IcpChecksWorkspace clients={clients}/>}
+        {!loading && section === "icp-validator" && <IcpValidatorWorkspace clients={clients}/>}
         {!loading && section === "logs" && isAdmin && <LogsPanel/>}
         {loading ? <LoadingState/> : null}
         {!loading && workspaceLoading ? <div className="workspace-progress" role="status"><span/>Updating {title.toLowerCase()}…</div> : null}

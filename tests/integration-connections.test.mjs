@@ -99,7 +99,9 @@ test('rate delay is bounded and accepts HTTP-date', () => {
   assert.equal(retryDelay('99999999'), 86400);
   assert.equal(retryDelay(new Date(120000).toUTCString(), 60000), 60);
 });
-test('integration tab survives URL restoration', () => {
-  assert.equal(readWorkspaceUrl(new URLSearchParams('s=integrations')).section, 'integrations');
+test('reply blocklist survives URL restoration; an old Integrations link lands on Overview', () => {
   assert.equal(readWorkspaceUrl(new URLSearchParams('s=reply-blocklist')).section, 'reply-blocklist');
+  // The Integrations screen was removed on 2026-09-30.
+  assert.equal(readWorkspaceUrl(new URLSearchParams('s=integrations')).section, 'overview');
+  assert.equal(readWorkspaceUrl(new URLSearchParams('s=icp-validator')).section, 'icp-validator');
 });

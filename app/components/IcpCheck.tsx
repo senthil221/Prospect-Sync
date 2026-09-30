@@ -234,6 +234,8 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
   const [method, setMethod] = useState<"strategy" | "models">("strategy");
   const [strategy, setStrategy] = useState<StrategyId>("balanced");
   const [cheapest, setCheapest] = useState(true);
+  // Companies already checked for this ICP are skipped unless forced.
+  const [force, setForce] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -256,11 +258,12 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
     if (method === "strategy") {
       setBusy(true); setError("");
       try {
-        const result = await api<{ check: { total_items: number } }>("/api/icp-checks", {
+        const result = await api<{ check: { total_items: number; skipped_items?: number } }>("/api/icp-checks", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "start", clientId, icpId: chosen.id, strategy, providerMode: cheapest ? "cheapest" : "default", scope: "selection", ...selection }),
+          body: JSON.stringify({ action: "start", clientId, icpId: chosen.id, strategy, providerMode: cheapest ? "cheapest" : "default", force, scope: "selection", ...selection }),
         });
-        onStarted(`${strategyLabel(strategy)} check started on ${formatNumber(result.check.total_items)} ${result.check.total_items === 1 ? "company" : "companies"} against ${chosen.name || "the ICP"}. Results fill the ICP check column as the votes decide them; follow progress on the ICP checks tab.`);
+        const skipped = Number(result.check.skipped_items ?? 0);
+        onStarted(`${strategyLabel(strategy)} check started on ${formatNumber(result.check.total_items)} ${result.check.total_items === 1 ? "company" : "companies"} against ${chosen.name || "the ICP"}${skipped ? ` (${formatNumber(skipped)} already checked were skipped)` : ""}. Results fill the ICP check column as the votes decide them; follow progress on the client's ICP checks tab.`);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Unable to start the check.");
         setBusy(false);
@@ -276,7 +279,7 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
           body: JSON.stringify({ action: "start_selection", icpId: chosen.id, models, effort, reuse, ...selection }),
         });
       const reused = result.runs.reduce((sum, run) => sum + Number(run.cached_items ?? 0), 0);
-      onStarted(`Checking ${formatNumber(result.selected)} ${result.selected === 1 ? "company" : "companies"} against ${chosen.name || "the ICP"} with ${models.map((id) => modelName(catalog, id)).join(", ")}${reused ? ` (${formatNumber(reused)} earlier verdicts reused)` : ""}. Verdicts fill the ICP check column as they arrive; follow progress on the ICP Validator tab.`);
+      onStarted(`Checking ${formatNumber(result.selected)} ${result.selected === 1 ? "company" : "companies"} against ${chosen.name || "the ICP"} with ${models.map((id) => modelName(catalog, id)).join(", ")}${reused ? ` (${formatNumber(reused)} earlier verdicts reused)` : ""}. Verdicts fill the ICP check column as they arrive; follow progress on the ICP validator page (Data tools).`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to start the check.");
       setBusy(false);
@@ -303,6 +306,7 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
           ]}/>
           {method === "strategy" ? <>
             <StrategyPicker name="icpv-dialog-strategy" value={strategy} onChange={setStrategy} companies={selectedCount} briefLength={chosen?.description.length}/>
+            <Switch checked={force} onChange={setForce} label="Force re-check" hint={force ? "Companies already checked for this ICP are checked again." : "Off: companies already checked for this ICP are skipped."}/>
             <Switch checked={cheapest} onChange={setCheapest} label="Cheapest providers" hint="Lowest-priced OpenRouter provider that supports JSON output and reasoning, no 4-bit hosts."/>
           </> : <>
             <ModelPicker catalog={catalog} selected={models} onChange={setModels} idPrefix="icpv-dialog" defaults={modelCatalog.defaults} onSaveDefaults={modelCatalog.saveDefaults}/>

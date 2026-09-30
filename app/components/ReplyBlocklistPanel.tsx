@@ -27,7 +27,7 @@ function plainStatus(value: string) {
   return value.replaceAll('_', ' ');
 }
 
-export default function ReplyBlocklistPanel({ onOpenIntegrations }: { onOpenIntegrations: () => void }) {
+export default function ReplyBlocklistPanel() {
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
@@ -124,7 +124,7 @@ export default function ReplyBlocklistPanel({ onOpenIntegrations }: { onOpenInte
     {notice && <div className="reply-blocklist-message is-success" role="status">{notice}</div>}
     {!status && !error && <section className="panel reply-blocklist-empty" role="status">Loading reply sync…</section>}
     {status && !status.canManage && <section className="panel reply-blocklist-empty"><h3>Administrator access needed</h3><p>Only a configured integration administrator can view and manage reply sync.</p></section>}
-    {status?.canManage && !inbox && <section className="panel reply-blocklist-empty"><h3>Reply sync is unavailable</h3><p>Check the Smartlead integration configuration, then refresh this page.</p><button type="button" onClick={onOpenIntegrations}>Open integrations</button></section>}
+    {status?.canManage && !inbox && <section className="panel reply-blocklist-empty"><h3>Reply sync is unavailable</h3><p>Check the Smartlead integration configuration, then refresh this page.</p></section>}
 
     {status?.canManage && inbox && <>
       <section className="panel reply-blocklist-connection" aria-labelledby="smartlead-connection-heading">
@@ -218,7 +218,7 @@ export default function ReplyBlocklistPanel({ onOpenIntegrations }: { onOpenInte
 
       <details className="panel reply-blocklist-details"><summary>Sync details and rules <AppIcon name="chevron" size={16}/></summary><div className="reply-blocklist-details-content">
         <div><h3>Reconciliation</h3><p>{inbox.settings.rows_observed.toLocaleString()} observations across {inbox.settings.pages_scanned.toLocaleString()} pages. {inbox.settings.initial_backfill_complete ? 'Historical scan complete.' : 'Historical scan still in progress.'}</p><button type="button" onClick={() => void act('sync_inbox')} disabled={!!busy || !inbox.settings.enabled || inbox.settings.status === 'running'}>Reconcile all replies now</button></div>
-        <div><h3>Blocking rules</h3><p>All assigned categories except Out of Office add the reply email to its matched client blocklist. “Not the right fit” also adds the domain. Category IDs are discovered from the connected account and sync cannot start when these names are uncertain.</p><p>{inbox.counts.manualRemoved.toLocaleString()} manually removed Smartlead entries will remain removed. Changing a reply to Out of Office does not undo an earlier block.</p><button type="button" onClick={onOpenIntegrations}>Open campaign delivery settings</button></div>
+        <div><h3>Blocking rules</h3><p>All assigned categories except Out of Office add the reply email to its matched client blocklist. “Not the right fit” also adds the domain. Category IDs are discovered from the connected account and sync cannot start when these names are uncertain.</p><p>{inbox.counts.manualRemoved.toLocaleString()} manually removed Smartlead entries will remain removed. Changing a reply to Out of Office does not undo an earlier block.</p></div>
       </div></details>
     </>}
   </div>;

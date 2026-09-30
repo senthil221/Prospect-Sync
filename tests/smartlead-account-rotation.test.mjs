@@ -62,11 +62,13 @@ test('validation resets telemetry and narrowly repairs a paused pre-migration ac
   assert.match(telemetryMigration, /grant execute on function public\.confirm_smartlead_inbox_contract_v2\(text,uuid,text,jsonb\)[\s\S]*to service_role/i);
 });
 
-test('Smartlead credential rotation is managed beside reply sync, not duplicated in Integrations', async () => {
-  const integrations = await readFile(new URL('../app/components/IntegrationsPanel.tsx', import.meta.url), 'utf8');
+test('Smartlead credential rotation is managed beside reply sync - the only place it lives', async () => {
+  // The Integrations screen was removed on 2026-09-30; the connection, key
+  // rotation and validation all stay on the Reply blocklist page.
   assert.match(panel, /Smartlead API key/);
   assert.match(panel, /Change API key/);
   assert.match(panel, /Validate this Smartlead account/);
-  assert.match(integrations, /provider !== 'smartlead' && <form/);
-  assert.match(integrations, /Manage Smartlead connection & replies/);
+  assert.doesNotMatch(panel, /onOpenIntegrations/);
+  const app = await readFile(new URL('../app/DashboardApp.tsx', import.meta.url), 'utf8');
+  assert.match(app, /<ReplyBlocklistPanel\/>/);
 });

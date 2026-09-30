@@ -98,7 +98,9 @@ test("the ICP checks route is measured, and starts, steers and reads checks", as
   const route = await read("../app/api/icp-checks/route.ts");
   assert.match(route, /export const GET = observed\("\/api\/icp-checks", handleGET\);/);
   assert.match(route, /export const POST = observed\("\/api\/icp-checks", handlePOST\);/);
-  assert.match(route, /rpc\("start_icp_strategy_check_v1"/);
+  assert.match(route, /rpc\("start_icp_strategy_check_v2"/);
+  assert.match(route, /p_force: body\.force === true,/);
+  assert.match(route, /rpc\("icp_strategy_scope_counts_v2"/);
   assert.match(route, /rpc\("set_icp_strategy_check_state_v1"/);
   assert.match(route, /await readIcpSelection\(clientId, body/);
   assert.match(route, /const unauthorized = await authorizeApi\(\);/g);
@@ -121,11 +123,35 @@ test("a strategy label is the Company DB row's verdict, named by its method", as
   assert.equal(sourceLabel("strategy:balanced"), "Balanced");
 });
 
-test("ICP checks is its own tab, and Validate ICP offers the methods first", async () => {
+
+test("ICP checks sits inside each client, and the ICP validator is a Data tool", async () => {
+  const clients = await read("../app/components/ClientsPanel.tsx");
+  assert.match(clients, /\{ id: "icp_checks" as const, label: "ICP checks"/);
+  assert.match(clients, /<IcpChecksWorkspace key=\{client\.id\} client=\{client\} clients=\{clients\}\/>/);
+  assert.doesNotMatch(clients, /IcpValidatorPanel/);
   const app = await read("../app/DashboardApp.tsx");
-  assert.match(app, /\{ id: "icp-checks", label: "ICP checks", mark: "target" \}/);
-  assert.match(app, /section === "icp-checks" && <IcpChecksWorkspace clients=\{clients\}\/>/);
+  assert.match(app, /\{ id: "icp-validator", label: "ICP validator", mark: "target" \}/);
+  assert.match(app, /section === "icp-validator" && <IcpValidatorWorkspace clients=\{clients\}\/>/);
+  assert.doesNotMatch(app, /"icp-checks"|"integrations"|IntegrationsPanel/);
   const dialog = await read("../app/components/IcpCheck.tsx");
   assert.match(dialog, /useState<"strategy" \| "models">\("strategy"\)/);
-  assert.match(dialog, /api<\{ check: \{ total_items: number \} \}>\("\/api\/icp-checks"/);
+  assert.match(dialog, /\("\/api\/icp-checks", \{/);
+  assert.match(dialog, /label="Force re-check"/);
+});
+
+test("a check starts on ICP unverified companies and skips already-checked ones unless forced", async () => {
+  const screen = await read("../app/components/IcpChecksWorkspace.tsx");
+  assert.match(screen, /useState<Scope>\("unverified"\)/);
+  assert.match(screen, /const \[force, setForce\] = useState\(false\);/);
+  const migration = await read("../supabase/migrations/20260930220000_icp_checks_skip_checked_and_unverified_scope.sql");
+  // Unverified = no manual ICP verification for this client.
+  assert.match(migration, /p_scope = 'all' or not exists \(\s*select 1 from public\.client_company_icp_validations iv/);
+  // Skipped = a current result from any method for this ICP.
+  assert.match(migration, /where coalesce\(p_force, false\) or not exists \([\s\S]*?v\.source like 'strategy:%' and v\.icp_hash = v_hash\)/);
+  assert.match(migration, /skipped_items = greatest\(0, v_checkable - v_total\)/);
+  assert.match(migration, /Turn on "Force re-check" to run them again\./);
+  assert.match(migration, /ICP skip proof passed and was rolled back/);
+  for (const fn of ["start_icp_strategy_check_v2", "icp_strategy_scope_counts_v2"]) {
+    assert.ok(migration.includes(`revoke execute on function public.${fn}(`) && migration.includes("from public, anon, authenticated;"), fn);
+  }
 });

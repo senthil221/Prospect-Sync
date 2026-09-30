@@ -6,7 +6,7 @@ const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
 test("screens other than Overview, People and Companies load on demand, then preload when idle", async () => {
   const app = await read("../app/DashboardApp.tsx");
-  for (const screen of ["ClientsPanel", "CoveragePanel", "DataQualityPanel", "ImportsPanel", "IntegrationsPanel", "ReplyBlocklistPanel", "EmailVerificationWorkspace", "IcpChecksWorkspace", "LogsPanel"]) {
+  for (const screen of ["ClientsPanel", "CoveragePanel", "DataQualityPanel", "ImportsPanel", "ReplyBlocklistPanel", "EmailVerificationWorkspace", "IcpValidatorWorkspace", "LogsPanel"]) {
     assert.doesNotMatch(app, new RegExp(`^import ${screen} from`, "m"), `${screen} must not be a static import`);
     assert.ok(app.includes(`const ${screen} = dynamic(`), `${screen} must load through next/dynamic`);
   }

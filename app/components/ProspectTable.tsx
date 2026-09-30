@@ -18,7 +18,6 @@ import ProspectTableRow from "./ProspectTableRow";
 import MenuButton from "./MenuButton";
 import Tabs from "./Tabs";
 import TitleClassifierPanel from "./TitleClassifierPanel";
-import IntegrationPreview from './IntegrationPreview';
 import { useClientIcps } from "./use-client-icps";
 import EmailVerificationPanel from "./EmailVerificationPanel";
 
@@ -42,7 +41,6 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   const topScrollRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [selectedRows, setSelectedRows] = useState<Map<string, Prospect>>(new Map());
-  const [integrationSelection,setIntegrationSelection]=useState<string[]|null>(null);
   const selectedIds = useMemo(() => new Set(selectedRows.keys()), [selectedRows]);
   const [selectionMode, setSelectionMode] = useState<"explicit" | "all_matching">("explicit");
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
@@ -664,9 +662,6 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   return <section className="people-workspace">
     {clientId ? <div className="icp-quick-filters" role="group" aria-label="Filter people by ICP verification"><button className={icpStatus === "all" ? "active" : ""} aria-pressed={icpStatus === "all"} onClick={() => setIcpStatus("all")}>All</button><button className={icpStatus === "verified" ? "active" : ""} aria-pressed={icpStatus === "verified"} onClick={() => setIcpStatus("verified")}>ICP Verified</button><button className={icpStatus === "unverified" ? "active" : ""} aria-pressed={icpStatus === "unverified"} onClick={() => setIcpStatus("unverified")}>ICP Unverified</button></div> : null}
     {clientId ? <div className="icp-quick-filters status-quick-filters" role="group" aria-label="Choose a client people view"><button className={clientView === "all" ? "active" : ""} aria-pressed={clientView === "all"} onClick={() => setClientView("all")}>All</button><button className={clientView === "leads" ? "active" : ""} aria-pressed={clientView === "leads"} onClick={() => setClientView("leads")}><AppIcon name="star" size={14}/> Leads</button><button className={clientView === "contactable" ? "active" : ""} aria-pressed={clientView === "contactable"} onClick={() => setClientView("contactable")} title="Past this client's contact cooldown, or never contacted"><AppIcon name="check" size={14}/> Contactable</button></div> : null}
-    {integrationSelection && <IntegrationPreview ids={integrationSelection} clientId={clientId} fields={fields} onClose={()=>setIntegrationSelection(null)}/>}
-    {selectedCount>0 && <div className="bulk-bar"><button disabled={selectionMode!=='explicit' || selectedCount>400} onClick={()=>setIntegrationSelection([...selectedIds])}>Preview Smartlead delivery</button>
-      <span>Preview supports 1–400 checked prospects across pages. All-matching delivery is not enabled yet.</span></div>}
     <div className="people-heading">
       <div><p className="eyebrow">PROSPECTS</p><h2>Find people</h2><p>Search and filter every prospect saved in your people database.</p></div>
       <div className="entity-pivot-actions">{!clientId ? <button className="secondary verify-email-button" onClick={() => setVerificationOpen(true)}><AppIcon name="target" size={15}/> Verify work emails</button> : null}{allowEntityPivot ? <button className="secondary" title="Safely scope up to 250,000 matching people" onClick={() => onSeeCompanies({ search: search.trim(), filters: filterPayload(effectiveFilters), limit: 250000 })}>See Companies <AppIcon name="arrow" size={14}/></button> : null}<button className="primary" onClick={onImport}><AppIcon name="upload" size={15}/> Import prospects</button></div>

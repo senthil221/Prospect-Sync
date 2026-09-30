@@ -12,7 +12,8 @@ import { ProgressRing, Segmented, Switch, WorkerBadge, durationText, money, rela
 // ICP checks: label a client's companies FIT / NON_FIT with one of three
 // voting setups (Strict, Balanced, Lenient). Each check is two or three model
 // runs by the ICP worker; the database decides each company from the votes.
-// The ICP Validator (per client) stays the bench for comparing models.
+// Lives in each client's workspace (client given); without one it offers a
+// client picker. The ICP Validator (Data tools) is the bench for comparing models.
 
 type Pass = {
   run_id: string; pass_no: number; model: string; reasoning_effort: string; status: RunStatus; status_message: string;
@@ -22,6 +23,7 @@ type Pass = {
 export type Check = {
   id: string; client_id: string; client_name: string; icp_profile_id: string; icp_name: string; icp_current: boolean;
   strategy: StrategyId; scope: string; provider_mode: "cheapest" | "default"; total_items: number; created_by: string; created_at: string;
+  forced?: boolean; skipped_items?: number;
   status: RunStatus; status_message: string; started_at: string | null; finished_at: string | null; cost_usd: number; failed_items: number;
   passes: Pass[]; outcome: { fit: number; non_fit: number; pending: number; split: number };
 };
@@ -30,9 +32,9 @@ export type ResultRow = {
   company_id: string; name: string; domain: string; industry: string; short_description: string;
   verdict: "FIT" | "NON_FIT" | null; reason: string; fit_votes: number; non_fit_votes: number; votes: Vote[];
 };
-type Scope = "all" | "unchecked" | "paste";
+type Scope = "unverified" | "all" | "paste";
 type Filter = "all" | "fit" | "non_fit" | "pending" | "split";
-type ScopeCounts = { all: number; unchecked: Record<StrategyId, number> };
+type ScopeCounts = { all: number; all_unchecked: number; unverified: number; unverified_unchecked: number };
 
 const base = "/api/icp-checks";
 const pageSize = 100;
@@ -41,7 +43,8 @@ const failure = (caught: unknown, fallback: string) => caught instanceof Error ?
 const isActive = (check: Check) => check.status === "queued" || check.status === "running";
 const post = <T,>(body: Record<string, unknown>) => api<T>(base, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-export default function IcpChecksWorkspace({ clients }: { clients: ClientRecord[] }) {
+export default function IcpChecksWorkspace({ clients, client }: { clients: ClientRecord[]; client?: ClientRecord }) {
+  const scopedTo = client?.id ?? "";
   const [checks, setChecks] = useState<Check[] | null>(null);
   const [worker, setWorker] = useState<WorkerState | null>(null);
   const [listError, setListError] = useState("");
@@ -51,10 +54,10 @@ export default function IcpChecksWorkspace({ clients }: { clients: ClientRecord[
 
   const load = useCallback(async () => {
     try {
-      const result = await api<{ checks: Check[]; worker: WorkerState }>(`${base}?view=checks`, { cache: "no-store" });
+      const result = await api<{ checks: Check[]; worker: WorkerState }>(`${base}?view=checks${scopedTo ? `&client=${encodeURIComponent(scopedTo)}` : ""}`, { cache: "no-store" });
       setChecks(result.checks); setWorker(result.worker); setListError("");
     } catch (caught) { setListError(failure(caught, "Unable to load ICP checks.")); setChecks((current) => current ?? []); }
-  }, []);
+  }, [scopedTo]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
@@ -78,7 +81,7 @@ export default function IcpChecksWorkspace({ clients }: { clients: ClientRecord[
     <header className="icpx-hero">
       <div className="icpx-hero-copy">
         <p className="icpx-eyebrow"><AppIcon name="target" size={14}/> ICP checks</p>
-        <h3>Label companies FIT or NON_FIT with a voting setup</h3>
+        <h3>{client ? `Check ${client.name}'s companies against its ICP` : "Label companies FIT or NON_FIT with a voting setup"}</h3>
         <p>Pick the companies and a method. Two or three model runs read each company&apos;s description and keywords, and the method&apos;s rule turns their votes into one label. Labels only - nothing is hidden or removed.</p>
       </div>
       <div className="icpx-hero-side">{worker ? <WorkerBadge worker={worker}/> : null}</div>
@@ -90,14 +93,14 @@ export default function IcpChecksWorkspace({ clients }: { clients: ClientRecord[
     {notice ? <div className="icpx-notice" role="status"><AppIcon name="check" size={15}/><span>{notice}</span><button type="button" aria-label="Dismiss" onClick={() => setNotice("")}><AppIcon name="close" size={14}/></button></div> : null}
 
     <div className="icpx-split">
-      <NewCheck clients={clients} onStarted={started}/>
+      <NewCheck clients={clients} fixedClient={client} onStarted={started}/>
       <section className="icpx-card icpx-activity" aria-labelledby="icc-checks">
-        <div className="icpx-section-head"><div><h4 id="icc-checks">Checks</h4><p>{anyActive ? "Live - updating every few seconds." : "Latest first, every client."}</p></div>
+        <div className="icpx-section-head"><div><h4 id="icc-checks">Checks</h4><p>{anyActive ? "Live - updating every few seconds." : client ? "Latest first." : "Latest first, every client."}</p></div>
           {anyActive ? <span className="icpx-live" aria-hidden="true"><span className="icpx-pulse"/>Live</span> : null}</div>
         {listError ? <p className="form-error" role="alert">{listError}</p> : null}
         {checks === null ? <div className="icpx-skeleton is-rows" aria-busy="true"><span/><span/><span/></div>
           : !checks.length ? <div className="icpx-empty is-quiet"><AppIcon name="target" size={18}/><div><strong>No checks yet</strong><p>Start one on the left. It shows up here with its progress and outcome.</p></div></div>
-          : <ul className="icpx-runs icc-checks">{checks.map((check) => <CheckItem key={check.id} check={check} selected={selected?.id === check.id}
+          : <ul className="icpx-runs icc-checks">{checks.map((check) => <CheckItem key={check.id} check={check} showClient={!client} selected={selected?.id === check.id}
               onSelect={() => setSelectedId(check.id)} onChanged={(message) => { setNotice(message); setVersion((value) => value + 1); }}/>)}</ul>}
       </section>
     </div>
@@ -106,14 +109,16 @@ export default function IcpChecksWorkspace({ clients }: { clients: ClientRecord[
   </article>;
 }
 
-function NewCheck({ clients, onStarted }: { clients: ClientRecord[]; onStarted: (message: string, checkId: string) => void }) {
-  const usableClients = useMemo(() => clients.filter((client) => !client.archived_at), [clients]);
+function NewCheck({ clients, fixedClient, onStarted }: { clients: ClientRecord[]; fixedClient?: ClientRecord; onStarted: (message: string, checkId: string) => void }) {
+  const usableClients = useMemo(() => fixedClient ? [fixedClient] : clients.filter((client) => !client.archived_at), [clients, fixedClient]);
   const [clientId, setClientId] = useState("");
   const client = usableClients.find((item) => item.id === clientId) ?? usableClients[0] ?? null;
   const [profiles, setProfiles] = useState<{ clientId: string; list: ClientIcpProfile[] } | null>(null);
   const [icpId, setIcpId] = useState("");
   const [strategy, setStrategy] = useState<StrategyId>("balanced");
-  const [scope, setScope] = useState<Scope>("all");
+  // Newly pushed companies are ICP unverified, so that is where a check starts.
+  const [scope, setScope] = useState<Scope>("unverified");
+  const [force, setForce] = useState(false);
   const [pasted, setPasted] = useState("");
   const [cheapest, setCheapest] = useState(true);
   const [counts, setCounts] = useState<{ key: string; value: ScopeCounts; cost: CostPerCompany } | null>(null);
@@ -151,7 +156,9 @@ function NewCheck({ clients, onStarted }: { clients: ClientRecord[]; onStarted: 
   // Keeps the last answer while another ICP's counts load: cost history is not per ICP.
   const observed = counts?.cost ?? null;
   const pastedLines = pasted.split(/[\n,;\t]+/).map((value) => value.trim()).filter(Boolean).length;
-  const companies = scope === "paste" ? pastedLines : scope === "unchecked" ? num(scopeCounts?.unchecked?.[strategy]) : num(scopeCounts?.all);
+  const companies = scope === "paste" ? pastedLines
+    : scope === "unverified" ? num(force ? scopeCounts?.unverified : scopeCounts?.unverified_unchecked)
+    : num(force ? scopeCounts?.all : scopeCounts?.all_unchecked);
   const estimate = estimateStrategy(strategy, companies, icp?.description.length ?? 800, observed);
 
   async function start() {
@@ -166,32 +173,37 @@ function NewCheck({ clients, onStarted }: { clients: ClientRecord[]; onStarted: 
         if (!resolved.companyIds.length) throw new Error(`None of the ${formatNumber(resolved.submitted)} pasted values matched a company in ${client.name}.`);
         selection = { scope: "selection", companyIds: resolved.companyIds };
       }
-      const result = await post<{ check: { id: string; total_items: number } }>({
-        action: "start", clientId: client.id, icpId: icp.id, strategy, providerMode: cheapest ? "cheapest" : "default", ...selection,
+      const result = await post<{ check: { id: string; total_items: number; skipped_items?: number } }>({
+        action: "start", clientId: client.id, icpId: icp.id, strategy, providerMode: cheapest ? "cheapest" : "default", force, ...selection,
       });
-      onStarted(`${strategyLabel(strategy)} check started on ${formatNumber(result.check.total_items)} ${result.check.total_items === 1 ? "company" : "companies"} for ${client.name}. Companies with no description and no keywords are skipped.`, result.check.id);
+      const skipped = num(result.check.skipped_items);
+      onStarted(`${strategyLabel(strategy)} check started on ${formatNumber(result.check.total_items)} ${result.check.total_items === 1 ? "company" : "companies"} for ${client.name}${skipped ? ` - ${formatNumber(skipped)} already checked were skipped` : ""}. Companies with no description and no keywords are never checked.`, result.check.id);
       setPasted("");
     } catch (caught) {
       setError(failure(caught, "Unable to start the check."));
     } finally { setBusy(false); }
   }
 
+  const count = (value: number | undefined) => scopeCounts ? <b>{formatNumber(num(value))}</b> : null;
   const scopeOptions: Array<{ value: Scope; label: ReactNode; hint?: string }> = [
-    { value: "all", label: <>All companies {scopeCounts ? <b>{formatNumber(scopeCounts.all)}</b> : null}</>, hint: "Every company of this client that has a description or keywords" },
-    { value: "unchecked", label: <>Not checked yet {scopeCounts ? <b>{formatNumber(num(scopeCounts.unchecked?.[strategy]))}</b> : null}</>, hint: "Companies without a current result from this method for this ICP" },
+    { value: "unverified", label: <>ICP unverified {count(force ? scopeCounts?.unverified : scopeCounts?.unverified_unchecked)}</>, hint: "Companies not marked ICP verified for this client - newly pushed ones land here" },
+    { value: "all", label: <>All companies {count(force ? scopeCounts?.all : scopeCounts?.all_unchecked)}</>, hint: "Every company of this client that has a description or keywords" },
     { value: "paste", label: "Paste a list", hint: "Websites or company names, one per line" },
   ];
+  const skippedHere = scope === "paste" || force || !scopeCounts ? 0
+    : scope === "unverified" ? num(scopeCounts.unverified) - num(scopeCounts.unverified_unchecked)
+    : num(scopeCounts.all) - num(scopeCounts.all_unchecked);
 
   return <section className="icpx-card icpx-composer" aria-labelledby="icc-new">
     <div className="icpx-section-head"><div><h4 id="icc-new">New check</h4><p>Choose the companies and how strict the labels should be.</p></div></div>
 
     {!usableClients.length ? <div className="icpx-empty is-quiet"><AppIcon name="clients" size={18}/><div><strong>No clients</strong><p>Create a client and give it an ICP brief first.</p></div></div> : <>
-      <div className="icc-row">
-        <label className="icpx-field"><span className="icpx-label">Client</span>
+      <div className={`icc-row${fixedClient ? " is-single" : ""}`}>
+        {fixedClient ? null : <label className="icpx-field"><span className="icpx-label">Client</span>
           <select className="icc-select" value={client?.id ?? ""} onChange={(event) => { setClientId(event.target.value); setIcpId(""); setError(""); }}>
             {usableClients.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-        </label>
+        </label>}
         <label className="icpx-field"><span className="icpx-label">ICP</span>
           <select className="icc-select" value={icp?.id ?? ""} disabled={!usable.length} onChange={(event) => setIcpId(event.target.value)}>
             {!loadedProfiles ? <option>Loading…</option> : !usable.length ? <option>No ICP with a brief</option>
@@ -211,8 +223,12 @@ function NewCheck({ clients, onStarted }: { clients: ClientRecord[]; onStarted: 
           <textarea className="icc-paste" rows={5} value={pasted} onChange={(event) => setPasted(event.target.value)}
             placeholder={"acme.com\nhttps://www.example.org\nContoso Fertilizers"} aria-label="Company websites or names"/>
           <p className="icpx-help">{pastedLines ? `${formatNumber(pastedLines)} value${pastedLines === 1 ? "" : "s"} - matched to ${client?.name}'s companies when you start.` : "Websites or names, one per line. Only this client's companies are matched."}</p>
-        </> : <p className="icpx-help">To check a filtered set, select companies in the client&apos;s Company DB and use <b>Validate ICP</b>.</p>}
+        </> : <p className="icpx-help">To check a filtered set, select companies in the Company DB and use <b>Validate ICP</b>.</p>}
       </div>
+
+      <Switch checked={force} onChange={setForce} label="Force re-check"
+        hint={force ? "Companies that already have an ICP check result for this ICP are checked again."
+          : skippedHere ? `Off: ${formatNumber(skippedHere)} already checked for this ICP will be skipped.` : "Off: companies already checked for this ICP are skipped."}/>
 
       <Switch checked={cheapest} onChange={setCheapest} label="Cheapest providers"
         hint="OpenRouter picks the lowest-priced provider that supports JSON output and reasoning, skipping 4-bit hosts. Usually well under list price for DeepSeek."/>
@@ -234,7 +250,7 @@ function providerText(pass: Pass) {
   return entries.slice(0, 2).map(([name]) => name).join(", ") + (entries.length > 2 ? ` +${entries.length - 2}` : "");
 }
 
-export function CheckItem({ check, selected, onSelect, onChanged }: { check: Check; selected: boolean; onSelect: () => void; onChanged: (message: string) => void }) {
+export function CheckItem({ check, selected, onSelect, onChanged, showClient = true }: { check: Check; selected: boolean; onSelect: () => void; onChanged: (message: string) => void; showClient?: boolean }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const done = check.passes.reduce((sum, pass) => sum + num(pass.done_items), 0);
@@ -258,13 +274,13 @@ export function CheckItem({ check, selected, onSelect, onChanged }: { check: Che
       <div className="icpx-run-title">
         <button type="button" className="icc-check-open" onClick={onSelect} aria-pressed={selected}>
           <span className={`icc-method is-${check.strategy}`}>{strategyLabel(check.strategy)}</span>
-          <strong>{check.client_name || "Client"}</strong><span className="icpx-muted">· {check.icp_name || "ICP"}</span>
+          {showClient ? <><strong>{check.client_name || "Client"}</strong><span className="icpx-muted">· {check.icp_name || "ICP"}</span></> : <strong>{check.icp_name || "ICP"}</strong>}
         </button>
         <span className={`icpx-status is-${check.status}`}>{check.status === "completed" ? "Done" : check.status.charAt(0).toUpperCase() + check.status.slice(1)}</span>
         {!check.icp_current ? <span className="icpx-chip is-warn" title="The ICP brief changed after this check started">Older brief</span> : null}
       </div>
       <div className="icpx-run-meta">
-        <span>{formatNumber(num(check.total_items))} companies</span>
+        <span>{formatNumber(num(check.total_items))} companies{num(check.skipped_items) ? <small className="icpx-muted"> · {formatNumber(num(check.skipped_items))} skipped</small> : null}{check.forced ? <small className="icpx-muted"> · forced</small> : null}</span>
         <span className="icpx-run-split"><b className="is-fit">{formatNumber(num(check.outcome.fit))}</b> FIT <b className="is-non-fit">{formatNumber(num(check.outcome.non_fit))}</b> NON_FIT</span>
         {num(check.outcome.pending) ? <span>{formatNumber(num(check.outcome.pending))} {finished ? "undecided" : "pending"}</span> : null}
         <span>{money(num(check.cost_usd))}</span>
