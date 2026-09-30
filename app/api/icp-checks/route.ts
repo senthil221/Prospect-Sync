@@ -1,6 +1,6 @@
 import { authorizeApi, getAuthorizedUser } from "../../../lib/auth.ts";
 import { readBoundedJson } from "../../../lib/bounded-json.ts";
-import { csvCell } from "../../../lib/csv.ts";
+import { attachmentDisposition, csvCell } from "../../../lib/csv.ts";
 import { readIcpSelection } from "../../../lib/icp-selection.ts";
 import { observed } from "../../../lib/observability.ts";
 import { createAdminClient } from "../../../lib/supabase/admin";
@@ -85,6 +85,27 @@ async function costPerCompany() {
   return Object.fromEntries([...totals].map(([key, total]) => [key, total.cost / total.companies]));
 }
 
+const filterNames: Record<string, string> = { fit: "FIT", non_fit: "NON_FIT", split: "Split votes", pending: "Pending" };
+
+// "ICP check - Balanced - Testing ICP - Krishify - FIT - 2026-09-30.csv":
+// the method first, then whose and which ICP, the view if it is not
+// everything, and the day the check ran (so downloading it again gives the
+// same name).
+async function csvFileName(clientId: string, checkId: string, url: URL) {
+  const supabase = createAdminClient();
+  const [{ data: check }, { data: client }] = await Promise.all([
+    supabase.from("icp_strategy_checks").select("strategy, icp_name, created_at").eq("id", checkId).eq("client_id", clientId).maybeSingle(),
+    supabase.from("clients").select("name").eq("id", clientId).maybeSingle(),
+  ]);
+  const method = icpStrategy(String(check?.strategy ?? ""))?.label ?? "Check";
+  const day = String(check?.created_at ?? new Date().toISOString()).slice(0, 10);
+  const view = filterNames[url.searchParams.get("filter") ?? ""];
+  const search = (url.searchParams.get("search") ?? "").trim();
+  return [
+    "ICP check", method, client?.name, check?.icp_name, view, search ? `search ${search.slice(0, 40)}` : "", day,
+  ].map((part) => String(part ?? "").trim()).filter(Boolean).join(" - ") + ".csv";
+}
+
 async function handleGET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
@@ -142,7 +163,7 @@ async function handleGET(request: Request) {
     return new Response(String.fromCharCode(0xfeff) + `${lines.join("\r\n")}\r\n`, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="icp-check-${checkId.slice(0, 8)}-${new Date().toISOString().slice(0, 10)}.csv"`,
+        "Content-Disposition": attachmentDisposition(await csvFileName(clientId, checkId, url)),
         "Cache-Control": "no-store",
       },
     });

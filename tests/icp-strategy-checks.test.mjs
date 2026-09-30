@@ -155,3 +155,13 @@ test("a check starts on ICP unverified companies and skips already-checked ones 
     assert.ok(migration.includes(`revoke execute on function public.${fn}(`) && migration.includes("from public, anon, authenticated;"), fn);
   }
 });
+
+test("a downloaded check is named after its method, client, ICP and view", async () => {
+  const { attachmentDisposition } = await import("../lib/csv.ts");
+  const header = attachmentDisposition("ICP check - Balanced - Acme/Co - Growers: India - FIT - 2026-09-30.csv");
+  assert.match(header, /^attachment; filename="ICP check - Balanced - Acme Co - Growers India - FIT - 2026-09-30\.csv"; filename\*=UTF-8''/);
+  assert.match(attachmentDisposition("ICP check - Strict - Café - 2026-09-30.csv"), /filename="ICP check - Strict - Caf_ - 2026-09-30\.csv"; filename\*=UTF-8''ICP%20check%20-%20Strict%20-%20Caf%C3%A9/);
+  const route = await read("../app/api/icp-checks/route.ts");
+  assert.match(route, /"ICP check", method, client\?\.name, check\?\.icp_name, view/);
+  assert.match(route, /"Content-Disposition": attachmentDisposition\(await csvFileName\(clientId, checkId, url\)\)/);
+});

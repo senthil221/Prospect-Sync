@@ -1,6 +1,6 @@
 import { authorizeApi, getAuthorizedUser } from "../../../../../lib/auth.ts";
 import { readBoundedJson } from "../../../../../lib/bounded-json.ts";
-import { csvCell } from "../../../../../lib/csv.ts";
+import { attachmentDisposition, csvCell } from "../../../../../lib/csv.ts";
 import { readIcpSelection } from "../../../../../lib/icp-selection.ts";
 import { icpModelCatalog, unknownIcpModels } from "../../../../../lib/openrouter-models.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
@@ -65,6 +65,17 @@ type VerdictRow = {
   company_id: string; name: string; domain: string; industry: string; short_description: string; keywords: string;
   verdicts: Record<string, { verdict: string; reason: string; current: boolean }>;
 };
+
+// "ICP validator - Testing ICP - Krishify - GPT-6 Luna vs DeepSeek V4.1 Flash - 2026-09-30.csv"
+async function validatorCsvName(clientId: string, icpId: string, sources: string[]) {
+  const supabase = createAdminClient();
+  const [{ data: profile }, { data: client }] = await Promise.all([
+    supabase.from("client_icp_profiles").select("name").eq("id", icpId).eq("client_id", clientId).maybeSingle(),
+    supabase.from("clients").select("name").eq("id", clientId).maybeSingle(),
+  ]);
+  return ["ICP validator", client?.name, profile?.name, sources.map(sourceLabel).join(" vs "), new Date().toISOString().slice(0, 10)]
+    .map((part) => String(part ?? "").trim()).filter(Boolean).join(" - ") + ".csv";
+}
 
 async function handleGET(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
@@ -143,7 +154,7 @@ async function handleGET(request: Request, context: { params: Promise<{ id: stri
     return new Response(String.fromCharCode(0xfeff) + `${lines.join("\r\n")}\r\n`, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="icp-verdicts-${new Date().toISOString().slice(0, 10)}.csv"`,
+        "Content-Disposition": attachmentDisposition(await validatorCsvName(id, icpId, sources)),
         "Cache-Control": "no-store",
       },
     });
