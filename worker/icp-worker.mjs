@@ -80,12 +80,12 @@ async function processBatch(unit) {
   let answer;
   try {
     answer = await callWithRateLimitRetry({
-      apiKey, model: unit.model, effort: unit.reasoning_effort, referer, timeoutMs,
+      apiKey, model: unit.model, effort: unit.reasoning_effort, providerMode: unit.provider_mode ?? 'default', referer, timeoutMs,
       system: buildSystemPrompt(unit.icp_text), user: batch.user,
     });
     const { results, missing } = parseModelOutput(answer.content, batch);
     const saved = await query('select public.complete_icp_validation_batch_v1($1, $2, $3, $4) as saved',
-      [unit.run_id, unit.token, JSON.stringify(results), JSON.stringify(answer.usage)]);
+      [unit.run_id, unit.token, JSON.stringify(results), JSON.stringify({ ...answer.usage, provider: answer.provider })]);
     log({ event: 'icp_batch', run: unit.run_id, model: unit.model, rows: batch.rows.length, saved: saved.rows[0]?.saved?.saved ?? 0,
       missing: missing.length, ms: answer.usage.ms, cost: answer.usage.cost, provider: answer.provider });
   } catch (error) {

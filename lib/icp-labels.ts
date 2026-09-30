@@ -5,6 +5,11 @@
 // agrees, MIXED when they do not, with the per-model detail in the tooltip.
 // Verdicts judged against an older version of the brief are counted
 // separately as stale rather than silently mixed in.
+//
+// A strategy check (Strict / Balanced / Lenient, source 'strategy:<name>') is
+// already the votes of several models reduced to one answer, so when one is
+// current it is the row's verdict - the latest one if several strategies ran -
+// and the individual model labels stay in the tooltip.
 
 export type IcpLabel = {
   company_id: string;
@@ -14,6 +19,7 @@ export type IcpLabel = {
   verdict: "FIT" | "NON_FIT";
   reason: string;
   current: boolean;
+  decided_at?: string | null;
 };
 
 export type IcpLabelSummary = {
@@ -23,7 +29,15 @@ export type IcpLabelSummary = {
   fit: number;
   nonFit: number;
   stale: number;
+  // "Strict", "Balanced" or "Lenient" when the verdict is a strategy's.
+  method: string | null;
   labels: IcpLabel[];
+};
+
+const strategyPrefix = "strategy:";
+const methodName = (source: string) => {
+  const name = source.slice(strategyPrefix.length);
+  return name.charAt(0).toUpperCase() + name.slice(1);
 };
 
 export function summarizeIcpLabels(labels: IcpLabel[]): IcpLabelSummary[] {
@@ -35,15 +49,20 @@ export function summarizeIcpLabels(labels: IcpLabel[]): IcpLabelSummary[] {
   }
   return [...byIcp.entries()].map(([icpId, list]) => {
     const current = list.filter((label) => label.current);
-    const fit = current.filter((label) => label.verdict === "FIT").length;
-    const nonFit = current.length - fit;
+    const strategy = current
+      .filter((label) => label.source.startsWith(strategyPrefix))
+      .sort((a, b) => String(b.decided_at ?? "").localeCompare(String(a.decided_at ?? "")))[0];
+    const models = current.filter((label) => !label.source.startsWith(strategyPrefix));
+    const fit = models.filter((label) => label.verdict === "FIT").length;
+    const nonFit = models.length - fit;
     return {
       icpId,
       icpName: list[0]?.icp_name.trim() || "Untitled ICP",
-      verdict: !current.length ? "STALE" : !nonFit ? "FIT" : !fit ? "NON_FIT" : "MIXED",
+      verdict: strategy ? strategy.verdict : !current.length ? "STALE" : !nonFit ? "FIT" : !fit ? "NON_FIT" : "MIXED",
       fit,
       nonFit,
       stale: list.length - current.length,
+      method: strategy ? methodName(strategy.source) : null,
       labels: list,
     };
   });

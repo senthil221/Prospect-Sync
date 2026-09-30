@@ -416,3 +416,69 @@
 .evx-grid .evx-results-body { gap: var(--space-6); }
 .evx-peak { color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); white-space: nowrap; }
 .evx-throughput .evx-bars { height: 150px; }
+
+/* ==========================================================================
+   ICP checks (Strict / Balanced / Lenient). Same console as the validator;
+   each method keeps one colour everywhere it appears.
+   ========================================================================== */
+.icc { --icc-strict: var(--danger); --icc-balanced: var(--accent); --icc-lenient: var(--success); }
+.icc-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.icc-select { height: var(--control-standard); padding: 0 var(--space-3); border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: var(--surface); color: var(--text-primary); font-size: var(--text-sm); font-weight: var(--weight-semibold); min-width: 0; }
+.icc-paste { width: 100%; min-height: 104px; padding: var(--space-2) var(--space-3); border: 1px solid var(--border-default); border-radius: var(--radius-lg); background: var(--surface); color: var(--text-primary); font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--leading-normal); resize: vertical; }
+.icc-paste:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+
+.icc-strategies { display: grid; gap: var(--space-2); }
+.icc-strategy { --icc-tone: var(--accent); position: relative; display: grid; gap: 6px; padding: var(--space-3) var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--surface); cursor: pointer; transition: border-color var(--duration-instant) var(--ease), background var(--duration-instant) var(--ease), box-shadow var(--duration-instant) var(--ease); }
+.icc-strategy.is-strict { --icc-tone: var(--icc-strict, var(--danger)); }
+.icc-strategy.is-balanced { --icc-tone: var(--icc-balanced, var(--accent)); }
+.icc-strategy.is-lenient { --icc-tone: var(--icc-lenient, var(--success)); }
+.icc-strategy:hover { border-color: var(--border-default); }
+.icc-strategy.is-on { border-color: color-mix(in srgb, var(--icc-tone) 45%, transparent); background: color-mix(in srgb, var(--icc-tone) 6%, var(--surface)); box-shadow: inset 3px 0 0 var(--icc-tone); }
+.icc-strategy input { position: absolute; opacity: 0; pointer-events: none; }
+.icc-strategy input:focus-visible ~ .icc-strategy-head .icc-radio { box-shadow: 0 0 0 3px var(--accent-ring); }
+.icc-strategy-head { display: flex; align-items: center; gap: var(--space-2); }
+.icc-strategy-head strong { font-size: var(--text-sm); font-weight: var(--weight-bold); }
+.icc-strategy-head small { color: var(--text-tertiary); font-size: 11px; font-weight: var(--weight-semibold); }
+.icc-strategy-head em { margin-left: auto; color: var(--text-secondary); font-size: var(--text-2xs); font-style: normal; font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+.icc-radio { position: relative; flex: none; width: 16px; height: 16px; border: 1.5px solid var(--border-control); border-radius: 50%; background: var(--surface); transition: border-color var(--duration-instant) var(--ease); }
+.icc-strategy.is-on .icc-radio { border-color: var(--icc-tone); }
+.icc-strategy.is-on .icc-radio::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--icc-tone); }
+.icc-strategy-rule { color: var(--text-primary); font-size: var(--text-xs); line-height: var(--leading-snug); }
+.icc-strategy-passes { display: flex; flex-wrap: wrap; gap: 4px; }
+.icc-strategy-summary { color: var(--text-tertiary); font-size: var(--text-2xs); line-height: var(--leading-snug); }
+
+.icc-method { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: var(--radius-full); font-size: 11px; font-weight: var(--weight-bold); color: var(--accent-text); background: var(--accent-soft); }
+.icc-method.is-strict { color: var(--danger); background: var(--danger-soft); }
+.icc-method.is-lenient { color: var(--success); background: var(--success-soft); }
+.icc-check-open { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: 0; border: 0; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.icc-check-open strong { font-size: var(--text-sm); font-weight: var(--weight-bold); }
+.icc-check-open:hover strong { text-decoration: underline; text-underline-offset: 3px; }
+.icc-checks .icc-check { margin: 0 calc(var(--space-3) * -1); padding-left: var(--space-3); padding-right: var(--space-3); border-radius: var(--radius-lg); }
+.icc-checks .icc-check.is-selected { background: var(--surface-sunken); border-top-color: transparent; }
+.icc-checks .icc-check.is-selected + .icc-check { border-top-color: transparent; }
+.icc-checks .icc-check:first-child { padding-top: var(--space-3); }
+.icc-passes { display: flex; flex-wrap: wrap; gap: 4px; }
+.icc-pass { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-full); background: var(--surface); color: var(--text-secondary); font-size: 11px; white-space: nowrap; }
+.icc-pass b { color: var(--text-tertiary); }
+.icc-pass i { font-style: normal; font-variant-numeric: tabular-nums; color: var(--text-primary); font-weight: var(--weight-semibold); }
+.icc-pass small { color: var(--text-tertiary); font-size: 10.5px; }
+.icc-pass small::before { content: "via "; }
+.icc-pass em { color: var(--danger); font-style: normal; font-weight: var(--weight-semibold); }
+.icc-pass.is-running { border-color: var(--accent-line); }
+.icc-pass.is-paused { border-color: var(--warning-line); }
+
+.icc-table td:nth-child(2) { white-space: nowrap; }
+.icc-tally { display: block; margin-top: 5px; color: var(--text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.icc-votes { display: flex; flex-wrap: wrap; gap: 4px; min-width: 180px; max-width: 280px; }
+.icc-vote { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: var(--radius-full); font-size: 11px; font-weight: var(--weight-semibold); white-space: nowrap; }
+.icc-vote b { opacity: .7; }
+.icc-vote.is-fit { background: var(--success-soft); color: var(--success); }
+.icc-vote.is-non-fit { background: var(--danger-soft); color: var(--danger); }
+.icc-vote.is-waiting { background: var(--surface-sunken); color: var(--text-tertiary); }
+
+/* Company DB "Validate ICP" dialog: method first, models only for testing */
+.icpv-dialog .icc-strategies { margin-top: var(--space-2); }
+.icpv-dialog .icpx-segmented { margin-top: var(--space-3); }
+
+@media (max-width: 640px) { .icc-row { grid-template-columns: 1fr; } .icc-votes { min-width: 140px; } }
+@media (prefers-reduced-motion: reduce) { .icc *, .icc *::before, .icc *::after { animation: none !important; transition: none !important; } }

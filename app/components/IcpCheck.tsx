@@ -8,6 +8,8 @@ import type { IcpModelOption } from "../../lib/openrouter-models";
 import type { ClientIcpProfile, Company } from "../../lib/types";
 import { ICP_MODELS, MAX_MODELS_PER_CHECK, REASONING_EFFORTS, estimateRunCost, sourceLabel } from "../../worker/icp-validator-core.mjs";
 import { Tooltip } from "./DashboardUi";
+import { StrategyPicker, strategyLabel, type StrategyId } from "./IcpStrategyPicker";
+import { Segmented, Switch } from "./IcpValidatorViews";
 
 // The ICP validator inside the client Company DB: the verdicts on each row,
 // "Validate ICP" for the current selection, and the model picker the ICP
@@ -201,7 +203,7 @@ export function IcpCheckCell({ labels }: { labels: IcpLabel[] | undefined }) {
     const detail = summary.labels
       .map((label) => `${sourceLabel(label.source)}: ${label.verdict}${label.current ? "" : " (stale)"}${label.reason ? ` - ${label.reason}` : ""}`)
       .join("\n");
-    const counts = summary.verdict === "MIXED" ? ` ${summary.nonFit}/${summary.fit + summary.nonFit}` : "";
+    const counts = summary.verdict === "MIXED" ? ` ${summary.nonFit}/${summary.fit + summary.nonFit}` : summary.method ? ` · ${summary.method}` : "";
     return <Tooltip key={summary.icpId} content={`${summary.icpName}\n${detail}`}>
       <span className={`data-pill icpv-verdict icpv-verdict-${summary.verdict.toLowerCase()}`}>
         {summaries.length > 1 ? <small>{summary.icpName}: </small> : null}{verdictText[summary.verdict]}{counts}
@@ -227,6 +229,11 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
   const models = picked ?? modelCatalog.defaults;
   const [effort, setEffort] = useState("low");
   const [reuse, setReuse] = useState(true);
+  // Production: one of the three voting methods. "Compare models" is the
+  // ICP Validator's testing path, kept for trying other models.
+  const [method, setMethod] = useState<"strategy" | "models">("strategy");
+  const [strategy, setStrategy] = useState<StrategyId>("balanced");
+  const [cheapest, setCheapest] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -245,7 +252,22 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
   const estimate = estimateModels(catalog, models, selectedCount, effort, chosen?.description.length ?? 800);
 
   async function start() {
-    if (!chosen || !models.length) return;
+    if (!chosen) return;
+    if (method === "strategy") {
+      setBusy(true); setError("");
+      try {
+        const result = await api<{ check: { total_items: number } }>("/api/icp-checks", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "start", clientId, icpId: chosen.id, strategy, providerMode: cheapest ? "cheapest" : "default", scope: "selection", ...selection }),
+        });
+        onStarted(`${strategyLabel(strategy)} check started on ${formatNumber(result.check.total_items)} ${result.check.total_items === 1 ? "company" : "companies"} against ${chosen.name || "the ICP"}. Results fill the ICP check column as the votes decide them; follow progress on the ICP checks tab.`);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Unable to start the check.");
+        setBusy(false);
+      }
+      return;
+    }
+    if (!models.length) return;
     setBusy(true); setError("");
     try {
       const result = await api<{ selected: number; runs: Array<{ cached_items: number; total_items: number }> }>(
@@ -265,7 +287,7 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
     <section className="confirm-modal icpv-dialog" role="dialog" aria-modal="true" aria-labelledby="icpv-dialog-title">
       <p className="eyebrow">ICP VALIDATOR</p>
       <h2 id="icpv-dialog-title">Validate {formatNumber(selectedCount)} {selectedCount === 1 ? "company" : "companies"}</h2>
-      <p>Each model reads the company&apos;s description and keywords and labels it FIT or NON_FIT for {clientName}&apos;s ICP. Labels only - nothing is hidden or removed. Companies with no description and no keywords are skipped.</p>
+      <p>Models read each company&apos;s description and keywords and label it FIT or NON_FIT for {clientName}&apos;s ICP. Labels only - nothing is hidden or removed. Companies with no description and no keywords are skipped.</p>
       {profiles === null ? <div className="workspace-loading">Loading ICPs…</div> : !usable.length
         ? <p className="form-error" role="alert">None of {clientName}&apos;s ICPs has a brief yet. Add one on the ICPs tab first.</p>
         : <>
@@ -275,20 +297,29 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
               {usable.map((profile) => <option key={profile.id} value={profile.id}>{profile.name.trim() || "Untitled ICP"}</option>)}
             </select>
           </div>
-          <ModelPicker catalog={catalog} selected={models} onChange={setModels} idPrefix="icpv-dialog" defaults={modelCatalog.defaults} onSaveDefaults={modelCatalog.saveDefaults}/>
-          <div className="form-field">
-            <label htmlFor="icpv-dialog-effort">Reasoning effort</label>
-            <select id="icpv-dialog-effort" value={effort} onChange={(event) => setEffort(event.target.value)}>
-              {REASONING_EFFORTS.map((value: string) => <option key={value} value={value}>{value}</option>)}
-            </select>
-          </div>
-          <label className="icpv-check"><input type="checkbox" checked={reuse} onChange={(event) => setReuse(event.target.checked)}/> Reuse earlier verdicts from the same model for this exact brief</label>
-          <p className="icpv-estimate" role="status">{models.length ? `≈ $${estimate.toFixed(estimate < 1 ? 3 : 2)} (estimate)` : "Choose at least one model."}</p>
+          <Segmented label="How to check" value={method} onChange={setMethod} options={[
+            { value: "strategy", label: "Method", hint: "Strict, Balanced or Lenient - the production setups" },
+            { value: "models", label: "Compare models", hint: "Pick models yourself, for testing" },
+          ]}/>
+          {method === "strategy" ? <>
+            <StrategyPicker name="icpv-dialog-strategy" value={strategy} onChange={setStrategy} companies={selectedCount} briefLength={chosen?.description.length}/>
+            <Switch checked={cheapest} onChange={setCheapest} label="Cheapest providers" hint="Lowest-priced OpenRouter provider that supports JSON output and reasoning, no 4-bit hosts."/>
+          </> : <>
+            <ModelPicker catalog={catalog} selected={models} onChange={setModels} idPrefix="icpv-dialog" defaults={modelCatalog.defaults} onSaveDefaults={modelCatalog.saveDefaults}/>
+            <div className="form-field">
+              <label htmlFor="icpv-dialog-effort">Reasoning effort</label>
+              <select id="icpv-dialog-effort" value={effort} onChange={(event) => setEffort(event.target.value)}>
+                {REASONING_EFFORTS.map((value: string) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </div>
+            <label className="icpv-check"><input type="checkbox" checked={reuse} onChange={(event) => setReuse(event.target.checked)}/> Reuse earlier verdicts from the same model for this exact brief</label>
+            <p className="icpv-estimate" role="status">{models.length ? `≈ ${estimate.toFixed(estimate < 1 ? 3 : 2)} (estimate)` : "Choose at least one model."}</p>
+          </>}
         </>}
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       <div className="modal-actions">
         <button className="secondary" data-autofocus disabled={busy} onClick={onClose}>Cancel</button>
-        <button className="primary" disabled={busy || !chosen || !models.length} onClick={() => void start()}>{busy ? "Starting…" : "Start validation"}</button>
+        <button className="primary" disabled={busy || !chosen || (method === "models" && !models.length)} onClick={() => void start()}>{busy ? "Starting…" : method === "strategy" ? `Run ${strategyLabel(strategy)}` : "Start validation"}</button>
       </div>
     </section>
   </div>;

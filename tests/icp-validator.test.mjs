@@ -168,7 +168,8 @@ test("a Company DB selection is validated through the shared resolver, never wid
   assert.match(migration, /ICP selection proof passed and was rolled back/);
   assert.doesNotMatch(migration, /(update|insert into|delete from)\s+public\.(companies|clients|client_companies|client_company_icp_validations)\b/i);
 
-  const route = await read("../app/api/clients/[id]/icp-validator/route.ts");
+  // The parser both ICP routes share.
+  const route = await read("../lib/icp-selection.ts");
   assert.match(route, /p_filters: widening \? parsedFilters : \[\]/);
   assert.match(route, /authorizeFilterSets\(createAdminClient\(\), parsedFilters, userId, "company", clientId/);
 

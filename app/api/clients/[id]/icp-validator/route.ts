@@ -1,12 +1,9 @@
 import { authorizeApi, getAuthorizedUser } from "../../../../../lib/auth.ts";
 import { readBoundedJson } from "../../../../../lib/bounded-json.ts";
-import { withClientWorkspaceCompleteness } from "../../../../../lib/client-workspace-completeness.ts";
 import { csvCell } from "../../../../../lib/csv.ts";
-import { authorizeFilterSets } from "../../../../../lib/filter-sets.ts";
+import { readIcpSelection } from "../../../../../lib/icp-selection.ts";
 import { icpModelCatalog, unknownIcpModels } from "../../../../../lib/openrouter-models.ts";
-import { filterErrorResponse, parseFilters } from "../../../../../lib/prospect-filters.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
-import { parsePeopleScope } from "../../../../../lib/workspace-scopes.ts";
 import { ICP_MODELS, MAX_MODELS_PER_CHECK, REASONING_EFFORTS, estimateRunCost, sourceLabel } from "../../../../../worker/icp-validator-core.mjs";
 import { observed } from "../../../../../lib/observability.ts";
 
@@ -224,53 +221,6 @@ async function startRuns(clientId: string, body: StartBody, actor: string) {
   return Response.json({ runs });
 }
 
-type SelectionArgs = {
-  p_company_ids: string[] | null; p_search: string; p_filters: unknown; p_people_scope: unknown; p_excluded_ids: string[] | null;
-};
-
-// A Company DB selection: the ticked ids, or everything matching the
-// workspace's search and filters. Parsed and checked exactly as the Company
-// DB's other bulk actions are (app/api/clients/[id]/companies), and resolved
-// once in the database.
-async function readSelection(clientId: string, body: Record<string, unknown>, userId: string, verb: string): Promise<
-  { args: SelectionArgs; error?: never } | { args?: never; error: Response }
-> {
-  const companyIds = Array.isArray(body.companyIds)
-    ? [...new Set(body.companyIds.map((value) => String(value ?? "").trim()).filter(Boolean))].slice(0, 50000)
-    : [];
-  const allMatching = body.allMatching === true;
-  if (!companyIds.length && !allMatching) return { error: bad(`Select companies to ${verb}.`) };
-
-  let parsedFilters;
-  let peopleScope;
-  try {
-    parsedFilters = withClientWorkspaceCompleteness(parseFilters(JSON.stringify(body.filters ?? [])), clientId);
-    peopleScope = body.peopleScope ? parsePeopleScope(JSON.stringify(body.peopleScope)) : null;
-  } catch (error) {
-    return { error: filterErrorResponse(error, "Invalid company selection.") };
-  }
-  const excludedIds = Array.isArray(body.excludedIds)
-    ? [...new Set(body.excludedIds.map((value) => String(value ?? "").trim()).filter(Boolean))].slice(0, 50000)
-    : [];
-  const widening = allMatching && !companyIds.length;
-  if (widening) {
-    const setDenial = await authorizeFilterSets(createAdminClient(), parsedFilters, userId, "company", clientId,
-      peopleScope ? [{ entityType: "prospect", clientScope: clientId, filters: peopleScope.filters }] : []);
-    if (setDenial) return { error: setDenial };
-  }
-  return {
-    args: {
-      p_company_ids: companyIds.length ? companyIds : null,
-      // Empty unless this is an all-matching request, so an explicit selection
-      // can never be widened by a filter left in the payload.
-      p_search: widening ? String(body.search ?? "").trim().slice(0, 300) : "",
-      p_filters: widening ? parsedFilters : [],
-      p_people_scope: widening ? peopleScope : null,
-      p_excluded_ids: widening && excludedIds.length ? excludedIds : null,
-    },
-  };
-}
-
 // Every chosen model judges the same companies: the selection is resolved once.
 async function startSelection(clientId: string, body: Record<string, unknown>, userId: string, actor: string) {
   const icpId = String(body.icpId ?? "").trim();
@@ -278,7 +228,7 @@ async function startSelection(clientId: string, body: Record<string, unknown>, u
   const chosen = await readModels(body.models);
   if (chosen.error) return chosen.error;
   const effort = REASONING_EFFORTS.includes(String(body.effort)) ? String(body.effort) : "low";
-  const selection = await readSelection(clientId, body, userId, "validate");
+  const selection = await readIcpSelection(clientId, body, userId, "validate");
   if (selection.error) return selection.error;
   const { data, error } = await createAdminClient().rpc("start_icp_validation_selection_v1", {
     p_client_id: clientId,
@@ -297,7 +247,7 @@ async function startSelection(clientId: string, body: Record<string, unknown>, u
 // skips checks still queued for those companies so the labels stay off.
 async function clearSelection(clientId: string, body: Record<string, unknown>, userId: string) {
   const icpId = String(body.icpId ?? "").trim();
-  const selection = await readSelection(clientId, body, userId, "clear");
+  const selection = await readIcpSelection(clientId, body, userId, "clear");
   if (selection.error) return selection.error;
   const { data, error } = await createAdminClient().rpc("clear_icp_verdicts_selection_v1", {
     p_client_id: clientId,

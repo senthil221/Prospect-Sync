@@ -38,8 +38,9 @@ test("the route accepts catalog models, up to three, and clears through the shar
   assert.match(route, /if \(action === "clear_selection"\) return clearSelection\(/);
   // Both selection actions go through the one parser, which never widens an
   // explicit selection.
-  assert.equal(route.match(/await readSelection\(/g).length, 2);
-  assert.match(route, /p_filters: widening \? parsedFilters : \[\]/);
+  assert.equal(route.match(/await readIcpSelection\(/g).length, 2);
+  const selection = await read("../lib/icp-selection.ts");
+  assert.match(selection, /p_filters: widening \? parsedFilters : \[\]/);
 });
 
 test("clearing an ICP check removes labels only, and keeps them off", async () => {

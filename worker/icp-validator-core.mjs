@@ -23,6 +23,7 @@ export function icpModel(id) {
 
 export function sourceLabel(source) {
   if (source.startsWith('reference:')) return `${source.slice('reference:'.length)} (reference)`;
+  if (source.startsWith('strategy:')) return icpStrategy(source.slice('strategy:'.length))?.label ?? source;
   return icpModel(source)?.label ?? source;
 }
 
@@ -32,6 +33,63 @@ export function sourceLabel(source) {
 const reasoningTokensPerRow = { minimal: 20, low: 120, medium: 300, high: 700 };
 // One check runs at most this many models side by side.
 export const MAX_MODELS_PER_CHECK = 3;
+
+// The production strategies: fixed model passes over the same companies, and
+// the rule that turns their votes into one label. The database's
+// icp_strategy_passes_v1 / icp_strategy_rule_v1 are what actually run; this is
+// what the app shows, and a unit test keeps the two identical.
+export const ICP_STRATEGIES = [
+  {
+    id: 'strict', label: 'Strict', needFit: 2,
+    rule: 'FIT only if both runs say FIT. Either says NON_FIT → NON_FIT.',
+    summary: 'Fewest FITs. For a tight list where a wrong FIT costs more than a missed one.',
+    passes: [
+      { model: 'deepseek/deepseek-v4.1-flash', effort: 'high' },
+      { model: 'openai/gpt-6-luna', effort: 'low' },
+    ],
+  },
+  {
+    id: 'balanced', label: 'Balanced', needFit: 2,
+    rule: 'FIT if at least two of three runs say FIT. Two NON_FITs → NON_FIT.',
+    summary: 'Majority vote. The middle ground.',
+    passes: [
+      { model: 'deepseek/deepseek-v4.1-flash', effort: 'high' },
+      { model: 'deepseek/deepseek-v4.1-flash', effort: 'high' },
+      { model: 'openai/gpt-6-luna', effort: 'low' },
+    ],
+  },
+  {
+    id: 'lenient', label: 'Lenient', needFit: 1,
+    rule: 'FIT if either run says FIT. Only both NON_FIT → NON_FIT.',
+    summary: 'Most FITs. Keeps borderline companies - fewest false NON_FITs.',
+    passes: [
+      { model: 'deepseek/deepseek-v4.1-flash', effort: 'high' },
+      { model: 'deepseek/deepseek-v4.1-flash', effort: 'high' },
+    ],
+  },
+];
+
+export function icpStrategy(id) {
+  return ICP_STRATEGIES.find((strategy) => strategy.id === id) ?? null;
+}
+
+// A strategy's final verdict from its votes, or null while the remaining
+// votes could still change it. The same rule settle_icp_strategy_companies_v1
+// applies.
+export function strategyVerdict(strategy, fitVotes, nonFitVotes) {
+  const rule = typeof strategy === 'string' ? icpStrategy(strategy) : strategy;
+  if (!rule) return null;
+  if (fitVotes >= rule.needFit) return 'FIT';
+  if (nonFitVotes > rule.passes.length - rule.needFit) return 'NON_FIT';
+  return null;
+}
+
+// Provider routing. 'cheapest' asks OpenRouter for the lowest-priced provider
+// that still honours JSON mode and reasoning, leaving out 4-bit quantized
+// hosts (fp4/int4 and their variants), whose answers can drift. Fallbacks stay
+// on, so a cheap provider that fails hands over to the next one.
+export const PROVIDER_MODES = ['cheapest', 'default'];
+export const CHEAPEST_QUANTIZATIONS = ['int8', 'fp6', 'fp8', 'mxfp8', 'fp16', 'bf16', 'fp32', 'unknown'];
 
 // modelOrId: a catalog entry ({inputPerM, outputPerM}) for any OpenRouter
 // model, or the id of one of the defaults.
@@ -219,7 +277,7 @@ function errorFromStatus(status, message, response) {
   return new OpenRouterError('transient', `OpenRouter or the model provider failed (${status})${detail}`);
 }
 
-export function openRouterBody({ model, effort, system, user }) {
+export function openRouterBody({ model, effort, system, user, providerMode = 'default' }) {
   return {
     model,
     messages: [
@@ -232,11 +290,13 @@ export function openRouterBody({ model, effort, system, user }) {
     usage: { include: true },
     // Only route to providers that honour JSON mode and reasoning settings, so
     // three models are compared on the same terms.
-    provider: { require_parameters: true },
+    provider: providerMode === 'cheapest'
+      ? { require_parameters: true, sort: 'price', quantizations: CHEAPEST_QUANTIZATIONS }
+      : { require_parameters: true },
   };
 }
 
-export async function callOpenRouter({ apiKey, model, effort, system, user, timeoutMs = 150_000, fetchImpl = fetch, referer = '' }) {
+export async function callOpenRouter({ apiKey, model, effort, system, user, providerMode = 'default', timeoutMs = 150_000, fetchImpl = fetch, referer = '' }) {
   const started = Date.now();
   let response;
   try {
@@ -248,7 +308,7 @@ export async function callOpenRouter({ apiKey, model, effort, system, user, time
         'X-Title': 'Prospect-Sync ICP validator',
         ...(referer ? { 'HTTP-Referer': referer } : {}),
       },
-      body: JSON.stringify(openRouterBody({ model, effort, system, user })),
+      body: JSON.stringify(openRouterBody({ model, effort, system, user, providerMode })),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {

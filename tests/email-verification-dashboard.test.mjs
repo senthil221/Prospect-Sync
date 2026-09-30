@@ -19,7 +19,7 @@ test("the page is a section with its own nav entry and live polling", async () =
   const types = await read("../lib/types.ts");
   assert.match(types, /"verification"/);
   const url = await read("../lib/workspace-url.ts");
-  assert.match(url, /"reply-blocklist", "verification"\]/);
+  assert.match(url, /"reply-blocklist", "verification"[,\]]/);
   const app = await read("../app/DashboardApp.tsx");
   assert.match(app, /\{ id: "verification", label: "Email verification", mark: "check" \}/);
   assert.match(app, /section === "verification" && <EmailVerificationWorkspace isAdmin=\{isAdmin\}\/>/);

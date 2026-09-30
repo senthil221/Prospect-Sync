@@ -30,6 +30,7 @@ const screenImports = {
   integrations: () => import("./components/IntegrationsPanel"),
   replyBlocklist: () => import("./components/ReplyBlocklistPanel"),
   verification: () => import("./components/EmailVerificationWorkspace"),
+  icpChecks: () => import("./components/IcpChecksWorkspace"),
   logs: () => import("./components/LogsPanel"),
 };
 const screenLoading = () => <LoadingState label="Loading this screen"/>;
@@ -40,6 +41,7 @@ const ImportsPanel = dynamic(screenImports.imports, { loading: screenLoading });
 const IntegrationsPanel = dynamic(screenImports.integrations, { loading: screenLoading });
 const ReplyBlocklistPanel = dynamic(screenImports.replyBlocklist, { loading: screenLoading });
 const EmailVerificationWorkspace = dynamic(screenImports.verification, { loading: screenLoading });
+const IcpChecksWorkspace = dynamic(screenImports.icpChecks, { loading: screenLoading });
 const LogsPanel = dynamic(screenImports.logs, { loading: screenLoading });
 
 function usePreloadScreens(isAdmin: boolean) {
@@ -74,6 +76,7 @@ const baseNavGroups: Array<{ label: string; items: Array<{ id: Section; label: s
       { id: "quality", label: "Data quality", mark: "quality" },
       { id: "imports", label: "Import CSV", mark: "upload" },
       { id: "verification", label: "Email verification", mark: "check" },
+      { id: "icp-checks", label: "ICP checks", mark: "target" },
       { id: "integrations", label: "Integrations", mark: "grid" },
       { id: "reply-blocklist", label: "Reply blocklist", mark: "quality" },
     ],
@@ -427,6 +430,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
         {!loading && section === "integrations" && <IntegrationsPanel onOpenReplyBlocklist={() => navigate("reply-blocklist")}/>}
         {!loading && section === "reply-blocklist" && <ReplyBlocklistPanel onOpenIntegrations={() => navigate("integrations")}/>}
         {!loading && section === "verification" && <EmailVerificationWorkspace isAdmin={isAdmin}/>}
+        {!loading && section === "icp-checks" && <IcpChecksWorkspace clients={clients}/>}
         {!loading && section === "logs" && isAdmin && <LogsPanel/>}
         {loading ? <LoadingState/> : null}
         {!loading && workspaceLoading ? <div className="workspace-progress" role="status"><span/>Updating {title.toLowerCase()}…</div> : null}
