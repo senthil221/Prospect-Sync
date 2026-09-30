@@ -4,8 +4,9 @@ import { normalizeDataSource } from "../../../../lib/data-source";
 import { companyImportFields, fixedImportColumns, missingCompanyImportFields, suggestedCompanyImportField } from "../../../../lib/import-schema";
 import { importHeaderSignature } from "../../../../lib/import-resume";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { observed } from "../../../../lib/observability";
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const payload = await request.json().catch(() => null) as { fileName?: unknown; totalRows?: unknown; dataSource?: unknown; headers?: unknown; fieldMap?: unknown; mergeMode?: unknown } | null;
@@ -38,3 +39,5 @@ export async function POST(request: Request) {
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ importId: id }, { status: 201 });
 }
+
+export const POST = observed("/api/company-imports/start", handlePOST);

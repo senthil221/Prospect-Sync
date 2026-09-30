@@ -1,6 +1,7 @@
 import { authorizeApi } from "../../../../../lib/auth";
 import { csvDocument } from "../../../../../lib/csv";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
+import { observed } from "../../../../../lib/observability";
 
 // The completion screen's "Kept without a People DB link" count has never had
 // anywhere to look further - the rows themselves only ever lived in list_rows
@@ -8,7 +9,7 @@ import { createAdminClient } from "../../../../../lib/supabase/admin";
 // that resolved to a prospect. This is the one place that count can be turned
 // into something a person can act on: the exact source rows, and their
 // original row numbers, so they can be found again in the file that made them.
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -56,3 +57,5 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     },
   });
 }
+
+export const GET = observed("/api/imports/[id]/skipped", handleGET);

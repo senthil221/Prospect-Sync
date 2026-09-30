@@ -1,7 +1,8 @@
+import { observed } from "../../../../../lib/observability";
 import { authorizeApi } from "../../../../../lib/auth";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 
-export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -31,3 +32,5 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ prospects: data ?? [], total: Number(count ?? 0), page, pageSize });
 }
+
+export const GET = observed("/api/companies/[id]/prospects", handleGET);

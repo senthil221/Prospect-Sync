@@ -1,8 +1,9 @@
 import { authorizeApi } from "../../../../lib/auth";
 import { deleteAndReindex, queuedNotice } from "../../../../lib/delete-cleanup.ts";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { observed } from "../../../../lib/observability.ts";
 
-export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -15,7 +16,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   return Response.json({ list: data }, { headers: { "Cache-Control": "no-store" } });
 }
 
-export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleDELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -28,3 +29,6 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   if (error) return Response.json({ error: error.message }, { status: error.code === "P0002" ? 404 : 500 });
   return Response.json({ result: data, notice: queuedNotice(data) });
 }
+
+export const GET = observed("/api/lists/[id]", handleGET);
+export const DELETE = observed("/api/lists/[id]", handleDELETE);

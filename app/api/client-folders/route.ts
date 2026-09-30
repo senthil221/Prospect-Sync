@@ -1,15 +1,16 @@
 import { normalizeText } from "../../../db/normalize";
 import { authorizeApi } from "../../../lib/auth";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { observed } from "../../../lib/observability";
 
-export async function GET() {
+async function handleGET() {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { data, error } = await createAdminClient().from("client_folders").select("id,name,created_at").order("name");
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ folders: data ?? [] });
 }
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const payload = await request.json().catch(() => null) as { name?: unknown } | null;
@@ -36,3 +37,6 @@ export async function POST(request: Request) {
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ folder: data }, { status: 201 });
 }
+
+export const GET = observed("/api/client-folders", handleGET);
+export const POST = observed("/api/client-folders", handlePOST);

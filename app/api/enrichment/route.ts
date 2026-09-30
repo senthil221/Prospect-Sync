@@ -13,7 +13,7 @@ function failure(error: { code?: string; message: string }) {
 
 // What would be filled, without filling anything. The apply step is only ever
 // reached after the user has seen these numbers.
-export async function GET() {
+async function handleGET() {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { data, error } = await createAdminClient().rpc("enrichment_preview_v1", { p_limit: 25 });
@@ -21,7 +21,7 @@ export async function GET() {
   return Response.json({ preview: data ?? { companies: 0, fields: 0, sample: [] } });
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const user = await getAuthorizedUser();
@@ -40,3 +40,7 @@ export async function POST(request: Request) {
   return Response.json({ result: data });
 }
 import { readBoundedJson } from '../../../lib/bounded-json';
+import { observed } from "../../../lib/observability.ts";
+
+export const GET = observed("/api/enrichment", handleGET);
+export const POST = observed("/api/enrichment", handlePOST);

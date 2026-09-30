@@ -4,6 +4,7 @@ import { databaseErrorResponse } from "../../../../lib/api-errors";
 import { logServerEvent } from "../../../../lib/server-log";
 import { reindexCompanyImport } from "../../../../lib/reindex";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { observed } from "../../../../lib/observability";
 
 // Completing a company import is now two separable things, and the separation
 // is the whole fix.
@@ -19,7 +20,7 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 // response, and durably: the rows are in reindex_backlog whether or not this
 // process survives the next minute, and the operations worker drains them
 // either way. Nothing below this line is load-bearing for correctness.
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const payload = await request.json().catch(() => null) as { importId?: unknown } | null;
@@ -63,3 +64,5 @@ export async function POST(request: Request) {
   });
   return Response.json({ summary: data?.[0] ?? null });
 }
+
+export const POST = observed("/api/company-imports/complete", handlePOST);

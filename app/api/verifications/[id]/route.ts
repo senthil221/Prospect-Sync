@@ -2,9 +2,10 @@ import { authorizeApi } from '../../../../lib/auth';
 import { readBoundedJson } from '../../../../lib/bounded-json';
 import { integrationWriteAllowed } from '../../../../lib/integrations/credentials';
 import { createAdminClient } from '../../../../lib/supabase/admin';
+import { observed } from "../../../../lib/observability";
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-export async function POST(request: Request, context: RouteContext<'/api/verifications/[id]'>) {
+async function handlePOST(request: Request, context: RouteContext<'/api/verifications/[id]'>) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const publicUrl = process.env.APP_PUBLIC_URL || (process.env.NODE_ENV !== 'production' ? new URL(request.url).origin : undefined);
@@ -18,3 +19,5 @@ export async function POST(request: Request, context: RouteContext<'/api/verific
   return error ? Response.json({ error: error.code === 'P0002' ? 'Verification run not found.' : 'Unable to update the run.' }, { status: error.code === 'P0002' ? 404 : 409 })
     : Response.json({ run: data }, { headers: { 'Cache-Control': 'no-store' } });
 }
+
+export const POST = observed("/api/verifications/[id]", handlePOST);

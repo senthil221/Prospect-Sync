@@ -3,6 +3,7 @@ import { buildCompanyExportColumns } from "../../../../../lib/company-export";
 import { buildExportColumns, csvHeaderLine, csvRowsBody, type ExportColumn, type ProspectRow } from "../../../../../lib/prospect-export";
 import { ownerIdentity } from "../../../../../lib/result-sets";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
+import { observed } from "../../../../../lib/observability";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -34,7 +35,7 @@ type StatusRow = {
   error?: string | null;
 };
 
-export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const owner = ownerIdentity(await getAuthorizedUser());
@@ -138,3 +139,5 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     },
   });
 }
+
+export const GET = observed("/api/exports/[id]/download", handleGET);

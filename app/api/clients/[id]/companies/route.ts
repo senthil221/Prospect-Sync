@@ -8,7 +8,7 @@ import { withClientWorkspaceCompleteness } from "../../../../../lib/client-works
 
 const missingFunctionCodes = new Set(["PGRST202", "42883", "42P01"]);
 
-export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handlePOST(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
 
@@ -259,3 +259,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   return Response.json({ result: data });
 }
 import { readBoundedJson } from "../../../../../lib/bounded-json";
+import { observed } from "../../../../../lib/observability.ts";
+
+export const POST = observed("/api/clients/[id]/companies", handlePOST);

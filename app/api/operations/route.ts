@@ -3,6 +3,7 @@ import { readBoundedJson } from '../../../lib/bounded-json';
 import { indexNotice, reindexProspects } from "../../../lib/reindex.ts";
 import { ownerIdentity } from "../../../lib/result-sets.ts";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { observed } from "../../../lib/observability.ts";
 
 // How a background bulk action reports itself. The mutation is being applied in
 // batches by the operations worker, so the only honest thing this can do is say
@@ -38,7 +39,7 @@ async function jobStatus(jobId: string) {
   });
 }
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const params = new URL(request.url).searchParams;
@@ -55,7 +56,7 @@ export async function GET(request: Request) {
   return Response.json({ tags: tags.data ?? [], events: events.data ?? [] });
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const decoded = await readBoundedJson(request);
@@ -91,3 +92,6 @@ export async function POST(request: Request) {
   }
   return Response.json({ error: "Unsupported bulk action." }, { status: 400 });
 }
+
+export const GET = observed("/api/operations", handleGET);
+export const POST = observed("/api/operations", handlePOST);

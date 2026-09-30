@@ -1,12 +1,13 @@
 import { authorizeApi } from "../../../../../lib/auth.ts";
 import { databaseErrorResponse, isStatementTimeout, statementTimeoutResponse } from "../../../../../lib/api-errors.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
+import { observed } from "../../../../../lib/observability.ts";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883", "42P01"]);
 
 const pageSize = 50;
 
-export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
 
@@ -87,3 +88,5 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     pageSize,
   });
 }
+
+export const GET = observed("/api/clients/[id]/recent", handleGET);

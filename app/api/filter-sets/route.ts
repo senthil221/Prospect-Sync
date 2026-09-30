@@ -15,7 +15,7 @@ export const runtime = "nodejs";
 const maxSetValues = 10_000;
 const allowedEntities = new Set(["prospect", "company"]);
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
 
@@ -92,3 +92,6 @@ export async function POST(request: Request) {
   });
 }
 import { readBoundedJson } from "../../../lib/bounded-json";
+import { observed } from "../../../lib/observability";
+
+export const POST = observed("/api/filter-sets", handlePOST);

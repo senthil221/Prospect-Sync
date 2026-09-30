@@ -7,6 +7,7 @@ import { unassignedClientId, unassignedClientName, unassignedClientNormalizedNam
 import { importHeaderSignature } from "../../../../lib/import-resume";
 import { prospectImportBucket, validProspectImportObjectPath } from "../../../../lib/import-storage.ts";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { observed } from "../../../../lib/observability.ts";
 
 function validDateContacted(value: unknown): string | null | undefined {
   if (value === null) return null;
@@ -20,7 +21,7 @@ function validDateContacted(value: unknown): string | null | undefined {
   return date <= new Date(Date.now() + 24 * 60 * 60_000).toISOString().slice(0, 10) ? date : undefined;
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   let user;
   try {
     user = await getAuthorizedUser();
@@ -107,3 +108,5 @@ export async function POST(request: Request) {
   }
   return Response.json({ importId, listId, clientId }, { status: 201 });
 }
+
+export const POST = observed("/api/imports/start", handlePOST);

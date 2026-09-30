@@ -2,12 +2,13 @@ import { createHash, randomBytes } from "node:crypto";
 import { authorizeApi, getAuthorizedUser } from "../../../../../lib/auth.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { blocklistShareOrigin } from "./public-origin";
+import { observed } from "../../../../../lib/observability.ts";
 
 function tokenHash(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -22,7 +23,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   return Response.json({ shares: shares.data ?? [], queue: { failed: failed.count ?? 0, pending: pending.count ?? 0 } });
 }
 
-export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handlePOST(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -41,7 +42,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   return Response.json({ share: data, url: `${origin}/blocklist#token=${token}` }, { status: 201 });
 }
 
-export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleDELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -55,7 +56,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   return Response.json({ revoked: true });
 }
 
-export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handlePATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -67,3 +68,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ retried: data?.length ?? 0 });
 }
+
+export const GET = observed("/api/clients/[id]/blocklist-shares", handleGET);
+export const POST = observed("/api/clients/[id]/blocklist-shares", handlePOST);
+export const DELETE = observed("/api/clients/[id]/blocklist-shares", handleDELETE);
+export const PATCH = observed("/api/clients/[id]/blocklist-shares", handlePATCH);

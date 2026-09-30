@@ -1,6 +1,7 @@
 import { authorizeApi } from "../../../lib/auth";
 import { FilterLimitError, filterErrorResponse, parseFilters } from "../../../lib/prospect-filters";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { observed } from "../../../lib/observability";
 
 type ViewRow = { definition?: unknown } & Record<string, unknown>;
 
@@ -31,7 +32,7 @@ function reviewFlag(view: ViewRow) {
   }
 }
 
-export async function GET() {
+async function handleGET() {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { data, error } = await createAdminClient().from("saved_views").select("*").order("updated_at", { ascending: false });
@@ -43,7 +44,7 @@ export async function GET() {
   return Response.json({ views });
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id, name, definition } = await request.json() as { id?: string; name?: string; definition?: unknown };
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
   return Response.json({ view: data });
 }
 
-export async function DELETE(request: Request) {
+async function handleDELETE(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const id = new URL(request.url).searchParams.get("id");
@@ -68,3 +69,7 @@ export async function DELETE(request: Request) {
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ deleted: true });
 }
+
+export const GET = observed("/api/saved-views", handleGET);
+export const POST = observed("/api/saved-views", handlePOST);
+export const DELETE = observed("/api/saved-views", handleDELETE);

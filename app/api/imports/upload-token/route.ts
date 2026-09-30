@@ -1,8 +1,9 @@
 import { getAuthorizedUser } from "../../../../lib/auth.ts";
 import { maximumProspectImportBytes, prospectImportBucket, prospectImportObjectPath } from "../../../../lib/import-storage.ts";
 import { createAdminClient } from "../../../../lib/supabase/admin.ts";
+import { observed } from "../../../../lib/observability.ts";
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   let user;
   try {
     user = await getAuthorizedUser();
@@ -42,3 +43,5 @@ export async function POST(request: Request) {
   if (signed.error) return Response.json({ error: signed.error.message }, { status: 500 });
   return Response.json({ objectPath, token: signed.data.token, alreadyUploaded: false });
 }
+
+export const POST = observed("/api/imports/upload-token", handlePOST);

@@ -2,6 +2,7 @@ import { getAuthorizedUser } from '../../../../lib/auth';
 import { csvCell } from '../../../../lib/csv';
 import { integrationAdmin } from '../../../../lib/integrations/credentials';
 import { createAdminClient } from '../../../../lib/supabase/admin';
+import { observed } from "../../../../lib/observability";
 
 // What the Smartlead reply sync added to which client's blocklist, and why
 // (the Smartlead category). Same audience as the Reply blocklist page: an
@@ -20,7 +21,7 @@ type BlockRow = {
   reply_email: string | null; reply_time: string | null; applied_at: string | null; created_at: string; status: string;
 };
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const user = await getAuthorizedUser();
   if (!user) return reply({ error: 'Unauthorized' }, 401);
   if (!integrationAdmin(user.email, process.env.INTEGRATION_ADMIN_EMAILS)) return reply({ error: 'Only an integration administrator can view reply blocks.' }, 403);
@@ -59,3 +60,5 @@ export async function GET(request: Request) {
     },
   });
 }
+
+export const GET = observed("/api/integrations/reply-blocks", handleGET);

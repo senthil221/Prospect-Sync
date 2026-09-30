@@ -2,7 +2,8 @@ import {getAuthorizedUser} from '../../../../lib/auth';
 import {integrationAdmin} from '../../../../lib/integrations/credentials';
 import {deliveryReport} from '../../../../lib/integrations/report';
 import {createAdminClient} from '../../../../lib/supabase/admin';
-export async function GET(request:Request){
+import { observed } from "../../../../lib/observability";
+async function handleGET(request:Request){
   try{
     const user=await getAuthorizedUser();
     if(!user || !integrationAdmin(user.email,process.env.INTEGRATION_ADMIN_EMAILS))return new Response('Unauthorized',{status:403});
@@ -13,3 +14,5 @@ export async function GET(request:Request){
     return new Response(deliveryReport(data),{headers:{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':`attachment; filename="smartlead-${id}.csv"`,'Cache-Control':'no-store'}});
   }catch{return new Response('Report unavailable',{status:503});}
 }
+
+export const GET = observed("/api/integrations/report", handleGET);

@@ -1,8 +1,9 @@
 import { normalizeText } from "../../../../db/normalize";
 import { authorizeApi } from "../../../../lib/auth";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { observed } from "../../../../lib/observability";
 
-export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handlePATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
 
@@ -27,7 +28,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   return Response.json({ folder: data });
 }
 
-export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleDELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
 
@@ -40,3 +41,6 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
   if (!data) return Response.json({ error: "Folder not found." }, { status: 404 });
   return Response.json({ deleted: true });
 }
+
+export const PATCH = observed("/api/client-folders/[id]", handlePATCH);
+export const DELETE = observed("/api/client-folders/[id]", handleDELETE);

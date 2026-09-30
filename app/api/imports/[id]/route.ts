@@ -1,6 +1,7 @@
 import { authorizeApi } from "../../../../lib/auth";
 import { deleteAndReindex, queuedNotice } from "../../../../lib/delete-cleanup.ts";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { observed } from "../../../../lib/observability.ts";
 
 type ImportDetailRow = {
   id: string; client_id?: string | null; list_id: string | null; file_name: string; data_source: string; status: string;
@@ -12,7 +13,7 @@ type ImportDetailRow = {
   merge_mode?: string | null;
 };
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -69,7 +70,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }, { headers: { "Cache-Control": "no-store" } });
 }
 
-export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleDELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -113,7 +114,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   return Response.json({ result: data, notice: queuedNotice(data) });
 }
 
-export async function PATCH(_request: Request, context: { params: Promise<{ id: string }> }) {
+async function handlePATCH(_request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -133,3 +134,7 @@ export async function PATCH(_request: Request, context: { params: Promise<{ id: 
   if (retried.error) return Response.json({ error: retried.error.message }, { status: 500 });
   return Response.json({ status: "queued" });
 }
+
+export const GET = observed("/api/imports/[id]", handleGET);
+export const DELETE = observed("/api/imports/[id]", handleDELETE);
+export const PATCH = observed("/api/imports/[id]", handlePATCH);

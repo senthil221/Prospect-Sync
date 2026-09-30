@@ -8,6 +8,7 @@ import { filterErrorResponse, parseFilters } from "../../../../../lib/prospect-f
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { parsePeopleScope } from "../../../../../lib/workspace-scopes.ts";
 import { ICP_MODELS, MAX_MODELS_PER_CHECK, REASONING_EFFORTS, estimateRunCost, sourceLabel } from "../../../../../worker/icp-validator-core.mjs";
+import { observed } from "../../../../../lib/observability.ts";
 
 // The ICP validator's API. The model calls happen in the ICP worker, never
 // here: this route starts and steers runs and reads results. Comparing with
@@ -68,7 +69,7 @@ type VerdictRow = {
   verdicts: Record<string, { verdict: string; reason: string; current: boolean }>;
 };
 
-export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -307,7 +308,7 @@ async function clearSelection(clientId: string, body: Record<string, unknown>, u
   return Response.json({ result: data });
 }
 
-export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handlePOST(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -358,3 +359,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   return bad("Unknown action.");
 }
+
+export const GET = observed("/api/clients/[id]/icp-validator", handleGET);
+export const POST = observed("/api/clients/[id]/icp-validator", handlePOST);

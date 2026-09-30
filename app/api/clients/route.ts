@@ -1,8 +1,9 @@
 import { authorizeApi } from "../../../lib/auth";
 import { normalizeText } from "../../../db/normalize";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { observed } from "../../../lib/observability";
 
-export async function GET() {
+async function handleGET() {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const supabase = createAdminClient();
@@ -21,7 +22,7 @@ export async function GET() {
   });
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { name } = await request.json() as { name?: string };
@@ -37,3 +38,6 @@ export async function POST(request: Request) {
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ client: { id: client.id, name: client.name } }, { status: 201 });
 }
+
+export const GET = observed("/api/clients", handleGET);
+export const POST = observed("/api/clients", handlePOST);

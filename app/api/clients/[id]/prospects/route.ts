@@ -29,7 +29,7 @@ function validDateContacted(value: unknown): string | null | undefined {
 // Push master records into this client, mark them ICP verified, or remove them.
 // Every action accepts either explicit ids or the current search/filters, so a
 // whole segment is one request.
-export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handlePOST(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -237,3 +237,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   return Response.json({ error: "Unsupported client action." }, { status: 400 });
 }
 import { readBoundedJson } from "../../../../../lib/bounded-json";
+import { observed } from "../../../../../lib/observability.ts";
+
+export const POST = observed("/api/clients/[id]/prospects", handlePOST);

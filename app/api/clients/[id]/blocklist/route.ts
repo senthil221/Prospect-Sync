@@ -3,6 +3,7 @@ import { BLOCKLIST_REQUEST_VALUES, partitionBlocklistValues } from "../../../../
 import { csvCell } from "../../../../../lib/csv.ts";
 import { readBoundedJson } from "../../../../../lib/bounded-json.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
+import { observed } from "../../../../../lib/observability.ts";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883", "42P01"]);
 const reasons = new Set(["Client Provided", "ICP Invalid", "Campaign Reply"]);
@@ -96,7 +97,7 @@ async function exportSelection(request: Request, clientId: string, payload: Sele
   } });
 }
 
-export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -119,7 +120,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   return Response.json({ entries: data ?? [], total: count ?? 0, page, pageSize });
 }
 
-export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handlePOST(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -147,7 +148,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   return Response.json({ result: data, domains: parsed.domains.length, emails: parsed.emails.length, duplicates: parsed.duplicates, unrecognised: parsed.invalid, unrecognisedCount: parsed.invalidCount });
 }
 
-export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handlePATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -168,7 +169,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   return Response.json({ result: data });
 }
 
-export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleDELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -186,3 +187,8 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   if (error) return failure(error);
   return Response.json({ result: data });
 }
+
+export const GET = observed("/api/clients/[id]/blocklist", handleGET);
+export const POST = observed("/api/clients/[id]/blocklist", handlePOST);
+export const PATCH = observed("/api/clients/[id]/blocklist", handlePATCH);
+export const DELETE = observed("/api/clients/[id]/blocklist", handleDELETE);

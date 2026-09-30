@@ -4,6 +4,7 @@ import { filterErrorResponse, parseFilters } from "../../../../lib/prospect-filt
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { parsePeopleScope } from "../../../../lib/workspace-scopes";
 import { readBoundedJson } from "../../../../lib/bounded-json";
+import { observed } from "../../../../lib/observability";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883"]);
 
@@ -17,7 +18,7 @@ const missingFunctionCodes = new Set(["PGRST202", "42883"]);
 // many rather than its own ceiling.
 const maxCopyDomains = 20_000;
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const decoded = await readBoundedJson(request);
@@ -114,3 +115,5 @@ export async function POST(request: Request) {
     truncated: companyIds.length >= maxCopyDomains,
   });
 }
+
+export const POST = observed("/api/companies/domains", handlePOST);

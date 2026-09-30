@@ -1,5 +1,6 @@
 import { authorizeApi } from "../../../../lib/auth";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { observed } from "../../../../lib/observability";
 
 // Job title classifier maintenance.
 //
@@ -27,7 +28,7 @@ function migrationRequired() {
   return Response.json({ error: "Apply the latest database migration to enable the job title classifier." }, { status: 503 });
 }
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const url = new URL(request.url);
@@ -62,7 +63,7 @@ export async function GET(request: Request) {
   }, { headers: { "Cache-Control": "no-store" } });
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const payload = await request.json().catch(() => null) as { batches?: unknown } | null;
@@ -93,3 +94,6 @@ export async function POST(request: Request) {
 
   return Response.json({ reclassified, remaining, remainingCount });
 }
+
+export const GET = observed("/api/prospects/classify", handleGET);
+export const POST = observed("/api/prospects/classify", handlePOST);

@@ -1,10 +1,11 @@
 import { authorizeAdminApi } from "../../../../lib/auth";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { observed } from "../../../../lib/observability";
 
 const pageSize = 50;
 const levels = new Set(["info", "warn", "error"]);
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const unauthorized = await authorizeAdminApi();
   if (unauthorized) return unauthorized;
 
@@ -29,3 +30,5 @@ export async function GET(request: Request) {
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ entries: data ?? [], total: count ?? 0, page, pageSize }, { headers: { "Cache-Control": "no-store" } });
 }
+
+export const GET = observed("/api/admin/logs", handleGET);

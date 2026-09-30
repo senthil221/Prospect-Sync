@@ -9,19 +9,20 @@ import { scopeRestricts } from '../../../lib/workspace-scopes';
 import { prepareCompanyScope } from '../../../lib/prepare-company-scope';
 import { ownerIdentity } from '../../../lib/result-sets';
 import { parseManualVerificationEmailLimit } from '../../../lib/verification-limits';
+import { observed } from "../../../lib/observability";
 
 export const runtime = 'nodejs';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 
-export async function GET() {
+async function handleGET() {
   const user = await getAuthorizedUser().catch(() => null);
   if (!user) return reply({ error: 'Unauthorized' }, 401);
   const { data, error } = await createAdminClient().rpc('email_verification_runs_v1', { p_limit: 30 }).abortSignal(AbortSignal.timeout(5000));
   return error ? reply({ error: 'Verification status is unavailable. Apply the latest database migration.' }, 503) : reply(data);
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const user = await getAuthorizedUser().catch(() => null);
   if (!user) return reply({ error: 'Unauthorized' }, 401);
   const publicUrl = process.env.APP_PUBLIC_URL || (process.env.NODE_ENV !== 'production' ? new URL(request.url).origin : undefined);
@@ -68,3 +69,6 @@ export async function POST(request: Request) {
   if (error) return reply({ error: 'Unable to create the verification run.' }, 503);
   return reply({ run: data }, 202);
 }
+
+export const GET = observed("/api/verifications", handleGET);
+export const POST = observed("/api/verifications", handlePOST);

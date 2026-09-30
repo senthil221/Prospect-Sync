@@ -1,3 +1,4 @@
+import { observed } from "../../../../lib/observability";
 import { authorizeApi } from "../../../../lib/auth";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 
@@ -6,7 +7,7 @@ export const maxDuration = 60;
 
 // Manual full rebuild of the flat prospect_index - a safety net. Normal operation
 // keeps the index fresh incrementally through reindex hooks on every write path.
-export async function POST() {
+async function handlePOST() {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const supabase = createAdminClient();
@@ -20,3 +21,5 @@ export async function POST() {
   }
   return Response.json({ indexed: Number(data ?? 0) });
 }
+
+export const POST = observed("/api/prospects/reindex", handlePOST);

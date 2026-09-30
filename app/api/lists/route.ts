@@ -1,7 +1,8 @@
 import { authorizeApi } from "../../../lib/auth";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { observed } from "../../../lib/observability";
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const clientId = new URL(request.url).searchParams.get("clientId");
@@ -21,7 +22,7 @@ export async function GET(request: Request) {
 // Create an empty list for a client. Until now a list could only come into
 // existence as a side effect of a CSV import, which left no way to push people from
 // the People database into a brand-new list.
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const payload = await request.json().catch(() => null) as { clientId?: unknown; name?: unknown } | null;
@@ -45,3 +46,6 @@ export async function POST(request: Request) {
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ list: { id: list.id, name: list.name } }, { status: 201 });
 }
+
+export const GET = observed("/api/lists", handleGET);
+export const POST = observed("/api/lists", handlePOST);

@@ -2,8 +2,9 @@ import { authorizeAdminApi } from '../../../../lib/auth';
 import { readBoundedJson } from '../../../../lib/bounded-json';
 import { integrationWriteAllowed } from '../../../../lib/integrations/credentials';
 import { createAdminClient } from '../../../../lib/supabase/admin';
+import { observed } from "../../../../lib/observability";
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeAdminApi();
   if (unauthorized) return unauthorized;
   const publicUrl = process.env.APP_PUBLIC_URL || (process.env.NODE_ENV !== 'production' ? new URL(request.url).origin : undefined);
@@ -19,3 +20,5 @@ export async function POST(request: Request) {
   return error ? Response.json({ error: 'Unable to update provider dispatch.' }, { status: 409 })
     : Response.json({ provider: data }, { headers: { 'Cache-Control': 'no-store' } });
 }
+
+export const POST = observed("/api/verifications/provider", handlePOST);

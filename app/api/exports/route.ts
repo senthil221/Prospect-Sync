@@ -38,7 +38,7 @@ const migrationNeeded = () => Response.json(
   { error: "Apply the latest database migration to enable background exports." }, { status: 503 });
 
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const user = await getAuthorizedUser();
@@ -175,7 +175,7 @@ export async function POST(request: Request) {
   }, { status: 202 });
 }
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const owner = ownerIdentity(await getAuthorizedUser());
@@ -212,3 +212,7 @@ export async function GET(request: Request) {
   });
 }
 import { readBoundedJson } from "../../../lib/bounded-json";
+import { observed } from "../../../lib/observability";
+
+export const POST = observed("/api/exports", handlePOST);
+export const GET = observed("/api/exports", handleGET);

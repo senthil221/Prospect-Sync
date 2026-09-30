@@ -3,10 +3,11 @@ import { readBoundedJson } from '../../../../lib/bounded-json';
 import { integrationAdmin, integrationWriteAllowed } from '../../../../lib/integrations/credentials';
 import { prepareIntegrationPreview, previewHash } from '../../../../lib/integrations/preview';
 import { createAdminClient } from '../../../../lib/supabase/admin';
+import { observed } from "../../../../lib/observability";
 
 export const runtime='nodejs';
 const reply=(value:unknown,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'no-store'}});
-export async function POST(request:Request) {
+async function handlePOST(request:Request) {
   try {
     const user=await getAuthorizedUser();
     if (!user) return reply({error:'Unauthorized'},401);
@@ -38,3 +39,5 @@ export async function POST(request:Request) {
     return reply({jobId:staged.data,counts,sample:preview.sample,dispatchEnabled:false});
   } catch {return reply({error:'Unable to prepare this preview. No leads were sent.'},503);}
 }
+
+export const POST = observed("/api/integrations/preview", handlePOST);

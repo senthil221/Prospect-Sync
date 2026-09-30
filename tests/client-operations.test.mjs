@@ -153,7 +153,8 @@ test("clients can be created before any list is imported", async () => {
   assert.match(panel, /> New client</);
   assert.match(panel, /\/api\/clients/);
   assert.match(panel, /add the blocklist before importing any prospects/i);
-  assert.match(route, /export async function POST/);
+  // Exported directly, or wrapped in observed() for request timing.
+  assert.match(route, /export async function POST|export const POST = observed\("\/api\/clients", handlePOST\)/);
   assert.match(route, /from\("clients"\)\.insert\(client\)/);
 });
 

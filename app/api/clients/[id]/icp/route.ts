@@ -1,6 +1,7 @@
 import { authorizeApi } from "../../../../../lib/auth.ts";
 import { readBoundedJson } from "../../../../../lib/bounded-json.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
+import { observed } from "../../../../../lib/observability.ts";
 
 const missingTableCodes = new Set(["PGRST205", "PGRST202", "42883", "42P01"]);
 
@@ -69,7 +70,7 @@ function readBody(value: unknown) {
   return { name, description };
 }
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -104,7 +105,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   });
 }
 
-export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handlePOST(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -132,7 +133,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   return Response.json({ profile: data });
 }
 
-export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handlePATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -167,7 +168,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   return Response.json({ profile: data });
 }
 
-export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleDELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -190,3 +191,8 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   // unlabel them.
   return Response.json({ deleted: data.id });
 }
+
+export const GET = observed("/api/clients/[id]/icp", handleGET);
+export const POST = observed("/api/clients/[id]/icp", handlePOST);
+export const PATCH = observed("/api/clients/[id]/icp", handlePATCH);
+export const DELETE = observed("/api/clients/[id]/icp", handleDELETE);

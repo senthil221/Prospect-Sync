@@ -2,13 +2,14 @@ import { authorizeApi } from "../../../../lib/auth";
 import { lookupEmailProvider } from "../../../../lib/email-provider";
 import { indexNotice, reindexProspectsOfCompanies } from "../../../../lib/reindex.ts";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { observed } from "../../../../lib/observability.ts";
 
 export const runtime = "nodejs";
 
 type ScanRequest = { afterId?: unknown; limit?: unknown; force?: unknown };
 type CompanyCandidate = { id: string; domain: string; normalized_domain: string };
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
 
@@ -91,3 +92,5 @@ export async function POST(request: Request) {
     notice: indexWarning,
   });
 }
+
+export const POST = observed("/api/email-providers/scan", handlePOST);

@@ -6,6 +6,7 @@ import { integrationAdmin, integrationWriteAllowed, isProvider, openCredential, 
 import { checkProvider, ProviderError, readSmartleadCategories, retryDelay } from '../../../lib/integrations/provider-api';
 import { readSmartleadInboxPage } from '../../../lib/integrations/smartlead-inbox.mjs';
 import { inboxConnectionCurrent } from '../../../lib/integrations/inbox-connection';
+import { observed } from "../../../lib/observability";
 
 export const runtime = 'nodejs';
 const reply = (body: unknown, status = 200, extra: Record<string, string> = {}) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...extra } });
@@ -15,7 +16,7 @@ async function deliveryReady() {
   try {return (await fetch(process.env.INTEGRATION_WORKER_HEALTH_URL,{cache:'no-store',signal:AbortSignal.timeout(2000)})).ok;} catch{return false;}
 }
 
-export async function GET() {
+async function handleGET() {
   try {
     const user = await getAuthorizedUser();
     if (!user) return reply({ error: 'Unauthorized' }, 401);
@@ -47,7 +48,7 @@ export async function GET() {
   } catch { return storageError(); }
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   try {
     const user = await getAuthorizedUser();
     if (!user) return reply({ error: 'Unauthorized' }, 401);
@@ -191,3 +192,6 @@ export async function POST(request: Request) {
     }
   } catch { return reply({ error: 'Unable to confirm this action. Check job history before retrying.' }, 503); }
 }
+
+export const GET = observed("/api/integrations", handleGET);
+export const POST = observed("/api/integrations", handlePOST);

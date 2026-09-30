@@ -1,8 +1,9 @@
 import { authorizeApi } from "../../../../lib/auth";
 import { deleteAndReindex, queuedNotice } from "../../../../lib/delete-cleanup.ts";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { observed } from "../../../../lib/observability.ts";
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -30,7 +31,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }, { headers: { "Cache-Control": "no-store" } });
 }
 
-export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handlePATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -65,7 +66,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   return Response.json({ cooldownDays: data.cooldown_days });
 }
 
-export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleDELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -78,3 +79,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   if (error) return Response.json({ error: error.message }, { status: error.code === "P0002" ? 404 : 500 });
   return Response.json({ result: data, notice: queuedNotice(data) });
 }
+
+export const GET = observed("/api/clients/[id]", handleGET);
+export const PATCH = observed("/api/clients/[id]", handlePATCH);
+export const DELETE = observed("/api/clients/[id]", handleDELETE);

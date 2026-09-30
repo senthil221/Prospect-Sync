@@ -24,7 +24,7 @@ export const runtime = "nodejs";
 const allowedEntities = new Set(["prospect", "company"]);
 const missing = (code?: string) => code === "PGRST202" || code === "42883";
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const owner = ownerIdentity(await getAuthorizedUser());
@@ -106,7 +106,7 @@ export async function POST(request: Request) {
   });
 }
 
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const owner = ownerIdentity(await getAuthorizedUser());
@@ -145,3 +145,7 @@ export async function GET(request: Request) {
   });
 }
 import { readBoundedJson } from "../../../lib/bounded-json";
+import { observed } from "../../../lib/observability";
+
+export const POST = observed("/api/result-sets", handlePOST);
+export const GET = observed("/api/result-sets", handleGET);

@@ -1,5 +1,6 @@
 import { authorizeApi } from "../../../lib/auth";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { observed } from "../../../lib/observability";
 
 type InterruptedImportRow = {
   id: string;
@@ -11,7 +12,7 @@ type InterruptedImportRow = {
   created_at: string;
 };
 
-export async function GET() {
+async function handleGET() {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const supabase = createAdminClient();
@@ -56,3 +57,5 @@ export async function GET() {
     lastError: String(row.last_error ?? ""), createdAt: row.created_at,
   })) }, { headers: { "Cache-Control": "no-store" } });
 }
+
+export const GET = observed("/api/imports", handleGET);

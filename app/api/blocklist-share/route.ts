@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readBoundedJson } from "../../../lib/bounded-json.ts";
 import { BLOCKLIST_REQUEST_VALUES, partitionBlocklistValues } from "../../../lib/bulk-values.ts";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { observed } from "../../../lib/observability.ts";
 
 const allowedReasons = ["Client Provided", "ICP Invalid", "Campaign Reply"] as const;
 function hash(value: string) { return createHash("sha256").update(value).digest("hex"); }
@@ -15,7 +16,7 @@ async function activeShare(token: string) {
     .is("revoked_at", null).or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`).maybeSingle();
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const decoded = await readBoundedJson(request, { bytes: 64 * 1024, depth: 8, timeoutMs: 10_000 });
   if (decoded.response) return decoded.response;
   const payload = decoded.value as { token?: unknown; action?: unknown; text?: unknown; reason?: unknown; requestId?: unknown } | null;
@@ -50,3 +51,5 @@ export async function POST(request: Request) {
   if (error) return json({ error: "The submission could not be accepted. Please try again." }, 500);
   return json({ accepted: true }, 202);
 }
+
+export const POST = observed("/api/blocklist-share", handlePOST);

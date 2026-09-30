@@ -1,7 +1,8 @@
+import { observed } from "../../../../../lib/observability";
 import { authorizeApi } from "../../../../../lib/auth";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 
-export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+async function handleGET(request: Request, context: { params: Promise<{ id: string }> }) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
@@ -19,3 +20,5 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const summary = Array.isArray(data) ? data[0] : data;
   return Response.json({ rows: summary?.result_rows ?? [], total: Number(summary?.total_count ?? 0), page, limit });
 }
+
+export const GET = observed("/api/lists/[id]/rows", handleGET);

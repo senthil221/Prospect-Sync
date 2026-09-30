@@ -3,8 +3,9 @@ import { completeProspectImport } from "../../../../../lib/import-complete.ts";
 import { logServerEvent } from "../../../../../lib/server-log.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin.ts";
 import { authorizeImportWorker } from "../../../../../lib/worker-auth.ts";
+import { observed } from "../../../../../lib/observability.ts";
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = authorizeImportWorker(request);
   if (unauthorized) return unauthorized;
   const { importId, listId } = await request.json() as { importId?: string; listId?: string };
@@ -21,3 +22,5 @@ export async function POST(request: Request) {
   });
   return Response.json({ summary: result.summary, verificationRunId: result.verificationRunId });
 }
+
+export const POST = observed("/api/internal/imports/complete", handlePOST);

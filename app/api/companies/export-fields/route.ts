@@ -1,5 +1,6 @@
 import { authorizeApi } from "../../../../lib/auth";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { observed } from "../../../../lib/observability";
 
 // The uploaded column names an export picker can offer beyond the typed ones.
 //
@@ -13,7 +14,7 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 // picker's typed fields are the point of it; the uploaded ones are extra, and
 // an export dialog that refuses to open because a sampling scan was slow would
 // be a worse trade than one that quietly offers five fewer checkboxes.
-export async function GET() {
+async function handleGET() {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const supabase = createAdminClient();
@@ -24,3 +25,5 @@ export async function GET() {
     .filter(Boolean);
   return Response.json({ fields, sampled: true });
 }
+
+export const GET = observed("/api/companies/export-fields", handleGET);

@@ -1,5 +1,6 @@
 import { getAuthorizedUser } from '../../../../lib/auth';
 import { createAdminClient } from '../../../../lib/supabase/admin';
+import { observed } from "../../../../lib/observability";
 
 // The Email verification page's one read: provider state, queue, result mix,
 // throughput and the latest runs (email_verification_dashboard_v1). Controls
@@ -9,7 +10,7 @@ import { createAdminClient } from '../../../../lib/supabase/admin';
 export const runtime = 'nodejs';
 const reply = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
 
-export async function GET() {
+async function handleGET() {
   const user = await getAuthorizedUser().catch(() => null);
   if (!user) return reply({ error: 'Unauthorized' }, 401);
   const { data, error } = await createAdminClient().rpc('email_verification_dashboard_v1', { p_runs: 15 }).abortSignal(AbortSignal.timeout(15000));
@@ -19,3 +20,5 @@ export async function GET() {
   }
   return reply(data);
 }
+
+export const GET = observed("/api/verifications/dashboard", handleGET);

@@ -2,6 +2,7 @@ import { normalizeDomain, normalizeText, parseEmployeeCount, stripUnstorableChar
 import { authorizeApi } from "../../../../lib/auth";
 import { companyImportFields } from "../../../../lib/import-schema";
 import { createAdminClient } from "../../../../lib/supabase/admin";
+import { observed } from "../../../../lib/observability";
 
 type CompanyImportRow = { name?: unknown; website?: unknown; employeeCount?: unknown; industry?: unknown; city?: unknown; state?: unknown; country?: unknown; keywords?: unknown; shortDescription?: unknown; foundedYear?: unknown; technologies?: unknown; totalFunding?: unknown; raw?: unknown; sourceRowNumber?: unknown };
 type ImportSummary = { processed: number; added: number; updated: number; skipped: number };
@@ -25,7 +26,7 @@ function fixedCompanyRaw(value: unknown) {
     .map(([field, item]) => [field, text(item)]));
 }
 
-export async function POST(request: Request) {
+async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const payload = await request.json().catch(() => null) as { importId?: unknown; rows?: CompanyImportRow[]; rowOffset?: unknown } | null;
@@ -115,3 +116,5 @@ export async function POST(request: Request) {
     committedRowOffset: rowOffset + rows.length,
   });
 }
+
+export const POST = observed("/api/company-imports/chunk", handlePOST);

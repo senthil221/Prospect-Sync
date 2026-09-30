@@ -14,6 +14,7 @@
 // what it is for - two application slots overlap during a release, so these
 // numbers are a signal, never an audit.
 
+import { isClientDisconnect } from "./api-errors.ts";
 import { logServerEvent } from "./server-log.ts";
 import type { ProspectFilter } from "./prospect-filters.ts";
 import type { CompanyScope } from "./workspace-scopes.ts";
@@ -127,9 +128,39 @@ function routeFamily(path: string) {
   return api === 'api' && routeFamilies.has(family) ? `/api/${family}` : 'unknown';
 }
 
+// Route handlers wrapped by observed() below, labelled by their file path
+// ("/api/clients/[id]/icp-validator"). The labels are constants in code, so
+// the set is as bounded as routeFamilies.
+const observedRoutes = new Set<string>();
+
+// Times one route handler and records its outcome like the admission-guarded
+// routes already do (lib/admission.ts). Until 2026-09-30 only those twelve
+// routes were measured; everything else - clients, ICP validator, lists,
+// imports, verification, integrations - was invisible. A thrown error is
+// recorded as the 500 Next.js will answer with (a client that went away as
+// 499), then rethrown untouched.
+export function observed<Rest extends unknown[], Result extends Response | undefined>(label: string,
+  handler: (request: Request, ...rest: Rest) => Result | Promise<Result>) {
+  observedRoutes.add(label);
+  // Whatever the handler returns is returned unchanged - including the odd
+  // path that returns nothing, which Next.js itself answers with a 500.
+  return async (request: Request, ...rest: Rest): Promise<Result> => {
+    const startedAt = performance.now();
+    try {
+      const response = await handler(request, ...rest);
+      recordRequest(label, response?.status ?? 500, performance.now() - startedAt);
+      return response;
+    } catch (error) {
+      recordRequest(label, isClientDisconnect(error) ? 499 : 500, performance.now() - startedAt);
+      throw error;
+    }
+  };
+}
+
 export function recordRequest(route: string, status: number, durationMs: number,
   context?: { requestId: string; admissionMs: number }) {
-  route = routeFamily(route); // Bounded labels even for direct callers and arbitrary IDs.
+  // Bounded labels even for direct callers and arbitrary IDs.
+  route = observedRoutes.has(route) ? route : routeFamily(route);
   durationMs = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 0;
   const outcome = outcomeFor(status);
   bump(`total`);
@@ -164,7 +195,10 @@ export function recordRequest(route: string, status: number, durationMs: number,
     // volume/latency signal rather than something that needs diagnosing, and
     // not client_error (400/401/404), which is ordinary client behavior, not
     // a server failure.
-    if (outcome === "over_cap" || outcome === "overloaded" || outcome === "timed_out" || outcome === "server_error") {
+    // Slow successes too (2026-09-30): a request over 5s is what "the app feels
+    // slow" is made of, and it was only ever a console line nobody reads.
+    const slow = (outcome === "ok" || outcome === "pending") && durationMs > 5_000;
+    if (slow || outcome === "over_cap" || outcome === "overloaded" || outcome === "timed_out" || outcome === "server_error") {
       logServerEvent({
         level: outcome === "server_error" ? "error" : "warn",
         source: "api",
@@ -172,7 +206,7 @@ export function recordRequest(route: string, status: number, durationMs: number,
         statusCode: status,
         durationMs: Math.round(durationMs),
         requestId: context?.requestId,
-        message: `${route} ${outcome} (${status})`,
+        message: slow ? `${route} slow (${(durationMs / 1000).toFixed(1)}s)` : `${route} ${outcome} (${status})`,
         detail: { admissionMs: context ? Math.round(context.admissionMs) : undefined },
       });
     }
