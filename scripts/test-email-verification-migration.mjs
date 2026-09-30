@@ -26,6 +26,7 @@ const migrations = [
   '20260930170000_verification_paced_for_190k_a_day.sql',
   '20260930180000_verification_back_to_the_sustained_pace.sql',
   '20260930190000_verification_paced_to_the_documented_plan_limit.sql',
+  '20260930200000_verification_results_move_the_cache_version_once_a_minute.sql',
 ];
 const sqlFiles = await Promise.all(migrations.map(name => readFile(new URL(`../supabase/migrations/${name}`, import.meta.url), 'utf8')));
 const contract = await readFile(new URL('./check-email-verification-migration.sql', import.meta.url), 'utf8');
