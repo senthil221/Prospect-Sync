@@ -21,6 +21,10 @@ const allowedOperators = new Set<string>([
   "never", "before", "on", "after", "between",
 ]);
 const verificationDateOperators = new Set(["never", "before", "on", "after", "between"]);
+// Fields that take the date operators: Last Verified (timestamps) and a
+// client's Date Contacted (calendar dates, client id first).
+const dateFields = new Set(["__work_email_verified_at", "__client_date_contacted"]);
+const calendarDate = /^\d{4}-\d{2}-\d{2}$/;
 const zonedIsoTimestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 const companyKeywordScopes = new Set(["name", "keywords", "description"]);
@@ -138,8 +142,8 @@ export function parseFilters(value: string | null, options: { compileBoolean?: b
     // Field-catalogue validation remains the compiler's responsibility.
     if (!field || field.length > 160) throw new Error('A filter field must contain 1–160 characters.');
     if (typeof operator !== 'string' || !allowedOperators.has(operator)) throw new Error('Unsupported filter operator.');
-    if (verificationDateOperators.has(operator) && field !== "__work_email_verified_at") throw new Error('Date operators are only available for Last Verified.');
-    if (field === "__work_email_verified_at" && !verificationDateOperators.has(String(operator))) throw new Error('Last Verified requires a date operator.');
+    if (verificationDateOperators.has(operator) && !dateFields.has(field)) throw new Error('Date operators are only available for Last Verified and Date Contacted.');
+    if (dateFields.has(field) && !verificationDateOperators.has(String(operator))) throw new Error(`${field === "__client_date_contacted" ? "Date Contacted" : "Last Verified"} requires a date operator.`);
 
     // Set-backed: the values live in the database, so none of the size caps
     // below apply - nothing is being carried. Only equality is expressible
@@ -177,6 +181,16 @@ export function parseFilters(value: string | null, options: { compileBoolean?: b
       if (values.length !== expectedValues) throw new Error(`Last Verified ${operator} requires ${expectedValues} date ${expectedValues === 1 ? "boundary" : "boundaries"}.`);
       if (values.some((value) => !zonedIsoTimestamp.test(value) || !Number.isFinite(Date.parse(value)))) throw new Error('Last Verified dates must be valid ISO timestamps with a timezone.');
       if (values.length === 2 && Date.parse(values[1]) <= Date.parse(values[0])) throw new Error('Last Verified end date must be after its start date.');
+    }
+    // [client id, date...]: never has no date, between has two, the rest one.
+    if (field === "__client_date_contacted") {
+      const dates = operator === "never" ? 0 : operator === "between" ? 2 : 1;
+      if (values.length !== dates + 1) throw new Error(`Date Contacted ${operator} needs the client and ${dates} date${dates === 1 ? "" : "s"}.`);
+      const [, ...days] = values;
+      if (days.some((day) => !calendarDate.test(day) || !Number.isFinite(Date.parse(`${day}T00:00:00Z`)) || new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) !== day)) {
+        throw new Error('Date Contacted dates must be calendar dates (YYYY-MM-DD).');
+      }
+      if (days.length === 2 && days[1] < days[0]) throw new Error('Date Contacted "through" date must be on or after the "from" date.');
     }
     if (!["empty", "not_empty", "never"].includes(operator) && !values.length) return [];
     if (operator === "boolean") {

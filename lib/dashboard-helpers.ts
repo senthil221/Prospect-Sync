@@ -6,6 +6,17 @@ export function formatNumber(value: unknown) {
   return new Intl.NumberFormat("en-IN").format(Number(value ?? 0));
 }
 
+// One chip for a whole Date Contacted filter: "1 Sep 2026 – 30 Sep 2026".
+export function contactDateChip(operator: string, values: string[]) {
+  const day = (value?: string) => value ? new Date(`${value}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "";
+  if (operator === "never") return "Never contacted";
+  if (operator === "before") return `Before ${day(values[1])}`;
+  if (operator === "on") return `On ${day(values[1])}`;
+  if (operator === "after") return `On or after ${day(values[1])}`;
+  if (operator === "between") return `${day(values[1])} – ${day(values[2])}`;
+  return "";
+}
+
 export function filterChipValue(field: string, value: string) {
   if (field === "__icp_verified" || field === "__company_icp_verified") return "Verified";
   // "<client id>|FIT" - the chip shows the result, not the id.

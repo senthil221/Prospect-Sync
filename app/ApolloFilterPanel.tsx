@@ -14,7 +14,7 @@ import { useClientLists } from "./components/use-client-lists";
 export type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 
 type FilterDefinition = ProspectFieldDefinition & {
-  kind?: "text" | "employee" | "tiers" | "departments" | "year" | "funding" | "company_keywords" | "verification_status" | "verification_date";
+  kind?: "text" | "employee" | "tiers" | "departments" | "year" | "funding" | "company_keywords" | "verification_status" | "verification_date" | "contact_date";
   advanced?: boolean;
   description?: string;
   /** Which value endpoint autocompletes this field. Company fields ask the company one. */
@@ -76,6 +76,11 @@ const optionalFilters: FilterDefinition[] = [
   { id: "__work_email_verified_at", label: "Last Verified", kind: "verification_date", description: "Calendar dates are interpreted in Asia/Kolkata and sent to the database as exact UTC boundaries." },
   { id: "__tags", label: "Tags", description: "Matches an ICP tag by name. Use the Client ICP filter to pick one exactly." },
 ];
+
+// The client's own contact history - only inside a client workspace, because
+// Date Contacted (the cooldown clock) is per client.
+const contactDateFilter: FilterDefinition = { id: "__client_date_contacted", label: "Date Contacted", kind: "contact_date",
+  description: "When this client last contacted the person - the date the cooldown counts from." };
 
 // The company profile, filterable from the People database.
 //
@@ -146,7 +151,7 @@ export function filterId(field: string, operator: ProspectFilterOperator) {
 }
 
 function activeCount(filters: ProspectFilter[]) {
-  return filters.reduce((count, filter) => count + (["empty", "not_empty", "never"].includes(filter.operator) ? 1 : filter.values.length), 0);
+  return filters.reduce((count, filter) => count + (["empty", "not_empty", "never"].includes(filter.operator) || filter.field === "__client_date_contacted" ? 1 : filter.values.length), 0);
 }
 
 export function filterLabel(field: string, customFields: ProspectFieldDefinition[] = []) {
@@ -161,6 +166,7 @@ export function filterLabel(field: string, customFields: ProspectFieldDefinition
   if (field === "__list_ids") return "Lists";
   if (field === "__lead") return "Lead";
   if (field === "__contactable") return "Contactable";
+  if (field === "__client_date_contacted") return "Date Contacted";
   return [...mainFilters, ...classifierFilters, ...companyFilters, ...optionalFilters, ...customFields].find((definition) => definition.id === field)?.label ?? field;
 }
 
@@ -255,6 +261,8 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
           ? <CompanyKeywordFilter key={fieldFilters.map((filter) => filter.scopes?.join("|") ?? "default").join(";") || "default"} filters={fieldFilters} defaultScopes={["keywords"]} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "verification_status"
           ? <EmailVerificationStatusFilter filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
+          : definition.kind === "contact_date" && clientId
+          ? <ContactDateFilter key={fieldFilters.map((filter) => `${filter.id}:${filter.operator}:${filter.values.join("|")}`).join(";") || "empty"} clientId={clientId} filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "verification_date"
           ? <EmailVerificationDateFilter key={fieldFilters.map((filter) => `${filter.id}:${filter.operator}:${filter.values.join("|")}`).join(";") || "empty"} filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "text" && definition.advanced
@@ -290,6 +298,9 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
         <ClientMembershipFilter field="__client_ids" title="Client" noun="prospects" options={clients} filters={filters}
           expanded={expanded === "__client_ids"} onToggle={() => setExpanded(expanded === "__client_ids" ? "" : "__client_ids")}
           onChange={onChange}/>
+      </div> : null}
+      {clientId && "date contacted cooldown".includes(normalizedSearch) ? <div className="apollo-filter-group">
+        <small>Contact history</small>{renderDefinition(contactDateFilter)}
       </div> : null}
       {clientId && icps.length && "client icp".includes(normalizedSearch) ? <div className="apollo-filter-group">
         <small>Client ICP</small>
@@ -426,6 +437,33 @@ function kolkataCalendarDate(value: string | undefined) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(value));
   const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
   return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+// A client's Date Contacted, by calendar date. Values: [client id, ...dates];
+// "On or after" and "Through" are inclusive, like the grid shows them.
+export function ContactDateFilter({ clientId, filters, onChange }: {
+  clientId: string; filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void;
+}) {
+  type Operator = "never" | "before" | "on" | "after" | "between";
+  const current = filters[0];
+  const [operator, setOperator] = useState<Operator>(
+    (["never", "before", "on", "after", "between"].includes(current?.operator ?? "") ? current?.operator : "between") as Operator);
+  const [start, setStart] = useState(current?.values[1] ?? "");
+  const [end, setEnd] = useState(current?.values[2] ?? "");
+  const invalid = operator !== "never" && (!start || (operator === "between" && (!end || end < start)));
+  function apply() {
+    if (invalid) return;
+    const values = operator === "never" ? [clientId] : operator === "between" ? [clientId, start, end] : [clientId, start];
+    onChange([{ id: current?.id ?? filterId("__client_date_contacted", operator), field: "__client_date_contacted", operator, values }]);
+  }
+  return <div className="verification-date-filter">
+    <label><span>Condition</span><select value={operator} onChange={(event) => setOperator(event.target.value as Operator)}>
+      <option value="between">Between dates</option><option value="on">On date</option><option value="before">Before date</option>
+      <option value="after">On or after date</option><option value="never">Never contacted</option></select></label>
+    {operator !== "never" ? <label><span>{operator === "between" ? "From" : "Date"}</span><input type="date" value={start} onChange={(event) => setStart(event.target.value)}/></label> : null}
+    {operator === "between" ? <label><span>Through</span><input type="date" min={start} value={end} onChange={(event) => setEnd(event.target.value)}/></label> : null}
+    <button type="button" disabled={invalid} onClick={apply}>Apply date</button>
+  </div>;
 }
 
 export function EmailVerificationDateFilter({ filters, onChange }: {
