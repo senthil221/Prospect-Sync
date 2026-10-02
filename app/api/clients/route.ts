@@ -10,15 +10,15 @@ async function handleGET() {
   const [summaries, settings, folders] = await Promise.all([
     // Cached until memberships or company text change (20260930250000).
     supabase.rpc("client_summaries_v1", { p_client_id: null }),
-    supabase.from("client_settings").select("client_id,cooldown_days"),
+    supabase.from("client_settings").select("client_id,cooldown_days,seg_emails"),
     supabase.from("client_folders").select("id,name,created_at").order("name"),
   ]);
   const error = summaries.error ?? settings.error ?? folders.error;
   if (error) return Response.json({ error: error.message }, { status: 500 });
-  const cooldowns = new Map((settings.data ?? []).map((setting) => [setting.client_id, setting.cooldown_days]));
+  const settingsByClient = new Map((settings.data ?? []).map((setting) => [setting.client_id, setting]));
   const folderNames = new Map((folders.data ?? []).map((folder) => [folder.id, folder.name]));
   return Response.json({
-    clients: ((summaries.data ?? []) as Array<{ id: string; folder_id: string | null }>).map((client) => ({ ...client, folder_name: client.folder_id ? folderNames.get(client.folder_id) ?? null : null, cooldown_days: cooldowns.get(client.id) ?? 90 })),
+    clients: ((summaries.data ?? []) as Array<{ id: string; folder_id: string | null }>).map((client) => ({ ...client, folder_name: client.folder_id ? folderNames.get(client.folder_id) ?? null : null, cooldown_days: settingsByClient.get(client.id)?.cooldown_days ?? 90, seg_emails: settingsByClient.get(client.id)?.seg_emails ?? "keep" })),
     folders: folders.data ?? [],
   });
 }

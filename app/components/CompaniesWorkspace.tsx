@@ -21,6 +21,7 @@ import { needsCompanyPreparation, type PreparationProgress } from "../../lib/pre
 import SearchPreparation from './SearchPreparation';
 import { useClientIcps } from "./use-client-icps";
 import { IcpValidateDialog, useIcpLabels } from "./IcpCheck";
+import PullPeopleDialog from "./PullPeopleDialog";
 import { incompleteCompanyProfileField } from "../../lib/client-workspace-completeness";
 
 export function useCompaniesWorkspaceController({ active, search, filters, peopleScope, initialPage, onLoading, onError }: { active: boolean; search: string; filters: ProspectFilter[]; peopleScope: PeopleScope | null; initialPage?: number; onLoading: (loading: boolean) => void; onError: (error: string) => void }) {
@@ -208,6 +209,7 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   // The ICP validator: verdicts on the rows, and "Validate ICP" for the selection.
   const icpLabels = useIcpLabels(clientId, companies);
   const [validateOpen, setValidateOpen] = useState(false);
+  const [pullOpen, setPullOpen] = useState(false);
   const [clearIcpOpen, setClearIcpOpen] = useState(false);
   const [clearingIcp, setClearingIcp] = useState(false);
   const [clearIcpError, setClearIcpError] = useState("");
@@ -672,6 +674,9 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
           <button className="bulk-verify" disabled={pushing || !pushClientId} onClick={() => void pushCompaniesToClient()}><AppIcon name="arrow" size={14}/> {pushing ? "Pushing…" : "Push to Client"}</button>
         </div>
         {canDelete ? <div className="bulk-action-group bulk-action-group-danger"><button className="row-danger bulk-delete" disabled={deleting || pushing} onClick={requestDeleteSelected}>🗑 Delete {selectionMode === "all_matching" ? formatNumber(selectedCount) : "selected"}</button></div> : <>
+          <div className="bulk-action-group">
+          <button disabled={updatingIcp} title="Add the Master People DB's people at these companies who are not in this client yet, by job title, management level and department" onClick={() => setPullOpen(true)}><AppIcon name="plus" size={14}/> Pull people</button>
+          </div>
           <div className="bulk-action-group bulk-action-group-primary">
           <button className="bulk-verify" disabled={updatingIcp} title={selectionMode === "all_matching" ? "Ask the AI models whether every matching company fits one of this client's ICPs" : "Ask the AI models whether the selected companies fit one of this client's ICPs"} onClick={() => setValidateOpen(true)}><AppIcon name="target" size={14}/> Validate ICP</button>
           <button disabled={updatingIcp || clearingIcp} title="Remove the AI models' FIT / NON_FIT labels from these companies" onClick={() => { setClearIcpError(""); setClearIcpOpen(true); }}><AppIcon name="close" size={14}/> Clear ICP check</button>
@@ -705,6 +710,7 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
       body="Removes every model's FIT / NON_FIT label from these companies, for all of this client's ICPs, and skips checks still queued for them. Companies, their people and ICP verification are not touched. Run history and cost stay on the ICP checks tab and the ICP validator page."
       error={clearIcpError} confirmLabel="Clear ICP check" busy={clearingIcp}
       onCancel={() => { setClearIcpOpen(false); setClearIcpError(""); }} onConfirm={() => void clearIcpCheck()}/> : null}
+    {pullOpen && clientId ? <PullPeopleDialog clientId={clientId} clientName={clients.find((candidate) => candidate.id === clientId)?.name ?? "this client"} selectedCount={selectedCount} selection={companySelectionPayload()} onClose={() => setPullOpen(false)} onDone={(message) => { setPullOpen(false); setCompanyNotice(message); clearSelection(); onRefresh?.(); }}/> : null}
     {validateOpen && clientId ? <IcpValidateDialog clientId={clientId} clientName={clients.find((candidate) => candidate.id === clientId)?.name ?? "this client"} selectedCount={selectedCount} selection={companySelectionPayload()} onClose={() => setValidateOpen(false)} onStarted={(message) => { setValidateOpen(false); setCompanyNotice(message); clearSelection(); }}/> : null}
     {removeRequest && clientId ? <ConfirmDialog
       title={removeRequest.people

@@ -10,11 +10,12 @@ import Tabs from "./components/Tabs";
 import { emptyTaxonomy, orderedDepartments, orderedTiers, tierLabel, type TitleTaxonomy } from "../lib/title-taxonomy";
 import { useClientIcps } from "./components/use-client-icps";
 import { useClientLists } from "./components/use-client-lists";
+import { ESP_OUTCOMES, ESP_PROVIDERS } from "../worker/email-provider-core.mjs";
 
 export type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 
 type FilterDefinition = ProspectFieldDefinition & {
-  kind?: "text" | "employee" | "tiers" | "departments" | "year" | "funding" | "company_keywords" | "verification_status" | "verification_date" | "contact_date";
+  kind?: "text" | "employee" | "tiers" | "departments" | "year" | "funding" | "company_keywords" | "verification_status" | "verification_date" | "contact_date" | "esp";
   advanced?: boolean;
   description?: string;
   /** Which value endpoint autocompletes this field. Company fields ask the company one. */
@@ -35,7 +36,7 @@ const mainFilters: FilterDefinition[] = [
   { id: "__email", label: "Email" },
   { id: "__linkedin", label: "Personal LinkedIn URL" },
   { id: "__title_seniority", label: "Job Title & Seniority", description: "Matches either the job title or the seniority." },
-  { id: "__esp_type", label: "ESP", description: "Matches the ESP or the email provider type (e.g. SEG)." },
+  { id: "__esp_type", label: "ESP", kind: "esp", description: "Who receives the company's email, read from its MX records. SEG = an email security gateway such as Mimecast or Proofpoint." },
 ];
 
 // Derived from the job title by the deterministic classifier, not from the uploaded
@@ -259,6 +260,8 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
           ? <RangeFilter field={definition.id} filters={fieldFilters} presets={fundingRanges} unknownLabel="Funding is not known" minPlaceholder="e.g. 1000000" maxPlaceholder="No maximum" onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "company_keywords"
           ? <CompanyKeywordFilter key={fieldFilters.map((filter) => filter.scopes?.join("|") ?? "default").join(";") || "default"} filters={fieldFilters} defaultScopes={["keywords"]} onChange={(next) => replaceField(definition.id, next)} />
+          : definition.kind === "esp"
+          ? <EspFilter filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "verification_status"
           ? <EmailVerificationStatusFilter filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "contact_date" && clientId
@@ -421,6 +424,69 @@ export function EmailVerificationStatusFilter({ filters, onChange }: {
   }
   return <div className="verification-status-options">
     {verificationStatuses.map(([value, label]) => <label key={value}><input type="checkbox" checked={selected.has(value)} onChange={() => toggle(value)}/><span>{label}</span></label>)}
+  </div>;
+}
+
+// The ESP picker, for People and Companies alike: every provider a scan can
+// record, grouped, with "any SEG" / "any mailbox provider" as one tick each.
+// Values are provider names or provider types; __esp_type equality matches
+// either column, so both kinds can sit in one filter. Include writes equals,
+// Exclude writes not_equals.
+const espGroups: Array<{ title: string; options: Array<{ value: string; label: string }> }> = [
+  { title: "Email security gateway (SEG)", options: [
+    { value: "SEG", label: "Any SEG" },
+    ...ESP_PROVIDERS.filter((provider) => provider.category === "SEG").map((provider) => ({ value: provider.name, label: provider.name })),
+  ] },
+  { title: "Mailbox provider", options: [
+    { value: "Mailbox provider", label: "Any mailbox provider" },
+    ...ESP_PROVIDERS.filter((provider) => provider.category === "Mailbox provider").map((provider) => ({ value: provider.name, label: provider.name })),
+  ] },
+  { title: "Other", options: [
+    { value: "Email relay", label: "Email relay (Cloudflare, SES, Mailgun)" },
+    ...ESP_OUTCOMES.map((outcome) => ({ value: outcome, label: outcome })),
+  ] },
+];
+
+export function EspFilter({ filters, onChange }: {
+  filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void;
+}) {
+  const includeRule = filters.find((filter) => filter.operator === "equals");
+  const excludeRule = filters.find((filter) => filter.operator === "not_equals");
+  // Typed values from before this picker (contains / not_contains) stay applied.
+  const otherRules = filters.filter((filter) => filter !== includeRule && filter !== excludeRule);
+  const [side, setSide] = useState<"include" | "exclude">(excludeRule && !includeRule ? "exclude" : "include");
+  const rule = side === "include" ? includeRule : excludeRule;
+  const selected = new Set((rule?.values ?? []).map((value) => value.toLocaleLowerCase()));
+
+  function toggle(value: string) {
+    const values = rule?.values ?? [];
+    const next = selected.has(value.toLocaleLowerCase())
+      ? values.filter((item) => item.toLocaleLowerCase() !== value.toLocaleLowerCase())
+      : [...values, value];
+    const operator: ProspectFilterOperator = side === "include" ? "equals" : "not_equals";
+    const opposite = side === "include" ? excludeRule : includeRule;
+    onChange([
+      ...otherRules,
+      ...(opposite ? [opposite] : []),
+      ...(next.length ? [{ id: rule?.id ?? filterId("__esp_type", operator), field: "__esp_type", operator, values: next }] : []),
+    ]);
+  }
+
+  const otherSide = side === "include" ? excludeRule : includeRule;
+  return <div className="esp-filter">
+    <div className="esp-filter-sides" role="radiogroup" aria-label="Include or exclude">
+      {(["include", "exclude"] as const).map((value) => <button key={value} type="button" role="radio" aria-checked={side === value} className={side === value ? "active" : ""} onClick={() => setSide(value)}>
+        {value === "include" ? "Include" : "Exclude"}{(value === "include" ? includeRule : excludeRule)?.values.length ? <b>{(value === "include" ? includeRule : excludeRule)?.values.length}</b> : null}
+      </button>)}
+    </div>
+    {otherSide?.values.length ? <p className="apollo-filter-description">{side === "include" ? "Excluding" : "Including"}: {otherSide.values.join(", ")}</p> : null}
+    {espGroups.map((group) => <div key={group.title} className="taxonomy-picker" role="group" aria-label={group.title}>
+      <small className="esp-filter-group">{group.title}</small>
+      {group.options.map((option) => <label key={option.value} className="taxonomy-option">
+        <input type="checkbox" checked={selected.has(option.value.toLocaleLowerCase())} onChange={() => toggle(option.value)}/>
+        <span className="taxonomy-name">{option.label}</span>
+      </label>)}
+    </div>)}
   </div>;
 }
 
@@ -727,7 +793,7 @@ function compactCount(value: number) {
 // on each. Checking several is an OR: the compiler turns a multi-value `equals`
 // into an IN, which was verified against production before this was built -
 // owner plus c_suite returns exactly the sum of the two.
-function ManagementLevelFilter({ filters, taxonomy, onChange }: {
+export function ManagementLevelFilter({ filters, taxonomy, onChange }: {
   filters: ProspectFilter[];
   taxonomy: TitleTaxonomy;
   onChange: (filters: ProspectFilter[]) => void;
@@ -761,7 +827,7 @@ function ManagementLevelFilter({ filters, taxonomy, onChange }: {
 // semantics for free: checking Sales and then Inside Sales narrows to people
 // whose department is Sales AND whose sub-department is Inside Sales, which is
 // what the plus sign implies.
-function DepartmentFunctionFilter({ filters, taxonomy, onChange }: {
+export function DepartmentFunctionFilter({ filters, taxonomy, onChange }: {
   filters: ProspectFilter[];
   taxonomy: TitleTaxonomy;
   onChange: (filters: ProspectFilter[]) => void;

@@ -10,7 +10,7 @@ async function handleGET(_request: Request, context: { params: Promise<{ id: str
   const supabase = createAdminClient();
   const [summary, setting, folder] = await Promise.all([
     supabase.rpc("client_summaries_v1", { p_client_id: id }),
-    supabase.from("client_settings").select("cooldown_days").eq("client_id", id).maybeSingle(),
+    supabase.from("client_settings").select("cooldown_days,seg_emails").eq("client_id", id).maybeSingle(),
     supabase.from("clients").select("folder_id").eq("id", id).maybeSingle(),
   ]);
   const error = summary.error ?? setting.error ?? folder.error;
@@ -28,6 +28,7 @@ async function handleGET(_request: Request, context: { params: Promise<{ id: str
       folder_id: folderId,
       folder_name: folderName?.data?.name ?? null,
       cooldown_days: setting.data?.cooldown_days ?? 90,
+      seg_emails: setting.data?.seg_emails ?? "keep",
     },
   }, { headers: { "Cache-Control": "no-store" } });
 }
@@ -36,7 +37,7 @@ async function handlePATCH(request: Request, context: { params: Promise<{ id: st
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
-  const payload = await request.json().catch(() => null) as { cooldownDays?: unknown; folderId?: unknown; archived?: unknown } | null;
+  const payload = await request.json().catch(() => null) as { cooldownDays?: unknown; segEmails?: unknown; folderId?: unknown; archived?: unknown } | null;
   if (!payload) return Response.json({ error: "Invalid client update." }, { status: 400 });
   const supabase = createAdminClient();
   if (payload.archived !== undefined) {
@@ -57,6 +58,16 @@ async function handlePATCH(request: Request, context: { params: Promise<{ id: st
     const { data, error } = await supabase.from("clients").update({ folder_id: folderId }).eq("id", id).select("id,folder_id").single();
     if (error) return Response.json({ error: error.message }, { status: error.code === "PGRST116" ? 404 : 500 });
     return Response.json({ client: data });
+  }
+  // Keep or discard people behind a secure email gateway. The database applies
+  // it to every view of this client from the next query (20261003100000).
+  if (payload.segEmails !== undefined) {
+    if (payload.segEmails !== "keep" && payload.segEmails !== "discard") return Response.json({ error: "SEG emails must be keep or discard." }, { status: 400 });
+    const { data, error } = await supabase.from("client_settings")
+      .upsert({ client_id: id, seg_emails: payload.segEmails, updated_at: new Date().toISOString() })
+      .select("seg_emails").single();
+    if (error) return Response.json({ error: error.message }, { status: error.code === "23503" ? 404 : 500 });
+    return Response.json({ segEmails: data.seg_emails });
   }
   const days = payload?.cooldownDays;
   if (typeof days !== "number" || !Number.isInteger(days) || days < 0 || days > 730) {

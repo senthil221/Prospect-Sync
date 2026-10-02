@@ -3,14 +3,14 @@
 import { ChangeEvent, useRef, useState } from "react";
 import { describeBulkMerge, describeMatchMode, exactMatchThreshold, mergeBulkValues, splitPastedValues, switchesToExactMatch } from "../lib/bulk-values";
 import { isXlsxFile, readXlsxRows } from "../lib/spreadsheet";
-import { ClientMembershipFilter, CompanyKeywordFilter, employeeRanges, filterId, foundedYearRanges, fundingRanges, IncludeExcludeFilter, RangeFilter, TextBooleanFilter, type ProspectFilter, type ProspectFilterOperator } from "./ApolloFilterPanel";
+import { ClientMembershipFilter, CompanyKeywordFilter, EspFilter, employeeRanges, filterId, foundedYearRanges, fundingRanges, IncludeExcludeFilter, RangeFilter, TextBooleanFilter, type ProspectFilter, type ProspectFilterOperator } from "./ApolloFilterPanel";
 import { useDismiss } from "./use-dismiss";
 import { AppIcon } from "./components/DashboardUi";
 import { useClientIcps } from "./components/use-client-icps";
 
 const COMPANY_VALUES_ENDPOINT = "/api/companies/filter-values";
 
-type CompanyFieldKind = "company_keywords" | "text" | "token" | "employee" | "year" | "funding";
+type CompanyFieldKind = "company_keywords" | "text" | "token" | "employee" | "year" | "funding" | "esp";
 type CompanyFilterDefinition = {
   id: string;
   label: string;
@@ -29,6 +29,7 @@ const companyFilters: CompanyFilterDefinition[] = [
   { id: "__company_location", label: "Company location", kind: "token", autocomplete: true, description: "One field for city, state and country - e.g. “London”, “California”, “India”." },
   { id: "__founded_year", label: "Founded year", kind: "year" },
   { id: "__technologies", label: "Technologies", kind: "token", autocomplete: true },
+  { id: "__esp_type", label: "ESP", kind: "esp", description: "Who receives the company's email, read from its MX records. SEG = an email security gateway such as Mimecast or Proofpoint." },
   { id: "__total_funding", label: "Total funding", kind: "funding", description: "Ranges over the funding amount. Most companies carry no funding figure, so Not known is by far the largest group." },
 ];
 
@@ -159,6 +160,8 @@ export default function CompanyFilterPanel({ filters, clients = [], clientId, on
           ? <CompanyKeywordFilter key={fieldFilters.map((filter) => filter.scopes?.join("|") ?? "default").join(";") || "default"} filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "employee"
           ? <RangeFilter field={definition.id} filters={fieldFilters} presets={employeeRanges} unknownLabel="# of employees is unknown" onChange={(next) => replaceField(definition.id, next)} />
+          : definition.kind === "esp"
+          ? <EspFilter filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "funding"
           ? <RangeFilter field={definition.id} filters={fieldFilters} presets={fundingRanges} unknownLabel="Funding is not known" minPlaceholder="e.g. 1000000" maxPlaceholder="No maximum" onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "year"

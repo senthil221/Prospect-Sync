@@ -1,6 +1,5 @@
 import { authorizeApi } from "../../../../lib/auth";
 import { lookupEmailProvider } from "../../../../lib/email-provider";
-import { indexNotice, reindexProspectsOfCompanies } from "../../../../lib/reindex.ts";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { observed } from "../../../../lib/observability.ts";
 
@@ -45,13 +44,18 @@ async function handlePOST(request: Request) {
   // them used to be one UPDATE per company - 44,185 of them in production, each
   // rewriting all 23 indexes on companies, because mx_checked_at sits in
   // idx_companies_pending_mx_scan's predicate and cannot take the cheap path.
-  // One statement for the whole batch instead (migration 20260902000250).
+  // One statement for the whole batch instead (migration 20260902000250); v2
+  // (20261003100000) also copies the ESP columns onto the companies' people in
+  // prospect_index, which a full re-index per prospect used to do.
+  //
+  // The ICP worker scans every company continuously now, so this button only
+  // gets ahead of it.
   const results = await Promise.all(companies.map(async (company) => {
     const domain = company.normalized_domain || company.domain;
     return { companyId: company.id, detection: await lookupEmailProvider(domain) };
   }));
 
-  const applied = await supabase.rpc("apply_email_provider_scan_v1", {
+  const applied = await supabase.rpc("apply_email_provider_scan_v2", {
     p_rows: results.map((result) => ({
       id: result.companyId,
       esp: result.detection.esp,
@@ -72,12 +76,8 @@ async function handlePOST(request: Request) {
   // The batch is one statement, so it either lands or the request already
   // returned above. A row can still go missing if its company was deleted
   // between the read and the write, which the returned count catches.
-  const updated = Number(applied.data ?? 0);
+  const updated = Number((applied.data as { updated?: number } | null)?.updated ?? 0);
   const failed = results.length - updated;
-
-  // ESP fields live on companies, so refresh the flat index for their prospects.
-  const reindexed = await reindexProspectsOfCompanies(supabase, results.map((result) => result.companyId));
-  const indexWarning = indexNotice(reindexed);
 
   const segs = results.filter((result) => result.detection.category === "SEG").length;
   const nextCursor = companies.at(-1)?.id ?? afterId;
@@ -89,7 +89,6 @@ async function handlePOST(request: Request) {
     segs,
     nextCursor,
     hasMore: companies.length === limit,
-    notice: indexWarning,
   });
 }
 

@@ -156,7 +156,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   // are not editable filter chips. Incomplete Info already names the invariant
   // above the table; showing a removable-looking chip that is immediately
   // restored by the tab would be a broken control.
-  const displayFilters = filters.filter((filter) => filter.field !== "__max_people_per_company" && filter.field !== "__incomplete_company_profile");
+  const displayFilters = filters.filter((filter) => filter.field !== "__max_people_per_company" && filter.field !== "__incomplete_company_profile" && filter.field !== "__client_seg_policy");
   const effectiveFilters = filters.filter((filter) => filter.values.length || filter.operator === "empty" || filter.operator === "not_empty" || filter.operator === "never");
   function setMaxPeoplePerCompany(raw: number) {
     const remaining = filters.filter((filter) => filter.field !== "__max_people_per_company");

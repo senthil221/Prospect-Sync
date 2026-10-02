@@ -1,13 +1,18 @@
 import pg from 'pg';
 import { createServer } from 'node:http';
+import { resolveMx } from 'node:dns/promises';
 import {
   buildBatch, buildSystemPrompt, callOpenRouter, failurePlan, IcpOutputError, OpenRouterError, parseModelOutput,
 } from './icp-validator-core.mjs';
+import { lookupEmailProvider } from './email-provider-core.mjs';
 
 // The ICP validator's worker. It leases 20 companies at a time from
 // icp_validation_items, asks the run's model on OpenRouter for FIT/NON_FIT,
 // and saves the answers. It logs in as prospect_icp_worker, which can execute
-// four functions and read nothing else.
+// a handful of functions and read nothing else.
+//
+// It also scans companies' MX records in the background (mxScanLoop), so the
+// ESP / SEG data is there for every company without anyone asking for it.
 //
 // An empty OPENROUTER_API_KEY is a healthy, idle configuration: runs wait in
 // the queue and the page says the key is missing.
@@ -126,6 +131,68 @@ async function applyLoop() {
   }
 }
 
+// MX scanning. Companies with a domain that were never scanned, 100 at a
+// time: DNS lookups in parallel, then one call that writes the batch to
+// companies and to their people's prospect_index rows. Imports add companies
+// unscanned, so this keeps running; with nothing to scan it checks once a
+// minute.
+const mxBatchSize = 100;
+const mxConcurrency = 16;
+
+async function pauseFor(ms) {
+  const until = Date.now() + ms;
+  while (!stopping && Date.now() < until) await wait(Math.min(1_000, until - Date.now()));
+}
+
+async function mapWithConcurrency(items, limit, task) {
+  const results = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await task(items[index]);
+    }
+  }));
+  return results;
+}
+
+async function mxScanLoop() {
+  while (!stopping) {
+    let pause = 60_000;
+    try {
+      const { rows } = await query('select id, domain from public.claim_mx_scan_batch_v1($1)', [mxBatchSize], 3);
+      if (rows.length) {
+        const scanned = await mapWithConcurrency(rows, mxConcurrency, async (row) =>
+          ({ id: row.id, detection: await lookupEmailProvider(row.domain, { resolveMx }) }));
+        const failed = scanned.filter((item) => item.detection.status === 'lookup_failed').length;
+        // A scan is written once and not retried, so a batch where DNS itself
+        // is failing (most lookups failed) is not written at all: wait and try
+        // the same companies again rather than mark them all "Lookup failed".
+        if (failed > rows.length / 2) {
+          log({ event: 'mx_scan_dns_unhealthy', companies: rows.length, failed });
+          pause = 300_000;
+        } else {
+          const checkedAt = new Date().toISOString();
+          const { rows: applied } = await query('select public.apply_email_provider_scan_v2($1::jsonb) as result', [JSON.stringify(
+            scanned.map(({ id, detection }) => ({
+              id, esp: detection.esp, email_provider_type: detection.category, mx_records: detection.mxRecords,
+              mx_status: detection.status, mx_checked_at: checkedAt,
+            })))], 3);
+          const result = applied[0]?.result ?? {};
+          log({ event: 'mx_scan', companies: rows.length, updated: result.updated ?? 0, people: result.people ?? 0,
+            segs: scanned.filter((item) => item.detection.category === 'SEG').length, failed });
+          pause = rows.length === mxBatchSize ? 1_000 : 60_000;
+        }
+      }
+    } catch (error) {
+      // Undefined function: the database is older than this worker; check rarely.
+      pause = error?.code === '42883' ? 300_000 : 30_000;
+      log({ event: 'mx_scan_failed', code: error?.code ?? '', message: String(error?.message ?? error).slice(0, 300) });
+    }
+    await pauseFor(pause);
+  }
+}
+
 async function claim() {
   const { rows } = await query('select public.claim_icp_validation_batch_v1($1, $2) as unit', [workerId, leaseSeconds]);
   const unit = rows[0]?.unit ?? null;
@@ -141,6 +208,7 @@ async function main() {
   log({ event: 'icp_worker_started', configured: Boolean(apiKey), concurrency, timeoutMs });
 
   const applier = applyLoop();
+  const mxScanner = mxScanLoop();
   let lastHeartbeat = Date.now();
   while (!stopping) {
     if (Date.now() - lastHeartbeat > 30_000) {
@@ -163,7 +231,7 @@ async function main() {
   }
   // In-flight calls get the stop grace period to land; anything still leased
   // after that expires and is retried, never lost.
-  await Promise.race([Promise.allSettled([...inFlight, applier]), wait(50_000)]);
+  await Promise.race([Promise.allSettled([...inFlight, applier, mxScanner]), wait(50_000)]);
 }
 
 await new Promise((resolve, reject) => { health.once('error', reject); health.listen(9094, '0.0.0.0', resolve); });

@@ -5,7 +5,9 @@ export type ProspectFilterOperator = "contains" | "equals" | "not_contains" | "n
 export type CompanyKeywordScope = "name" | "keywords" | "description";
 export type ProspectFilter = { id: string; field: string; operator: ProspectFilterOperator; values: string[]; scopes?: CompanyKeywordScope[] };
 
-export type ClientRecord = { id: string; name: string; list_count: number; prospect_count: number; company_count?: number; cooldown_days?: number; icp_verified_count?: number; blocked_count?: number; folder_id?: string | null; folder_name?: string | null; archived_at?: string | null };
+// Whether a client's workspace shows people behind a secure email gateway.
+export type SegEmails = "keep" | "discard";
+export type ClientRecord = { id: string; name: string; list_count: number; prospect_count: number; company_count?: number; cooldown_days?: number; seg_emails?: SegEmails; icp_verified_count?: number; blocked_count?: number; folder_id?: string | null; folder_name?: string | null; archived_at?: string | null };
 export type ClientFolder = { id: string; name: string; created_at: string };
 export type ListRecord = { id: string; name: string; data_source: string; source_file_name: string; uploaded_rows: number; unique_added: number; duplicates_linked: number; prospect_count: number; created_at: string; field_count: number; field_headers: string[] };
 export type ProspectMembership = { listId: string; listName: string; clientId: string; clientName: string };

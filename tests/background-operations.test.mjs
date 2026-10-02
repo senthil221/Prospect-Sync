@@ -143,6 +143,7 @@ test("client result sets normalize the same completeness partition before hashin
   assert.deepEqual(normalized.filters, [
     ...ordinary,
     { id: "client-profile:complete", field: "__incomplete_company_profile", operator: "equals", values: ["false"] },
+    { id: "client-seg:policy", field: "__client_seg_policy", operator: "equals", values: ["client-a"] },
   ]);
   assert.equal(normalizeResultSetQuestion(normalized), normalized, "normalization must be idempotent");
   assert.notEqual(resultSetContentHash(requested), resultSetContentHash(normalized),
@@ -155,8 +156,12 @@ test("client result sets normalize the same completeness partition before hashin
     filters: [{ field: "__incomplete_company_profile", operator: "equals", values: ["true"] }],
     companyScope,
   };
-  assert.equal(normalizeResultSetQuestion(incomplete), incomplete,
-    "an explicit Incomplete Info partition must not be replaced");
+  const incompleteNormalized = normalizeResultSetQuestion(incomplete);
+  assert.deepEqual(incompleteNormalized.filters, [
+    ...incomplete.filters,
+    { id: "client-seg:policy", field: "__client_seg_policy", operator: "equals", values: ["client-a"] },
+  ], "an explicit Incomplete Info partition must not be replaced, and still carries the SEG policy");
+  assert.equal(normalizeResultSetQuestion(incompleteNormalized), incompleteNormalized);
 
   const companyMaster = { entityType: "company", clientScope: "", search: "", filters: ordinary };
   assert.equal(normalizeResultSetQuestion(companyMaster), companyMaster,
@@ -171,6 +176,7 @@ test("client result sets normalize the same completeness partition before hashin
   assert.deepEqual(companyNormalized.filters, [
     conflictingCompany.filters[0],
     { id: "client-profile:complete", field: "__incomplete_company_profile", operator: "equals", values: ["false"] },
+    { id: "client-seg:policy", field: "__client_seg_policy", operator: "equals", values: ["client-a"] },
     { field: "__company_client_ids", operator: "contains", values: ["client-a"] },
   ], "the server-owned Company membership must intersect a contradictory caller filter");
   assert.equal(normalizeResultSetQuestion(companyNormalized), companyNormalized,

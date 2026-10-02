@@ -5,7 +5,7 @@ import type { CompanyScope, PeopleScope } from "../../lib/workspace-scopes";
 import { api, encodeFilters, fetchCompanies, fetchProspects, filterPayload, isAbortError, type ProspectPagination } from "../../lib/dashboard-api";
 import { filterPayloadWithSets } from "../../lib/filter-set-client";
 import { formatNumber, initials } from "../../lib/dashboard-helpers";
-import type { ClientFolder, ClientRecord, Company, ListRecord, Prospect, ProspectFilter } from "../../lib/types";
+import type { ClientFolder, ClientRecord, Company, ListRecord, Prospect, ProspectFilter, SegEmails } from "../../lib/types";
 import { AppIcon, ConfirmDialog, EmptyCompact, EmptyState, TabPanel } from "./DashboardUi";
 import { CompanyTable } from "./CompaniesWorkspace";
 import BlocklistPanel from "./BlocklistPanel";
@@ -338,6 +338,8 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
   const [cooldown, setCooldown] = useState(client.cooldown_days ?? 90);
   const [savedCooldown, setSavedCooldown] = useState(client.cooldown_days ?? 90);
   const [cooldownState, setCooldownState] = useState("");
+  const [segEmails, setSegEmails] = useState<SegEmails>(client.seg_emails ?? "keep");
+  const [segState, setSegState] = useState("");
   const [tab, setTab] = useState<"lists" | "prospects" | "recent" | "by_icp" | "companies" | "incomplete" | "icp" | "icp_checks" | "blocklist">(() => listPivot?.target ?? "lists");
   const [listSearch, setListSearch] = useState("");
   const deferredListSearch = useDeferredValue(listSearch);
@@ -395,7 +397,15 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
     try { const result = await api<{ cooldownDays: number }>(`/api/clients/${encodeURIComponent(client.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cooldownDays: cooldown }) }); setCooldown(result.cooldownDays); setSavedCooldown(result.cooldownDays); setCooldownState("Saved"); onRefreshClients(); }
     catch (caught) { setCooldownState(caught instanceof Error ? caught.message : "Unable to save"); }
   }
-  return <><button className="back" onClick={onBack}><AppIcon name="back" size={14}/> All clients</button><div className="client-hero client-hero-compact"><span className="client-logo tone-0">{initials(client.name)}</span><div className="client-hero-identity"><p className="eyebrow">CLIENT WORKSPACE</p><h2>{client.name}</h2><p>{formatNumber(client.prospect_count)} people · {formatNumber(client.company_count ?? 0)} companies · {formatNumber(client.list_count)} lists{client.icp_verified_count !== undefined ? <> · <strong className="icp-count">{formatNumber(client.icp_verified_count)} ICP verified</strong></> : null}</p></div><div className="client-actions"><button className="primary" onClick={onImport}><AppIcon name="plus" size={14}/> Import list</button><details className="client-settings"><summary>Settings</summary><div className="client-settings-panel"><div className="cooldown-setting"><label htmlFor="cooldown-days">Contact cooldown</label><div><input id="cooldown-days" type="number" min="0" max="730" value={cooldown} onChange={(event) => setCooldown(Number(event.target.value))}/><span>days</span><button onClick={() => void saveCooldown()}>Save</button></div><small role="status">{cooldownState || "Used when checking reuse eligibility"}</small></div><button className="danger-button" onClick={onDeleteClient}>Delete client</button></div></details></div></div>
+  // Applies to every view of this client from the next query; the panels are
+  // keyed on it so they load again.
+  async function saveSegEmails(next: SegEmails) {
+    if (next === segEmails) return;
+    setSegState("Saving…");
+    try { const result = await api<{ segEmails: SegEmails }>(`/api/clients/${encodeURIComponent(client.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ segEmails: next }) }); setSegEmails(result.segEmails); setSegState("Saved"); onRefreshClients(); }
+    catch (caught) { setSegState(caught instanceof Error ? caught.message : "Unable to save"); }
+  }
+  return <><button className="back" onClick={onBack}><AppIcon name="back" size={14}/> All clients</button><div className="client-hero client-hero-compact"><span className="client-logo tone-0">{initials(client.name)}</span><div className="client-hero-identity"><p className="eyebrow">CLIENT WORKSPACE</p><h2>{client.name}</h2><p>{formatNumber(client.prospect_count)} people · {formatNumber(client.company_count ?? 0)} companies · {formatNumber(client.list_count)} lists{client.icp_verified_count !== undefined ? <> · <strong className="icp-count">{formatNumber(client.icp_verified_count)} ICP verified</strong></> : null}</p></div><div className="client-actions"><button className="primary" onClick={onImport}><AppIcon name="plus" size={14}/> Import list</button><details className="client-settings"><summary>Settings</summary><div className="client-settings-panel"><div className="cooldown-setting"><label htmlFor="cooldown-days">Contact cooldown</label><div><input id="cooldown-days" type="number" min="0" max="730" value={cooldown} onChange={(event) => setCooldown(Number(event.target.value))}/><span>days</span><button onClick={() => void saveCooldown()}>Save</button></div><small role="status">{cooldownState || "Used when checking reuse eligibility"}</small></div><div className="seg-setting"><span id={`seg-emails-${client.id}`}>SEG emails</span><div role="radiogroup" aria-labelledby={`seg-emails-${client.id}`}>{(["keep", "discard"] as const).map((value) => <button key={value} type="button" role="radio" aria-checked={segEmails === value} className={segEmails === value ? "active" : ""} disabled={segState === "Saving…"} onClick={() => void saveSegEmails(value)}>{value === "keep" ? "Keep" : "Discard"}</button>)}</div><small role="status">{segState && segState !== "Saved" ? segState : segEmails === "discard" ? "People at companies behind an email security gateway (Mimecast, Proofpoint…) are left out of this client, as they come in and when detected later." : "People behind an email security gateway are included. Discard them for a large TAM."}</small></div><button className="danger-button" onClick={onDeleteClient}>Delete client</button></div></details></div></div>
     {/* The ICP picker sits BESIDE the tablist, not inside it: role="tablist"
         may only contain tabs, and a <select> in there is announced as one more
         tab that does nothing. Choosing an ICP is what activates its panel, and
@@ -439,10 +449,10 @@ function ClientDetail({ client, clients, lists, onBack, onOpenList, onSelectPros
           ? <>Showing {client.name} prospects carrying <strong>none</strong> of its {icps.length} ICP{icps.length === 1 ? "" : "s"}.</>
           : <>{client.name} has no named ICPs yet, so every prospect is unassigned. Name one on the ICPs tab to start sorting them.</>
         : <>Showing {client.name} prospects tagged <strong>{icps.find((icp) => icp.id === icpChoice)?.name ?? "this ICP"}</strong>.</>}</p>
-      <ClientMasterDatabase key={`icp:${client.id}:${icpChoice}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients} active initialFilters={icpFilters} companyScope={null} onClearCompanyScope={() => {}} onSeeCompanies={(scope) => { setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/>
+      <ClientMasterDatabase key={`icp:${client.id}:${icpChoice}:${segEmails}`} client={{ ...client, cooldown_days: savedCooldown }} clients={clients} active initialFilters={icpFilters} companyScope={null} onClearCompanyScope={() => {}} onSeeCompanies={(scope) => { setPeopleCompanyScope(scope); setTab("companies"); }} onSelect={onSelectProspect} onImport={onImport}/>
     </> : null}</TabPanel>
     <TabPanel id="companies" active={tab === "companies"} keepMounted className="client-tab-panel"><ClientCompanyDatabase key={`companies:${client.prospect_count}:${client.blocked_count ?? 0}`} client={client} clients={clients} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onSelectListScope={(listId) => setPeopleCompanyScope(listId ? { search: "", filters: [{ field: "__list_ids", operator: "contains", values: [listId] }], limit: 250000 } : null)} onSeePeople={(scope) => { if (peopleCompanyScope) { setPeopleCompanyScope(null); setCompanyPeopleScope(null); } else setCompanyPeopleScope(scope); setTab("prospects"); }} onImport={onImport}/></TabPanel>
-    <TabPanel id="incomplete" active={tab === "incomplete"} keepMounted className="client-tab-panel">{tab === "incomplete" ? <IncompleteInfoPanel client={client} clients={clients} onSelect={onSelectProspect} onImport={onImport}/> : null}</TabPanel>
+    <TabPanel id="incomplete" active={tab === "incomplete"} keepMounted className="client-tab-panel">{tab === "incomplete" ? <IncompleteInfoPanel key={segEmails} client={client} clients={clients} onSelect={onSelectProspect} onImport={onImport}/> : null}</TabPanel>
     {/* Its own fetch against a narrow time window, so it is mounted only while
         open rather than on every client screen. */}
     <TabPanel id="recent" active={tab === "recent"} keepMounted className="client-tab-panel">{tab === "recent" ? <RecentlyAddedPanel key={client.id} client={client} onChanged={onRefreshClients}/> : null}</TabPanel>

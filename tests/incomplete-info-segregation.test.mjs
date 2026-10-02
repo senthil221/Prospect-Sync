@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
+  clientSegPolicyFilter,
   completeClientCompanyProfileFilter,
   incompleteClientCompanyProfileFilter,
   withClientWorkspaceCompleteness,
@@ -14,12 +15,14 @@ test("client workspace completeness is added once and Master stays unchanged", (
   assert.equal(withClientWorkspaceCompleteness(ordinary, null), ordinary);
 
   const client = withClientWorkspaceCompleteness(ordinary, "client-a");
-  assert.equal(client.length, 2);
-  assert.deepEqual(client.at(-1), completeClientCompanyProfileFilter);
+  assert.equal(client.length, 3);
+  assert.deepEqual(client.at(-2), completeClientCompanyProfileFilter);
+  // The client's SEG emails setting, applied by the database (20261003100000).
+  assert.deepEqual(client.at(-1), clientSegPolicyFilter("client-a"));
   assert.equal(withClientWorkspaceCompleteness(client, "client-a"), client);
 
   const incomplete = [incompleteClientCompanyProfileFilter];
-  assert.equal(withClientWorkspaceCompleteness(incomplete, "client-a"), incomplete);
+  assert.deepEqual(withClientWorkspaceCompleteness(incomplete, "client-a"), [...incomplete, clientSegPolicyFilter("client-a")]);
 });
 
 test("client UI locks both normal and incomplete partitions and hides the internal filter", async () => {

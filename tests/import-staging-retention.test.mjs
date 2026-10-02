@@ -81,7 +81,9 @@ test("an MX scan batch is applied in one statement", async () => {
 test("the scan route writes once per batch, not once per company", async () => {
   const source = await route();
 
-  assert.match(source, /supabase\.rpc\("apply_email_provider_scan_v1"/);
+  // v2 (20261003100000): the same single statement, plus the ESP columns on
+  // the companies' prospect_index rows instead of a full re-index.
+  assert.match(source, /supabase\.rpc\("apply_email_provider_scan_v2"/);
   // The per-company UPDATE is gone.
   assert.doesNotMatch(source, /supabase\.from\("companies"\)\.update\(/);
   // DNS lookups stay parallel - they are the honest cost and were never the problem.
