@@ -48,11 +48,9 @@ test("the ICP worker applies results in its own loop, never inside a batch", asy
   assert.match(migration, /pg_try_advisory_xact_lock\(hashtext\('apply_icp_check_results_v1'\)\)/);
 });
 
-test("both start paths offer the switch, on by default", async () => {
+test("both start paths always apply results", async () => {
   const screen = await read("../app/components/IcpChecksWorkspace.tsx");
-  assert.match(screen, /const \[autoApply, setAutoApply\] = useState\(true\);/);
-  assert.match(screen, /label="Apply results automatically"/);
+  assert.match(screen, /autoApply: true/);
   const dialog = await read("../app/components/IcpCheck.tsx");
-  assert.match(dialog, /const \[autoApply, setAutoApply\] = useState\(true\);/);
-  assert.match(dialog, /force, autoApply, scope: "selection"/);
+  assert.match(dialog, /autoApply: true, scope: "selection"/);
 });

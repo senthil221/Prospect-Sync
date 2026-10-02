@@ -8,17 +8,19 @@ import {
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 const migrationPath = "../supabase/migrations/20260930210000_icp_strategy_checks.sql";
 
-test("the three strategies are the agreed combos: DeepSeek high + GPT Luna low", () => {
+test("the three strategies are the agreed combos: Strict and Balanced low, Lenient high, GPT Luna low", () => {
   const byId = Object.fromEntries(ICP_STRATEGIES.map((strategy) => [strategy.id, strategy]));
-  const ds = { model: "deepseek/deepseek-v4.1-flash", effort: "high" };
+  const dsLow = { model: "deepseek/deepseek-v4.1-flash", effort: "low" };
+  const dsHigh = { model: "deepseek/deepseek-v4.1-flash", effort: "high" };
   const gpt = { model: "openai/gpt-6-luna", effort: "low" };
-  assert.deepEqual(byId.strict.passes, [ds, gpt]);
-  assert.deepEqual(byId.lenient.passes, [ds, ds]);
-  assert.deepEqual(byId.balanced.passes, [ds, ds, gpt]);
+  assert.deepEqual(byId.strict.passes, [dsLow, gpt]);
+  assert.deepEqual(byId.lenient.passes, [dsHigh, dsHigh]);
+  assert.deepEqual(byId.balanced.passes, [dsLow, dsLow, gpt]);
 });
 
 test("the app's strategies are exactly the ones the database runs", async () => {
-  const migration = await read(migrationPath);
+  // The latest definition of icp_strategy_passes_v1 is the one that runs.
+  const migration = await read("../supabase/migrations/20261003090000_icp_strategy_reasoning_levels.sql");
   const rows = [...migration.matchAll(/\('(strict|lenient|balanced)',\s*(\d), '([^']+)',\s*'(\w+)'\)/g)]
     .map(([, strategy, pass, model, effort]) => ({ strategy, pass: Number(pass), model, effort }));
   for (const strategy of ICP_STRATEGIES) {
@@ -26,7 +28,7 @@ test("the app's strategies are exactly the ones the database runs", async () => 
     assert.deepEqual(sql.map(({ model, effort }) => ({ model, effort })), strategy.passes, strategy.id);
   }
   // passes and need_fit, as the rule function states them
-  assert.match(migration, /select case p_strategy when 'balanced' then 3 else 2 end,\s+case p_strategy when 'strict' then 2 when 'lenient' then 1 else 2 end/);
+  assert.match(await read(migrationPath), /select case p_strategy when 'balanced' then 3 else 2 end,\s+case p_strategy when 'strict' then 2 when 'lenient' then 1 else 2 end/);
   assert.deepEqual(ICP_STRATEGIES.map((strategy) => [strategy.id, strategy.needFit]), [["strict", 2], ["balanced", 2], ["lenient", 1]]);
 });
 
@@ -137,13 +139,17 @@ test("ICP checks sits inside each client, and the ICP validator is a Data tool",
   const dialog = await read("../app/components/IcpCheck.tsx");
   assert.match(dialog, /useState<"strategy" \| "models">\("strategy"\)/);
   assert.match(dialog, /\("\/api\/icp-checks", \{/);
-  assert.match(dialog, /label="Force re-check"/);
+  // Production defaults, no switches: cheapest providers, results applied,
+  // already-checked companies skipped.
+  assert.match(dialog, /providerMode: "cheapest", force: false, autoApply: true, scope: "selection"/);
+  assert.doesNotMatch(dialog, /<Switch/);
 });
 
 test("a check starts on ICP unverified companies and skips already-checked ones unless forced", async () => {
   const screen = await read("../app/components/IcpChecksWorkspace.tsx");
   assert.match(screen, /useState<Scope>\("unverified"\)/);
-  assert.match(screen, /const \[force, setForce\] = useState\(false\);/);
+  assert.match(screen, /providerMode: "cheapest", force: false, autoApply: true/);
+  assert.doesNotMatch(screen, /<Switch/);
   const migration = await read("../supabase/migrations/20260930220000_icp_checks_skip_checked_and_unverified_scope.sql");
   // Unverified = no manual ICP verification for this client.
   assert.match(migration, /p_scope = 'all' or not exists \(\s*select 1 from public\.client_company_icp_validations iv/);

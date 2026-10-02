@@ -44,7 +44,7 @@ export const ICP_STRATEGIES = [
     rule: 'FIT only if both runs say FIT. Either says NON_FIT → NON_FIT.',
     summary: 'Fewest FITs. For a tight list where a wrong FIT costs more than a missed one.',
     passes: [
-      { model: 'deepseek/deepseek-v4.1-flash', effort: 'high' },
+      { model: 'deepseek/deepseek-v4.1-flash', effort: 'low' },
       { model: 'openai/gpt-6-luna', effort: 'low' },
     ],
   },
@@ -53,8 +53,8 @@ export const ICP_STRATEGIES = [
     rule: 'FIT if at least two of three runs say FIT. Two NON_FITs → NON_FIT.',
     summary: 'Majority vote. The middle ground.',
     passes: [
-      { model: 'deepseek/deepseek-v4.1-flash', effort: 'high' },
-      { model: 'deepseek/deepseek-v4.1-flash', effort: 'high' },
+      { model: 'deepseek/deepseek-v4.1-flash', effort: 'low' },
+      { model: 'deepseek/deepseek-v4.1-flash', effort: 'low' },
       { model: 'openai/gpt-6-luna', effort: 'low' },
     ],
   },

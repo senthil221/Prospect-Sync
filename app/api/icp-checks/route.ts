@@ -214,7 +214,9 @@ async function handlePOST(request: Request) {
       p_auto_apply: body.autoApply !== false,
       p_created_by: actor,
     });
-    if (error) return failure(error);
+    // The dashboard no longer offers a force switch, so the database's hint
+    // to turn one on would point at nothing.
+    if (error) return failure({ ...error, message: error.message.replace(/ Turn on "Force re-check" to run them again\./, "") });
     return Response.json({ check: data });
   }
 

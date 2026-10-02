@@ -7,7 +7,7 @@ import type { ClientIcpProfile, ClientRecord } from "../../lib/types";
 import { sourceLabel } from "../../worker/icp-validator-core.mjs";
 import { AppIcon, ConfirmDialog } from "./DashboardUi";
 import { StrategyPicker, estimateStrategy, hasObservedCost, strategies, strategyLabel, type CostPerCompany, type StrategyId } from "./IcpStrategyPicker";
-import { ProgressRing, Segmented, Switch, WorkerBadge, durationText, money, relativeTime, type RunStatus, type WorkerState } from "./IcpValidatorViews";
+import { ProgressRing, Segmented, WorkerBadge, durationText, money, relativeTime, type RunStatus, type WorkerState } from "./IcpValidatorViews";
 
 // ICP checks: label a client's companies FIT / NON_FIT with one of three
 // voting setups (Strict, Balanced, Lenient). Each check is two or three model
@@ -125,10 +125,7 @@ function NewCheck({ clients, fixedClient, onStarted }: { clients: ClientRecord[]
   const [strategy, setStrategy] = useState<StrategyId>("balanced");
   // Newly pushed companies are ICP unverified, so that is where a check starts.
   const [scope, setScope] = useState<Scope>("unverified");
-  const [force, setForce] = useState(false);
-  const [autoApply, setAutoApply] = useState(true);
   const [pasted, setPasted] = useState("");
-  const [cheapest, setCheapest] = useState(true);
   const [counts, setCounts] = useState<{ key: string; value: ScopeCounts; cost: CostPerCompany } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -165,8 +162,8 @@ function NewCheck({ clients, fixedClient, onStarted }: { clients: ClientRecord[]
   const observed = counts?.cost ?? null;
   const pastedLines = pasted.split(/[\n,;\t]+/).map((value) => value.trim()).filter(Boolean).length;
   const companies = scope === "paste" ? pastedLines
-    : scope === "unverified" ? num(force ? scopeCounts?.unverified : scopeCounts?.unverified_unchecked)
-    : num(force ? scopeCounts?.all : scopeCounts?.all_unchecked);
+    : scope === "unverified" ? num(scopeCounts?.unverified_unchecked)
+    : num(scopeCounts?.all_unchecked);
   const estimate = estimateStrategy(strategy, companies, icp?.description.length ?? 800, observed);
 
   async function start() {
@@ -182,7 +179,9 @@ function NewCheck({ clients, fixedClient, onStarted }: { clients: ClientRecord[]
         selection = { scope: "selection", companyIds: resolved.companyIds };
       }
       const result = await post<{ check: { id: string; total_items: number; skipped_items?: number } }>({
-        action: "start", clientId: client.id, icpId: icp.id, strategy, providerMode: cheapest ? "cheapest" : "default", force, autoApply, ...selection,
+        // Production defaults: cheapest providers, results applied, companies
+        // already checked for this ICP skipped.
+        action: "start", clientId: client.id, icpId: icp.id, strategy, providerMode: "cheapest", force: false, autoApply: true, ...selection,
       });
       const skipped = num(result.check.skipped_items);
       onStarted(`${strategyLabel(strategy)} check started on ${formatNumber(result.check.total_items)} ${result.check.total_items === 1 ? "company" : "companies"} for ${client.name}${skipped ? ` - ${formatNumber(skipped)} already checked were skipped` : ""}. Companies with no description and no keywords are never checked.`, result.check.id);
@@ -194,11 +193,11 @@ function NewCheck({ clients, fixedClient, onStarted }: { clients: ClientRecord[]
 
   const count = (value: number | undefined) => scopeCounts ? <b>{formatNumber(num(value))}</b> : null;
   const scopeOptions: Array<{ value: Scope; label: ReactNode; hint?: string }> = [
-    { value: "unverified", label: <>ICP unverified {count(force ? scopeCounts?.unverified : scopeCounts?.unverified_unchecked)}</>, hint: "Companies not marked ICP verified for this client - newly pushed ones land here" },
-    { value: "all", label: <>All companies {count(force ? scopeCounts?.all : scopeCounts?.all_unchecked)}</>, hint: "Every company of this client that has a description or keywords" },
+    { value: "unverified", label: <>ICP unverified {count(scopeCounts?.unverified_unchecked)}</>, hint: "Companies not marked ICP verified for this client - newly pushed ones land here" },
+    { value: "all", label: <>All companies {count(scopeCounts?.all_unchecked)}</>, hint: "Every company of this client that has a description or keywords" },
     { value: "paste", label: "Paste a list", hint: "Websites or company names, one per line" },
   ];
-  const skippedHere = scope === "paste" || force || !scopeCounts ? 0
+  const skippedHere = scope === "paste" || !scopeCounts ? 0
     : scope === "unverified" ? num(scopeCounts.unverified) - num(scopeCounts.unverified_unchecked)
     : num(scopeCounts.all) - num(scopeCounts.all_unchecked);
 
@@ -231,18 +230,8 @@ function NewCheck({ clients, fixedClient, onStarted }: { clients: ClientRecord[]
           <textarea className="icc-paste" rows={5} value={pasted} onChange={(event) => setPasted(event.target.value)}
             placeholder={"acme.com\nhttps://www.example.org\nContoso Fertilizers"} aria-label="Company websites or names"/>
           <p className="icpx-help">{pastedLines ? `${formatNumber(pastedLines)} value${pastedLines === 1 ? "" : "s"} - matched to ${client?.name}'s companies when you start.` : "Websites or names, one per line. Only this client's companies are matched."}</p>
-        </> : <p className="icpx-help">To check a filtered set, select companies in the Company DB and use <b>Validate ICP</b>.</p>}
+        </> : <p className="icpx-help">{skippedHere ? <>{formatNumber(skippedHere)} already checked for this ICP {skippedHere === 1 ? "is" : "are"} skipped. </> : null}To check a filtered set, select companies in the Company DB and use <b>Validate ICP</b>.</p>}
       </div>
-
-      <Switch checked={force} onChange={setForce} label="Force re-check"
-        hint={force ? "Companies that already have an ICP check result for this ICP are checked again."
-          : skippedHere ? `Off: ${formatNumber(skippedHere)} already checked for this ICP will be skipped.` : "Off: companies already checked for this ICP are skipped."}/>
-
-      <Switch checked={autoApply} onChange={setAutoApply} label="Apply results automatically"
-        hint={autoApply ? `FIT → ICP verified. NON_FIT → domain added to ${client?.name ?? "the client"}'s blocklist (not if already ICP verified). Reviewing a result later updates it.` : "Off: results are labels only. Act on them from the Company DB or with Mark FIT as ICP verified."}/>
-
-      <Switch checked={cheapest} onChange={setCheapest} label="Cheapest providers"
-        hint="OpenRouter picks the lowest-priced provider that supports JSON output and reasoning, skipping 4-bit hosts. Usually well under list price for DeepSeek."/>
     </>}
 
     {error ? <p className="form-error" role="alert">{error}</p> : null}
