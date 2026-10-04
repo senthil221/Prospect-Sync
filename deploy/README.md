@@ -260,7 +260,22 @@ journalctl -u prospect-backup.service -n 50 --no-pager
 
 Set `RESTIC_REPOSITORY` in `.env` first. A backup sitting on the same VPS as the
 database is not a backup - one Hostinger incident loses both. Cloudflare R2 has
-no egress fees and costs cents a month at this size.
+no egress fees and costs cents a month at this size. The host also needs `jq`:
+the nightly job will not call an upload verified until the exact restic
+snapshot is listed and its `meta.json` reads back byte-for-byte.
+
+`backup.sh` creates the local dump and offsite snapshot. A separate weekly
+`prospect-backup-retention.timer` runs the slower remote prune under the same
+lock. It deliberately never runs `restic unlock`; an operator must investigate
+and clear a stale repository lock. Deploying application code with `update.sh`
+does not install or change systemd units, so rerun `sudo ./scripts/install-timers.sh`
+after this timer changes.
+
+The credential-free files under `${BACKUP_DIR}/.status/` separate the latest
+attempt from the last verified local/offsite success. They are operational
+receipts, not restore proof. Only a successful isolated `restore.sh
+--verify-only` drill validates the full archive, ownership, grants and data
+checks; a production restore remains a deliberate operator action.
 
 ---
 
@@ -283,8 +298,8 @@ no egress fees and costs cents a month at this size.
 ### The monthly ten minutes
 
 1. `./scripts/restore.sh --verify-only` - restores the latest backup into a
-   scratch database and counts rows. Production is untouched. **Do this.** An
-   untested backup is a hypothesis.
+   scratch database and validates data, object ownership and grants. Production
+   is untouched. **Do this.** An untested backup is a hypothesis.
 2. `./scripts/maintenance.sh` - read the disk line and the slow-query list.
 3. `sudo apt update && sudo apt list --upgradable` - security patches apply
    automatically, but kernel updates need a reboot you choose.

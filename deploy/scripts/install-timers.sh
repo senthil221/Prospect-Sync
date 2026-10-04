@@ -43,6 +43,33 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+write_unit prospect-backup-retention.service <<EOF
+[Unit]
+Description=Prospect Sync offsite backup retention
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=${RUN_AS}
+WorkingDirectory=${DEPLOY_DIR}
+ExecStart=${DEPLOY_DIR}/scripts/backup-retention.sh
+TimeoutStartSec=7200
+EOF
+
+write_unit prospect-backup-retention.timer <<'EOF'
+[Unit]
+Description=Weekly Prospect Sync offsite backup retention
+
+[Timer]
+OnCalendar=Sat *-*-* 05:15:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
 write_unit prospect-maintenance.service <<EOF
 [Unit]
 Description=Prospect Sync weekly database maintenance
@@ -71,7 +98,7 @@ WantedBy=timers.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now prospect-backup.timer prospect-maintenance.timer
+systemctl enable --now prospect-backup.timer prospect-backup-retention.timer prospect-maintenance.timer
 
 echo
 systemctl list-timers 'prospect-*' --no-pager

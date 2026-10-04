@@ -12,6 +12,7 @@ set -eEuo pipefail
 
 cd "$(dirname "$0")/.."
 source "$(dirname "$0")/_env.sh"
+source "$(dirname "$0")/restore-orchestration.sh"
 load_env .env
 if [[ -z "${VERIFICATION_WORKER_DB_PASSWORD:-}" ]]; then
   echo "VERIFICATION_WORKER_DB_PASSWORD is required. Generate a dedicated value; do not reuse POSTGRES_PASSWORD." >&2
@@ -41,7 +42,7 @@ fi
 [[ -f "${BACKUP}/database.dump.zst" ]] || { echo "No database.dump.zst in ${BACKUP}" >&2; exit 1; }
 
 pg() { docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" db "$@"; }
-psql_as() { pg psql -X -v ON_ERROR_STOP=1 -U postgres -h 127.0.0.1 "$@"; }
+psql_as() { pg psql -X -v ON_ERROR_STOP=1 -U supabase_admin -h 127.0.0.1 "$@"; }
 psql_admin() { pg psql -X -v ON_ERROR_STOP=1 -U supabase_admin -h 127.0.0.1 "$@"; }
 
 restore_globals() {
@@ -53,13 +54,17 @@ restore_globals() {
   # Continue past those so every global is considered, but reject any other
   # SQL error and any decompression/connection failure.
   set +e
+  # Credentials in a historical archive must never rotate the password used by
+  # the still-running recovery session. Roles, memberships and settings are
+  # restored; current deployment passwords are reasserted by bootstrap below.
   zstd -dc "${BACKUP}/globals.sql.zst" \
-    | pg psql -U postgres -h 127.0.0.1 -d template1 -q -v ON_ERROR_STOP=0 --set=VERBOSITY=verbose \
+    | sed -E "s/[[:space:]]+PASSWORD[[:space:]]+('[^']*'|NULL)//Ig" \
+    | pg psql -U supabase_admin -h 127.0.0.1 -d template1 -q -v ON_ERROR_STOP=0 --set=VERBOSITY=verbose \
       >"$output" 2>&1
   pipeline_status=("${PIPESTATUS[@]}")
   set -e
 
-  if (( pipeline_status[0] != 0 || pipeline_status[1] != 0 )); then
+  if (( pipeline_status[0] != 0 || pipeline_status[1] != 0 || pipeline_status[2] != 0 )); then
     cat "$output" >&2
     rm -f -- "$output"
     return 1
@@ -183,67 +188,100 @@ read -rp "Type the word RESTORE to continue: " confirm
 
 SERVICES_STOPPED=0
 RECOVERY_ACTIVE=0
-RUNNING_APP_CONTAINERS=()
-for container in prospect-app prospect-app-blue prospect-app-green; do
-  if [[ "$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null || true)" == "true" ]]; then
-    RUNNING_APP_CONTAINERS+=("$container")
-  fi
-done
-
-restart_application_containers() {
-  if (( ${#RUNNING_APP_CONTAINERS[@]} > 0 )); then
-    docker start "${RUNNING_APP_CONTAINERS[@]}" >/dev/null
-  fi
+RESTORE_VALIDATED=0
+production_admin_preflight="$(psql_admin -d template1 -tAq -c \
+  "select current_user || '|' || rolsuper from pg_roles where rolname = current_user")"
+[[ "$production_admin_preflight" == "supabase_admin|true" ]] || {
+  echo "Production restore requires the existing supabase_admin superuser; got ${production_admin_preflight:-no result}." >&2
+  exit 1
 }
+capture_running_services
+
+# Never destroy an earlier recovery copy. Resolve this before stopping a single
+# writer so an operator can inspect or remove it without an outage.
+old_exists="$(psql_as -d template1 -tAq -c "select exists(select 1 from pg_database where datname = '${POSTGRES_DB}_old')")"
+[[ "$old_exists" == "f" ]] || {
+  echo "Refusing restore: ${POSTGRES_DB}_old already exists. Verify or remove it manually first." >&2
+  exit 1
+}
+database_owner="$(psql_admin -d template1 -tAq -c \
+  "select pg_get_userbyid(datdba) from pg_database where datname = '${POSTGRES_DB}'")"
+[[ "$database_owner" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+  echo "Refusing restore: current database owner is missing or not a simple PostgreSQL role identifier." >&2
+  exit 1
+}
+database_owner_sql="\"${database_owner}\""
 
 restore_failed() {
-  status=$?
+  status=$? rollback_ok=1 original_present=""
   trap - ERR
   set +e
   echo "Restore failed (exit ${status}). Recovering the previous database." >&2
-  if [[ "$RECOVERY_ACTIVE" == "1" ]]; then
-    psql_as -d template1 -q -c "select pg_terminate_backend(pid) from pg_stat_activity where datname = '${POSTGRES_DB}' and pid <> pg_backend_pid();" >/dev/null
-    psql_as -d template1 -q -c "drop database if exists ${POSTGRES_DB} with (force);"
-    psql_as -d template1 -q -c "alter database ${POSTGRES_DB}_old rename to ${POSTGRES_DB};"
+  if [[ "$RESTORE_VALIDATED" == "1" ]]; then
+    # The replacement database has passed its data/security checks. A partial
+    # container startup is an orchestration failure, not grounds to delete the
+    # validated restore. Quiesce writers again and retain both databases.
+    if stop_database_writers; then
+      echo "Validated database retained, but service startup failed. Writers are stopped; inspect services before retrying startup." >&2
+    else
+      echo "Validated database retained, but service startup failed and writer shutdown could not be proven. Stop writers manually." >&2
+    fi
+    exit 1
   fi
-  if [[ "$SERVICES_STOPPED" == "1" ]]; then
-    docker compose up -d
-    restart_application_containers
+  if [[ "$RECOVERY_ACTIVE" == "1" ]]; then
+    psql_as -d template1 -q -c "select pg_terminate_backend(pid) from pg_stat_activity where datname = '${POSTGRES_DB}' and pid <> pg_backend_pid();" >/dev/null || rollback_ok=0
+    psql_as -d template1 -q -c "drop database if exists ${POSTGRES_DB} with (force);" || rollback_ok=0
+    psql_as -d template1 -q -c "alter database ${POSTGRES_DB}_old rename to ${POSTGRES_DB};" || rollback_ok=0
+  fi
+  original_present="$(psql_as -d template1 -tAq -c "select exists(select 1 from pg_database where datname = '${POSTGRES_DB}') and not exists(select 1 from pg_database where datname = '${POSTGRES_DB}_old')" 2>/dev/null)" || rollback_ok=0
+  [[ "$original_present" == "t" ]] || rollback_ok=0
+  if [[ "$rollback_ok" == "1" ]]; then
+    docker compose exec -T -e VERIFICATION_WORKER_DB_PASSWORD db bash -s < postgres/init/00-prospect-bootstrap.sh || rollback_ok=0
+  fi
+  if [[ "$SERVICES_STOPPED" == "1" && "$rollback_ok" == "1" ]]; then
+    restart_previous_services_fail_closed || rollback_ok=0
+  fi
+  if [[ "$rollback_ok" != "1" ]]; then
+    echo "Automatic rollback or writer restart could not be proven. A fail-closed shutdown was attempted; confirm every writer is stopped before manual recovery." >&2
+    exit 1
   fi
   exit "$status"
 }
 trap restore_failed ERR
 
 echo "Stopping everything that writes to the database"
-if (( ${#RUNNING_APP_CONTAINERS[@]} > 0 )); then
-  docker stop "${RUNNING_APP_CONTAINERS[@]}" >/dev/null
-fi
-docker compose stop rest auth studio meta storage realtime functions 2>/dev/null || true
-SERVICES_STOPPED=1
+stop_database_writers
 
 echo "Restoring globals"
 restore_globals
 
 echo "Recreating ${POSTGRES_DB}"
-psql_as -d template1 -q -c "drop database if exists ${POSTGRES_DB}_old with (force);"
 psql_as -d template1 -q -c "select pg_terminate_backend(pid) from pg_stat_activity where datname = '${POSTGRES_DB}' and pid <> pg_backend_pid();" >/dev/null
 psql_as -d template1 -q -c "alter database ${POSTGRES_DB} rename to ${POSTGRES_DB}_old;"
 RECOVERY_ACTIVE=1
-psql_as -d template1 -q -c "create database ${POSTGRES_DB};"
+psql_as -d template1 -q -c "create database ${POSTGRES_DB} with template template0 owner ${database_owner_sql};"
 
 echo "Restoring data"
 zstd -dc "${BACKUP}/database.dump.zst" \
-  | pg pg_restore -U postgres -h 127.0.0.1 -d "$POSTGRES_DB" 2>&1 \
-  | sed '/warning\|already exists/Id'
+  | pg pg_restore -U supabase_admin -h 127.0.0.1 -d "$POSTGRES_DB" --exit-on-error
 
 echo "Re-applying role passwords and settings"
 docker compose exec -T -e VERIFICATION_WORKER_DB_PASSWORD db bash -s < postgres/init/00-prospect-bootstrap.sh
 
+echo "Validating restored data, ownership and grants before writers resume"
+pg sh -c 'exec psql -X -v ON_ERROR_STOP=1 -U supabase_admin -h 127.0.0.1 -d "$1" -f -' sh "$POSTGRES_DB" < scripts/restore-verify.sql
+restored_owner="$(psql_admin -d template1 -tAq -c \
+  "select pg_get_userbyid(datdba) from pg_database where datname = '${POSTGRES_DB}'")"
+[[ "$restored_owner" == "$database_owner" ]] || {
+  echo "Restored database owner changed from ${database_owner} to ${restored_owner:-unknown}." >&2
+  false
+}
+
 echo "Restarting services"
-docker compose up -d
-restart_application_containers
-SERVICES_STOPPED=0
+RESTORE_VALIDATED=1
 RECOVERY_ACTIVE=0
+restart_previous_services
+SERVICES_STOPPED=0
 trap - ERR
 
 cat <<EOF

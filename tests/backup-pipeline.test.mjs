@@ -29,19 +29,28 @@ test('synthetic backup pipeline regression executes under Linux CI', { skip: pro
 // clears; after 2026-09-08 every night uploaded successfully and then died on
 // that lock, so the unit exited 1 and a good backup reported failure for eight
 // nights. `restic unlock` removes only locks whose process is gone.
-test('offsite retention is grouped so the policy can remove anything, and a stale lock cannot fail a good backup', async () => {
-  const source = await readFile(new URL('../deploy/scripts/backup.sh', import.meta.url), 'utf8');
+test('offsite upload is verified separately from serialized weekly retention', async () => {
+  const [source, retention] = await Promise.all([
+    readFile(new URL('../deploy/scripts/backup.sh', import.meta.url), 'utf8'),
+    readFile(new URL('../deploy/scripts/backup-retention.sh', import.meta.url), 'utf8'),
+  ]);
+  const retentionCode = retention.split(/\r?\n/).filter(line => !line.trimStart().startsWith('#')).join('\n');
 
-  assert.match(source, /restic forget --tag prospect-db --group-by host,tags/);
-  assert.match(source, /--keep-daily 7 --keep-weekly 5 --keep-monthly 12 --prune/);
+  assert.doesNotMatch(source, /restic forget/);
+  assert.doesNotMatch(source, /restic unlock/);
+  assert.doesNotMatch(source, /write_backup_stage offsite uploaded/);
+  assert.match(source, /restic snapshots --tag prospect-db --host prospect-vps --path "\$DEST" --latest 1/);
+  assert.match(source, /write_backup_stage offsite verified/);
+  assert.match(source, /select_offsite_snapshot_id/);
+  assert.doesNotMatch(source, /Pushing to \$\{RESTIC_REPOSITORY\}/);
 
-  // Order matters in both directions: unlock after the upload, so it never
-  // clears a lock the upload is holding, and before forget, which is the step
-  // the stale lock was killing.
-  assert.ok(source.indexOf('restic backup') < source.indexOf('restic unlock'),
-    'unlock must come after the upload, not before it');
-  assert.ok(source.indexOf('restic unlock') < source.indexOf('restic forget'),
-    'unlock must come before the step the stale lock blocks');
+  assert.match(retention, /restic forget --tag prospect-db --group-by host,tags/);
+  assert.match(retention, /RESTIC_KEEP_DAILY="\$\{RESTIC_KEEP_DAILY:-7\}"/);
+  assert.match(retention, /--keep-daily "\$RESTIC_KEEP_DAILY"/);
+  assert.doesNotMatch(retentionCode, /restic unlock/);
+  assert.match(source, /flock -n 9/);
+  assert.match(retention, /flock -n 9/);
+  assert.match(retention, /write_backup_attempt failed "\$RETENTION_PHASE"/);
 });
 
 // A transient read must not be mistaken for an absent repository.

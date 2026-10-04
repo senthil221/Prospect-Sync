@@ -48,8 +48,9 @@ test("public resumable uploads translate the signed Supabase URL to Storage's in
 });
 
 test("restore, rollback, Studio, and backup guards fail closed", async () => {
-  const [restore, restoreVerify, update, caddy, backup] = await Promise.all([
+  const [restore, restoreOrchestration, restoreVerify, update, caddy, backup] = await Promise.all([
     readFile(new URL("../deploy/scripts/restore.sh", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/scripts/restore-orchestration.sh", import.meta.url), "utf8"),
     readFile(new URL("../deploy/scripts/restore-verify.sql", import.meta.url), "utf8"),
     readFile(new URL("../deploy/scripts/update.sh", import.meta.url), "utf8"),
     readFile(new URL("../deploy/caddy/Caddyfile", import.meta.url), "utf8"),
@@ -58,7 +59,7 @@ test("restore, rollback, Studio, and backup guards fail closed", async () => {
 
   assert.doesNotMatch(restore, /pg_restore[^\n]*\|\s*grep[^\n]*\|\| true/);
   assert.doesNotMatch(restore, /pg_restore[^\n]*--jobs/);
-  assert.match(restore, /-U supabase_admin[^\n]*--exit-on-error/);
+  assert.ok((restore.match(/-U supabase_admin[^\n]*--exit-on-error/g) ?? []).length >= 2);
   assert.doesNotMatch(restore, /pg_restore[^\n]*--no-owner|pg_restore[^\n]*--no-acl/);
   assert.match(restore, /create database \$\{SCRATCH\} with template template0/);
   assert.match(restore, /EXTENSION - pg_cron/);
@@ -81,6 +82,34 @@ test("restore, rollback, Studio, and backup guards fail closed", async () => {
   assert.match(caddy, /STUDIO_ALLOWED_CIDRS/);
   assert.match(backup, /Refusing to use broad backup directory/);
   assert.match(backup, /-name '20\[0-9\]/);
+  for (const service of ['import-worker', 'operations-worker', 'integration-worker', 'verification-worker', 'icp-worker']) {
+    assert.match(restoreOrchestration, new RegExp(`QUIESCE_SERVICES=.*${service}`));
+  }
+  assert.match(restoreOrchestration, /Refusing restore: \$\{service\} is still running/);
+  assert.match(restore, /Refusing restore: \$\{POSTGRES_DB\}_old already exists/);
+  assert.match(restore, /pg_restore[^\n]*--exit-on-error/);
+  assert.match(restore, /restore-verify\.sql/);
+  assert.match(restore, /sed -E "s\/\[\[:space:\]\]\+PASSWORD/);
+  assert.match(restore, /pipeline_status\[2\] != 0/);
+  assert.match(restore, /psql_as\(\) \{ pg psql[^\n]*-U supabase_admin/);
+  assert.match(restore, /pg psql -U supabase_admin[^\n]*ON_ERROR_STOP=0/);
+  assert.match(restore, /production_admin_preflight/);
+  assert.match(restore, /database_owner=[\s\S]*?pg_get_userbyid\(datdba\)/);
+  assert.match(restore, /\[\[ "\$database_owner" =~ \^\[A-Za-z_\]/);
+  assert.match(restore, /database_owner_sql="\\"\$\{database_owner\}\\""/);
+  assert.match(restore, /create database \$\{POSTGRES_DB\} with template template0 owner \$\{database_owner_sql\}/);
+  assert.match(restore, /\[\[ "\$restored_owner" == "\$database_owner" \]\]/);
+  assert.match(restore, /Automatic rollback or writer restart could not be proven/);
+  assert.match(restoreOrchestration, /restart_previous_services_fail_closed/);
+  assert.match(restore, /Validated database retained, but service startup failed/);
+  assert.ok(restore.indexOf("RESTORE_VALIDATED=1") < restore.indexOf("restart_previous_services\nSERVICES_STOPPED=0"));
+  assert.match(restoreOrchestration, /docker start "\$\{RUNNING_CONTAINER_IDS\[@\]\}"/);
+  assert.doesNotMatch(restoreOrchestration, /docker compose up -d/);
+});
+
+test("synthetic restore orchestration checks writer shutdown and exact restart", { skip: process.platform === "win32" }, () => {
+  const result = spawnSync("bash", ["scripts/test-restore-orchestration.sh"], { encoding: "utf8", timeout: 10_000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
 test("deployments retry transport failures and switch blue/green traffic only after readiness", async () => {

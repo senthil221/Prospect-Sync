@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Nightly backup: globals + full database, verified, pruned, pushed offsite.
+# Nightly backup: globals + full database, verified locally and pushed offsite.
 #
 #   ./scripts/backup.sh
 #
@@ -12,6 +12,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 source "$(dirname "$0")/_env.sh"
+source "$(dirname "$0")/backup-status.sh"
 load_env .env
 
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/prospect}"
@@ -28,8 +29,28 @@ case "$BACKUP_DIR" in
     exit 1
     ;;
 esac
+exec 9>"${BACKUP_DIR}/.backup.lock"
+flock -n 9 || { echo "Another backup or retention job is already running." >&2; exit 1; }
 DEST="${BACKUP_DIR}/${STAMP}"
 mkdir -p "$DEST"
+
+BACKUP_PHASE="local_dump"
+snapshot_receipt=""
+remote_meta=""
+write_backup_attempt running "$BACKUP_PHASE" "$STAMP" "$(basename "$DEST")"
+record_backup_exit() {
+  local status=$?
+  trap - EXIT
+  [[ -z "$snapshot_receipt" ]] || rm -f -- "$snapshot_receipt"
+  [[ -z "$remote_meta" ]] || rm -f -- "$remote_meta"
+  if (( status == 0 )); then
+    write_backup_attempt complete complete "$STAMP" "$(basename "$DEST")"
+  else
+    write_backup_attempt failed "$BACKUP_PHASE" "$STAMP" "$(basename "$DEST")" || true
+  fi
+  exit "$status"
+}
+trap record_backup_exit EXIT
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 
@@ -73,12 +94,16 @@ cat > "${DEST}/meta.json" <<EOF
 EOF
 
 log "Local backup complete: ${DEST} ($(du -sh "$DEST" | cut -f1), ${objects} objects)"
+backup_bytes="$(du -sb "$DEST" | cut -f1)"
+write_backup_stage local complete "$STAMP" "$(basename "$DEST")" "$objects" "$backup_bytes"
 
 # ── Offsite ────────────────────────────────────────────────────────────────
 # Backups that live only on the machine they protect are not backups. Point
 # RESTIC_REPOSITORY at Cloudflare R2 or Backblaze B2.
 if [[ -n "${RESTIC_REPOSITORY:-}" ]]; then
-  log "Pushing to ${RESTIC_REPOSITORY}"
+  BACKUP_PHASE="offsite_upload"
+  write_backup_attempt running "$BACKUP_PHASE" "$STAMP" "$(basename "$DEST")"
+  log "Pushing backup to the configured offsite repository"
 
   # PACE THE REMOTE, BECAUSE GOOGLE DRIVE IS THE BINDING CONSTRAINT. 140 quota
   # rejections across five nights in the last fortnight, all of them
@@ -125,32 +150,37 @@ if [[ -n "${RESTIC_REPOSITORY:-}" ]]; then
 
   restic backup "$DEST" --tag prospect-db --host prospect-vps
 
-  # A STALE LOCK MUST NOT MAKE A GOOD BACKUP LOOK LIKE A FAILED ONE. A run
-  # killed part-way through leaves a lock nothing clears, and every night after
-  # it the upload succeeded and then forget died on the lock - so the service
-  # exited 1 and the backup read as failed. Measured on 2026-09-16: five
-  # snapshots were sitting safely offsite while the job had reported failure
-  # every night since 8 September. `unlock` removes only locks whose process is
-  # gone, so it cannot interrupt a run that is genuinely in progress.
-  restic unlock
-
-  # --group-by IS LOAD-BEARING. restic groups snapshots by host+paths by
-  # default, and every backup here has a unique path
-  # (/var/backups/prospect/<TIMESTAMP>). So each snapshot landed in a group of
-  # its own, the policy kept "1 of 1" in each, and NOTHING was ever removed -
-  # retention was a no-op dressed up as a policy, and the repository grew by
-  # about a gigabyte a night forever. Grouping by tag puts every prospect-db
-  # snapshot in one group, which is what the daily/weekly/monthly counts were
-  # always meant to apply to. Verified with --dry-run against the live
-  # repository before this change: default grouping printed five groups of one,
-  # this grouping prints one group of five.
-  restic forget --tag prospect-db --group-by host,tags \
-    --keep-daily 7 --keep-weekly 5 --keep-monthly 12 --prune
-  log "Offsite copy complete"
+  # Query this exact path without grouping so a successful command means the
+  # snapshot is listable. Retention is a separate weekly job under the same
+  # lock and cannot erase this upload result.
+  BACKUP_PHASE="offsite_verify"
+  write_backup_attempt running "$BACKUP_PHASE" "$STAMP" "$(basename "$DEST")"
+  snapshot_receipt="$(mktemp)"
+  command -v jq >/dev/null || { echo "jq is required to verify an offsite snapshot." >&2; exit 1; }
+  if ! restic snapshots --tag prospect-db --host prospect-vps --path "$DEST" --latest 1 --json >"$snapshot_receipt" \
+    || ! snapshot_id="$(select_offsite_snapshot_id "$snapshot_receipt" "$DEST")"; then
+    rm -f -- "$snapshot_receipt"
+    echo "Offsite upload returned, but its snapshot could not be verified." >&2
+    exit 1
+  fi
+  rm -f -- "$snapshot_receipt"
+  snapshot_receipt=""
+  remote_meta="$(mktemp)"
+  if ! restic dump "$snapshot_id" "${DEST}/meta.json" >"$remote_meta" || ! cmp -s "$remote_meta" "${DEST}/meta.json"; then
+    rm -f -- "$remote_meta"
+    echo "Offsite snapshot exists, but its metadata could not be read back." >&2
+    exit 1
+  fi
+  rm -f -- "$remote_meta"
+  remote_meta=""
+  write_backup_stage offsite verified "$STAMP" "$(basename "$DEST")" "$objects" "$backup_bytes" "$snapshot_id"
+  log "Offsite copy uploaded and verified"
 else
   log "WARNING: RESTIC_REPOSITORY is unset - this backup exists only on this VPS."
 fi
 
+BACKUP_PHASE="local_prune"
+write_backup_attempt running "$BACKUP_PHASE" "$STAMP" "$(basename "$DEST")"
 log "Pruning local backups older than ${RETENTION} days"
 find "$BACKUP_DIR" -maxdepth 1 -mindepth 1 -type d \
   -name '20[0-9][0-9][01][0-9][0-3][0-9]T[0-2][0-9][0-5][0-9][0-5][0-9]Z' \

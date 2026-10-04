@@ -219,6 +219,9 @@ jobs:
       - name: Unit tests
         run: npm run test:unit
 
+      - name: Backup receipt behavior
+        run: bash scripts/test-backup-snapshot-json.sh
+
   deterministic-browser-contract:
     name: Deterministic responsive browser contract
     runs-on: ubuntu-latest

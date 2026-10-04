@@ -128,7 +128,38 @@ else
 fi
 
 if [[ -n "${RESTIC_REPOSITORY:-}" ]]; then
-  row "off-server" "${OK}${RESTIC_REPOSITORY}${R}"
+  offsite_status="${BACKUP_DIR:-/var/backups/prospect}/.status/offsite.json"
+  if [[ -f "$offsite_status" ]]; then
+    offsite_age_h=$(( ( $(date +%s) - $(stat -c %Y "$offsite_status") ) / 3600 ))
+    offsite_state="$(sed -nE 's/.*"state":"([a-z_]+)".*/\1/p' "$offsite_status")"
+    if [[ "$offsite_state" == "verified" && "$offsite_age_h" -le 30 ]]; then
+      row "off-server" "${OK}verified ${offsite_age_h}h ago${R}"
+    else
+      row "off-server" "${WARN}${offsite_state:-unknown}, ${offsite_age_h}h ago${R}"
+      warn "latest offsite backup is not freshly verified"
+    fi
+  else
+    row "off-server" "${WARN}configured, no verification receipt${R}"
+    warn "offsite backup verification has no status receipt"
+  fi
+  backup_attempt="${BACKUP_DIR:-/var/backups/prospect}/.status/attempt.json"
+  if [[ -f "$backup_attempt" ]]; then
+    attempt_state="$(sed -nE 's/.*"state":"([a-z_]+)".*/\1/p' "$backup_attempt")"
+    attempt_phase="$(sed -nE 's/.*"phase":"([a-z_]+)".*/\1/p' "$backup_attempt")"
+    if [[ "$attempt_state" == "failed" ]]; then
+      row "latest attempt" "${WARN}failed during ${attempt_phase:-unknown}${R}"
+      warn "latest backup attempt failed during ${attempt_phase:-an unknown phase}; the verified receipt above is the last success"
+    fi
+  fi
+  retention_attempt="${BACKUP_DIR:-/var/backups/prospect}/.status/retention-attempt.json"
+  if [[ -f "$retention_attempt" ]]; then
+    retention_state="$(sed -nE 's/.*"state":"([a-z_]+)".*/\1/p' "$retention_attempt")"
+    retention_phase="$(sed -nE 's/.*"phase":"([a-z_]+)".*/\1/p' "$retention_attempt")"
+    if [[ "$retention_state" == "failed" ]]; then
+      row "retention" "${WARN}failed during ${retention_phase:-unknown}${R}"
+      warn "latest offsite retention attempt failed"
+    fi
+  fi
 else
   row "off-server" "${BAD}not configured${R}"
   warn "backups exist only on this server - a hardware failure loses the database and its backups together"
