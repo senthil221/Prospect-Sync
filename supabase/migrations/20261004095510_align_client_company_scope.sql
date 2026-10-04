@@ -118,9 +118,10 @@ begin
   -- Per-row matcher used by selection fallbacks.
   select pg_get_functiondef('public.company_matches_filters_v1(public.companies,text,jsonb)'::regprocedure) into v_definition;
   if v_definition not like '%__client_company_scope%' then
-    v_anchor := $old$    where not case
-      when filter_item->>'field' = '__company_tags' then ($old$;
-    if strpos(v_definition, v_anchor) = 0 then raise exception 'company_matches_filters_v1 case anchor moved'; end if;
+    v_anchor := '    where not case';
+    if (length(v_definition) - length(replace(v_definition, v_anchor, ''))) / length(v_anchor) <> 1 then
+      raise exception 'company_matches_filters_v1 case anchor moved';
+    end if;
     v_definition := replace(v_definition, v_anchor,
       $new$    where not case
       when filter_item->>'field' = '__client_company_scope' then (
@@ -128,8 +129,7 @@ begin
         and exists (select 1 from public.client_companies origin
           where origin.company_id = (p_row).id
             and origin.client_id = prospect_results.client_company_scope_value_v1(p_filters))
-      )
-      when filter_item->>'field' = '__company_tags' then ($new$);
+      )$new$);
 
     v_anchor := $old$      when filter_item->>'field' = '__company_coverage' then (
         coalesce(jsonb_array_length(filter_item->'values'), 0) = 0

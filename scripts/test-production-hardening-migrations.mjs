@@ -20,6 +20,7 @@ const migrationNames = (await readdir(migrationDir))
 const expected = "20261004004258_inline_client_summary_ctes.sql";
 if (!migrationNames.includes(expected)) throw new Error(`Expected ${expected} in the forward validation chain.`);
 const fixture = await readFile(new URL("../supabase/tests/client_summary_inline_parity.sql", import.meta.url), "utf8");
+const clientCompanyFixture = await readFile(new URL("../supabase/tests/client_company_scope_parity.sql", import.meta.url), "utf8");
 
 const psqlEnv = {
   PATH: process.env.PATH,
@@ -124,5 +125,6 @@ for (const name of migrationNames) {
   psql(name, `begin; set local lock_timeout='5s'; set local statement_timeout='5min';\n${sql}\ncommit;`);
 }
 
+psql("client company listing, stream, pivot and selection parity", `begin; set local statement_timeout='2min';\n${clientCompanyFixture}\nrollback;`);
 psql("client-summary SEG, incomplete and transition parity", `begin; set local statement_timeout='2min';\n${fixture}\nrollback;`);
-process.stdout.write(`Applied ${migrationNames.length} additive migrations and passed client-summary parity.\n`);
+process.stdout.write(`Applied ${migrationNames.length} additive migrations and passed client company and summary parity.\n`);
