@@ -6,7 +6,7 @@ do $$ begin
   if current_database() <> 'cursor_migration_test' then
     raise exception 'Refusing client-company parity fixture outside its disposable database.';
   end if;
-end $$;
+end; $$;
 
 insert into public.clients(id, name, normalized_name) values
   ('scope-parity-a', 'Scope Parity A', 'scope parity a'),

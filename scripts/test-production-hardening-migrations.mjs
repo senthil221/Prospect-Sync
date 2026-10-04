@@ -42,9 +42,12 @@ function psql(label, sql, timeout = 330_000) {
   });
   if (result.error || result.status !== 0) {
     const output = `${result.stderr ?? ""}\n${result.stdout ?? ""}`;
-    const firstError = output.split(/\r?\n/u).find(line => /\bERROR:/u.test(line))
-      ?? result.error?.message ?? `psql exited ${result.status ?? "unknown"}`;
-    process.stderr.write(`::error title=Production hardening migration::${safe(label)}: ${safe(firstError)}\n`);
+    const lines = output.split(/\r?\n/u);
+    const errorIndex = lines.findIndex(line => /\bERROR:/u.test(line));
+    const diagnostic = errorIndex >= 0
+      ? lines.slice(errorIndex, errorIndex + 12).filter(Boolean).join(" | ")
+      : result.error?.message ?? `psql exited ${result.status ?? "unknown"}`;
+    process.stderr.write(`::error title=Production hardening migration::${safe(label)}: ${safe(diagnostic)}\n`);
     process.stdout.write(result.stdout ?? "");
     process.stderr.write(result.stderr ?? "");
     throw result.error ?? new Error(`${label} failed.`);

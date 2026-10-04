@@ -12,7 +12,7 @@
 -- Master questions contain no internal predicate and keep their old global
 -- coverage semantics.
 
-set local lock_timeout = '10s';
+set local lock_timeout = '5s';
 
 create or replace function prospect_results.client_company_scope_value_v1(p_filters jsonb)
 returns text
