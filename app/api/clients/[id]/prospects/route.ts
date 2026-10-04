@@ -5,7 +5,7 @@ import { beginOperation, freezeFromResultSet, freezeSelection, parseRequestId, r
 import { filterErrorResponse } from "../../../../../lib/prospect-filters.ts";
 import { ownerIdentity } from "../../../../../lib/result-sets.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
-import { withClientWorkspaceCompleteness } from "../../../../../lib/client-workspace-completeness.ts";
+import { rejectClientCompanyScope, withClientWorkspaceCompleteness } from "../../../../../lib/client-workspace-completeness.ts";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883", "42P01"]);
 
@@ -47,6 +47,8 @@ async function handlePOST(request: Request, context: { params: Promise<{ id: str
   try { selection = parseBulkSelection(payload); }
   catch (error) { return filterErrorResponse(error, "Invalid filter."); }
   const selectionScope = action === "push" ? selection.sourceClientId : id;
+  try { rejectClientCompanyScope(selection.filters); }
+  catch (error) { return filterErrorResponse(error, "Invalid client company scope."); }
   selection = {
     ...selection,
     filters: withClientWorkspaceCompleteness(selection.filters, selectionScope),

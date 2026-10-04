@@ -139,7 +139,11 @@ test("client result sets normalize the same completeness partition before hashin
   const requested = { entityType: "prospect", clientScope: "client-a", search: "", filters: ordinary, companyScope };
   const normalized = normalizeResultSetQuestion(requested);
   assert.notEqual(normalized, requested);
-  assert.equal(normalized.companyScope, companyScope, "the parent scope must keep listing semantics");
+  assert.deepEqual(normalized.companyScope.filters, [
+    { id: "client-profile:complete", field: "__incomplete_company_profile", operator: "equals", values: ["false"] },
+    { id: "client-seg:policy", field: "__client_seg_policy", operator: "equals", values: ["client-a"] },
+    { id: "client-company:scope", field: "__client_company_scope", operator: "equals", values: ["client-a"] },
+  ], "the parent scope must use the same client workspace semantics as its listing");
   assert.deepEqual(normalized.filters, [
     ...ordinary,
     { id: "client-profile:complete", field: "__incomplete_company_profile", operator: "equals", values: ["false"] },
@@ -177,7 +181,7 @@ test("client result sets normalize the same completeness partition before hashin
     conflictingCompany.filters[0],
     { id: "client-profile:complete", field: "__incomplete_company_profile", operator: "equals", values: ["false"] },
     { id: "client-seg:policy", field: "__client_seg_policy", operator: "equals", values: ["client-a"] },
-    { field: "__company_client_ids", operator: "contains", values: ["client-a"] },
+    { id: "client-company:scope", field: "__client_company_scope", operator: "equals", values: ["client-a"] },
   ], "the server-owned Company membership must intersect a contradictory caller filter");
   assert.equal(normalizeResultSetQuestion(companyNormalized), companyNormalized,
     "Company membership normalization must be idempotent");
@@ -185,7 +189,7 @@ test("client result sets normalize the same completeness partition before hashin
     "Company membership must be part of result-set identity");
 
   const route = await read("../app/api/result-sets/route.ts");
-  const guard = route.indexOf("if (!search && !filters.length && !scopePayload)");
+  const guard = route.indexOf("if (!search && !filtersHaveCallerIntent(filters) && !scopePayload)");
   const normalization = route.indexOf("normalizeResultSetQuestion({");
   const authorization = route.indexOf("authorizeFilterSets(supabase, filters");
   const persistence = route.indexOf("p_filters: filters");

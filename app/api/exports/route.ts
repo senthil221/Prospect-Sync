@@ -6,7 +6,7 @@ import { availableCompanyExportFieldIds, companyExportKeys, companyExportRowKeys
 import { availableExportFieldIds, exportRowKeys } from "../../../lib/prospect-export";
 import { normalizeResultSetQuestion, ownerIdentity, resultSetContentHash } from "../../../lib/result-sets";
 import { createAdminClient } from "../../../lib/supabase/admin";
-import { hasUnsupportedPeoplePivot, parseCompanyScope, scopeRestricts } from "../../../lib/workspace-scopes";
+import { companyScopeHasIntent, hasUnsupportedPeoplePivot, normalizeCompanyScope, parseCompanyScope } from "../../../lib/workspace-scopes";
 
 export const runtime = "nodejs";
 
@@ -75,16 +75,22 @@ async function handlePOST(request: Request) {
   // had nowhere to put a pivot, so a background export under one would have
   // written every person matching the filters instead of only those companies -
   // which is why this used to answer 400 rather than build anything.
-  const scopePayload = scopeRestricts(companyScope) ? companyScope : null;
+  try { companyScope = normalizeCompanyScope(companyScope, clientScope); }
+  catch (error) { return filterErrorResponse(error, "Invalid client company scope."); }
+  let scopePayload = companyScopeHasIntent(companyScope) ? companyScope : null;
   if (entityType === "company" && scopePayload) {
     return Response.json({ error: "A company export cannot carry a company scope." }, { status: 400 });
   }
-  ({ filters } = normalizeResultSetQuestion({
-    entityType,
-    clientScope,
-    filters,
-    companyScope: scopePayload,
-  }));
+  try {
+    ({ filters, companyScope: scopePayload } = normalizeResultSetQuestion({
+      entityType,
+      clientScope,
+      filters,
+      companyScope: scopePayload,
+    }));
+  } catch (error) {
+    return filterErrorResponse(error, "Invalid client company scope.");
+  }
 
   const requestedFields = Array.isArray(payload.fields)
     ? [...new Set(payload.fields.map((field) => String(field).trim()).filter(Boolean))].slice(0, 600)

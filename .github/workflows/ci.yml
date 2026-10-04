@@ -235,10 +235,10 @@ jobs:
       - run: npm ci
       - name: Install isolated browser runtime
         run: npx playwright install --with-deps chromium
-      - name: Verify mobile focus and real theme behavior
+      - name: Verify navigation and Company DB filter behavior
         env:
           E2E_FIXTURE_SUITE: "1"
-        run: npm run test:e2e -- mobile-nav-fixture
+        run: npm run test:e2e -- mobile-nav-fixture company-workspace-fixture
 
   migration-guard:
     name: Migration guard

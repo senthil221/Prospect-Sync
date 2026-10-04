@@ -1,4 +1,5 @@
 import { parseFilters, type ProspectFilter } from "./prospect-filters.ts";
+import { clientCompanyScopeField, clientSegPolicyField, validateClientCompanyScopeFilters, withClientCompanyScope } from "./client-workspace-completeness.ts";
 
 export type CompanyScope = {
   search: string;
@@ -32,6 +33,14 @@ export function scopeRestricts(scope: { search: string; filters: unknown[] } | n
   return Boolean(scope && (scope.search.trim() !== "" || scope.filters.length > 0));
 }
 
+// Server-injected origin/SEG predicates never count as the user's request to
+// create a pivot. An explicit incomplete-profile predicate does: it is how the
+// Incomplete Info workspace deliberately asks for its partition.
+export function companyScopeHasIntent(scope: CompanyScope | null) {
+  return Boolean(scope && (scope.search.trim() !== "" || scope.filters.some((filter) =>
+    filter.field !== clientCompanyScopeField && filter.field !== clientSegPolicyField)));
+}
+
 function parseScopeLimit(value: unknown) {
   const parsed = Number(value ?? workspacePivotLimit);
   if (!Number.isFinite(parsed)) return workspacePivotLimit;
@@ -56,6 +65,24 @@ export function parsePeopleScope(raw: string | null, options: { compileBoolean?:
     filters: parseFilters(JSON.stringify(parsed.filters ?? []), options),
     limit: parseScopeLimit(parsed.limit),
   };
+}
+
+// Bind a Company -> People pivot to the client workspace that created it.
+// Server-owned predicates do not make an otherwise empty pivot meaningful: an
+// unfiltered Client Company DB already leads to the same client's People DB.
+export function normalizeCompanyScope(
+  scope: CompanyScope | null,
+  clientId: string | null | undefined,
+): CompanyScope | null {
+  if (!scope) return null;
+  validateClientCompanyScopeFilters(scope.filters);
+  const hasServerScope = scope.filters.some((filter) => filter.field === clientCompanyScopeField);
+  if (!clientId && hasServerScope) {
+    throw new Error("Client company scope is server-managed.");
+  }
+  if (!companyScopeHasIntent(scope)) return null;
+  const filters = withClientCompanyScope(scope.filters, clientId);
+  return filters === scope.filters ? scope : { ...scope, filters };
 }
 
 export function hasUnsupportedPeoplePivot(payload: Record<string, unknown>, options: { compileBoolean?: boolean } = {}) {

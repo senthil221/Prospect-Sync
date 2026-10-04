@@ -1,4 +1,4 @@
-import { withClientWorkspaceCompleteness } from "./client-workspace-completeness.ts";
+import { withClientCompanyScope } from "./client-workspace-completeness.ts";
 import { authorizeFilterSets } from "./filter-sets.ts";
 import { filterErrorResponse, parseFilters } from "./prospect-filters.ts";
 import { createAdminClient } from "./supabase/admin.ts";
@@ -29,7 +29,7 @@ export async function readIcpSelection(clientId: string, body: Record<string, un
   let parsedFilters;
   let peopleScope;
   try {
-    parsedFilters = withClientWorkspaceCompleteness(parseFilters(JSON.stringify(body.filters ?? [])), clientId);
+    parsedFilters = withClientCompanyScope(parseFilters(JSON.stringify(body.filters ?? [])), clientId);
     peopleScope = body.peopleScope ? parsePeopleScope(JSON.stringify(body.peopleScope)) : null;
   } catch (error) {
     return { error: filterErrorResponse(error, "Invalid company selection.") };

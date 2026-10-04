@@ -36,19 +36,15 @@ test("the ICP validation export writes exactly the five review columns", () => {
   ]);
 });
 
-// A client-scoped company export carries its client as a filter rather than as
-// the clientId parameter, so that the streamed export and the background one
-// are scoped by one filter list instead of two mechanisms kept in step. The
-// route refuses the parameter form outright, which is what makes that the only
-// path - so both halves are pinned here.
-test("a client-scoped company export is scoped by filter, not by clientId", async () => {
+// Both direct and background company exports carry the actual origin client.
+// The server, not the browser, binds that identity to the internal company
+// predicate before authorization and execution.
+test("a client-scoped company export is bound by the server in both paths", async () => {
   const runner = await read("../lib/export-runner.ts");
-  assert.match(runner, /function withClientFilter/);
-  assert.match(runner, /field: "__company_client_ids", operator: "contains", values: \[clientId\]/);
-  // Folded in once, at the top, so both the background branch and the direct
-  // POST below it send the same scoped list.
-  assert.match(runner, /const filters = withClientFilter\(options\.filters, options\.clientId\);/);
+  assert.match(runner, /clientScope: options\.clientId \?\? ""/);
+  assert.match(runner, /clientId: options\.clientId \?\? ""/);
+  assert.doesNotMatch(runner, /function withClientFilter/);
 
   const route = await read("../app/api/companies/route.ts");
-  assert.match(route, /Scope a company export with a client filter, not clientId/);
+  assert.match(route, /filters = withClientCompanyScope\(filters, clientId\)/);
 });

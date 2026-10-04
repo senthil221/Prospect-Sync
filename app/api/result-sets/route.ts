@@ -3,8 +3,10 @@ import { backgroundAdmissionResponse } from '../../../lib/operations-health';
 import { authorizeFilterSets } from "../../../lib/filter-sets";
 import { filterErrorResponse, parseFilters } from "../../../lib/prospect-filters";
 import { normalizeResultSetQuestion, ownerIdentity, resultSetContentHash } from "../../../lib/result-sets";
-import { hasUnsupportedPeoplePivot, parseCompanyScope, scopeRestricts } from "../../../lib/workspace-scopes";
+import { companyScopeHasIntent, hasUnsupportedPeoplePivot, parseCompanyScope, scopeRestricts } from "../../../lib/workspace-scopes";
 import { createAdminClient } from "../../../lib/supabase/admin";
+import { filtersHaveCallerIntent } from "../../../lib/client-workspace-completeness";
+import { normalizeCompanyScope } from "../../../lib/workspace-scopes";
 
 export const runtime = "nodejs";
 
@@ -62,13 +64,15 @@ async function handlePOST(request: Request) {
   if (entityType === "company" && scopeRestricts(companyScope)) {
     return Response.json({ error: "A company set cannot carry a company scope." }, { status: 400 });
   }
-  const scopePayload = scopeRestricts(companyScope) ? companyScope : null;
+  try { companyScope = normalizeCompanyScope(companyScope, clientScope); }
+  catch (error) { return filterErrorResponse(error, "Invalid client company scope."); }
+  let scopePayload = companyScopeHasIntent(companyScope) ? companyScope : null;
 
   // Without a search term and without caller-supplied filters this would freeze the entire
   // database. That is a real thing to want, but not by accident. A pivot is a
   // narrowing in its own right, so a scoped request has already said which
   // rows it means.
-  if (!search && !filters.length && !scopePayload) {
+  if (!search && !filtersHaveCallerIntent(filters) && !scopePayload) {
     return Response.json({ error: "Apply a filter or a search term before building a result set." }, { status: 400 });
   }
 
@@ -76,12 +80,16 @@ async function handlePOST(request: Request) {
   // predicate must not turn an otherwise unfiltered click into permission to
   // freeze a whole client database. From this point forward the normalized
   // question is authoritative for authorization, hashing and persistence.
-  ({ filters } = normalizeResultSetQuestion({
-    entityType,
-    clientScope,
-    filters,
-    companyScope: scopePayload,
-  }));
+  try {
+    ({ filters, companyScope: scopePayload } = normalizeResultSetQuestion({
+      entityType,
+      clientScope,
+      filters,
+      companyScope: scopePayload,
+    }));
+  } catch (error) {
+    return filterErrorResponse(error, "Invalid client company scope.");
+  }
 
   const supabase = createAdminClient();
   // A set id is not authorization, and neither is a filter-set id inside it.

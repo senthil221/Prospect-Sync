@@ -1,7 +1,7 @@
 # Database production-readiness programme
 
-Status: active engineering programme, prepared 2026-10-01 from repository
-`cfce643`. This is a dependency map and release backlog. It is not a claim that
+Status: active engineering programme, updated 2026-10-04. This is a dependency
+map and release backlog. It is not a claim that
 the whole application has been audited, load tested, or certified for a future
 record count.
 
@@ -32,14 +32,20 @@ The following is a read-only production sample, not a benchmark:
   p95 latency or explain a particular timeout.
 - `run_queue_unit_v1` has about 2.145 million calls at 0.62 ms average, but this
   includes empty polling. It is not background-job throughput evidence.
-- The production `prospect-backup.service` last exited with status 1 at
-  2026-09-30 09:36:52 IST and is currently failed. Its sanitized journal for
-  the surrounding 30 minutes contains 12 remote `Quota exceeded` / requests per
-  minute / HTTP 403 events and no `storageQuotaExceeded` or `invalid_grant`
-  event. That supports remote API request-rate quota as the present failure,
-  rather than storage capacity or OAuth, but does not prove whether an earlier
-  offsite copy exists. A successful offsite verification plus an isolated
-  restore proof is a critical production-readiness gate.
+- A bounded, read-only 2026-10-04 aggregate for Krishify found 939 complete,
+  SEG-eligible client companies: 841 with a person in that client and 98
+  without. Of those 98 client-without companies, 50 had people globally. The
+  old global-coverage compiler therefore dropped 50 legitimate results from
+  that client-relative `Without prospects` view. The single warm aggregate
+  completed in 93.489 ms; that is defect evidence, not a latency benchmark or
+  load-test result.
+- On 2026-10-04 a local database dump completed at about 1.07 GB, but its
+  offsite upload failed with an HTTP 500/quota response. A separate read-only
+  snapshot probe throttled to one request per second still returned HTTP 403.
+  There is no verified offsite receipt, so no remote-copy or restore claim can
+  be made. A successful offsite verification plus an isolated restore proof is
+  still a critical production-readiness gate; this query package does not alter
+  backup configuration or prune any copy.
 
 No customer rows, filter values, SQL text, credentials, write load, stress run,
 worker restart or restore was used for this snapshot.
@@ -77,28 +83,26 @@ budget.
   a background single-file export under a People pivot instead of dropping the
   pivot. A general People → Companies frozen-membership path remains backlog.
 - The durable Company builder compiles filters but does not independently apply
-  its stored `client_scope`. Client-scoped result-set and background-export API
-  questions are therefore normalized with the established
-  `__company_client_ids contains <client>` predicate before authorization,
-  hashing and persistence. A contradictory caller filter is retained and
-  intersected; it cannot replace the server-owned scope. A read-only production
-  check found zero currently stored client-scoped Company sets lacking this
-  predicate. That does not establish historical immunity or full filter parity.
-- `__company_client_ids` uses `client_companies`, matching client Company
-  membership. Per-client `__company_coverage` semantics have not yet been
-  proved equal between the interactive client workspace and the general
-  compiler; that catalogue case remains P0.
+  its stored `client_scope`. Client-origin Company questions are therefore
+  rebound by the server to the internal `__client_company_scope` predicate
+  before authorization, hashing, persistence or execution. It checks
+  `client_companies` membership and makes `__company_coverage` client-relative.
+  A caller's ordinary `__company_client_ids` filter remains visible and is
+  intersected; it cannot replace the origin. Master questions carry no internal
+  origin and retain global coverage semantics.
 - The people-per-company limit is represented by
   `__max_people_per_company`; the current durable People builder has an explicit
   ranked-candidate path in
   `20260924205130_client_workspace_feature_pack.sql`. It needs equivalence
-  coverage before broader planner routing.
-- The interactive People route does not add the client completeness predicate
-  inside a nested `companyScope`; the originating client Company screen also
-  submits that hidden predicate only to its own listing request. This package
-  keeps background behavior equal to the current People listing and records
-  parent-scope completeness as a parity question. It must be resolved across
-  listing, count, export and selection together.
+  coverage before broader planner routing. The new disposable parity case
+  covers it together with a normalized Company → People scope; broader filter
+  catalogue and scale evidence remain required.
+- Client-origin nested `companyScope` is now normalized once with membership,
+  completeness, SEG policy and client-relative coverage before interactive
+  People listing, streamed export or frozen selection consumes it. Empty
+  server-only scopes do not manufacture caller intent, malformed internal
+  values fail closed, and old Master payloads containing the pre-existing SEG
+  predicate remain backward compatible.
 - An empty `/api/result-sets` request remains forbidden even for a client. A
   server-injected completeness filter cannot turn an accidental empty request
   into a full client-database build.
@@ -113,36 +117,34 @@ gate; it is not implied by a passing build.
 | --- | --- | --- | --- | --- | --- |
 | Global People | Present: People route and v13/cursor RPCs | Present: filter, cursor and failure-mode tests | Present for selected compiler/cursor contracts; full catalogue required | Required: fresh multi-filter, paging, count, pivot | Historical aggregate only; no current p95 |
 | Global Companies | Present: Companies route and v4/prepared paths | Present: company filters, pivot and export tests | Present for selected filter/pivot fixtures; full catalogue required | Required: filters, paging, People pivot | No workflow run in this package |
-| Client People / Companies | Present: client scope plus membership RPCs | Present: client operations and Incomplete Info tests | Present: Incomplete Info segregation fixture | Required: normal/incomplete partition and enrichment transition | No workflow run in this package |
-| Company → People | Present: `companyScope` carried by listing/export/result set | Present: scope/auth/result-set tests | Partial: selected prepared-search fixtures | Required: result parity through page, exact count, export, all matching | Prior single journeys exist in the v8 ledger; not repeated here |
+| Client People / Companies | Present: client scope plus membership RPCs | Present: client operations, legacy-filter UI and Incomplete Info tests | Package: listing/stream/frozen/selection parity plus enrichment and SEG transitions | Required: authenticated normal/incomplete journey | Read-only coverage defect quantified; post-release parity check pending |
+| Company → People | Present: normalized `companyScope` carried by listing/export/result set | Present: scope/auth/result-set/identity tests | Package: actual People listing, export and frozen builder with max-people cap | Required: authenticated page/export/all-matching parity | Read-only source counts only; no write journey |
 | People → Companies | Present for interactive listing; durable membership unsupported | Present: pivot honesty tests | Gap: complete frozen-set equivalence | Required: listing plus bounded export behavior | Not certified |
-| Exact count / all matching | Package: client completeness and Company membership normalized before authorize/hash/store | Package: behavioral normalization, contradictory Company scope, idempotency, identity and guard-order checks | Package fixture compares complete/incomplete People and Company interactive IDs/counts with built sets; exact-head CI run pending | Required: normal and Incomplete Info all-matching actions | Read-only check found no stored affected Company sets; no writes performed |
-| Streaming/background export | Present: separate bounded paths | Present: streaming export tests | Partial: result-set/export worker fixtures | Required: downloaded IDs/fields equal selected query | Not certified under concurrent import |
+| Exact count / all matching | Package: client completeness and Company origin normalized before authorize/hash/store | Package: behavioral normalization, contradictory scope, idempotency, identity and guard-order checks | Package fixture compares interactive, explicit/all-matching and frozen IDs/counts; exact-head CI pending | Required: normal and Incomplete Info all-matching actions | No writes performed |
+| Streaming/background export | Present: direct and background paths carry the real origin client | Present: streaming/export wiring tests | Package: client Company stream and nested People stream equal their listings in disposable SQL | Required: authenticated downloaded IDs/fields | Not certified under concurrent import |
 | Imports / push / membership removal | Present: staged routes and bounded workers | Present: import, client operation and retry tests | Present for selected import fixtures; concurrent retry catalogue required | Required: resume, duplicate and removal journeys | No write/recovery drill here |
 | Blocklist | Present: scoped bulk/share/reply paths | Present: blocklist and Smartlead tests | Present for selected migrations; account/retry recovery required | Required: add/update/delete/export/share/reply sync | Addon, not a core-query certification |
 | Email verification | Present: frozen selection and dedicated worker | Present: provider, worker and bounded-run tests | Present for selected run/reconcile fixtures | Required: create/pause/resume/reuse/result labels | Addon, not a core-query certification |
 | ICP | Present: selected company queues and worker | Present: ICP route/model/clear tests | Present for selected queue and selection fixtures | Required: selected run, review and retry | Addon, not a core-query certification |
-| Health / backup / restore | Present: health route and deployment scripts | Present: failure visibility and backup script tests | Restore SQL exists | Required: operator-facing degraded states | **Red:** latest run hit remote request-rate quota; remediation, offsite-copy verification and isolated restore remain open |
+| Health / backup / restore | Present: health route and deployment scripts | Present: failure visibility and backup script tests | Restore SQL exists | Required: operator-facing degraded states | **Red:** the 2026-10-04 local dump succeeded, but offsite upload returned HTTP 500/quota and the read-only snapshot probe returned HTTP 403; offsite-copy verification and an isolated restore remain open |
 
 ## Ranked implementation backlog and release gates
 
 ### P0 — close query parity defects before expansion
 
-1. Apply server-owned client completeness to result-set filters before filter-set
-   authorization, content hashing and persistence; retain the caller-intent
-   guard. This package implements that item.
-2. Run the extended disposable SQL equivalence fixture in exact-head CI. It
-   compares client interactive membership with the actual result-set builder
-   for complete and incomplete People/Company slices, includes out-of-client
-   Company controls, and verifies unchanged Master People membership.
-3. Decide parent-pivot completeness once, then implement the same rule in
-   People listing, count, export and result-set creation. Do not patch only one
-   consumer.
-4. Catalogue every supported filter/operator/scope combination and make each
+1. Run the extended disposable SQL equivalence fixture in exact-head CI. It
+   compares client interactive, streaming, pivot, explicit/all-matching and
+   frozen IDs; includes global-but-not-client coverage, shared/out-of-client,
+   completeness, SEG, enrichment, max-people and unchanged Master controls.
+2. Complete the authenticated Company UI and Company → People smoke after
+   deployment. The deterministic browser fixture covers selector cleanup,
+   negative/multi-value legacy filters and selection reset without customer
+   writes.
+3. Catalogue every supported filter/operator/scope combination and make each
    consumer either preserve it or return a stable unsupported error.
-5. Prove or correct per-client company-coverage semantics between
-   `client_company_workspace_v2` and the general Company compiler before
-   certifying client Company result sets beyond the covered fixture catalogue.
+4. Add representative staging plans and mixed-load evidence before certifying
+   latency or a future record tier; the production aggregate above is not that
+   evidence.
 
 Gate: identical ordered ID digest (or identical membership digest when order is
 not part of the contract), count state and authorization outcome across listing,

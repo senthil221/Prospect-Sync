@@ -4,7 +4,8 @@ import { authorizeFilterSets } from '../../../lib/filter-sets';
 import { filterErrorResponse, parseFilters } from '../../../lib/prospect-filters';
 import { createAdminClient } from '../../../lib/supabase/admin';
 import { integrationWriteAllowed } from '../../../lib/integrations/credentials';
-import { parseCompanyScope } from '../../../lib/workspace-scopes';
+import { normalizeCompanyScope, parseCompanyScope } from '../../../lib/workspace-scopes';
+import { rejectClientCompanyScope } from '../../../lib/client-workspace-completeness';
 import { scopeRestricts } from '../../../lib/workspace-scopes';
 import { prepareCompanyScope } from '../../../lib/prepare-company-scope';
 import { ownerIdentity } from '../../../lib/result-sets';
@@ -40,6 +41,8 @@ async function handlePOST(request: Request) {
     filters = scope === 'filtered' ? parseFilters(JSON.stringify(raw.filters ?? [])) : [];
     companyScope = scope === 'filtered' && raw.companyScope
       ? parseCompanyScope(JSON.stringify(raw.companyScope)) : null;
+    rejectClientCompanyScope(filters);
+    companyScope = normalizeCompanyScope(companyScope, null);
   } catch (error) { return filterErrorResponse(error, 'Invalid verification filters.'); }
   const search = scope === 'filtered' ? String(raw.search ?? '').trim() : '';
   if (search.length > 300 || typeof raw.forceReverify !== 'boolean') return reply({ error: 'Invalid verification request.' }, 400);

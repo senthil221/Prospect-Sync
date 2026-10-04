@@ -334,7 +334,8 @@ test("a background export carries the pivot rather than refusing it", async () =
   // nowhere to put one and the file would have contained every person matching
   // the filters. 20260902000180 gave it somewhere, so the scope is passed into
   // both the set's identity and the set itself.
-  assert.match(route, /const scopePayload = scopeRestricts\(companyScope\) \? companyScope : null;/);
+  assert.match(route, /companyScope = normalizeCompanyScope\(companyScope, clientScope\)/);
+  assert.match(route, /let scopePayload = companyScopeHasIntent\(companyScope\) \? companyScope : null;/);
   assert.match(route, /p_company_scope: scopePayload \?\? \{\}/);
   assert.match(route, /companyScope: scopePayload/);
   assert.doesNotMatch(route, /pivotRefusal/);

@@ -4,13 +4,13 @@ import { databaseErrorResponse, isClientDisconnect, isStatementTimeout, statemen
 import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { filterErrorResponse, parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
 import { createAdminClient } from "../../../lib/supabase/admin";
-import { parseCompanyScope, type CompanyScope } from "../../../lib/workspace-scopes";
+import { normalizeCompanyScope, parseCompanyScope, type CompanyScope } from "../../../lib/workspace-scopes";
 import { needsCompanyPreparation } from "../../../lib/prepared-search";
 import { ownerIdentity } from "../../../lib/result-sets";
 import { prepareCompanyScope, preparationResponse } from "../../../lib/prepare-company-scope";
 import { prospectQueryFamily, recordQueryPhase, type QueryPhaseOutcome } from "../../../lib/observability";
 import { decodeProspectCursor, encodeProspectCursor, isProspectCursorEligible, prospectCursorQueryHash, type ProspectCursor } from "../../../lib/prospect-pagination";
-import { withClientWorkspaceCompleteness } from "../../../lib/client-workspace-completeness";
+import { rejectClientCompanyScope, withClientWorkspaceCompleteness } from "../../../lib/client-workspace-completeness";
 
 type WorkspaceQuery = {
   search: string;
@@ -118,7 +118,13 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   let filters: ProspectFilter[];
   try { filters = parseFilters(url.searchParams.get("filters")); }
   catch (error) { return filterErrorResponse(error, "Invalid Boolean filter."); }
-  filters = withClientWorkspaceCompleteness(filters, clientId);
+  try {
+    rejectClientCompanyScope(filters);
+    filters = withClientWorkspaceCompleteness(filters, clientId);
+    companyScope = normalizeCompanyScope(companyScope, clientId);
+  } catch (error) {
+    return filterErrorResponse(error, "Invalid client company scope.");
+  }
   const requestedCursorMode = url.searchParams.get("pagination") === "cursor";
   const rawCursor = (url.searchParams.get("cursor") ?? "").trim();
   const cursorEligible = isProspectCursorEligible({

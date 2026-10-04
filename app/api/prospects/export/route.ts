@@ -6,7 +6,8 @@ import { filterErrorResponse, parseFilters, type ProspectFilter } from "../../..
 import { availableExportFieldIds, buildExportColumns, csvHeaderLine, csvRowsBody, exportRowKeys, type ProspectRow } from "../../../../lib/prospect-export";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { recordRequest, routeOf } from "../../../../lib/observability";
-import { parseCompanyScope, type CompanyScope } from "../../../../lib/workspace-scopes";
+import { normalizeCompanyScope, parseCompanyScope, type CompanyScope } from "../../../../lib/workspace-scopes";
+import { rejectClientCompanyScope, withClientWorkspaceCompleteness } from "../../../../lib/client-workspace-completeness";
 
 export const runtime = "nodejs";
 // A direct export is several bounded queries with bytes going to the client in
@@ -76,6 +77,13 @@ async function runExport(request: Request) {
   let companyScope: CompanyScope | null;
   try { companyScope = parseCompanyScope(payload.companyScope ? JSON.stringify(payload.companyScope) : null); }
   catch (error) { return answer(filterErrorResponse(error, "Invalid company navigation scope.")); }
+  try {
+    rejectClientCompanyScope(filters);
+    filters = withClientWorkspaceCompleteness(filters, clientId);
+    companyScope = normalizeCompanyScope(companyScope, clientId);
+  } catch (error) {
+    return answer(filterErrorResponse(error, "Invalid client company scope."));
+  }
   const requestedFields = Array.isArray(payload.fields)
     ? [...new Set(payload.fields.map((field) => String(field).trim()).filter(Boolean))].slice(0, 600)
     : [];

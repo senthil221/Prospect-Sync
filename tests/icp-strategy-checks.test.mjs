@@ -188,8 +188,9 @@ test("the Company DB filters by ICP check result, and a check's FIT can be marke
   assert.match(migration, /ICP check filter proof passed and was rolled back/);
 
   const table = await read("../app/components/CompaniesWorkspace.tsx");
-  assert.match(table, /field: "__company_icp_check",/);
-  assert.match(table, /\["UNCHECKED", "Not checked"\]/);
+  assert.doesNotMatch(table, />Any ICP check</);
+  assert.match(table, /legacyIcpCheckFilters/);
+  assert.match(table, /Exclude saved ICP results/);
   const { filterChipValue } = await import("../lib/dashboard-helpers.ts");
   assert.equal(filterChipValue("__company_icp_check", "client-1|FIT"), "ICP check FIT");
   assert.equal(filterChipValue("__company_icp_check", "client-1|UNCHECKED"), "ICP not checked");

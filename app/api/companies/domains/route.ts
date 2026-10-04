@@ -5,6 +5,7 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
 import { parsePeopleScope } from "../../../../lib/workspace-scopes";
 import { readBoundedJson } from "../../../../lib/bounded-json";
 import { observed } from "../../../../lib/observability";
+import { withClientCompanyScope } from "../../../../lib/client-workspace-completeness";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883"]);
 
@@ -49,7 +50,7 @@ async function handlePOST(request: Request) {
   let filters;
   let peopleScope;
   try {
-    filters = parseFilters(JSON.stringify(payload.filters ?? []));
+    filters = withClientCompanyScope(parseFilters(JSON.stringify(payload.filters ?? [])), clientId);
     peopleScope = payload.peopleScope ? parsePeopleScope(JSON.stringify(payload.peopleScope)) : null;
   } catch (error) {
     return filterErrorResponse(error, "Invalid company selection.");

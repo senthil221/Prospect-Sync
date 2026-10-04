@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { withClientWorkspaceCompleteness } from "./client-workspace-completeness.ts";
+import { clientCompanyScopeField, withClientCompanyScope, withClientWorkspaceCompleteness } from "./client-workspace-completeness.ts";
 import type { ProspectFilter } from "./prospect-filters.ts";
+import { normalizeCompanyScope, type CompanyScope } from "./workspace-scopes.ts";
 
 // Durable result sets (migration 20260902000120, reachable since
 // 20260902000160). A result set is the answer to a question, frozen: the ids
@@ -52,34 +53,30 @@ export function resultSetContentHash(input: {
 // in the normal client workspace UI, so trusting only the submitted filters can
 // freeze a broader set than the listing that launched the action.
 //
-// Keep parent companyScope untouched here. The live People listing currently
-// carries that scope exactly as submitted, so changing it only for a background
-// result would create a different answer. Parent-scope parity is tracked as a
-// separate query-contract gap rather than silently changed in this helper.
+// A nested Company -> People scope is normalized here too. The interactive,
+// streamed and frozen paths therefore authorize and execute the same canonical
+// question, including the originating client's membership and coverage rules.
 export function normalizeResultSetQuestion<T extends {
   entityType: string;
   clientScope: string;
   filters: ProspectFilter[];
-  companyScope?: unknown;
+  companyScope?: CompanyScope | null;
 }>(question: T): T {
-  let filters = withClientWorkspaceCompleteness(question.filters, question.clientScope);
-  if (question.entityType === "company" && question.clientScope && !filters.some((filter) =>
-    filter.field === "__company_client_ids"
-      && filter.operator === "contains"
-      && filter.values.length === 1
-      && filter.values[0] === question.clientScope)) {
-    // The durable Company builder compiles filters but does not independently
-    // consume client_scope. Express the established membership contract in the
-    // same filter language as streaming company exports. A contradictory
-    // caller filter remains in place and is intersected with this server-owned
-    // predicate, so it can narrow to zero but can never widen to another client.
-    filters = [...filters, {
-      field: "__company_client_ids",
-      operator: "contains",
-      values: [question.clientScope],
-    }];
+  let filters: ProspectFilter[];
+  if (question.entityType === "company") {
+    filters = withClientCompanyScope(question.filters, question.clientScope);
+  } else {
+    if (question.filters.some((filter) => filter.field === clientCompanyScopeField)) {
+      throw new Error("Client company scope is only valid for company filters.");
+    }
+    filters = withClientWorkspaceCompleteness(question.filters, question.clientScope);
   }
-  return filters === question.filters ? question : { ...question, filters };
+  const companyScope = question.entityType === "prospect"
+    ? normalizeCompanyScope(question.companyScope ?? null, question.clientScope)
+    : null;
+  return filters === question.filters && companyScope === (question.companyScope ?? null)
+    ? question
+    : { ...question, filters, companyScope };
 }
 
 // Who owns a result set, and who acts on an operation, have to be the same

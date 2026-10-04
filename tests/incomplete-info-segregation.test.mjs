@@ -42,7 +42,7 @@ test("client UI locks both normal and incomplete partitions and hides the intern
   ]);
   assert.match(clients, /forceClientWorkspaceCompleteness\(initialFilters, profileFilter\)/);
   assert.match(clients, /incompleteCompanyFilters: ProspectFilter\[\] = \[incompleteClientProfileFilter\]/);
-  assert.match(companies, /filter\.field !== incompleteCompanyProfileField/);
+  assert.match(companies, /!internalClientFilterFields\.has\(filter\.field\)/);
   assert.match(prospects, /filter\.field !== "__incomplete_company_profile"/);
 });
 

@@ -269,7 +269,7 @@ test("the master DB filters by client id, not by joined client names", async () 
   assert.match(companyPanel, /<ClientMembershipFilter field="__company_client_ids"/);
   // Internal workspace predicates still reach queries and exports, but are not
   // rendered as user-editable filter chips in the shared Company panel.
-  assert.match(workspace, /const displayFilters = filters\.filter\(\(filter\) => filter\.field !== incompleteCompanyProfileField\)/);
+  assert.match(workspace, /const displayFilters = filters\.filter\(\(filter\) => !internalClientFilterFields\.has\(filter\.field\)\)/);
   assert.match(workspace, /<CompanyFilterPanel filters=\{displayFilters\} clients=\{clients\}/);
 });
 

@@ -4,7 +4,7 @@ import { MAX_BULK_COMPANY_MATCHES, parseCompanyBulkSelection } from "../../../..
 import { filterErrorResponse, parseFilters } from "../../../../../lib/prospect-filters.ts";
 import { createAdminClient } from "../../../../../lib/supabase/admin";
 import { parsePeopleScope } from "../../../../../lib/workspace-scopes.ts";
-import { withClientWorkspaceCompleteness } from "../../../../../lib/client-workspace-completeness.ts";
+import { withClientCompanyScope } from "../../../../../lib/client-workspace-completeness.ts";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883", "42P01"]);
 
@@ -80,7 +80,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ id: str
     let tagFilters;
     let tagPeopleScope;
     try {
-      tagFilters = withClientWorkspaceCompleteness(parseFilters(JSON.stringify(payload.filters ?? [])), clientId);
+      tagFilters = withClientCompanyScope(parseFilters(JSON.stringify(payload.filters ?? [])), clientId);
       tagPeopleScope = payload.peopleScope ? parsePeopleScope(JSON.stringify(payload.peopleScope)) : null;
     } catch (error) {
       return filterErrorResponse(error, "Invalid company selection.");
@@ -147,7 +147,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ id: str
     let removeFilters;
     let removePeopleScope;
     try {
-      removeFilters = withClientWorkspaceCompleteness(parseFilters(JSON.stringify(payload.filters ?? [])), clientId);
+      removeFilters = withClientCompanyScope(parseFilters(JSON.stringify(payload.filters ?? [])), clientId);
       removePeopleScope = payload.peopleScope ? parsePeopleScope(JSON.stringify(payload.peopleScope)) : null;
     } catch (error) {
       return filterErrorResponse(error, "Invalid company selection.");
@@ -214,7 +214,7 @@ async function handlePOST(request: Request, context: { params: Promise<{ id: str
   let filters;
   let peopleScope;
   try {
-    filters = withClientWorkspaceCompleteness(
+    filters = withClientCompanyScope(
       parseFilters(JSON.stringify(payload.filters ?? [])),
       action === "push" ? sourceClientId : clientId,
     );

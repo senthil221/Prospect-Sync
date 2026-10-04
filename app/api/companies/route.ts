@@ -10,7 +10,7 @@ import { parsePeopleScope, type PeopleScope } from "../../../lib/workspace-scope
 import { needsCompanyPreparation } from "../../../lib/prepared-search";
 import { prepareCompanyScope, preparationResponse } from "../../../lib/prepare-company-scope";
 import { ownerIdentity } from "../../../lib/result-sets";
-import { withClientWorkspaceCompleteness } from "../../../lib/client-workspace-completeness";
+import { withClientCompanyScope } from "../../../lib/client-workspace-completeness";
 
 // One keyset page. It was 1,000 when each page was a fresh OFFSET scan and
 // making them larger made the quadratic worse; a keyset page costs the same
@@ -277,7 +277,8 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
   let filters: ProspectFilter[];
   try { filters = parseFilters(url.searchParams.get("filters")); }
   catch (error) { return filterErrorResponse(error, "Invalid company filters."); }
-  filters = withClientWorkspaceCompleteness(filters, clientId);
+  try { filters = withClientCompanyScope(filters, clientId); }
+  catch (error) { return filterErrorResponse(error, "Invalid client company scope."); }
 
   let peopleScope: PeopleScope | null;
   try { peopleScope = parsePeopleScope(url.searchParams.get("peopleScope")); }
@@ -299,11 +300,9 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
   if (setDenial) return setDenial;
 
   if (exportCsv) {
-    // A client-scoped company export carries its client as an ordinary
-    // __company_client_ids filter (20260915140000) rather than as this
-    // parameter, so that one filter list scopes the streamed export and the
-    // background one identically. See runCompanyExport.
-    if (clientId) return Response.json({ error: "Scope a company export with a client filter, not clientId." }, { status: 400 });
+    // The route binds clientId to the internal company scope above. Both the
+    // streamed and frozen paths therefore use the same client-relative
+    // membership and coverage semantics.
     const { response } = await streamCompanyExport(search, websitesOnly, filters, peopleScope, parseExportFields(url.searchParams.get("fields")), signal);
     return response;
   }
