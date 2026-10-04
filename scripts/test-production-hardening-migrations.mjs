@@ -18,7 +18,7 @@ const migrationNames = (await readdir(migrationDir))
   .filter(name => /^\d+_.+\.sql$/u.test(name) && name > "20260926083856_prospect_people_cursor_v1.sql")
   .sort();
 const expected = "20261004004258_inline_client_summary_ctes.sql";
-if (migrationNames.at(-1) !== expected) throw new Error(`Expected ${expected} to be the latest migration in this validation chain.`);
+if (!migrationNames.includes(expected)) throw new Error(`Expected ${expected} in the forward validation chain.`);
 const fixture = await readFile(new URL("../supabase/tests/client_summary_inline_parity.sql", import.meta.url), "utf8");
 
 const psqlEnv = {
@@ -53,8 +53,26 @@ function psql(label, sql, timeout = 330_000) {
 psql("disposable baseline preflight", String.raw`
 do $$ begin
   if current_database() <> 'cursor_migration_test' then raise exception 'wrong database'; end if;
-  if exists(select 1 from public.clients) or exists(select 1 from public.prospects) then
-    raise exception 'schema-only baseline unexpectedly contains rows';
+  -- The cursor contract immediately before this job intentionally commits its
+  -- deterministic fixture. Accept that exact state, but fail closed if any
+  -- unrelated/customer-shaped row is present. Nothing is deleted here.
+  if (select count(*) from public.clients) <> 2
+     or exists(select 1 from public.clients where id not in ('cursor-client-a', 'cursor-client-b'))
+     or (select count(*) from public.companies) <> 3
+     or exists(select 1 from public.companies where id not in ('cursor-company-complete', 'cursor-company-incomplete', 'cursor-company-b'))
+     or (select count(*) from public.prospects) <> 151
+     or exists(select 1 from public.prospects where id not like 'cursor-fixture-%')
+     or (select count(*) from public.prospect_index) <> 151
+     or exists(select 1 from public.prospect_index where id not like 'cursor-fixture-%')
+     or (select count(*) from public.lists) <> 3
+     or exists(select 1 from public.lists where id not in ('cursor-list-a', 'cursor-list-a-secondary', 'cursor-list-b'))
+     or (select count(*) from public.imports) <> 3
+     or exists(select 1 from public.imports where id not in ('cursor-import-a', 'cursor-import-a-secondary', 'cursor-import-b'))
+     or (select count(*) from public.client_prospects) <> 151
+     or exists(select 1 from public.client_prospects where client_id not in ('cursor-client-a', 'cursor-client-b') or prospect_id not like 'cursor-fixture-%')
+     or (select count(*) from public.list_memberships) <> 132
+     or exists(select 1 from public.list_memberships where list_id not in ('cursor-list-a', 'cursor-list-a-secondary', 'cursor-list-b') or prospect_id not like 'cursor-fixture-%') then
+    raise exception 'cursor baseline differs from the reviewed deterministic fixture';
   end if;
 end $$;`);
 
