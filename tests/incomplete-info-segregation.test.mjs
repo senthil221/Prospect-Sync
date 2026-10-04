@@ -115,5 +115,7 @@ test("measured client-summary migration preserves grants and adds synthetic tran
   assert.match(runner, /offset 200000 limit 1/);
   assert.match(runner, /offset 100 limit 1/);
   assert.match(runner, /sql\.split\(anchor\)\.length !== 2/);
+  assert.match(runner, /from generate_series\(1, 1049\) n/);
+  assert.match(runner, /exactly 1,200 canonical and projected rows/);
   assert.match(workflow, /production-hardening-contract:/);
 });

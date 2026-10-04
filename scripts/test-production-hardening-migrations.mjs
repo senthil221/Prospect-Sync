@@ -76,6 +76,30 @@ do $$ begin
   end if;
 end $$;`);
 
+psql("bounded synthetic scale fixture", String.raw`
+insert into public.prospects(id, full_name, work_email, all_data, created_at, updated_at)
+select
+  'hardening-scale-' || lpad(n::text, 4, '0'),
+  'Hardening Scale ' || n,
+  'hardening-scale-' || n || '@example.test',
+  jsonb_build_object('fixture', 'production-hardening-ci', 'ordinal', n),
+  '2025-01-01 00:00:00+00'::timestamptz + make_interval(secs => n),
+  '2025-01-01 00:00:00+00'::timestamptz + make_interval(secs => n)
+from generate_series(1, 1049) n;
+
+select public.reindex_prospects(array_agg(id order by id))
+from public.prospects
+where id like 'hardening-scale-%';
+
+do $$ begin
+  if (select count(*) from public.prospects) <> 1200
+     or (select count(*) from public.prospect_index) <> 1200
+     or (select count(*) from public.prospects where id like 'hardening-scale-%') <> 1049
+     or (select count(*) from public.prospect_index where id like 'hardening-scale-%') <> 1049 then
+    raise exception 'bounded scale fixture did not produce exactly 1,200 canonical and projected rows';
+  end if;
+end $$;`);
+
 for (const name of migrationNames) {
   let sql = await readFile(new URL(name, migrationDir), "utf8");
   if (name === "20260926150000_indexes_are_reachable_and_background_work_waits.sql") {
