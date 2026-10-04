@@ -6,7 +6,7 @@ import { availableCompanyExportFieldIds, companyExportKeys, companyExportRowKeys
 import { availableExportFieldIds, exportRowKeys } from "../../../lib/prospect-export";
 import { normalizeResultSetQuestion, ownerIdentity, resultSetContentHash } from "../../../lib/result-sets";
 import { createAdminClient } from "../../../lib/supabase/admin";
-import { parseCompanyScope, scopeRestricts } from "../../../lib/workspace-scopes";
+import { hasUnsupportedPeoplePivot, parseCompanyScope, scopeRestricts } from "../../../lib/workspace-scopes";
 
 export const runtime = "nodejs";
 
@@ -65,6 +65,12 @@ async function handlePOST(request: Request) {
   let companyScope;
   try { companyScope = parseCompanyScope(payload.companyScope ? JSON.stringify(payload.companyScope) : null); }
   catch (error) { return filterErrorResponse(error, "Invalid company navigation scope."); }
+  let unsupportedPeoplePivot;
+  try { unsupportedPeoplePivot = hasUnsupportedPeoplePivot(payload); }
+  catch (error) { return filterErrorResponse(error, "Invalid people navigation scope."); }
+  if (unsupportedPeoplePivot) {
+    return Response.json({ error: "Background exports do not yet support a People-to-Companies pivot." }, { status: 400 });
+  }
   // Carried into the set rather than refused. Until 20260902000180 a result set
   // had nowhere to put a pivot, so a background export under one would have
   // written every person matching the filters instead of only those companies -

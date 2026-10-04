@@ -3,7 +3,7 @@ import { backgroundAdmissionResponse } from '../../../lib/operations-health';
 import { authorizeFilterSets } from "../../../lib/filter-sets";
 import { filterErrorResponse, parseFilters } from "../../../lib/prospect-filters";
 import { normalizeResultSetQuestion, ownerIdentity, resultSetContentHash } from "../../../lib/result-sets";
-import { parseCompanyScope, scopeRestricts } from "../../../lib/workspace-scopes";
+import { hasUnsupportedPeoplePivot, parseCompanyScope, scopeRestricts } from "../../../lib/workspace-scopes";
 import { createAdminClient } from "../../../lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -53,6 +53,12 @@ async function handlePOST(request: Request) {
   let companyScope;
   try { companyScope = parseCompanyScope(payload.companyScope ? JSON.stringify(payload.companyScope) : null); }
   catch (error) { return filterErrorResponse(error, "Invalid company navigation scope."); }
+  let unsupportedPeoplePivot;
+  try { unsupportedPeoplePivot = hasUnsupportedPeoplePivot(payload); }
+  catch (error) { return filterErrorResponse(error, "Invalid people navigation scope."); }
+  if (unsupportedPeoplePivot) {
+    return Response.json({ error: "Background result sets do not yet support a People-to-Companies pivot." }, { status: 400 });
+  }
   if (entityType === "company" && scopeRestricts(companyScope)) {
     return Response.json({ error: "A company set cannot carry a company scope." }, { status: 400 });
   }

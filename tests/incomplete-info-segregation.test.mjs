@@ -19,10 +19,19 @@ test("client workspace completeness is added once and Master stays unchanged", (
   assert.deepEqual(client.at(-2), completeClientCompanyProfileFilter);
   // The client's SEG emails setting, applied by the database (20261003100000).
   assert.deepEqual(client.at(-1), clientSegPolicyFilter("client-a"));
-  assert.equal(withClientWorkspaceCompleteness(client, "client-a"), client);
+  assert.deepEqual(withClientWorkspaceCompleteness(client, "client-a"), client);
 
   const incomplete = [incompleteClientCompanyProfileFilter];
   assert.deepEqual(withClientWorkspaceCompleteness(incomplete, "client-a"), [...incomplete, clientSegPolicyFilter("client-a")]);
+
+  const spoofed = [
+    incompleteClientCompanyProfileFilter,
+    clientSegPolicyFilter("other-client"),
+    clientSegPolicyFilter("client-a"),
+  ];
+  const normalized = withClientWorkspaceCompleteness(spoofed, "client-a");
+  assert.deepEqual(normalized, [incompleteClientCompanyProfileFilter, clientSegPolicyFilter("client-a")]);
+  assert.equal(normalized.filter(filter => filter.field === "__client_seg_policy").length, 1);
 });
 
 test("client UI locks both normal and incomplete partitions and hides the internal filter", async () => {
@@ -86,4 +95,21 @@ test("a failed client-directory request is recoverable and never becomes an empt
   assert.match(clients, /Client directory unavailable/);
   assert.match(clients, /no clients or client data were removed/i);
   assert.match(clients, /onClick=\{onRefresh\}>Retry/);
+});
+
+test("measured client-summary migration preserves grants and adds synthetic transition parity", async () => {
+  const [migration, fixture, runner, workflow] = await Promise.all([
+    read("../supabase/migrations/20261004004258_inline_client_summary_ctes.sql"),
+    read("../supabase/tests/client_summary_inline_parity.sql"),
+    read("../scripts/test-production-hardening-migrations.mjs"),
+    read("../.github/workflows/ci.yml"),
+  ]);
+  const viewBody = migration.slice(0, migration.indexOf("revoke all on public.client_summaries"));
+  assert.equal((viewBody.match(/as not materialized/gi) ?? []).length, 5);
+  assert.match(migration, /revoke all on public\.client_summaries from public, anon, authenticated/);
+  assert.match(fixture, /summary-inline-discard/);
+  assert.match(fixture, /SEG-to-mailbox transition mismatch/);
+  assert.match(fixture, /Keep-to-discard transition mismatch/);
+  assert.match(runner, /schema-only baseline unexpectedly contains rows/);
+  assert.match(workflow, /production-hardening-contract:/);
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { initials } from "../../lib/dashboard-helpers";
 import { AppIcon, type IconName } from "./DashboardUi";
 import ThemeToggle from "./ThemeToggle";
@@ -10,6 +11,60 @@ export type MobileNavItem = { id: string; label: string; mark: IconName };
 
 /** The three that earn a permanent slot. Everything else lives behind More. */
 const pinned = ["overview", "prospects", "companies"];
+
+function MobileNavSheet({ items, section, onNavigate, onClose, currentUserEmail }: {
+  items: MobileNavItem[];
+  section: string;
+  onNavigate: (id: string) => void;
+  onClose: () => void;
+  currentUserEmail: string;
+}) {
+  const sheet = useRef<HTMLElement>(null);
+  // This component only mounts while the sheet exists. Calling the focus hook
+  // in MobileNav itself ran it once against a null ref, so Escape, focus
+  // containment and focus restoration were never installed.
+  useDialogFocus(sheet, { onClose });
+
+  return createPortal(<div className="mobile-sheet-backdrop" role="presentation">
+    <section
+      ref={sheet}
+      className="mobile-sheet"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mobile-sheet-title"
+    >
+      <div className="mobile-sheet-head">
+        <h2 id="mobile-sheet-title">More</h2>
+        <button type="button" className="mobile-sheet-close" data-autofocus onClick={onClose} aria-label="Close">
+          <AppIcon name="close" size={18}/>
+        </button>
+      </div>
+      <div className="mobile-sheet-body">
+        {items.map((item) => <button
+          key={item.id}
+          type="button"
+          aria-current={section === item.id ? "page" : undefined}
+          className={`mobile-sheet-item ${section === item.id ? "active" : ""}`}
+          onClick={() => onNavigate(item.id)}
+        >
+          <span aria-hidden="true"><AppIcon name={item.mark} size={18}/></span>
+          {item.label}
+        </button>)}
+
+        <div className="mobile-sheet-group">
+          <span className="mobile-sheet-label">Appearance</span>
+          <ThemeToggle/>
+        </div>
+
+        <a className="mobile-sheet-account" href="/auth/signout">
+          <span className="profile-avatar">{initials(currentUserEmail)}</span>
+          <div><strong>{currentUserEmail}</strong><small>Sign out</small></div>
+          <AppIcon name="arrow" size={16}/>
+        </a>
+      </div>
+    </section>
+  </div>, document.body);
+}
 
 /**
  * MOBILE-01: the bottom bar, and the way back to everything it cannot hold.
@@ -32,8 +87,6 @@ export default function MobileNav({ section, items, onNavigate, currentUserEmail
   currentUserEmail: string;
 }) {
   const [open, setOpen] = useState(false);
-  const sheet = useRef<HTMLElement>(null);
-  useDialogFocus(sheet, { onClose: () => setOpen(false) });
 
   const primary = items.filter((item) => pinned.includes(item.id));
   const secondary = items.filter((item) => !pinned.includes(item.id));
@@ -72,46 +125,12 @@ export default function MobileNav({ section, items, onNavigate, currentUserEmail
       </button>
     </nav>
 
-    {open ? <div className="mobile-sheet-backdrop" role="presentation">
-      <section
-        ref={sheet}
-        className="mobile-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="mobile-sheet-title"
-      >
-        <div className="mobile-sheet-head">
-          <h2 id="mobile-sheet-title">More</h2>
-          <button type="button" className="mobile-sheet-close" data-autofocus onClick={() => setOpen(false)} aria-label="Close">
-            <AppIcon name="close" size={18}/>
-          </button>
-        </div>
-        <div className="mobile-sheet-body">
-          {secondary.map((item) => <button
-            key={item.id}
-            type="button"
-            aria-current={section === item.id ? "page" : undefined}
-            className={`mobile-sheet-item ${section === item.id ? "active" : ""}`}
-            onClick={() => go(item.id)}
-          >
-            <span aria-hidden="true"><AppIcon name={item.mark} size={18}/></span>
-            {item.label}
-          </button>)}
-
-          <div className="mobile-sheet-group">
-            <span className="mobile-sheet-label">Appearance</span>
-            <ThemeToggle/>
-          </div>
-
-          {/* The only sign-out in the product. The old shell hid it entirely
-              below 760px, so a phone could sign in and never sign out. */}
-          <a className="mobile-sheet-account" href="/auth/signout">
-            <span className="profile-avatar">{initials(currentUserEmail)}</span>
-            <div><strong>{currentUserEmail}</strong><small>Sign out</small></div>
-            <AppIcon name="arrow" size={16}/>
-          </a>
-        </div>
-      </section>
-    </div> : null}
+    {open ? <MobileNavSheet
+      items={secondary}
+      section={section}
+      onNavigate={go}
+      onClose={() => setOpen(false)}
+      currentUserEmail={currentUserEmail}
+    /> : null}
   </>;
 }

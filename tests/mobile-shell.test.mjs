@@ -63,7 +63,8 @@ test("the More sheet is a real dialog", async () => {
   const nav = await read("../app/components/MobileNav.tsx");
   // Same lifecycle as every other dialog: focus trapped, Escape closes, focus
   // returns to the launcher. The mobile gate asks for exactly this.
-  assert.match(nav, /useDialogFocus\(sheet, \{ onClose: \(\) => setOpen\(false\) \}\)/);
+  assert.match(nav, /function MobileNavSheet[\s\S]*?useDialogFocus\(sheet, \{ onClose \}\)/);
+  assert.match(nav, /open \? <MobileNavSheet/);
   assert.match(nav, /role="dialog"/);
   assert.match(nav, /aria-modal="true"/);
   assert.match(nav, /aria-labelledby="mobile-sheet-title"/);

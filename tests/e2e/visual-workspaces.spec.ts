@@ -24,14 +24,16 @@ test.skip(!email || !password, "Set E2E_USER_EMAIL and E2E_USER_PASSWORD to capt
 
 const widths = [1440, 1280, 1024];
 const sections = [
-  { name: "people", nav: "Master DB" },
-  { name: "companies", nav: "Company DB" },
-  { name: "clients", nav: "Clients" },
+  { name: "people", nav: "People database" },
+  { name: "companies", nav: "Companies" },
+  { name: "clients", nav: "Clients & lists" },
 ];
 
 for (const theme of ["light", "dark"] as const) {
   test(`workspaces render in ${theme}`, async ({ page }) => {
-    await page.emulateMedia({ colorScheme: theme });
+    await page.addInitScript(({ selectedTheme }) => {
+      localStorage.setItem("prospecthub-theme", selectedTheme);
+    }, { selectedTheme: theme });
     await page.goto("/login");
     await page.getByLabel("Email address").fill(email);
     await page.getByLabel("Password").fill(password);
@@ -42,10 +44,11 @@ for (const theme of ["light", "dark"] as const) {
       await page.setViewportSize({ width, height: 900 });
       for (const section of sections) {
         const link = page.getByRole("button", { name: section.nav });
-        if (await link.count() === 0) continue;
+        await expect(link, `${section.nav} must remain reachable from primary navigation`).toHaveCount(1);
         await link.first().click();
-        // Settle rather than race the listing request.
-        await page.waitForLoadState("networkidle").catch(() => undefined);
+        await expect(page.locator("main")).toBeVisible();
+        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+        await expect(page.locator(".skeleton")).toHaveCount(0, { timeout: 30_000 });
         await page.screenshot({ path: `test-results/${theme}-${width}-${section.name}.png`, fullPage: false });
       }
     }

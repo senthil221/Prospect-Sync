@@ -57,3 +57,14 @@ export function parsePeopleScope(raw: string | null, options: { compileBoolean?:
     limit: parseScopeLimit(parsed.limit),
   };
 }
+
+export function hasUnsupportedPeoplePivot(payload: Record<string, unknown>, options: { compileBoolean?: boolean } = {}) {
+  if (!Object.prototype.hasOwnProperty.call(payload, "peopleScope") || payload.peopleScope === null || payload.peopleScope === undefined) {
+    return false;
+  }
+  // JSON.stringify preserves false/0/empty-string, so malformed present values
+  // fail instead of being silently treated as absent by a truthiness check.
+  const encoded = JSON.stringify(payload.peopleScope);
+  if (encoded === undefined) throw new Error("A people pivot scope must be JSON serializable.");
+  return scopeRestricts(parsePeopleScope(encoded, options));
+}

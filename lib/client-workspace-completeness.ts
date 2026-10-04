@@ -43,10 +43,16 @@ export function withClientWorkspaceCompleteness(
   clientId: string | null | undefined,
 ): ProspectFilter[] {
   if (!clientId) return filters;
+  const existingSeg = filters.filter((filter) => filter.field === clientSegPolicyField);
+  const profilePresent = filters.some((filter) => filter.field === incompleteCompanyProfileField);
+  if (profilePresent && existingSeg.length === 1 && existingSeg[0].operator === "equals"
+    && existingSeg[0].values.length === 1 && existingSeg[0].values[0] === clientId) return filters;
+  // The SEG predicate is server-owned. A caller may omit it, duplicate it, or
+  // submit another client's id; none of those inputs may influence the scope.
+  const withoutCallerSeg = filters.filter((filter) => filter.field !== clientSegPolicyField);
   const additions: ProspectFilter[] = [];
-  if (!filters.some((filter) => filter.field === incompleteCompanyProfileField)) additions.push(completeClientCompanyProfileFilter);
-  if (!filters.some((filter) => filter.field === clientSegPolicyField)) additions.push(clientSegPolicyFilter(clientId));
-  return additions.length ? [...filters, ...additions] : filters;
+  if (!profilePresent) additions.push(completeClientCompanyProfileFilter);
+  return [...withoutCallerSeg, ...additions, clientSegPolicyFilter(clientId)];
 }
 
 export function forceClientWorkspaceCompleteness<T extends ProspectFilter>(
