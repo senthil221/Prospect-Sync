@@ -169,22 +169,40 @@ async function claimNext() {
   }
 }
 
-function createRenewalTransport() {
+function createRenewalTransport(shutdownSignal) {
   let client = null;
+  let detachClientAbort = async () => undefined;
+
+  const discardClient = async (force = true) => {
+    const discarded = client;
+    const detach = detachClientAbort;
+    client = null;
+    detachClientAbort = async () => undefined;
+    await detach();
+    if (discarded) {
+      try { discarded.release(force); } catch { /* Shutdown may already have ended the socket. */ }
+    }
+  };
+
   return {
     async query(text, values) {
-      if (!client) client = await importerClient({ statementTimeout: "8s", lockTimeout: "8s" });
+      if (!client) {
+        client = await importerClient({ statementTimeout: "8s", lockTimeout: "8s" });
+        detachClientAbort = bindAbortToPgSession(client, shutdownSignal);
+        if (shutdownSignal.aborted) {
+          await discardClient();
+          throw shutdownSignal.reason;
+        }
+      }
       try {
         return await client.query({ text, values, query_timeout: 10_000 });
       } catch (error) {
-        client.release(true);
-        client = null;
+        await discardClient();
         throw error;
       }
     },
     async close() {
-      client?.release();
-      client = null;
+      await discardClient(shutdownSignal.aborted);
     },
   };
 }
@@ -313,7 +331,7 @@ async function processJob(job) {
     mergeClient = await importerClient({ statementTimeout: stagingTimeout, lockTimeout: "30s" });
     detachMergeAbort = bindAbortToPgSession(mergeClient, jobAbort.signal);
     if (jobAbort.signal.aborted) throw jobAbort.signal.reason;
-    renewalTransport = createRenewalTransport();
+    renewalTransport = createRenewalTransport(jobAbort.signal);
     lease = createLease(job, renewalTransport);
     await lease.start();
     beginPhase("stage", stagingTimeoutMs + 15_000);
@@ -405,8 +423,7 @@ async function processJob(job) {
   } finally {
     if (!completed && stopping) lease?.abort(new Error("Import worker is shutting down."));
     await lease?.stop();
-    await renewalTransport?.close();
-    await detachMergeAbort();
+    await Promise.all([renewalTransport?.close(), detachMergeAbort()]);
     // A per-job connection also guarantees that a cancelled COPY or client-side
     // query timeout cannot leak protocol state into the next import.
     if (mergeClient) {

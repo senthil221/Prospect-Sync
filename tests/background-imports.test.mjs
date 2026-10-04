@@ -113,7 +113,9 @@ test("deployment runs storage and one bounded import worker", async () => {
   assert.match(worker, /complete_claim_v2/);
   assert.match(worker, /query_timeout: 10_000/);
   assert.match(worker, /bindAbortToPgSession\(mergeClient, jobAbort\.signal\)/);
-  assert.match(worker, /await detachMergeAbort\(\)/);
+  assert.match(worker, /createRenewalTransport\(jobAbort\.signal\)/);
+  assert.match(worker, /detachClientAbort = bindAbortToPgSession\(client, shutdownSignal\)/);
+  assert.match(worker, /Promise\.all\(\[renewalTransport\?\.close\(\), detachMergeAbort\(\)\]\)/);
   assert.match(worker, /await importerClient[\s\S]*await failOrRetry/u);
   assert.match(update, /pause_or_restore_fenced_import_worker/);
   assert.match(update, /FENCED_IMPORT_WORKER_IMAGE_FILE/);
