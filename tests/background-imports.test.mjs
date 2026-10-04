@@ -116,6 +116,12 @@ test("deployment runs storage and one bounded import worker", async () => {
   assert.match(worker, /createRenewalTransport\(jobAbort\.signal\)/);
   assert.match(worker, /detachClientAbort = bindAbortToPgSession\(client, shutdownSignal\)/);
   assert.match(worker, /Promise\.all\(\[renewalTransport\?\.close\(\), detachMergeAbort\(\)\]\)/);
+  assert.match(worker, /const shutdownRetryBudgetMs = 4_000/);
+  assert.match(worker, /application_name: "prospect-import-worker-shutdown-release"/);
+  assert.match(worker, /connectionTimeoutMillis: 1_250/);
+  assert.match(worker, /bindAbortToPgSession\(client, deadline\.signal, 250\)/);
+  assert.match(worker, /query_timeout: 2_500/);
+  assert.match(worker, /if \(stopping\) \{[\s\S]*Shutdown retry budget expired/u);
   assert.match(worker, /await importerClient[\s\S]*await failOrRetry/u);
   assert.match(update, /pause_or_restore_fenced_import_worker/);
   assert.match(update, /FENCED_IMPORT_WORKER_IMAGE_FILE/);

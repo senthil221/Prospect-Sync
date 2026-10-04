@@ -17,6 +17,7 @@ const bucket = "prospect-imports";
 const protocolVersion = 2;
 const leaseSeconds = 300;
 const renewalSeconds = 60;
+const shutdownRetryBudgetMs = 4_000;
 const batchSize = Math.max(100, Math.min(5000, Number(process.env.IMPORT_BATCH_SIZE ?? 1000)));
 const batchTimeout = pgInterval(process.env.IMPORT_BATCH_TIMEOUT, "120s", "IMPORT_BATCH_TIMEOUT");
 const stagingTimeout = pgInterval(process.env.IMPORT_STAGING_TIMEOUT, "10min", "IMPORT_STAGING_TIMEOUT");
@@ -441,13 +442,54 @@ async function failOrRetry(job, error) {
     return;
   }
   const fatal = message.startsWith("FATAL:");
-  const retrySeconds = stopping ? 1 : Math.min(3600, 15 * 2 ** Math.min(Number(job.attemptCount ?? 1) - 1, 8));
+  const retryMessage = message.replace(/^FATAL:\s*/u, "");
+  if (stopping) {
+    // Shutdown is bounded by Docker's grace period. Do not reuse the normal
+    // pool here: acquiring it and then waiting on its 10-12 second query bounds
+    // can keep the process alive after both active job sessions were aborted.
+    // A dedicated connection has one wall-clock budget; failure simply leaves
+    // the lease to expire and be reclaimed through the same rotating token.
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(new Error("Shutdown retry budget expired.")), shutdownRetryBudgetMs);
+    const client = new pg.Client({
+      application_name: "prospect-import-worker-shutdown-release",
+      connectionTimeoutMillis: 1_250,
+    });
+    client.on("error", () => undefined);
+    const detachAbort = bindAbortToPgSession(client, deadline.signal, 250);
+    try {
+      await client.connect();
+      if (deadline.signal.aborted) throw deadline.signal.reason;
+      await client.query({
+        text: "set role prospect_importer; set statement_timeout='2s'; set lock_timeout='1s'",
+        query_timeout: 750,
+      });
+      const result = await client.query({
+        text: "select prospect_import.retry_claim_v2($1,$2,$3,$4,$5,1,$6) status",
+        values: [job.id, job.listId, workerId, job.claimToken, retryMessage, fatal ? 1 : 3],
+        query_timeout: 2_500,
+      });
+      metrics.record("retry", result.rows[0]?.status ? "ok" : "skipped", performance.now() - started);
+    } catch (retryError) {
+      metrics.record("retry", isDefinitiveClaimLoss(retryError) ? "skipped" : "error", performance.now() - started);
+      if (!isDefinitiveClaimLoss(retryError)) {
+        console.error("Could not release import claim within shutdown budget", retryError?.message ?? retryError);
+      }
+    } finally {
+      clearTimeout(timer);
+      if (!deadline.signal.aborted) deadline.abort(new Error("Shutdown retry finished."));
+      await detachAbort();
+    }
+    return;
+  }
+
+  const retrySeconds = Math.min(3600, 15 * 2 ** Math.min(Number(job.attemptCount ?? 1) - 1, 8));
   const client = await importerClient({ statementTimeout: "10s", lockTimeout: "10s" }).catch(() => null);
   if (!client) return;
   try {
     const result = await client.query({
       text: "select prospect_import.retry_claim_v2($1,$2,$3,$4,$5,$6,$7) status",
-      values: [job.id, job.listId, workerId, job.claimToken, message.replace(/^FATAL:\s*/u, ""), retrySeconds, fatal ? 1 : 3],
+      values: [job.id, job.listId, workerId, job.claimToken, retryMessage, retrySeconds, fatal ? 1 : 3],
       query_timeout: 12_000,
     });
     metrics.record("retry", result.rows[0]?.status ? "ok" : "skipped", performance.now() - started);
