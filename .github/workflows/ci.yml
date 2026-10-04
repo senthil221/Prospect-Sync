@@ -124,7 +124,7 @@ jobs:
   production-hardening-contract:
     name: Production hardening forward-migration contract (synthetic)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:15
@@ -153,6 +153,13 @@ jobs:
           DATABASE_URL: postgres://postgres:disposable-ci-only@127.0.0.1:5432/cursor_migration_test
           PRODUCTION_HARDENING_MIGRATION_TEST_ALLOW: "1"
         run: node scripts/test-production-hardening-migrations.mjs
+      - name: Install isolated import-worker test dependencies
+        run: npm ci --prefix worker --ignore-scripts
+      - name: Verify fenced import races, recovery, compatibility and ACLs
+        env:
+          DATABASE_URL: postgres://postgres:disposable-ci-only@127.0.0.1:5432/cursor_migration_test
+          IMPORT_FENCING_TEST_ALLOW: "1"
+        run: node scripts/test-import-fencing-concurrency.mjs
 
   atomic-unit-contract:
     name: PostgreSQL atomic worker contract (synthetic)
