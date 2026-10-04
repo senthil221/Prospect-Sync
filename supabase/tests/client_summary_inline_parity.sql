@@ -33,7 +33,8 @@ from (values ('summary-inline-discard'), ('summary-inline-keep')) clients(client
 insert into public.client_companies(client_id, company_id)
 select client_id, company_id
 from (values ('summary-inline-discard'), ('summary-inline-keep')) clients(client_id)
-cross join (values ('summary-inline-incomplete'), ('summary-inline-seg'), ('summary-inline-normal')) companies(company_id);
+cross join (values ('summary-inline-incomplete'), ('summary-inline-seg'), ('summary-inline-normal')) companies(company_id)
+on conflict (client_id, company_id) do nothing;
 insert into public.lists(id, client_id, name)
 values ('summary-inline-list-discard', 'summary-inline-discard', 'Fixture'),
        ('summary-inline-list-keep', 'summary-inline-keep', 'Fixture');
