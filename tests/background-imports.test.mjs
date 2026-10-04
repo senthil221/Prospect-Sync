@@ -121,6 +121,11 @@ test("deployment runs storage and one bounded import worker", async () => {
   assert.match(worker, /application_name: "prospect-import-worker-shutdown-release"/);
   assert.match(worker, /connectionTimeoutMillis: 1_000/);
   assert.match(worker, /bindAbortToPgSession\(client, deadline\.signal, 250\)/);
+  assert.match(worker, /backend_start::text backend_start,usename,application_name[\s\S]*where pid=pg_backend_pid\(\)/u);
+  assert.match(worker, /pg_cancel_backend\(a\.pid\)[\s\S]*a\.pid=\$1 and a\.backend_start=\$2::timestamptz[\s\S]*a\.usename=\$3 and a\.application_name=\$4/u);
+  assert.match(worker, /a\.pid<>pg_backend_pid\(\)/u);
+  assert.doesNotMatch(worker, /grant\s+pg_signal_backend/i);
+  assert.doesNotMatch(worker, /security definer\s+(?:set|as)/i);
   assert.match(worker, /statement_timeout='4500ms'; set lock_timeout='4s'/);
   assert.match(worker, /query_timeout: 4_750/);
   assert.match(worker, /if \(stopping\) \{[\s\S]*Shutdown retry budget expired/u);

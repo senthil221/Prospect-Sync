@@ -34,6 +34,7 @@ const importPool = new pg.Pool({
 importPool.on("error", error => console.error("Idle import database connection failed", error?.message ?? error));
 let stopping = false;
 let activeAbortController = null;
+let activeMergeBackendIdentity = null;
 let lastProgressAt = Date.now();
 let activeImportId = "";
 let activePhase = "idle";
@@ -330,6 +331,16 @@ async function processJob(job) {
   let mergeStarted = 0;
   try {
     mergeClient = await importerClient({ statementTimeout: stagingTimeout, lockTimeout: "30s" });
+    const backendIdentity = await mergeClient.query({
+      text: `select pid,backend_start::text backend_start,usename,application_name
+        from pg_stat_activity where pid=pg_backend_pid()`,
+      query_timeout: 2_000,
+    });
+    activeMergeBackendIdentity = backendIdentity.rows[0] ?? null;
+    if (!activeMergeBackendIdentity?.pid || !activeMergeBackendIdentity.backend_start
+        || !activeMergeBackendIdentity.usename || !activeMergeBackendIdentity.application_name) {
+      throw new Error("Could not identify the import merge database session.");
+    }
     detachMergeAbort = bindAbortToPgSession(mergeClient, jobAbort.signal);
     if (jobAbort.signal.aborted) throw jobAbort.signal.reason;
     renewalTransport = createRenewalTransport(jobAbort.signal);
@@ -460,9 +471,27 @@ async function failOrRetry(job, error) {
     try {
       await client.connect();
       if (deadline.signal.aborted) throw deadline.signal.reason;
+      if (activeMergeBackendIdentity) {
+        // Closing the merge socket initiates server-side cleanup but does not
+        // prove that PostgreSQL has observed it yet. Cancel only the exact
+        // session captured for this job. backend_start prevents PID reuse from
+        // targeting a later connection; user and application markers prevent
+        // crossing worker boundaries. The login role may cancel its own query
+        // without pg_signal_backend or a SECURITY DEFINER helper.
+        await client.query({
+          text: `select coalesce((select pg_cancel_backend(a.pid)
+            from pg_stat_activity a
+            where a.pid=$1 and a.backend_start=$2::timestamptz
+              and a.usename=$3 and a.application_name=$4
+              and a.pid<>pg_backend_pid()),false) canceled`,
+          values: [activeMergeBackendIdentity.pid, activeMergeBackendIdentity.backend_start,
+            activeMergeBackendIdentity.usename, activeMergeBackendIdentity.application_name],
+          query_timeout: 750,
+        });
+      }
       await client.query({
         text: "set role prospect_importer; set statement_timeout='4500ms'; set lock_timeout='4s'",
-        query_timeout: 750,
+        query_timeout: 500,
       });
       const result = await client.query({
         text: "select prospect_import.retry_claim_v2($1,$2,$3,$4,$5,1,$6) status",
@@ -518,6 +547,8 @@ async function main() {
       console.error(`Import ${job?.id ?? "claim"} failed`, error?.message ?? error);
       if (job) await failOrRetry(job, error);
       else if (!stopping) await wait(5000);
+    } finally {
+      activeMergeBackendIdentity = null;
     }
   }
   metrics.flush();
