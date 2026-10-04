@@ -69,6 +69,9 @@ declare
   );
   v_with jsonb;
   v_without jsonb;
+  v_case jsonb;
+  v_builder_sql text;
+  v_prefilter_sql text;
   v_builder text[];
   v_matcher text[];
   v_prefilter text[];
@@ -102,13 +105,21 @@ begin
   -- The compiler, legacy matcher and candidate prefilter must partition this
   -- client's complete, non-SEG companies identically. In particular,
   -- scope-global-not-a has a person globally but none for A.
-  foreach v_with in array array[v_with, v_without] loop
+  foreach v_case in array array[v_with, v_without] loop
+    v_builder_sql := public.company_filter_sql_v3('', v_case, false);
+    v_prefilter_sql := public.company_prefilter_sql('', v_case);
+    if nullif(btrim(v_builder_sql), '') is null then
+      raise exception 'company filter compiler returned an empty predicate';
+    end if;
+    if nullif(btrim(v_prefilter_sql), '') is null then
+      raise exception 'company prefilter compiler returned an empty predicate';
+    end if;
     execute format('select coalesce(array_agg(c.id order by c.id), array[]::text[]) from public.companies c where %s',
-      public.company_filter_sql_v3('', v_with, false)) into v_builder;
+      v_builder_sql) into v_builder;
     select coalesce(array_agg(c.id order by c.id), array[]::text[]) into v_matcher
-      from public.companies c where public.company_matches_filters_v1(c, '', v_with);
+      from public.companies c where public.company_matches_filters_v1(c, '', v_case);
     execute format('select coalesce(array_agg(c.id order by c.id), array[]::text[]) from public.companies c where %s',
-      public.company_prefilter_sql('', v_with)) into v_prefilter;
+      v_prefilter_sql) into v_prefilter;
     if v_builder is distinct from v_matcher or v_builder is distinct from v_prefilter then
       raise exception 'company filter paths disagree: builder %, matcher %, prefilter %', v_builder, v_matcher, v_prefilter;
     end if;
