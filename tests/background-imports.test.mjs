@@ -75,11 +75,12 @@ test("background import API opts into v2 without exposing claim credentials", as
 });
 
 test("deployment runs storage and one bounded import worker", async () => {
-  const [compose, update, bootstrap, worker] = await Promise.all([
+  const [compose, update, bootstrap, worker, concurrencyHarness] = await Promise.all([
     readFile(new URL("../deploy/docker-compose.yml", import.meta.url), "utf8"),
     readFile(new URL("../deploy/scripts/update.sh", import.meta.url), "utf8"),
     readFile(new URL("../deploy/postgres/init/00-prospect-bootstrap.sh", import.meta.url), "utf8"),
     readFile(new URL("../worker/import-worker.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/test-import-fencing-concurrency.mjs", import.meta.url), "utf8"),
   ]);
   assert.match(compose, /import-worker:/);
   assert.match(compose, /cpus: "1\.0"/);
@@ -116,13 +117,16 @@ test("deployment runs storage and one bounded import worker", async () => {
   assert.match(worker, /createRenewalTransport\(jobAbort\.signal\)/);
   assert.match(worker, /detachClientAbort = bindAbortToPgSession\(client, shutdownSignal\)/);
   assert.match(worker, /Promise\.all\(\[renewalTransport\?\.close\(\), detachMergeAbort\(\)\]\)/);
-  assert.match(worker, /const shutdownRetryBudgetMs = 4_000/);
+  assert.match(worker, /const shutdownRetryBudgetMs = 6_000/);
   assert.match(worker, /application_name: "prospect-import-worker-shutdown-release"/);
-  assert.match(worker, /connectionTimeoutMillis: 1_250/);
+  assert.match(worker, /connectionTimeoutMillis: 1_000/);
   assert.match(worker, /bindAbortToPgSession\(client, deadline\.signal, 250\)/);
-  assert.match(worker, /query_timeout: 2_500/);
+  assert.match(worker, /statement_timeout='4500ms'; set lock_timeout='4s'/);
+  assert.match(worker, /query_timeout: 4_750/);
   assert.match(worker, /if \(stopping\) \{[\s\S]*Shutdown retry budget expired/u);
   assert.match(worker, /await importerClient[\s\S]*await failOrRetry/u);
+  assert.match(concurrencyHarness, /shutdown did not roll back and release the active batch:[\s\S]*diagnosticWorkerOutput\(\)/u);
+  assert.match(concurrencyHarness, /diagnosticWorkerOutput[\s\S]*\[redacted\]/u);
   assert.match(update, /pause_or_restore_fenced_import_worker/);
   assert.match(update, /FENCED_IMPORT_WORKER_IMAGE_FILE/);
 });

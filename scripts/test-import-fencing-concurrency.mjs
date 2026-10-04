@@ -396,6 +396,11 @@ try {
   const address = storageServer.address();
   if (!address || typeof address === "string") throw new Error("fake Storage did not bind a TCP port");
   let workerOutput = "";
+  const diagnosticWorkerOutput = () => workerOutput
+    .replaceAll("disposable-ci-only", "[redacted]")
+    .replaceAll("synthetic-ci-key", "[redacted]")
+    .replace(/postgres(?:ql)?:\/\/[^\s@]+@/giu, "postgresql://[redacted]@")
+    .slice(-4_000);
   workerProcess = spawn(process.execPath, [fileURLToPath(new URL("../worker/import-worker.mjs", import.meta.url))], {
     cwd: fileURLToPath(new URL("../", import.meta.url)),
     env: {
@@ -484,7 +489,7 @@ try {
       || shutdownRow.claim_token !== null || shutdownRow.lease_expires_at !== null
       || Number(shutdownRow.committed_row_offset) !== 0 || shutdownRow.prospect_exists
       || shutdownRow.list_rows !== 0 || shutdownRow.staged_rows !== 1) {
-    throw new Error(`shutdown did not roll back and release the active batch: ${JSON.stringify(shutdownRow)}`);
+    throw new Error(`shutdown did not roll back and release the active batch: ${JSON.stringify(shutdownRow)}; worker output: ${diagnosticWorkerOutput()}`);
   }
   workerProcess = null;
   await new Promise(resolve => storageServer.close(resolve));

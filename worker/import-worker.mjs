@@ -17,7 +17,7 @@ const bucket = "prospect-imports";
 const protocolVersion = 2;
 const leaseSeconds = 300;
 const renewalSeconds = 60;
-const shutdownRetryBudgetMs = 4_000;
+const shutdownRetryBudgetMs = 6_000;
 const batchSize = Math.max(100, Math.min(5000, Number(process.env.IMPORT_BATCH_SIZE ?? 1000)));
 const batchTimeout = pgInterval(process.env.IMPORT_BATCH_TIMEOUT, "120s", "IMPORT_BATCH_TIMEOUT");
 const stagingTimeout = pgInterval(process.env.IMPORT_STAGING_TIMEOUT, "10min", "IMPORT_STAGING_TIMEOUT");
@@ -453,7 +453,7 @@ async function failOrRetry(job, error) {
     const timer = setTimeout(() => deadline.abort(new Error("Shutdown retry budget expired.")), shutdownRetryBudgetMs);
     const client = new pg.Client({
       application_name: "prospect-import-worker-shutdown-release",
-      connectionTimeoutMillis: 1_250,
+      connectionTimeoutMillis: 1_000,
     });
     client.on("error", () => undefined);
     const detachAbort = bindAbortToPgSession(client, deadline.signal, 250);
@@ -461,13 +461,13 @@ async function failOrRetry(job, error) {
       await client.connect();
       if (deadline.signal.aborted) throw deadline.signal.reason;
       await client.query({
-        text: "set role prospect_importer; set statement_timeout='2s'; set lock_timeout='1s'",
+        text: "set role prospect_importer; set statement_timeout='4500ms'; set lock_timeout='4s'",
         query_timeout: 750,
       });
       const result = await client.query({
         text: "select prospect_import.retry_claim_v2($1,$2,$3,$4,$5,1,$6) status",
         values: [job.id, job.listId, workerId, job.claimToken, retryMessage, fatal ? 1 : 3],
-        query_timeout: 2_500,
+        query_timeout: 4_750,
       });
       metrics.record("retry", result.rows[0]?.status ? "ok" : "skipped", performance.now() - started);
     } catch (retryError) {
