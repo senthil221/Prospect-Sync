@@ -22,6 +22,7 @@ const batchSize = Math.max(100, Math.min(5000, Number(process.env.IMPORT_BATCH_S
 const batchTimeout = pgInterval(process.env.IMPORT_BATCH_TIMEOUT, "120s", "IMPORT_BATCH_TIMEOUT");
 const stagingTimeout = pgInterval(process.env.IMPORT_STAGING_TIMEOUT, "10min", "IMPORT_STAGING_TIMEOUT");
 const publicationTimeout = pgInterval(process.env.IMPORT_PUBLICATION_TIMEOUT, "120s", "IMPORT_PUBLICATION_TIMEOUT");
+const backendIdentitySymbol = Symbol("importBackendIdentity");
 const batchTimeoutMs = pgIntervalMilliseconds(batchTimeout);
 const stagingTimeoutMs = pgIntervalMilliseconds(stagingTimeout);
 const personImportFields = new Set(["First Name", "Last Name", "Job Title", "Email", "Mobile Number", "Personal LinkedIn URL", "Company Name", "Website"]);
@@ -147,9 +148,18 @@ function boundedDbQuery(client, text, values = [], queryTimeout = 10_000) {
   return client.query({ text, values, query_timeout: queryTimeout });
 }
 
-async function importerClient({ statementTimeout = "10s", lockTimeout = "10s" } = {}) {
+async function importerClient({ statementTimeout = "10s", lockTimeout = "10s", captureBackendIdentity = false } = {}) {
   const client = await importPool.connect();
   try {
+    // SET ROLE persists across node-postgres pool check-ins. Restore the login
+    // role before inspecting its own pg_stat_activity row, then re-apply the
+    // least-privileged importer role for all application work.
+    await boundedDbQuery(client, "reset role");
+    if (captureBackendIdentity) {
+      const backendIdentity = await boundedDbQuery(client, `select pid,backend_start::text backend_start,usename,application_name
+        from pg_stat_activity where pid=pg_backend_pid()`, [], 2_000);
+      client[backendIdentitySymbol] = backendIdentity.rows[0] ?? null;
+    }
     await boundedDbQuery(client, "set role prospect_importer");
     await boundedDbQuery(client, `set statement_timeout='${statementTimeout}'`);
     await boundedDbQuery(client, `set lock_timeout='${lockTimeout}'`);
@@ -330,13 +340,9 @@ async function processJob(job) {
   const stageStarted = performance.now();
   let mergeStarted = 0;
   try {
-    mergeClient = await importerClient({ statementTimeout: stagingTimeout, lockTimeout: "30s" });
-    const backendIdentity = await mergeClient.query({
-      text: `select pid,backend_start::text backend_start,usename,application_name
-        from pg_stat_activity where pid=pg_backend_pid()`,
-      query_timeout: 2_000,
-    });
-    activeMergeBackendIdentity = backendIdentity.rows[0] ?? null;
+    mergeClient = await importerClient({ statementTimeout: stagingTimeout, lockTimeout: "30s",
+      captureBackendIdentity: true });
+    activeMergeBackendIdentity = mergeClient[backendIdentitySymbol];
     if (!activeMergeBackendIdentity?.pid || !activeMergeBackendIdentity.backend_start
         || !activeMergeBackendIdentity.usename || !activeMergeBackendIdentity.application_name) {
       throw new Error("Could not identify the import merge database session.");
