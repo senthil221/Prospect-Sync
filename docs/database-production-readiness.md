@@ -63,7 +63,7 @@ worker restart or restore was used for this snapshot.
 | Durable membership | `app/api/result-sets/route.ts`, `lib/result-sets.ts`, `prospect_results.result_sets`, operations worker | Exact count and all-matching actions freeze authorized IDs. The final server-applied question must be authorized, hashed and stored consistently. |
 | Exports | `app/api/prospects/export/route.ts`, `app/api/companies/route.ts`, `app/api/exports/route.ts`, `lib/export-runner.ts` | Streaming and background exports must enumerate the same membership as the screen and keep memory bounded. |
 | Mutations | client prospect/company routes, `app/api/operations/route.ts`, frozen operation functions | Explicit IDs or an owned frozen set; retries must be idempotent and must not re-resolve a changed live query. |
-| Imports and repair | people/company import routes, import worker, completion RPCs, reindex backlog | Staged, resumable writes publish memberships and data versions. A failed completion remains diagnosable and recoverable. |
+| Imports and repair | people/company import routes, import worker, completion RPCs, reindex backlog | Protocol-2 background imports use a rotating claim token, connection-local COPY, fenced durable publication/batches/completion and an atomic cancel lock. Browser/company imports retain their legacy entry points. |
 | Summaries and health | dashboard/client summary RPCs, `app/api/data-quality/route.ts`, `app/api/health/route.ts` | Summaries expose freshness; health distinguishes app, database and worker dependencies without running a full scan. |
 | Email verification addon | verification routes, `prospect_verification.*`, verification worker | Reads an authorized/frozen People scope and labels the unchanged work email. It receives bounded capacity and does not exclude records automatically. |
 | ICP addon | ICP routes, `icp_validation_*`, ICP worker | Reads selected client companies and writes scoped verdicts/validation state. Incomplete Info remains a database partition, not a second company store. |
@@ -122,7 +122,7 @@ gate; it is not implied by a passing build.
 | People → Companies | Present for interactive listing; durable membership unsupported | Present: pivot honesty tests | Gap: complete frozen-set equivalence | Required: listing plus bounded export behavior | Not certified |
 | Exact count / all matching | Package: client completeness and Company origin normalized before authorize/hash/store | Package: behavioral normalization, contradictory scope, idempotency, identity and guard-order checks | Package fixture compares interactive, explicit/all-matching and frozen IDs/counts; exact-head CI pending | Required: normal and Incomplete Info all-matching actions | No writes performed |
 | Streaming/background export | Present: direct and background paths carry the real origin client | Present: streaming/export wiring tests | Package: client Company stream and nested People stream equal their listings in disposable SQL | Required: authenticated downloaded IDs/fields | Not certified under concurrent import |
-| Imports / push / membership removal | Present: staged routes and bounded workers | Present: import, client operation and retry tests | Present for selected import fixtures; concurrent retry catalogue required | Required: resume, duplicate and removal journeys | No write/recovery drill here |
+| Imports / push / membership removal | Package: v2 token fence, private stage, bounded renewal and direct receipt-bearing completion | Package: lease budget, blocked renewal, API, rollback and worker wiring tests | Package: independent-session claim/reclaim, stale writes, COPY publication, replay, cancellation, completion, ACL and real-worker consecutive-import fixture | Required: authenticated resume, duplicate and removal journeys | No production write/recovery drill; disposable PostgreSQL only |
 | Blocklist | Present: scoped bulk/share/reply paths | Present: blocklist and Smartlead tests | Present for selected migrations; account/retry recovery required | Required: add/update/delete/export/share/reply sync | Addon, not a core-query certification |
 | Email verification | Present: frozen selection and dedicated worker | Present: provider, worker and bounded-run tests | Present for selected run/reconcile fixtures | Required: create/pause/resume/reuse/result labels | Addon, not a core-query certification |
 | ICP | Present: selected company queues and worker | Present: ICP route/model/clear tests | Present for selected queue and selection fixtures | Required: selected run, review and retry | Addon, not a core-query certification |
@@ -186,6 +186,15 @@ reservations and incremental cleanup for disposable result data.
 Gate: concurrent browse/import/export/addon scenarios meet the agreed latency
 and queue-age limits; killed workers resume without duplicate mutations; status
 polling remains available during overload.
+
+The current package closes the background People import fencing prerequisite:
+the database owns a versioned rotating token; stale workers cannot publish,
+merge, retry or complete; cancellation and merge serialize on the import row;
+completion returns an idempotent receipt and creates import verification work
+once. The worker renews on an independent bounded connection and checks the
+authoritative cursor after an ambiguous batch. CI uses synthetic rows and a
+fake local Storage server. It does not establish production throughput, and a
+live import/restart drill remains a separate release gate.
 
 ### P4 — production operations
 

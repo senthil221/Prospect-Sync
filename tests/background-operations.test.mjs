@@ -299,7 +299,7 @@ test("each worker bounds its own statements, because its functions cannot", asyn
   // bound sized for what it actually sends, rather than inheriting the role's
   // 15 minutes.
   assert.match(imports, /const batchTimeout = pgInterval\(process\.env\.IMPORT_BATCH_TIMEOUT, "120s", "IMPORT_BATCH_TIMEOUT"\);/);
-  assert.match(imports, /await client\.query\(`set statement_timeout = '\$\{batchTimeout\}'`\);/);
+  assert.match(imports, /await (?:client|mergeClient)\.query\(`set statement_timeout = '\$\{batchTimeout\}'`\);/);
   // Staging is a COPY of the whole file and stays generous.
   assert.match(imports, /const stagingTimeout = pgInterval\(process\.env\.IMPORT_STAGING_TIMEOUT, "10min", "IMPORT_STAGING_TIMEOUT"\);/);
   assert.doesNotMatch(codeOnly(imports), /set statement_timeout = '10min'/);

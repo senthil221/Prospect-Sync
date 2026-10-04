@@ -54,6 +54,7 @@ yarn-error.log*
 # VPS deployment state (created by deploy/scripts/update.sh)
 /deploy/.active-app-slot
 /deploy/.last-image
+/deploy/.fenced-import-worker-image
 /deploy/.deploy.lock
 /deploy/.env.tmp
 supabase/.temp/

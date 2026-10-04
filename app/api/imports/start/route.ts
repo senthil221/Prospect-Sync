@@ -89,6 +89,7 @@ async function handlePOST(request: Request) {
     field_map: fixedFieldMap, header_signature: importHeaderSignature(sourceHeaders),
     status: payload.background === true ? "queued" : "processing",
     ingestion_mode: payload.background === true ? "background" : "browser",
+    import_protocol_version: payload.background === true ? 2 : 1,
     storage_object_path: payload.background === true ? payload.storageObjectPath : null,
     source_headers: sourceHeaders,
     file_size_bytes: payload.background === true ? Number(payload.fileSizeBytes ?? 0) : null,

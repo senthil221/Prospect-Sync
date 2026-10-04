@@ -1,6 +1,9 @@
 import { createRequire } from "node:module";
+import { spawn } from "node:child_process";
 import { finished } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
+import { fileURLToPath } from "node:url";
 
 if (process.env.IMPORT_FENCING_TEST_ALLOW !== "1") {
   throw new Error("Set IMPORT_FENCING_TEST_ALLOW=1 only for the disposable import-fencing database.");
@@ -27,6 +30,8 @@ const id = (label) => `import-fence-${tag}-${label}`;
 const worker = id("worker");
 const clientId = id("client");
 let stage = "setup";
+let workerProcess = null;
+let storageServer = null;
 
 const sleep = (milliseconds) => new Promise(resolve => setTimeout(resolve, milliseconds));
 const copyText = (value) => String(value).replaceAll("\\", "\\\\").replaceAll("\t", "\\t")
@@ -149,6 +154,18 @@ async function waitForBlock(waitingPid, blockerPid, label) {
     await sleep(20);
   }
   throw new Error(`${label} did not reach the PostgreSQL row-lock barrier`);
+}
+
+async function waitForCondition(check, label, timeoutMilliseconds = 30_000) {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (Date.now() < deadline) {
+    if (await check()) return;
+    if (workerProcess?.exitCode !== null && workerProcess?.exitCode !== undefined) {
+      throw new Error(`${label} stopped because the real worker exited ${workerProcess.exitCode}`);
+    }
+    await sleep(100);
+  }
+  throw new Error(`${label} timed out`);
 }
 
 try {
@@ -304,8 +321,19 @@ try {
   if (legacyHeartbeat.rows[0]?.ok !== true) throw new Error("legacy heartbeat stopped working for protocol 1");
   await service.query("select public.retry_prospect_import_v1($1,$2,'fixture',1,1)", [legacy.importId, id("legacy-worker")]);
   const browser = await createImport("browser", { mode: "browser", status: "processing" });
+  await pool.query("update public.imports set total_rows=1 where id=$1", [browser.importId]);
+  const browserBatch = await service.query("select * from public.import_prospect_batch_v5($1,$2,$3::jsonb,0)",
+    [browser.importId, browser.listId, JSON.stringify([payload(0, "browser")])]);
+  if (Number(browserBatch.rows[0]?.processed) !== 1) throw new Error("legacy browser People batch compatibility broke");
   const browserComplete = await service.query("select public.complete_prospect_import_v2($1,$2) result", [browser.importId, browser.listId]);
   if (browserComplete.rows[0]?.result?.summary?.status !== "completed") throw new Error("browser completion compatibility broke");
+  const companyImportId = id("company-import");
+  await pool.query(`insert into public.company_imports(id,file_name,data_source,status,total_rows)
+    values($1,'company.csv','Fixture','processing',1)`, [companyImportId]);
+  const companyBatch = await service.query("select * from public.import_company_batch_v2($1,$2::jsonb,0)", [companyImportId,
+    JSON.stringify([{ name: "Fence Company", normalizedName: `fence-company-${tag}`,
+      domain: `${tag}.company.test`, normalizedDomain: `${tag}.company.test`, sourceRowNumber: 2, raw: { fixture: true } }])]);
+  if (Number(companyBatch.rows[0]?.processed) !== 1) throw new Error("Company import compatibility broke");
   const guarded = await createImport("guarded");
   const guardedOwner = await roleClient();
   const guardedClaim = await claim(guardedOwner);
@@ -330,6 +358,138 @@ try {
       has_function_privilege('authenticated','prospect_import.claim_next_v2(text,integer)','EXECUTE') authenticated_claim`);
   if (Object.values(acl.rows[0]).some(Boolean)) throw new Error(`a fenced import bypass remains: ${JSON.stringify(acl.rows[0])}`);
 
+  stage = "real worker completes consecutive imports despite object cleanup failure";
+  const workerImportA = await createImport("worker-a", { verify: true, protocol: 2 });
+  const workerImportB = await createImport("worker-b", { verify: true, protocol: 2 });
+  const timeoutImport = await createImport("worker-timeout", { protocol: 2 });
+  const csvByPath = new Map([
+    [`/object/prospect-imports/fixture/${workerImportA.importId}.csv`, `Email\nworker-a-${tag}@example.test\n`],
+    [`/object/prospect-imports/fixture/${workerImportB.importId}.csv`, `Email\nworker-b-${tag}@example.test\n`],
+  ]);
+  const stalledPaths = new Set([`/object/prospect-imports/fixture/${timeoutImport.importId}.csv`]);
+  let stalledRequests = 0;
+  let cleanupRequests = 0;
+  storageServer = createServer((request, response) => {
+    if (request.method === "GET" && csvByPath.has(request.url ?? "")) {
+      response.writeHead(200, { "content-type": "text/csv" });
+      response.end(csvByPath.get(request.url ?? ""));
+      return;
+    }
+    if (request.method === "GET" && stalledPaths.has(request.url ?? "")) {
+      stalledRequests += 1;
+      response.writeHead(200, { "content-type": "text/csv" });
+      response.write("Email\n");
+      return;
+    }
+    if (request.method === "DELETE" && request.url === "/object/prospect-imports") {
+      cleanupRequests += 1;
+      response.writeHead(cleanupRequests === 1 ? 500 : 200, { "content-type": "application/json" });
+      response.end(cleanupRequests === 1 ? '{"error":"synthetic cleanup failure"}' : "{}");
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  await new Promise((resolve, reject) => {
+    storageServer.once("error", reject);
+    storageServer.listen(0, "127.0.0.1", resolve);
+  });
+  const address = storageServer.address();
+  if (!address || typeof address === "string") throw new Error("fake Storage did not bind a TCP port");
+  let workerOutput = "";
+  workerProcess = spawn(process.execPath, [fileURLToPath(new URL("../worker/import-worker.mjs", import.meta.url))], {
+    cwd: fileURLToPath(new URL("../", import.meta.url)),
+    env: {
+      ...process.env,
+      PGHOST: url.hostname === "[::1]" ? "::1" : url.hostname,
+      PGPORT: url.port || "5432",
+      PGUSER: decodeURIComponent(url.username),
+      PGPASSWORD: decodeURIComponent(url.password),
+      PGDATABASE: decodeURIComponent(url.pathname.slice(1)),
+      SUPABASE_SERVICE_ROLE_KEY: "synthetic-ci-key",
+      SUPABASE_STORAGE_URL: `http://127.0.0.1:${address.port}`,
+      IMPORT_BATCH_SIZE: "100",
+      IMPORT_STAGING_TIMEOUT: "8s",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  workerProcess.stdout.on("data", chunk => { workerOutput = `${workerOutput}${chunk}`.slice(-8_000); });
+  workerProcess.stderr.on("data", chunk => { workerOutput = `${workerOutput}${chunk}`.slice(-8_000); });
+  await waitForCondition(async () => {
+    const result = await pool.query("select id,status,completion_receipt from public.imports where id=any($1::text[]) order by id",
+      [[workerImportA.importId, workerImportB.importId]]);
+    return result.rows.length === 2 && result.rows.every(row => row.status === "completed" && row.completion_receipt);
+  }, "two consecutive real-worker imports", 45_000).catch(error => {
+    throw new Error(`${error.message}; worker output: ${workerOutput}`);
+  });
+  const workerVerification = await pool.query(`select r.source_import_id,count(distinct r.id)::int runs,
+      count(t.run_id)::int targets
+    from prospect_verification.runs r left join prospect_verification.run_targets t on t.run_id=r.id
+    where r.source_import_id=any($1::text[])
+    group by r.source_import_id order by r.source_import_id`, [[workerImportA.importId, workerImportB.importId]]);
+  if (workerVerification.rows.length !== 2
+      || workerVerification.rows.some(row => row.runs !== 1 || row.targets !== 1)) {
+    throw new Error(`real worker completion was not once-only: ${JSON.stringify(workerVerification.rows)}`);
+  }
+  if (cleanupRequests !== 2) throw new Error(`real worker made ${cleanupRequests} cleanup requests instead of two`);
+
+  stage = "real worker bounds a stalled Storage download";
+  await waitForCondition(async () => {
+    const result = await pool.query("select status,attempt_count,last_error from public.imports where id=$1", [timeoutImport.importId]);
+    const row = result.rows[0];
+    return row?.status === "queued" && Number(row.attempt_count) === 1 && Boolean(row.last_error);
+  }, "stalled download retry", 20_000).catch(error => {
+    throw new Error(`${error.message}; worker output: ${workerOutput}`);
+  });
+  if (stalledRequests !== 1) throw new Error(`stalled download opened ${stalledRequests} requests instead of one`);
+  const timeoutStage = await pool.query("select count(*)::int count from prospect_import.staged_rows_v2 where import_id=$1",
+    [timeoutImport.importId]);
+  if (timeoutStage.rows[0]?.count !== 0) throw new Error("a timed-out download published durable rows");
+
+  stage = "real worker rolls an active database batch back and releases the claim on shutdown";
+  const shutdownImport = await createImport("worker-shutdown", { protocol: 2 });
+  const shutdownEmail = `worker-shutdown-${tag}@example.test`;
+  csvByPath.set(`/object/prospect-imports/fixture/${shutdownImport.importId}.csv`, `Email\n${shutdownEmail}\n`);
+  const sleepFunction = `import_fencing_sleep_${tag}`;
+  const sleepTrigger = `import_fencing_sleep_trigger_${tag}`;
+  await pool.query(`create function public.${sleepFunction}() returns trigger language plpgsql as $body$
+    begin
+      if new.work_email = $email$${shutdownEmail}$email$ then perform pg_sleep(30); end if;
+      return new;
+    end $body$`);
+  await pool.query(`create trigger ${sleepTrigger} before insert on public.prospects
+    for each row execute function public.${sleepFunction}()`);
+  await waitForCondition(async () => {
+    const result = await pool.query(`select exists(select 1 from pg_stat_activity
+      where application_name='prospect-import-worker-v2' and state='active'
+        and query like '%process_staged_batch_v2%' and wait_event='PgSleep') sleeping`);
+    return result.rows[0]?.sleeping === true;
+  }, "active PostgreSQL batch before shutdown", 15_000).catch(error => {
+    throw new Error(`${error.message}; worker output: ${workerOutput}`);
+  });
+  const workerExit = new Promise(resolve => workerProcess.once("exit", (code, signal) => resolve({ code, signal })));
+  workerProcess.kill("SIGTERM");
+  const graceful = await Promise.race([workerExit, sleep(8_000).then(() => null)]);
+  if (!graceful || graceful.code !== 0) {
+    workerProcess.kill("SIGKILL");
+    throw new Error(`real worker did not shut down cleanly: ${JSON.stringify(graceful)}; output: ${workerOutput}`);
+  }
+  const shutdownState = await pool.query(`select i.status,i.worker_id,i.claim_token,i.lease_expires_at,
+      i.committed_row_offset,
+      exists(select 1 from public.prospects p where p.work_email=$2) prospect_exists,
+      (select count(*)::int from public.list_rows lr where lr.import_id=i.id) list_rows,
+      (select count(*)::int from prospect_import.staged_rows_v2 s where s.import_id=i.id) staged_rows
+    from public.imports i where i.id=$1`, [shutdownImport.importId, shutdownEmail]);
+  const shutdownRow = shutdownState.rows[0];
+  if (shutdownRow?.status !== "queued" || shutdownRow.worker_id !== null
+      || shutdownRow.claim_token !== null || shutdownRow.lease_expires_at !== null
+      || Number(shutdownRow.committed_row_offset) !== 0 || shutdownRow.prospect_exists
+      || shutdownRow.list_rows !== 0 || shutdownRow.staged_rows !== 1) {
+    throw new Error(`shutdown did not roll back and release the active batch: ${JSON.stringify(shutdownRow)}`);
+  }
+  workerProcess = null;
+  await new Promise(resolve => storageServer.close(resolve));
+  storageServer = null;
+
   await closeRoleClient(claimerA);
   await closeRoleClient(claimerB);
   process.stdout.write("Import fencing concurrency, recovery, completion, compatibility and ACL checks passed.\n");
@@ -339,6 +499,8 @@ try {
   process.stderr.write(`::error title=Import fencing contract::${stage}: ${safe.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A")}\n`);
   throw error;
 } finally {
+  if (workerProcess && workerProcess.exitCode === null) workerProcess.kill("SIGKILL");
+  if (storageServer) await new Promise(resolve => storageServer.close(resolve));
   await Promise.allSettled([...roleSessions].map(client => closeRoleClient(client)));
   await pool.end().catch(() => undefined);
 }

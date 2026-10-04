@@ -102,7 +102,28 @@ async function handleDELETE(request: Request, context: { params: Promise<{ id: s
       ? ["queued", "processing", "failed"].includes(existing.data.status)
       : existing.data.status === "processing";
     if (!cancellable) return Response.json({ error: "Only unfinished imports can be cancelled." }, { status: 409 });
-    if (existing.data.ingestion_mode === "background") backgroundObjectPath = existing.data.storage_object_path;
+    if (existing.data.ingestion_mode === "background") {
+      const cancelled = await supabase.rpc("cancel_background_prospect_import_v2", { p_import_id: id });
+      if (cancelled.error) {
+        const status = cancelled.error.code === "P0002" ? 404 : cancelled.error.code === "40001" ? 409 : 500;
+        return Response.json({ error: cancelled.error.message }, { status });
+      }
+      const result = cancelled.data as { result?: unknown; storageObjectPath?: unknown } | null;
+      backgroundObjectPath = String(result?.storageObjectPath ?? existing.data.storage_object_path ?? "") || null;
+      if (backgroundObjectPath) {
+        let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            supabase.storage.from("prospect-imports").remove([backgroundObjectPath]),
+            new Promise(resolve => { cleanupTimer = setTimeout(resolve, 5_000); }),
+          ]).catch(() => undefined);
+        } finally {
+          if (cleanupTimer) clearTimeout(cleanupTimer);
+        }
+      }
+      const deletion = result?.result ?? null;
+      return Response.json({ result: deletion, notice: queuedNotice(deletion) });
+    }
   }
 
   // Client-side deletes never touch the People/Company databases: only the
@@ -130,8 +151,11 @@ async function handlePATCH(_request: Request, context: { params: Promise<{ id: s
   const stored = await supabase.storage.from("prospect-imports").list(folder, { search: name, limit: 2 });
   if (stored.error) return Response.json({ error: stored.error.message }, { status: 500 });
   if (!stored.data.some((item) => item.name === name)) return Response.json({ error: "The original CSV is no longer available. Start a new import." }, { status: 409 });
-  const retried = await supabase.from("imports").update({ status: "queued", attempt_count: 0, next_attempt_at: new Date().toISOString(), last_error: null, worker_id: null, lease_expires_at: null }).eq("id", id).eq("status", "failed");
-  if (retried.error) return Response.json({ error: retried.error.message }, { status: 500 });
+  const retried = await supabase.rpc("requeue_background_prospect_import_v2", { p_import_id: id });
+  if (retried.error) {
+    const status = retried.error.code === "P0002" ? 404 : retried.error.code === "40001" ? 409 : 500;
+    return Response.json({ error: retried.error.message }, { status });
+  }
   return Response.json({ status: "queued" });
 }
 

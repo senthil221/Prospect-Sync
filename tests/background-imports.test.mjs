@@ -47,6 +47,33 @@ test("background import migration uses leases, skip-locked claiming and service-
   assert.match(sql, /grant execute on function public\.claim_next_prospect_import_v1[\s\S]*to service_role/i);
 });
 
+test("fenced background imports publish temporary COPY rows through a rotating claim", async () => {
+  const sql = await readFile(new URL("../supabase/migrations/20261004145556_fence_background_prospect_imports.sql", import.meta.url), "utf8");
+  assert.match(sql, /import_protocol_version smallint not null default 1/i);
+  assert.match(sql, /claim_token uuid/i);
+  assert.match(sql, /for update skip locked/i);
+  assert.match(sql, /p_temp_table regclass/i);
+  assert.match(sql, /relpersistence <> 't'/i);
+  assert.match(sql, /source_fingerprint/i);
+  assert.match(sql, /IMPORT_CLAIM_LOST/i);
+  assert.match(sql, /committed_row_offset<>v_import\.total_rows/i);
+  assert.match(sql, /revoke all on prospect_import\.staged_rows_v2[\s\S]*prospect_importer/i);
+  assert.doesNotMatch(sql, /grant (?:select|insert|update|delete)[^;]*staged_rows_v2/i);
+});
+
+test("background import API opts into v2 without exposing claim credentials", async () => {
+  const [startRoute, detailRoute] = await Promise.all([
+    readFile(new URL("../app/api/imports/start/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/imports/[id]/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(startRoute, /import_protocol_version: payload\.background === true \? 2 : 1/);
+  assert.match(detailRoute, /cancel_background_prospect_import_v2/);
+  assert.match(detailRoute, /requeue_background_prospect_import_v2/);
+  const getSelect = detailRoute.match(/\.select\("id,client_id,list_id[^\n]+/u)?.[0] ?? "";
+  assert.doesNotMatch(getSelect, /claim_token|completion_receipt/i);
+  assert.match(detailRoute, /setTimeout\(resolve, 5_000\)/);
+});
+
 test("deployment runs storage and one bounded import worker", async () => {
   const [compose, update, bootstrap, worker] = await Promise.all([
     readFile(new URL("../deploy/docker-compose.yml", import.meta.url), "utf8"),
@@ -80,8 +107,31 @@ test("deployment runs storage and one bounded import worker", async () => {
   const pool = Number(compose.match(/PGRST_DB_POOL: "(\d+)"/)?.[1]);
   assert.ok(pool >= 24, `PGRST_DB_POOL must stay >= 24 for headroom, found ${pool}`);
   assert.match(compose, /PGRST_DB_POOL_ACQUISITION_TIMEOUT: "10"/);
-  assert.match(worker, /copyFrom\("copy prospect_import\.staged_rows/);
-  assert.match(worker, /process_staged_batch_v1/);
+  assert.match(worker, /copyFrom\("copy prospect_import_stage_buffer/);
+  assert.match(worker, /publish_temp_stage_v2/);
+  assert.match(worker, /process_staged_batch_v2/);
+  assert.match(worker, /complete_claim_v2/);
+  assert.match(worker, /query_timeout: 10_000/);
+  assert.match(worker, /bindAbortToPgSession\(mergeClient, jobAbort\.signal\)/);
+  assert.match(worker, /await detachMergeAbort\(\)/);
+  assert.match(worker, /await importerClient[\s\S]*await failOrRetry/u);
+  assert.match(update, /pause_or_restore_fenced_import_worker/);
+  assert.match(update, /FENCED_IMPORT_WORKER_IMAGE_FILE/);
+});
+
+test("both rollback paths pause an unsafe import worker without claiming the app is fully ready", async () => {
+  const [update, health, compose] = await Promise.all([
+    readFile(new URL("../deploy/scripts/update.sh", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/health/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/docker-compose.yml", import.meta.url), "utf8"),
+  ]);
+  assert.match(update, /rollback_on_error\(\)[\s\S]*pause_or_restore_fenced_import_worker/u);
+  assert.match(update, /image_has_fenced_import_worker "\$NEW_IMAGE"[\s\S]*pause_or_restore_fenced_import_worker/u);
+  assert.match(update, /docker compose stop import-worker/u);
+  assert.match(health, /const workerChecks = \{ importWorker: checkImportWorker \}/u);
+  assert.match(health, /status: degraded\.length \? "degraded" : "ok"/u);
+  assert.match(health, /const failed = coreEntries/u);
+  assert.match(compose, /reports a paused import worker as degraded/u);
 });
 
 test("fast import staging is private and reuses the active resumable importer", async () => {

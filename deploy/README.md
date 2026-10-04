@@ -250,6 +250,15 @@ This means a failed rollout keeps serving the
 known-good application. SSH transport is retried without starting concurrent
 deployments.
 
+Background People imports use a database-fenced worker protocol. Once that
+schema is present, `update.sh --rollback` never recreates an older unfenced
+import worker. It retains the healthy protocol-2 worker recorded in
+`.fenced-import-worker-image`; if no compatible worker can be proven healthy,
+it pauses imports while the application rollback proceeds. Do not manually
+`docker compose up import-worker` with an older application image. Use a
+forward-fix, or restore the recorded compatible worker before resuming queued
+imports. Browser and Company imports remain backward compatible.
+
 ### 8. Turn on backups
 
 ```bash

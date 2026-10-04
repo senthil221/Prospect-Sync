@@ -21,6 +21,7 @@ if [[ -z "${VERIFICATION_WORKER_DB_PASSWORD:-}" ]]; then
 fi
 
 LAST_IMAGE_FILE=".last-image"
+FENCED_IMPORT_WORKER_IMAGE_FILE=".fenced-import-worker-image"
 ACTIVE_SLOT_FILE=".active-app-slot"
 LOCK_FILE=".deploy.lock"
 CADDY_TEMPLATE="caddy/Caddyfile"
@@ -62,6 +63,59 @@ container_healthy() {
 
 image_for_slot() {
   docker inspect --format '{{.Config.Image}}' "$(slot_container "$1")" 2>/dev/null || true
+}
+
+import_worker_image() {
+  docker inspect --format '{{.Config.Image}}' prospect-import-worker 2>/dev/null || true
+}
+
+image_has_fenced_import_worker() {
+  local image="$1"
+  [[ -n "$image" ]] || return 1
+  docker run --rm --entrypoint sh "$image" -c \
+    "grep -q 'const protocolVersion = 2' /app/worker/import-worker.mjs" >/dev/null 2>&1
+}
+
+running_fenced_import_worker() {
+  local image
+  container_healthy prospect-import-worker || return 1
+  image="$(import_worker_image)"
+  image_has_fenced_import_worker "$image"
+}
+
+fenced_import_schema_state() {
+  local state
+  state="$(docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" -e PGCONNECT_TIMEOUT=5 \
+    -e PGOPTIONS='-c statement_timeout=5s' db \
+    psql -tAq -U postgres -d "$POSTGRES_DB" -h 127.0.0.1 \
+      -c "select to_regprocedure('prospect_import.claim_next_v2(text,integer)') is not null" 2>/dev/null \
+    | tr -d '[:space:]' || true)"
+  case "$state" in
+    t) echo 1 ;;
+    f) echo 0 ;;
+    *) echo unknown ;;
+  esac
+}
+
+pause_or_restore_fenced_import_worker() {
+  local app_image="$APP_IMAGE" known=""
+  if running_fenced_import_worker; then
+    echo "==> Retaining the running fenced import worker across application rollback"
+    return 0
+  fi
+  if [[ -f "$FENCED_IMPORT_WORKER_IMAGE_FILE" ]]; then
+    known="$(tr -d '[:space:]' < "$FENCED_IMPORT_WORKER_IMAGE_FILE")"
+  fi
+  if image_has_fenced_import_worker "$known"; then
+    echo "==> Restoring the last known-good fenced import worker"
+    set_app_image "$known"
+    docker compose up -d --no-deps import-worker >/dev/null 2>&1 || true
+    set_app_image "$app_image"
+    if wait_for_container prospect-import-worker 18; then return 0; fi
+  fi
+  docker compose stop import-worker >/dev/null 2>&1 || true
+  echo "WARNING: imports are paused because no healthy fenced worker can safely process protocol-2 jobs." >&2
+  return 0
 }
 
 detect_active_slot() {
@@ -254,6 +308,10 @@ CANDIDATE_SERVICE="$(slot_service "$CANDIDATE_SLOT")"
 CANDIDATE_CONTAINER="$(slot_container "$CANDIDATE_SLOT")"
 TRAFFIC_SWITCHED=0
 CANDIDATE_STARTED=0
+FENCED_IMPORT_SCHEMA="$(fenced_import_schema_state)"
+if [[ "$FENCED_IMPORT_SCHEMA" == "unknown" ]] && running_fenced_import_worker; then
+  FENCED_IMPORT_SCHEMA=1
+fi
 
 # A retry after a lost SSH response may arrive after the first remote process
 # already completed. Do not bounce the same build through the other slot or
@@ -284,8 +342,12 @@ rollback_on_error() {
   fi
   if [[ -n "$PREVIOUS_IMAGE" && "$safe_to_stop_candidate" == "1" ]]; then
     set_app_image "$PREVIOUS_IMAGE"
-    docker compose up -d --no-deps import-worker >/dev/null 2>&1 \
-      || echo "WARNING: the previous import worker image could not be restored automatically." >&2
+    if [[ "$FENCED_IMPORT_SCHEMA" != "0" ]]; then
+      pause_or_restore_fenced_import_worker
+    else
+      docker compose up -d --no-deps import-worker >/dev/null 2>&1 \
+        || echo "WARNING: the previous import worker image could not be restored automatically." >&2
+    fi
     docker compose up -d --no-deps operations-worker >/dev/null 2>&1 \
       || echo "WARNING: the previous operations worker image could not be restored automatically." >&2
     docker compose stop verification-worker >/dev/null 2>&1 || true
@@ -332,14 +394,28 @@ docker compose exec -T -e VERIFICATION_WORKER_DB_PASSWORD db bash -s < postgres/
 
 echo "==> Applying pending backward-compatible migrations"
 ./scripts/migrate.sh
+FENCED_IMPORT_SCHEMA="$(fenced_import_schema_state)"
+if [[ "$FENCED_IMPORT_SCHEMA" != "1" ]]; then
+  echo "Could not prove the fenced import schema after migrations; imports will not be restarted." >&2
+  false
+fi
 
 echo "==> Starting and verifying the durable import worker on ${NEW_IMAGE}"
 docker compose up -d --no-deps app-router
-docker compose up -d --no-deps --pull always import-worker
-if ! wait_for_container prospect-import-worker 18; then
-  echo "Import worker did not become healthy. Last 80 log lines:" >&2
-  docker compose logs --tail 80 import-worker >&2 || true
-  rollback_on_error 1
+if [[ "$FENCED_IMPORT_SCHEMA" == "1" ]] && ! image_has_fenced_import_worker "$NEW_IMAGE"; then
+  echo "==> ${NEW_IMAGE} predates fenced imports; retaining the known-good worker or pausing imports"
+  pause_or_restore_fenced_import_worker
+else
+  docker compose up -d --no-deps --pull always import-worker
+  if ! wait_for_container prospect-import-worker 18; then
+    echo "Import worker did not become healthy. Last 80 log lines:" >&2
+    docker compose logs --tail 80 import-worker >&2 || true
+    rollback_on_error 1
+  fi
+  if [[ "$FENCED_IMPORT_SCHEMA" == "1" ]]; then
+    printf '%s\n' "$NEW_IMAGE" > "${FENCED_IMPORT_WORKER_IMAGE_FILE}.tmp"
+    mv "${FENCED_IMPORT_WORKER_IMAGE_FILE}.tmp" "$FENCED_IMPORT_WORKER_IMAGE_FILE"
+  fi
 fi
 
 # The operations worker builds durable result sets and runs retention. It starts
