@@ -70,6 +70,7 @@ declare
   v_with jsonb;
   v_without jsonb;
   v_case jsonb;
+  v_low_level jsonb;
   v_builder_sql text;
   v_prefilter_sql text;
   v_builder text[];
@@ -102,11 +103,13 @@ begin
   v_without := v_base || jsonb_build_array(jsonb_build_object(
     'field','__company_coverage','operator','equals','values',jsonb_build_array('without')));
 
-  -- The compiler, legacy matcher and candidate prefilter must partition this
-  -- client's complete, non-SEG companies identically. In particular,
+  -- The effective compiler and row matcher must partition the full question
+  -- identically. The prefilter is only a necessary condition: it may retain
+  -- extra candidates because completeness is added by the effective compiler,
+  -- but it must never discard an exact match. In particular,
   -- scope-global-not-a has a person globally but none for A.
   foreach v_case in array array[v_with, v_without] loop
-    v_builder_sql := public.company_filter_sql_v3('', v_case, false);
+    v_builder_sql := public.company_effective_filter_sql_v1('', v_case);
     v_prefilter_sql := public.company_prefilter_sql('', v_case);
     if nullif(btrim(v_builder_sql), '') is null then
       raise exception 'company filter compiler returned an empty predicate';
@@ -120,20 +123,49 @@ begin
       from public.companies c where public.company_matches_filters_v1(c, '', v_case);
     execute format('select coalesce(array_agg(c.id order by c.id), array[]::text[]) from public.companies c where %s',
       v_prefilter_sql) into v_prefilter;
+    if v_builder is distinct from v_matcher then
+      raise exception 'effective company compiler and matcher disagree: builder %, matcher %', v_builder, v_matcher;
+    end if;
+    if exists (
+      select company_id from unnest(v_builder) as exact_matches(company_id)
+      except
+      select company_id from unnest(v_prefilter) as candidates(company_id)
+    ) then
+      raise exception 'company prefilter dropped an exact result: builder %, prefilter %', v_builder, v_prefilter;
+    end if;
+
+    -- At the lower-level compiler boundary, origin and coverage are both
+    -- supported exact predicates. Prove compiler/matcher/prefilter equality
+    -- separately from the private completeness wrapper above.
+    select coalesce(jsonb_agg(value order by ordinal), '[]'::jsonb) into v_low_level
+    from jsonb_array_elements(v_case) with ordinality entries(value, ordinal)
+    where value->>'field' in ('__client_company_scope', '__company_coverage');
+    v_builder_sql := public.company_filter_sql_v3('', v_low_level, false);
+    v_prefilter_sql := public.company_prefilter_sql('', v_low_level);
+    if nullif(btrim(v_builder_sql), '') is null or nullif(btrim(v_prefilter_sql), '') is null then
+      raise exception 'lower-level client scope compiler returned an empty predicate';
+    end if;
+    execute format('select coalesce(array_agg(c.id order by c.id), array[]::text[]) from public.companies c where %s',
+      v_builder_sql) into v_builder;
+    select coalesce(array_agg(c.id order by c.id), array[]::text[]) into v_matcher
+      from public.companies c where public.company_matches_filters_v1(c, '', v_low_level);
+    execute format('select coalesce(array_agg(c.id order by c.id), array[]::text[]) from public.companies c where %s',
+      v_prefilter_sql) into v_prefilter;
     if v_builder is distinct from v_matcher or v_builder is distinct from v_prefilter then
-      raise exception 'company filter paths disagree: builder %, matcher %, prefilter %', v_builder, v_matcher, v_prefilter;
+      raise exception 'lower-level client scope paths disagree: builder %, matcher %, prefilter %',
+        v_builder, v_matcher, v_prefilter;
     end if;
   end loop;
 
   execute format('select coalesce(array_agg(c.id order by c.id), array[]::text[]) from public.companies c where %s',
-    public.company_filter_sql_v3('', v_base || jsonb_build_array(jsonb_build_object(
-      'field','__company_coverage','operator','equals','values',jsonb_build_array('with'))), false)) into v_builder;
+    public.company_effective_filter_sql_v1('', v_base || jsonb_build_array(jsonb_build_object(
+      'field','__company_coverage','operator','equals','values',jsonb_build_array('with'))))) into v_builder;
   if v_builder is distinct from array['scope-a-with','scope-shared']::text[] then
     raise exception 'client with-coverage mismatch: %', v_builder;
   end if;
   execute format('select coalesce(array_agg(c.id order by c.id), array[]::text[]) from public.companies c where %s',
-    public.company_filter_sql_v3('', v_base || jsonb_build_array(jsonb_build_object(
-      'field','__company_coverage','operator','equals','values',jsonb_build_array('without'))), false)) into v_builder;
+    public.company_effective_filter_sql_v1('', v_base || jsonb_build_array(jsonb_build_object(
+      'field','__company_coverage','operator','equals','values',jsonb_build_array('without'))))) into v_builder;
   if v_builder is distinct from array['scope-global-not-a','scope-nobody']::text[] then
     raise exception 'client without-coverage mismatch: %', v_builder;
   end if;

@@ -245,7 +245,7 @@ begin
 
   v_filters := '[{"field":"__client_company_scope","operator":"equals","values":["client''quoted"]}]'::jsonb;
   v_sql := public.company_filter_sql_v3('', v_filters, false);
-  if v_sql not like '%client''''quoted%' then
+  if v_sql is null or v_sql not like '%client''''quoted%' then
     raise exception 'client company scope was not literal-quoted: %', v_sql;
   end if;
 end;
