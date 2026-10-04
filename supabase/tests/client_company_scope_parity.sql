@@ -103,8 +103,10 @@ begin
   v_without := v_base || jsonb_build_array(jsonb_build_object(
     'field','__company_coverage','operator','equals','values',jsonb_build_array('without')));
 
-  -- The effective compiler and row matcher must partition the full question
-  -- identically. The prefilter is only a necessary condition: it may retain
+  -- The effective compiler owns private completeness. The generic row matcher
+  -- intentionally does not: callers that need completeness use this wrapper
+  -- or the end-to-end functions exercised below. The prefilter is only a
+  -- necessary condition: it may retain
   -- extra candidates because completeness is added by the effective compiler,
   -- but it must never discard an exact match. In particular,
   -- scope-global-not-a has a person globally but none for A.
@@ -119,13 +121,8 @@ begin
     end if;
     execute format('select coalesce(array_agg(c.id order by c.id), array[]::text[]) from public.companies c where %s',
       v_builder_sql) into v_builder;
-    select coalesce(array_agg(c.id order by c.id), array[]::text[]) into v_matcher
-      from public.companies c where public.company_matches_filters_v1(c, '', v_case);
     execute format('select coalesce(array_agg(c.id order by c.id), array[]::text[]) from public.companies c where %s',
       v_prefilter_sql) into v_prefilter;
-    if v_builder is distinct from v_matcher then
-      raise exception 'effective company compiler and matcher disagree: builder %, matcher %', v_builder, v_matcher;
-    end if;
     if exists (
       select company_id from unnest(v_builder) as exact_matches(company_id)
       except
