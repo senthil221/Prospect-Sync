@@ -77,7 +77,22 @@ do $$ begin
 end $$;`);
 
 for (const name of migrationNames) {
-  const sql = await readFile(new URL(name, migrationDir), "utf8");
+  let sql = await readFile(new URL(name, migrationDir), "utf8");
+  if (name === "20260926150000_indexes_are_reachable_and_background_work_waits.sql") {
+    // This historical migration ends with a live-data smoke at row 200,000.
+    // The reviewed disposable cursor fixture deliberately has 151 rows. Adapt
+    // only the two smoke offsets; all DDL and function bodies replay verbatim.
+    const smokeOffsets = [
+      ["offset 200000 limit 1", "offset 100 limit 1"],
+      ["offset 200001 limit 50", "offset 101 limit 50"],
+    ];
+    for (const [anchor, replacement] of smokeOffsets) {
+      if (sql.split(anchor).length !== 2) {
+        throw new Error(`${name} cursor smoke anchor changed: ${anchor}`);
+      }
+      sql = sql.replace(anchor, replacement);
+    }
+  }
   const meaningful = sql.split(/\r?\n/u).map(line => line.trim()).filter(line => line && !line.startsWith("--"));
   if (meaningful[0]?.toLowerCase() === "begin;" || meaningful.at(-1)?.toLowerCase() === "commit;") {
     throw new Error(`${name} must not own its transaction.`);

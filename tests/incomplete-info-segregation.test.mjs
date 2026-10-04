@@ -112,5 +112,8 @@ test("measured client-summary migration preserves grants and adds synthetic tran
   assert.match(fixture, /Keep-to-discard transition mismatch/);
   assert.match(runner, /cursor baseline differs from the reviewed deterministic fixture/);
   assert.match(runner, /where id not in \('cursor-client-a', 'cursor-client-b'\)/);
+  assert.match(runner, /offset 200000 limit 1/);
+  assert.match(runner, /offset 100 limit 1/);
+  assert.match(runner, /sql\.split\(anchor\)\.length !== 2/);
   assert.match(workflow, /production-hardening-contract:/);
 });
