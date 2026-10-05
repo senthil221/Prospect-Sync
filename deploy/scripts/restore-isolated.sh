@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 source "$(dirname "$0")/_env.sh"
 source "$(dirname "$0")/backup-status.sh"
 source "$(dirname "$0")/backup-offsite.sh"
+source "$(dirname "$0")/restore-platform.sh"
 load_env .env
 
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/prospect}"
@@ -237,11 +238,22 @@ write_backup_attempt running "$DRILL_PHASE" "$STAMP" "$STAMP" restore_drill
 restore_log="${WORK_DIR}/restore.log"
 : >"$restore_log"
 chmod 600 "$restore_log"
+# Every entry except the Supabase platform ones restore-platform.sh holds back.
+# manifest.txt is the archive's `pg_restore --list`, and
+# validate_local_backup_for_upload above proved it byte-identical.
+main_list="${WORK_DIR}/restore-main.list"
+late_list="${WORK_DIR}/restore-late.list"
+if ! restore_platform_split "$BACKUP/manifest.txt" "$main_list" "$late_list"; then
+  echo "Could not split the archive's table of contents." >&2
+  exit 1
+fi
+docker exec -i "$CONTAINER" sh -c 'cat > /tmp/restore-main.list' <"$main_list"
+docker exec -i "$CONTAINER" sh -c 'cat > /tmp/restore-late.list' <"$late_list"
 restore_started_epoch="$(date +%s)"
 set +e
 zstd -dc "$BACKUP/database.dump.zst" \
   | timeout --signal=TERM --kill-after=60 "$(remaining_deadline)s" docker exec -i -e "PGPASSWORD=${DRILL_PASSWORD}" "$CONTAINER" \
-      pg_restore -U supabase_admin -h 127.0.0.1 -d "$DRILL_DB" --jobs=1 --exit-on-error \
+      pg_restore -U supabase_admin -h 127.0.0.1 -d "$DRILL_DB" --jobs=1 --exit-on-error -L /tmp/restore-main.list \
       >"$restore_log" 2>&1
 restore_statuses=("${PIPESTATUS[@]}")
 set -e
@@ -259,6 +271,32 @@ if (( decompressor_status != 0 || pg_restore_status != 0 )); then
   if (( pg_restore_status != 0 )); then exit "$pg_restore_status"; else exit "$decompressor_status"; fi
 fi
 rm -f -- "$restore_log"
+
+# The held-back platform entries: rebuild graphql_public.graphql, then apply
+# them without ownership changes (restore-platform.sh says why).
+DRILL_PHASE="platform_restore"
+write_backup_attempt running "$DRILL_PHASE" "$STAMP" "$STAMP" restore_drill
+if [[ -s "$late_list" ]]; then
+  timeout --signal=TERM --kill-after=30 "$(bounded_deadline 120)s" docker exec -e "PGPASSWORD=${DRILL_PASSWORD}" "$CONTAINER" \
+    psql -X -v ON_ERROR_STOP=1 -U supabase_admin -h 127.0.0.1 -d "$DRILL_DB" -q -c "$RESTORE_PLATFORM_REBUILD_SQL" >/dev/null \
+    || { echo "Isolated restore could not rebuild the pg_graphql platform function." >&2; exit 1; }
+  : >"$restore_log"
+  set +e
+  zstd -dc "$BACKUP/database.dump.zst" \
+    | timeout --signal=TERM --kill-after=30 "$(bounded_deadline 600)s" docker exec -i -e "PGPASSWORD=${DRILL_PASSWORD}" "$CONTAINER" \
+        pg_restore -U supabase_admin -h 127.0.0.1 -d "$DRILL_DB" --exit-on-error --no-owner -L /tmp/restore-late.list \
+        >"$restore_log" 2>&1
+  late_statuses=("${PIPESTATUS[@]}")
+  set -e
+  if (( late_statuses[1] != 0 || (late_statuses[0] != 0 && late_statuses[0] != 141) )); then
+    printf 'Isolated restore of the held-back platform entries failed: category=%s pg_restore_status=%s. Raw restore output was suppressed.\n' \
+      "$(restore_failure_category "$restore_log" "${late_statuses[0]}" "${late_statuses[1]}" false)" "${late_statuses[1]}" >&2
+    rm -f -- "$restore_log"
+    exit 1
+  fi
+  rm -f -- "$restore_log"
+fi
+rm -f -- "$main_list" "$late_list"
 
 DRILL_PHASE="verify"
 write_backup_attempt running "$DRILL_PHASE" "$STAMP" "$STAMP" restore_drill

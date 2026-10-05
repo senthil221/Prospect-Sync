@@ -91,3 +91,44 @@ test("recovery documentation keeps status red until both external proofs exist",
   assert.match(runbook, /restore-isolated\.sh/);
   assert.match(runbook, /shares host disk I\/O with production/);
 });
+
+// The 2026-10-05 drill: a full restore into a template0 database stopped on two
+// Supabase platform entries. They are applied in a second pass, after pg_graphql
+// is recreated; everything else restores in the first pass, unchanged.
+test("restores hold back exactly the two Supabase platform entries for a second pass", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtempSync, readFileSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "restore-platform-"));
+  const toc = [
+    ";",
+    "; Archive created at 2026-10-05 03:26:31 UTC",
+    "7; 3079 16673 EXTENSION - pg_graphql ",
+    "3456; 1259 17000 TABLE public companies supabase_admin",
+    "5977; 0 0 ACL graphql_public FUNCTION graphql(\"operationName\" text, query text, variables jsonb, extensions jsonb) supabase_admin",
+    "4277; 3466 16613 EVENT TRIGGER - issue_pg_graphql_access supabase_admin",
+    "4276; 3466 16563 EVENT TRIGGER - issue_pg_net_access postgres",
+    "6001; 0 0 ACL public TABLE companies supabase_admin",
+  ].join("\n") + "\n";
+  writeFileSync(join(dir, "toc"), toc);
+  const run = spawnSync("bash", ["-c", 'source deploy/scripts/restore-platform.sh && restore_platform_split "$1/toc" "$1/main" "$1/late"', "bash", dir.replaceAll("\\", "/")],
+    { cwd: new URL("..", import.meta.url), encoding: "utf8" });
+  assert.equal(run.status, 0, run.stderr);
+  const late = readFileSync(join(dir, "late"), "utf8").trim().split("\n");
+  const main = readFileSync(join(dir, "main"), "utf8");
+  assert.deepEqual(late.map((line) => line.split(";")[0]), ["5977", "4276"]);
+  for (const kept of ["7;", "3456;", "4277;", "6001;"]) assert.ok(main.includes(`\n${kept}`), kept);
+  assert.ok(!main.includes("5977;") && !main.includes("4276;"));
+
+  const [platform, drill, restore] = await Promise.all([
+    read("../deploy/scripts/restore-platform.sh"),
+    read("../deploy/scripts/restore-isolated.sh"),
+    read("../deploy/scripts/restore.sh"),
+  ]);
+  assert.match(platform, /drop extension pg_graphql;\s*execute format\('create extension pg_graphql with schema %I', v_schema\);/);
+  assert.match(drill, /--exit-on-error -L \/tmp\/restore-main\.list/);
+  assert.match(drill, /--exit-on-error --no-owner -L \/tmp\/restore-late\.list/);
+  assert.match(drill, /-c "\$RESTORE_PLATFORM_REBUILD_SQL"/);
+  assert.equal((restore.match(/restore_archive_into "\$(SCRATCH|POSTGRES_DB)"/g) ?? []).length, 2);
+});

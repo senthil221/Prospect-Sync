@@ -145,6 +145,8 @@ case "$command_name" in
     joined=" $* "
     if [[ "$joined" == *" pg_isready "* ]]; then exit 0; fi
     if [[ "$joined" == *" du -sb /var/lib/postgresql/data "* ]]; then echo '1048576 /var/lib/postgresql/data'; exit 0; fi
+    # The restore lists (restore-platform.sh) copied into the container.
+    if [[ "$joined" == *" sh -c cat > /tmp/restore-"* ]]; then cat >/dev/null; exit 0; fi
     if [[ "$joined" == *" pg_restore "* ]]; then
       if [[ "${MOCK_MODE:-}" == restore_secret_sigpipe ]]; then
         printf '%s\n' 'pg_restore: error: ERROR: 42501: permission denied for table private_customer_rows' >&2

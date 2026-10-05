@@ -14,6 +14,7 @@ set -eEuo pipefail
 cd "$(dirname "$0")/.."
 source "$(dirname "$0")/_env.sh"
 source "$(dirname "$0")/restore-orchestration.sh"
+source "$(dirname "$0")/restore-platform.sh"
 load_env .env
 if [[ -z "${VERIFICATION_WORKER_DB_PASSWORD:-}" ]]; then
   echo "VERIFICATION_WORKER_DB_PASSWORD is required. Generate a dedicated value; do not reuse POSTGRES_PASSWORD." >&2
@@ -45,6 +46,41 @@ fi
 pg() { docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" db "$@"; }
 psql_as() { pg psql -X -v ON_ERROR_STOP=1 -U supabase_admin -h 127.0.0.1 "$@"; }
 psql_admin() { pg psql -X -v ON_ERROR_STOP=1 -U supabase_admin -h 127.0.0.1 "$@"; }
+
+# The whole archive into a fresh database, in two passes (restore-platform.sh
+# says why one pass cannot work on this image). Both pipelines that may end on
+# SIGPIPE run in subshells with the ERR trap cleared, so an expected 141 never
+# reaches restore_failed; a real failure returns 1 to the caller, which does.
+restore_archive_into() {
+  local target="$1" work
+  work="$(mktemp -d)"
+  if ! ( trap - ERR; set +eo pipefail
+         zstd -dc "${BACKUP}/database.dump.zst" | pg pg_restore -l >"${work}/toc" 2>/dev/null
+         exit "${PIPESTATUS[1]}" ) \
+     || ! restore_platform_split "${work}/toc" "${work}/main.list" "${work}/late.list"; then
+    rm -rf -- "$work"
+    echo "Could not read the archive's table of contents." >&2
+    return 1
+  fi
+  pg sh -c 'cat > /tmp/restore-main.list' <"${work}/main.list"
+  pg sh -c 'cat > /tmp/restore-late.list' <"${work}/late.list"
+  zstd -dc "${BACKUP}/database.dump.zst" \
+    | pg pg_restore -U supabase_admin -h 127.0.0.1 -d "$target" --exit-on-error -L /tmp/restore-main.list
+  if [[ -s "${work}/late.list" ]]; then
+    psql_admin -d "$target" -q -c "$RESTORE_PLATFORM_REBUILD_SQL" >/dev/null
+    if ! ( trap - ERR; set +eo pipefail
+           zstd -dc "${BACKUP}/database.dump.zst" \
+             | pg pg_restore -U supabase_admin -h 127.0.0.1 -d "$target" --exit-on-error --no-owner -L /tmp/restore-late.list
+           statuses=("${PIPESTATUS[@]}")
+           (( statuses[1] == 0 && (statuses[0] == 0 || statuses[0] == 141) )) ); then
+      rm -rf -- "$work"
+      echo "Restoring the held-back Supabase platform entries failed." >&2
+      return 1
+    fi
+  fi
+  pg rm -f /tmp/restore-main.list /tmp/restore-late.list >/dev/null 2>&1 || true
+  rm -rf -- "$work"
+}
 
 restore_globals() {
   local output unexpected
@@ -153,10 +189,10 @@ if [[ "$MODE" == "verify" ]]; then
   psql_admin -d postgres -q -c "create database ${SCRATCH} with template template0;"
 
   # This is intentionally a full archive restore: ownership and ACLs are part
-  # of recoverability. No selective list, --no-owner, --no-acl, warning filter,
-  # or globals/bootstrap replay is allowed in verification mode.
-  zstd -dc "${BACKUP}/database.dump.zst" \
-    | pg pg_restore -U supabase_admin -h 127.0.0.1 -d "$SCRATCH" --exit-on-error
+  # of recoverability. Every entry is restored; the only exceptions are the two
+  # Supabase platform entries restore_archive_into applies in a second pass
+  # (no --no-acl, no warning filter, no globals/bootstrap replay here).
+  restore_archive_into "$SCRATCH"
 
   echo
   echo "Running restored data and security checks."
@@ -263,8 +299,7 @@ RECOVERY_ACTIVE=1
 psql_as -d template1 -q -c "create database ${POSTGRES_DB} with template template0 owner ${database_owner_sql};"
 
 echo "Restoring data"
-zstd -dc "${BACKUP}/database.dump.zst" \
-  | pg pg_restore -U supabase_admin -h 127.0.0.1 -d "$POSTGRES_DB" --exit-on-error
+restore_archive_into "$POSTGRES_DB"
 
 echo "Re-applying role passwords and settings"
 docker compose exec -T -e VERIFICATION_WORKER_DB_PASSWORD db bash -s < postgres/init/00-prospect-bootstrap.sh

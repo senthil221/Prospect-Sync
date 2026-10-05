@@ -60,7 +60,12 @@ test("restore, rollback, Studio, and backup guards fail closed", async () => {
   assert.doesNotMatch(restore, /pg_restore[^\n]*\|\s*grep[^\n]*\|\| true/);
   assert.doesNotMatch(restore, /pg_restore[^\n]*--jobs/);
   assert.ok((restore.match(/-U supabase_admin[^\n]*--exit-on-error/g) ?? []).length >= 2);
-  assert.doesNotMatch(restore, /pg_restore[^\n]*--no-owner|pg_restore[^\n]*--no-acl/);
+  // Ownership is restored everywhere except the held-back Supabase platform
+  // pass, where an event trigger owned by the non-superuser postgres cannot be
+  // recreated verbatim (deploy/scripts/restore-platform.sh).
+  const platformPass = /pg_restore[^\n]*--no-owner -L \/tmp\/restore-late\.list/g;
+  assert.equal((restore.match(platformPass) ?? []).length, 1);
+  assert.doesNotMatch(restore.replace(platformPass, ""), /pg_restore[^\n]*--no-owner|pg_restore[^\n]*--no-acl/);
   assert.match(restore, /create database \$\{SCRATCH\} with template template0/);
   assert.match(restore, /EXTENSION - pg_cron/);
   assert.match(restore, /scratch_present/);
