@@ -333,7 +333,7 @@ test("client page-first renders before a count and pages by hasMore without trea
   expect(pageTwoParams.get("cursor")).toBe(issuedProspectCursor("page-first", 1));
 
   await panel.getByRole("button", { name: "Select all matching records" }).click();
-  await expect(panel.getByText(/All matching records selected/)).toBeVisible();
+  await expect(panel.getByRole("button", { name: "All matching records selected", exact: true })).toBeVisible();
   await panel.getByRole("button", { name: /Export selected/ }).click();
   await expect(page.getByText("All matching records · total not counted")).toBeVisible();
   await page.getByLabel("All matching prospects").check();
@@ -341,7 +341,7 @@ test("client page-first renders before a count and pages by hasMore without trea
   await page.getByRole("button", { name: "Close", exact: true }).click();
 
   await panel.getByRole("button", { name: "Count all matches" }).click();
-  await expect(panel.getByText("75 matched when counted")).toBeVisible();
+  await expect(panel.locator(".results-count > strong")).toHaveText("75 matched when counted");
   await expect(panel.getByText(/Page 1$/)).toBeVisible();
 });
 
