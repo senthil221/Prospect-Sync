@@ -21,7 +21,10 @@ insert into public.companies(
   ('keyword-index-description', 'Description Match', 'description match', 'kw-description.test', 'kw-description.test', array['finance'], 'Builds BLOCKCHAIN infrastructure', 'Mailbox provider'),
   ('keyword-index-tag', 'Tag Match', 'tag match', 'kw-tag.test', 'kw-tag.test', array['Blockchain'], 'Ordinary profile', 'Mailbox provider'),
   ('keyword-index-duplicate', 'Duplicate blockchain', 'duplicate blockchain', 'kw-duplicate.test', 'kw-duplicate.test', array['blockchain'], 'blockchain twice', 'Mailbox provider'),
-  ('keyword-index-null', 'Null Profile', 'null profile', 'kw-null.test', 'kw-null.test', null, null, 'Mailbox provider'),
+  -- Production models missing keyword/description data with schema-valid empty
+  -- values; both columns are NOT NULL. The companyless person below covers a
+  -- genuinely missing company join.
+  ('keyword-index-null', 'Blank Profile', 'blank profile', 'kw-null.test', 'kw-null.test', '{}'::text[], '', 'Mailbox provider'),
   ('keyword-index-special', 'Pipe|Blockchain 100%', 'pipe blockchain 100', 'kw-special.test', 'kw-special.test', array['pipe|blockchain'], 'Literal under_score and back\\slash', 'Mailbox provider'),
   ('keyword-index-seg', 'Blockchain SEG', 'blockchain seg', 'kw-seg.test', 'kw-seg.test', array['blockchain'], 'Complete SEG profile', 'SEG'),
   ('keyword-index-incomplete', 'Blockchain Incomplete', 'blockchain incomplete', '', '', '{}'::text[], '', 'Mailbox provider');
