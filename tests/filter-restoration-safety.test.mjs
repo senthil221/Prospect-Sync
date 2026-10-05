@@ -87,7 +87,8 @@ test('malformed requests return 400 and the browser guards query, prefetch and U
   assert.match(app, /active: !restoreError && section === "prospects"/);
   assert.match(app, /active: !restoreError && section === "companies"/);
   assert.match(app, /if \(restoreError\) return; \/\/ Preserve/);
-  assert.match(app, /setRestoreError\(restored.restoreError \?\? ''\);\s*if \(restored.restoreError\) return;/);
+  assert.match(app, /setRestoreError\(restored.restoreError \?\? ''\);\s*if \(restored.restoreError\) \{ closeClientWorkspace\(\); return; \}/);
+  assert.match(app, /initial\.section === "clients" && !initial\.restoreError \? initial\.clientId : ""/);
   assert.match(app, /const prefetchSection = useCallback\(\(next: Section\) => \{\s*if \(restoreError\) return;/);
   assert.match(app, /if \(restoreError\) return <main/);
   assert.match(app, /Clear this link and start a new search/);

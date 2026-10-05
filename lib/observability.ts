@@ -41,11 +41,15 @@ const prospectQueryFamilies = new Set([
   "company_scoped", "max_people_cap",
 ] as const);
 const prospectQueryPhases = new Set(["authorization", "preparation", "workspace", "metadata"] as const);
+const clientSummaryScopes = new Set(["directory", "single"] as const);
+const clientSummaryPhases = new Set(["counts", "metadata"] as const);
 const queryPhaseOutcomes = new Set(["ok", "pending", "client_error", "timed_out", "cancelled", "error"] as const);
 
 export type ProspectQueryFamily = typeof prospectQueryFamilies extends Set<infer T> ? T : never;
 export type ProspectQueryPhase = typeof prospectQueryPhases extends Set<infer T> ? T : never;
 export type QueryPhaseOutcome = typeof queryPhaseOutcomes extends Set<infer T> ? T : never;
+export type ClientSummaryScope = typeof clientSummaryScopes extends Set<infer T> ? T : never;
+export type ClientSummaryPhase = typeof clientSummaryPhases extends Set<infer T> ? T : never;
 
 // Coarse, mutually-exclusive labels only. Never put search text, client IDs,
 // filter fields/values or saved-set IDs into a metric label: all of those are
@@ -82,13 +86,9 @@ function rowBucket(rows: number | undefined) {
 // through the already-authenticated health payload. It deliberately records no
 // request ID or query material. This is enough to build a before/after baseline
 // without turning observability into a second prospect database.
-export function recordQueryPhase(family: ProspectQueryFamily, phase: ProspectQueryPhase,
-  outcome: QueryPhaseOutcome, durationMs: number, rows?: number) {
-  if (!prospectQueryFamilies.has(family) || !prospectQueryPhases.has(phase) || !queryPhaseOutcomes.has(outcome)) {
-    return; // Labels are code-owned; never admit arbitrary caller input.
-  }
+function recordPhase(key: string, outcome: QueryPhaseOutcome, durationMs: number, rows?: number) {
   durationMs = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 0;
-  const key = `${family}:${phase}:${outcome}`;
+  key = `${key}:${outcome}`;
   queryPhaseTotals.set(key, (queryPhaseTotals.get(key) ?? 0) + 1);
   const buckets = queryPhaseHistograms.get(key) ?? Array(histogramBounds.length + 1).fill(0);
   const index = histogramBounds.findIndex(bound => durationMs <= bound);
@@ -101,6 +101,23 @@ export function recordQueryPhase(family: ProspectQueryFamily, phase: ProspectQue
     counts[bucket] = (counts[bucket] ?? 0) + 1;
     queryPhaseRows.set(key, counts);
   }
+}
+
+export function recordQueryPhase(family: ProspectQueryFamily, phase: ProspectQueryPhase,
+  outcome: QueryPhaseOutcome, durationMs: number, rows?: number) {
+  if (!prospectQueryFamilies.has(family) || !prospectQueryPhases.has(phase) || !queryPhaseOutcomes.has(outcome)) {
+    return; // Labels are code-owned; never admit arbitrary caller input.
+  }
+  recordPhase(`${family}:${phase}`, outcome, durationMs, rows);
+}
+
+// Client-summary labels are fixed enums. Client ids, names and cache payloads
+// must never become metric dimensions; this answers only whether directory or
+// single-client count/metadata work is slow.
+export function recordClientSummaryPhase(scope: ClientSummaryScope, phase: ClientSummaryPhase,
+  outcome: QueryPhaseOutcome, durationMs: number, rows?: number) {
+  if (!clientSummaryScopes.has(scope) || !clientSummaryPhases.has(phase) || !queryPhaseOutcomes.has(outcome)) return;
+  recordPhase(`client_summary_${scope}:${phase}`, outcome, durationMs, rows);
 }
 
 function bump(key: string, by = 1) {

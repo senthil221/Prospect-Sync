@@ -1,27 +1,94 @@
 import { authorizeApi } from "../../../../lib/auth";
+import { boundedDatabaseAbortResponse, databaseErrorResponse } from "../../../../lib/api-errors.ts";
+import { clientSummarySignals, observeClientSummaryQuery } from "../../../../lib/client-summary-query.ts";
 import { deleteAndReindex, queuedNotice } from "../../../../lib/delete-cleanup.ts";
 import { createAdminClient } from "../../../../lib/supabase/admin";
 import { observed } from "../../../../lib/observability.ts";
 
-async function handleGET(_request: Request, context: { params: Promise<{ id: string }> }) {
-  const unauthorized = await authorizeApi();
+type ClientDetailDependencies = {
+  authorize: typeof authorizeApi;
+  admin: typeof createAdminClient;
+  signals: typeof clientSummarySignals;
+};
+
+const clientDetailDependencies: ClientDetailDependencies = {
+  authorize: authorizeApi,
+  admin: createAdminClient,
+  signals: clientSummarySignals,
+};
+
+async function getClientDetail(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+  dependencies: ClientDetailDependencies = clientDetailDependencies,
+) {
+  const unauthorized = await dependencies.authorize();
   if (unauthorized) return unauthorized;
   const { id } = await context.params;
-  const supabase = createAdminClient();
-  const [summary, setting, folder] = await Promise.all([
-    supabase.rpc("client_summaries_v1", { p_client_id: id }),
-    supabase.from("client_settings").select("cooldown_days,seg_emails").eq("client_id", id).maybeSingle(),
-    supabase.from("clients").select("folder_id").eq("id", id).maybeSingle(),
-  ]);
+  const supabase = dependencies.admin();
+  const { callerSignal, deadlineSignal, signal } = dependencies.signals(request.signal);
+  let summary;
+  let setting;
+  let folder;
+  try {
+    [summary, setting, folder] = await Promise.all([
+      observeClientSummaryQuery("single", "counts",
+        supabase.rpc("client_summaries_v1", { p_client_id: id }).abortSignal(signal),
+        callerSignal, deadlineSignal),
+      observeClientSummaryQuery("single", "metadata",
+        supabase.from("client_settings").select("cooldown_days,seg_emails").eq("client_id", id).maybeSingle().abortSignal(signal),
+        callerSignal, deadlineSignal),
+      observeClientSummaryQuery("single", "metadata",
+        supabase.from("clients").select("folder_id").eq("id", id).maybeSingle().abortSignal(signal),
+        callerSignal, deadlineSignal),
+    ]);
+  } catch (error) {
+    const bounded = boundedDatabaseAbortResponse({
+      callerSignal, deadlineSignal, error: error as { code?: string; message?: string },
+      subject: "This client summary",
+      alternative: "Return to the Clients directory, then retry this client.",
+    });
+    return bounded ?? databaseErrorResponse("The client summary", error as { code?: string; message?: string });
+  }
   const error = summary.error ?? setting.error ?? folder.error;
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) {
+    const bounded = boundedDatabaseAbortResponse({
+      callerSignal,
+      deadlineSignal,
+      error,
+      subject: "This client summary",
+      alternative: "Return to the Clients directory, then retry this client.",
+    });
+    return bounded ?? databaseErrorResponse("The client summary", error);
+  }
   const client = ((summary.data ?? []) as Array<{ id: string; folder_id: string | null }>)[0];
   if (!client) return Response.json({ error: "Client not found." }, { status: 404 });
   const folderId = folder.data?.folder_id ?? client.folder_id ?? null;
-  const folderName = folderId
-    ? await supabase.from("client_folders").select("name").eq("id", folderId).maybeSingle()
-    : null;
-  if (folderName?.error) return Response.json({ error: folderName.error.message }, { status: 500 });
+  let folderName = null;
+  try {
+    folderName = folderId
+      ? await observeClientSummaryQuery("single", "metadata",
+        supabase.from("client_folders").select("name").eq("id", folderId).maybeSingle().abortSignal(signal),
+        callerSignal, deadlineSignal)
+      : null;
+  } catch (error) {
+    const bounded = boundedDatabaseAbortResponse({
+      callerSignal, deadlineSignal, error: error as { code?: string; message?: string },
+      subject: "This client summary",
+      alternative: "Return to the Clients directory, then retry this client.",
+    });
+    return bounded ?? databaseErrorResponse("The client folder metadata", error as { code?: string; message?: string });
+  }
+  if (folderName?.error) {
+    const bounded = boundedDatabaseAbortResponse({
+      callerSignal,
+      deadlineSignal,
+      error: folderName.error,
+      subject: "This client summary",
+      alternative: "Return to the Clients directory, then retry this client.",
+    });
+    return bounded ?? databaseErrorResponse("The client folder metadata", folderName.error);
+  }
   return Response.json({
     client: {
       ...client,
@@ -31,6 +98,10 @@ async function handleGET(_request: Request, context: { params: Promise<{ id: str
       seg_emails: setting.data?.seg_emails ?? "keep",
     },
   }, { headers: { "Cache-Control": "no-store" } });
+}
+
+async function handleGET(request: Request, context: { params: Promise<{ id: string }> }) {
+  return getClientDetail(request, context);
 }
 
 async function handlePATCH(request: Request, context: { params: Promise<{ id: string }> }) {

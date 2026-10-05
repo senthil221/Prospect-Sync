@@ -17,12 +17,13 @@ const migrationDir = new URL("../supabase/migrations/", import.meta.url);
 const migrationNames = (await readdir(migrationDir))
   .filter(name => /^\d+_.+\.sql$/u.test(name) && name > "20260926083856_prospect_people_cursor_v1.sql")
   .sort();
-const expected = "20261004004258_inline_client_summary_ctes.sql";
+const expected = "20261005073357_scope_single_client_summary_cache_miss.sql";
 if (!migrationNames.includes(expected)) throw new Error(`Expected ${expected} in the forward validation chain.`);
 const fixture = await readFile(new URL("../supabase/tests/client_summary_inline_parity.sql", import.meta.url), "utf8");
 const clientCompanyFixture = await readFile(new URL("../supabase/tests/client_company_scope_parity.sql", import.meta.url), "utf8");
 const storedCountAuthorityFixture = await readFile(new URL("../supabase/tests/client_company_stored_count_authority.sql", import.meta.url), "utf8");
 const cappedCompanyFixture = await readFile(new URL("../supabase/tests/client_company_capped_pagination.sql", import.meta.url), "utf8");
+const scopedClientSummaryFixture = await readFile(new URL("../supabase/tests/client_summary_scoped_cache.sql", import.meta.url), "utf8");
 
 const psqlEnv = {
   PATH: process.env.PATH,
@@ -134,4 +135,5 @@ psql("client company listing, stream, pivot and selection parity", `begin; set l
 psql("client company stored-count write-path authority", `begin; set local statement_timeout='2min';\n${storedCountAuthorityFixture}\nrollback;`);
 psql("client company capped pagination and complete export", `begin; set local statement_timeout='5min';\n${cappedCompanyFixture}\nrollback;`, 330_000);
 psql("client-summary SEG, incomplete and transition parity", `begin; set local statement_timeout='2min';\n${fixture}\nrollback;`);
-process.stdout.write(`Applied ${migrationNames.length} additive migrations and passed client company count authority, cap, export and summary parity.\n`);
+psql("client-summary scoped cache miss and mutation parity", `begin; set local statement_timeout='2min';\n${scopedClientSummaryFixture}\nrollback;`);
+process.stdout.write(`Applied ${migrationNames.length} additive migrations and passed client company count authority, cap, export and scoped-summary parity.\n`);

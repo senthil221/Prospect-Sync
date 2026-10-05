@@ -245,7 +245,7 @@ jobs:
       - name: Verify navigation and Company DB filter behavior
         env:
           E2E_FIXTURE_SUITE: "1"
-        run: npm run test:e2e -- mobile-nav-fixture company-workspace-fixture
+        run: npm run test:e2e -- mobile-nav-fixture company-workspace-fixture client-navigation-fixture
 
   migration-guard:
     name: Migration guard

@@ -1,26 +1,75 @@
 import { authorizeApi } from "../../../lib/auth";
+import { boundedDatabaseAbortResponse, databaseErrorResponse } from "../../../lib/api-errors.ts";
+import { clientSummarySignals, observeClientSummaryQuery } from "../../../lib/client-summary-query.ts";
 import { normalizeText } from "../../../db/normalize";
 import { createAdminClient } from "../../../lib/supabase/admin";
 import { observed } from "../../../lib/observability";
 
-async function handleGET() {
-  const unauthorized = await authorizeApi();
+type ClientDirectoryDependencies = {
+  authorize: typeof authorizeApi;
+  admin: typeof createAdminClient;
+  signals: typeof clientSummarySignals;
+};
+
+const clientDirectoryDependencies: ClientDirectoryDependencies = {
+  authorize: authorizeApi,
+  admin: createAdminClient,
+  signals: clientSummarySignals,
+};
+
+async function getClientDirectory(
+  request: Request,
+  dependencies: ClientDirectoryDependencies = clientDirectoryDependencies,
+) {
+  const unauthorized = await dependencies.authorize();
   if (unauthorized) return unauthorized;
-  const supabase = createAdminClient();
-  const [summaries, settings, folders] = await Promise.all([
-    // Cached until memberships or company text change (20260930250000).
-    supabase.rpc("client_summaries_v1", { p_client_id: null }),
-    supabase.from("client_settings").select("client_id,cooldown_days,seg_emails"),
-    supabase.from("client_folders").select("id,name,created_at").order("name"),
-  ]);
+  const supabase = dependencies.admin();
+  const { callerSignal, deadlineSignal, signal } = dependencies.signals(request.signal);
+  let summaries;
+  let settings;
+  let folders;
+  try {
+    [summaries, settings, folders] = await Promise.all([
+      // Cached until memberships or company text change (20260930250000).
+      observeClientSummaryQuery("directory", "counts",
+        supabase.rpc("client_summaries_v1", { p_client_id: null }).abortSignal(signal),
+        callerSignal, deadlineSignal),
+      observeClientSummaryQuery("directory", "metadata",
+        supabase.from("client_settings").select("client_id,cooldown_days,seg_emails").abortSignal(signal),
+        callerSignal, deadlineSignal),
+      observeClientSummaryQuery("directory", "metadata",
+        supabase.from("client_folders").select("id,name,created_at").order("name").abortSignal(signal),
+        callerSignal, deadlineSignal),
+    ]);
+  } catch (error) {
+    const bounded = boundedDatabaseAbortResponse({
+      callerSignal, deadlineSignal, error: error as { code?: string; message?: string },
+      subject: "The client directory",
+      alternative: "Open a specific client instead.",
+    });
+    return bounded ?? databaseErrorResponse("The client directory", error as { code?: string; message?: string });
+  }
   const error = summaries.error ?? settings.error ?? folders.error;
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) {
+    const bounded = boundedDatabaseAbortResponse({
+      callerSignal,
+      deadlineSignal,
+      error,
+      subject: "The client directory",
+      alternative: "Open a specific client instead.",
+    });
+    return bounded ?? databaseErrorResponse("The client directory", error);
+  }
   const settingsByClient = new Map((settings.data ?? []).map((setting) => [setting.client_id, setting]));
   const folderNames = new Map((folders.data ?? []).map((folder) => [folder.id, folder.name]));
   return Response.json({
     clients: ((summaries.data ?? []) as Array<{ id: string; folder_id: string | null }>).map((client) => ({ ...client, folder_name: client.folder_id ? folderNames.get(client.folder_id) ?? null : null, cooldown_days: settingsByClient.get(client.id)?.cooldown_days ?? 90, seg_emails: settingsByClient.get(client.id)?.seg_emails ?? "keep" })),
     folders: folders.data ?? [],
   });
+}
+
+async function handleGET(request: Request) {
+  return getClientDirectory(request);
 }
 
 async function handlePOST(request: Request) {

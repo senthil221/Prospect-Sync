@@ -7,6 +7,7 @@ import { api, companyApiPath, encodeFilters, prefetchApi, prospectApiPath } from
 import { initials } from "../lib/dashboard-helpers";
 import { scopeRestricts, type CompanyScope, type PeopleScope } from "../lib/workspace-scopes";
 import { readWorkspaceUrl, writeWorkspaceUrl, type WorkspaceUrlState } from "../lib/workspace-url";
+import { useClientWorkspaceLoader } from "../lib/use-client-workspace-loader";
 import { emptyStats, type ClientRecord, type DeleteRequest, type ImportRecord, type ListRecord, type Prospect, type ProspectFilter, type Section } from "../lib/types";
 import CompaniesWorkspace, { useCompaniesWorkspaceController } from "./components/CompaniesWorkspace";
 import { AppIcon, DeleteConfirmation, LoadingState, ProspectDrawer, type IconName } from "./components/DashboardUi";
@@ -114,9 +115,15 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
   const [stats, setStats] = useState(emptyStats);
   const [recentImports, setRecentImports] = useState<ImportRecord[]>([]);
   const [clients, setClients] = useState<ClientRecord[]>([]);
-  const [lists, setLists] = useState<ListRecord[]>([]);
-  const [selectedClient, setSelectedClient] = useState<ClientRecord | null>(null);
-  const [selectedList, setSelectedList] = useState<ListRecord | null>(null);
+  const initialClientId = initial.section === "clients" && !initial.restoreError ? initial.clientId : "";
+  const initialListId = initialClientId ? initial.listId : "";
+  const clientWorkspace = useClientWorkspaceLoader(initialClientId, initialListId);
+  const {
+    requestedClientId, requestedListId, selectedClient, selectedList, lists,
+    request: requestClientWorkspace, closeList: closeClientList, closeClient: closeClientWorkspace,
+    isCurrent: isCurrentClientWorkspace,
+    setSelectedClient, setLists,
+  } = clientWorkspace;
   // A pivot requested from the List workspace ("See People"/"See Companies"),
   // consumed once by ClientDetail at the mount that follows closing the list -
   // going through ListsPanel always unmounts ClientDetail and remounts it fresh,
@@ -156,8 +163,8 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
   const urlState: WorkspaceUrlState = useMemo(() => ({
     section,
     search,
-    clientId: selectedClient?.id ?? "",
-    listId: selectedList?.id ?? "",
+    clientId: requestedClientId,
+    listId: requestedListId,
     prospectPage: prospectsController.page,
     companyPage: companiesController.page,
     sort: prospectSort,
@@ -166,7 +173,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
     companyFilters,
     companyPeopleScope,
     peopleCompanyScope,
-  }), [section, search, selectedClient, selectedList, prospectsController.page, companiesController.page,
+  }), [section, search, requestedClientId, requestedListId, prospectsController.page, companiesController.page,
        prospectSort, prospectDirection, prospectFilters, companyFilters, companyPeopleScope, peopleCompanyScope]);
 
   // Written with the native History API, which is what Next documents for
@@ -200,7 +207,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
       lastRestoredLocation.current = window.location.href;
       const restored = readWorkspaceUrl(new URLSearchParams(window.location.search), window.location.hash);
       setRestoreError(restored.restoreError ?? '');
-      if (restored.restoreError) return;
+      if (restored.restoreError) { closeClientWorkspace(); return; }
       restoring.current = true;
       const restoredSection = restored.section === "logs" && !isAdmin ? "overview" : restored.section;
       lastSection.current = restoredSection;
@@ -214,8 +221,8 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
       setPeopleCompanyScope(restored.peopleCompanyScope);
       setProspectPage(restored.prospectPage);
       setCompanyPage(restored.companyPage);
-      setSelectedClient((current) => (current?.id === restored.clientId ? current : clients.find((client) => client.id === restored.clientId) ?? null));
-      if (!restored.listId) setSelectedList(null);
+      if (restoredSection === "clients") requestClientWorkspace(restored.clientId, restored.listId);
+      else closeClientWorkspace();
     };
     window.addEventListener("popstate", onPopState);
     window.addEventListener("hashchange", onPopState);
@@ -223,7 +230,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
       window.removeEventListener("popstate", onPopState);
       window.removeEventListener("hashchange", onPopState);
     };
-  }, [clients, isAdmin, setProspectPage, setCompanyPage]);
+  }, [closeClientWorkspace, isAdmin, requestClientWorkspace, setProspectPage, setCompanyPage]);
 
   const encodedProspectFilters = useMemo(() => encodeFilters(prospectFilters), [prospectFilters]);
 
@@ -256,10 +263,10 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
   }, []);
 
   useEffect(() => {
-    if (restoreError) return;
+    if (restoreError || !clientWorkspace.initialResolutionComplete) return;
     const timer = window.setTimeout(() => { void refreshDashboard().finally(() => setLoading(false)); }, 0);
     return () => window.clearTimeout(timer);
-  }, [refreshDashboard, restoreError]);
+  }, [clientWorkspace.initialResolutionComplete, refreshDashboard, restoreError]);
 
   useEffect(() => {
     if (loading) return;
@@ -268,32 +275,20 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
   }, [loading, prefetchSection]);
 
   const openClient = useCallback(async (client: ClientRecord) => {
-    setSelectedClient(client);
     prefetchApi(prospectApiPath({ clientId: client.id }));
     prefetchApi(companyApiPath({ clientId: client.id }));
-    const data = await api<{ lists: ListRecord[] }>(`/api/lists?clientId=${encodeURIComponent(client.id)}`);
-    setLists(data.lists);
-  }, []);
-
-  // A client in the URL is an id; it becomes a selection once the directory has
-  // loaded, which is why this cannot happen in the initial state above.
-  const restoredClient = useRef(false);
-  useEffect(() => {
-    if (restoreError || restoredClient.current || !initial.clientId || !clients.length) return;
-    restoredClient.current = true;
-    const match = clients.find((client) => client.id === initial.clientId);
-    if (match) void Promise.resolve().then(() => openClient(match));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clients, restoreError]);
+    requestClientWorkspace(client.id, "", client);
+  }, [requestClientWorkspace]);
 
   const navigate = useCallback((next: Section) => {
     pivotOrigin.current = null;
     peopleBeforePivot.current = null; companiesBeforePivot.current = null;
-    setSection(next); setSearch(""); setError(""); setWorkspaceLoading(false); setProspectPage(1); setCompanyPage(1); setSelectedList(null);
+    setSection(next); setSearch(""); setError(""); setWorkspaceLoading(false); setProspectPage(1); setCompanyPage(1);
     if (next === "prospects") setCompanyPeopleScope(null);
     if (next === "companies") setPeopleCompanyScope(null);
-    if (next !== "clients") setSelectedClient(null);
-  }, [setCompanyPage, setProspectPage]);
+    if (next !== "clients") closeClientWorkspace();
+    else closeClientList();
+  }, [closeClientList, closeClientWorkspace, setCompanyPage, setProspectPage]);
 
   const openImportedDestination = useCallback(async (destination?: ImportDestination) => {
     const refreshed = await refreshDashboard();
@@ -307,8 +302,8 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
       ?? (await api<{ client: ClientRecord }>(`/api/clients/${encodeURIComponent(destination.clientId)}`, { cache: "no-store" })).client;
     const list = (await api<{ list: ListRecord }>(`/api/lists/${encodeURIComponent(destination.listId)}?clientId=${encodeURIComponent(client.id)}`, { cache: "no-store" })).list;
     navigate("clients");
-    setSelectedClient(client); setLists((current) => current.some((item) => item.id === list.id) ? current : [list, ...current]); setSelectedList(list);
-  }, [navigate, refreshDashboard]);
+    requestClientWorkspace(client.id, list.id, client, list);
+  }, [navigate, refreshDashboard, requestClientWorkspace]);
 
   // Open the People workspace on exactly the records a quality check counted.
   //
@@ -341,15 +336,15 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
       const previous = peopleBeforePivot.current;
       setSearch(previous.search); setProspectFilters(previous.filters); setProspectPage(previous.page);
       setProspectSort(previous.sort); setProspectDirection(previous.direction); setCompanyPeopleScope(previous.companyScope);
-      setPeopleCompanyScope(null); setSection("prospects"); setSelectedClient(null);
+      setPeopleCompanyScope(null); setSection("prospects"); closeClientWorkspace();
       pivotOrigin.current = null;
       return;
     }
     companiesBeforePivot.current = { search, filters: companyFilters, page: companiesController.page, peopleScope: peopleCompanyScope };
     pivotOrigin.current = "companies";
     setCompanyPeopleScope(scopeRestricts(scope) ? scope : null);
-    setProspectFilters([]); setProspectPage(1); setSearch(""); setSection("prospects"); setSelectedClient(null);
-  }, [companiesController.page, companyFilters, peopleCompanyScope, search, setProspectPage]);
+    setProspectFilters([]); setProspectPage(1); setSearch(""); setSection("prospects"); closeClientWorkspace();
+  }, [closeClientWorkspace, companiesController.page, companyFilters, peopleCompanyScope, search, setProspectPage]);
 
   // A query that times out leaves the screen holding the very filters that
   // caused it, and the only route back is to find them in the panel and take
@@ -373,15 +368,15 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
     if (pivotOrigin.current === "companies" && companiesBeforePivot.current) {
       const previous = companiesBeforePivot.current;
       setSearch(previous.search); setCompanyFilters(previous.filters); setCompanyPage(previous.page); setPeopleCompanyScope(previous.peopleScope);
-      setCompanyPeopleScope(null); setSection("companies"); setSelectedClient(null);
+      setCompanyPeopleScope(null); setSection("companies"); closeClientWorkspace();
       pivotOrigin.current = null;
       return;
     }
     peopleBeforePivot.current = { search, filters: prospectFilters, page: prospectsController.page, sort: prospectSort, direction: prospectDirection, companyScope: companyPeopleScope };
     pivotOrigin.current = "prospects";
     setPeopleCompanyScope(scopeRestricts(scope) ? scope : null);
-    setCompanyFilters([]); setCompanyPage(1); setSearch(""); setSection("companies"); setSelectedClient(null);
-  }, [companyPeopleScope, prospectDirection, prospectFilters, prospectSort, prospectsController.page, search, setCompanyPage]);
+    setCompanyFilters([]); setCompanyPage(1); setSearch(""); setSection("companies"); closeClientWorkspace();
+  }, [closeClientWorkspace, companyPeopleScope, prospectDirection, prospectFilters, prospectSort, prospectsController.page, search, setCompanyPage]);
 
   const confirmDelete = useCallback(async () => {
     if (!deleteRequest) return;
@@ -390,21 +385,26 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
       const endpoint = deleteRequest.kind === "client" ? "clients" : deleteRequest.kind === "list" ? "lists" : "imports";
       await api(`/api/${endpoint}/${encodeURIComponent(deleteRequest.id)}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
       const refreshedClients = await refreshDashboard();
-      if (deleteRequest.kind === "client") setSelectedClient(null);
-      else if (selectedClient && refreshedClients) {
+      if (deleteRequest.kind === "client") {
+        if (selectedClient && isCurrentClientWorkspace(selectedClient.id)) closeClientWorkspace();
+      } else if (selectedClient && refreshedClients && isCurrentClientWorkspace(selectedClient.id)) {
         const updatedClient = refreshedClients.find((client) => client.id === selectedClient.id) ?? null;
-        setSelectedClient(updatedClient);
-        if (updatedClient) {
+        if (!updatedClient) closeClientWorkspace();
+        else {
+          setSelectedClient(updatedClient);
           const data = await api<{ lists: ListRecord[] }>(`/api/lists?clientId=${updatedClient.id}`);
-          setLists(data.lists);
+          if (isCurrentClientWorkspace(updatedClient.id)) setLists(data.lists);
         }
       }
       setDeleteRequest(null);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to delete this record."); }
     finally { setDeleting(false); }
-  }, [deleteRequest, refreshDashboard, selectedClient]);
+  }, [closeClientWorkspace, deleteRequest, isCurrentClientWorkspace, refreshDashboard, selectedClient, setLists, setSelectedClient]);
 
   const title = navItems.find((item) => item.id === section)?.label ?? "Overview";
+  const scopedClientSection = section === "clients" && Boolean(requestedClientId);
+  const scopedClientReady = scopedClientSection && Boolean(selectedClient || clientWorkspace.loadError);
+  const showGlobalLoading = loading && !scopedClientSection;
 
   if (restoreError) return <main className="panel" aria-labelledby="restore-error-title">
     <h1 id="restore-error-title">This search link needs attention</h1>
@@ -423,29 +423,38 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
     <MobileNav section={section} items={navItems} onNavigate={(id) => navigate(id as Section)} currentUserEmail={currentUserEmail}/>
     <main id="main-content"><header className="topbar"><div><p className="eyebrow">DATABASE WORKSPACE</p><h1>{selectedClient ? selectedClient.name : title}</h1></div><div className="top-actions">{(section === "prospects" || section === "companies") && <label className="search"><span><AppIcon name="search" size={16}/></span><input aria-label="Search" value={search} onChange={(event) => { setSearch(event.target.value); if (section === "prospects") setProspectPage(1); if (section === "companies") setCompanyPage(1); }} placeholder={`Search ${section}...`}/></label>}{section !== "reply-blocklist" && <button className="primary" onClick={() => navigate("imports")}><AppIcon name="plus" size={15}/> Import list</button>}</div></header>
       {error && <div className="alert"><span>!</span><p>{error}</p>{canResetQuery ? <button className="alert-reset" onClick={resetQuery}>Clear filters and start over</button> : null}<button aria-label="Dismiss" onClick={() => setError("")}><AppIcon name="close" size={14}/></button></div>}
-      <section className="content" aria-busy={loading || workspaceLoading}>
+      <section className="content" aria-busy={showGlobalLoading || workspaceLoading || clientWorkspace.clientLoading || clientWorkspace.listLoading}>
         {!loading && section === "reply-blocklist" && <ReplyBlocklistPanel/>}
         {!loading && section === "verification" && <EmailVerificationWorkspace isAdmin={isAdmin}/>}
         {!loading && section === "icp-validator" && <IcpValidatorWorkspace clients={clients}/>}
         {!loading && section === "logs" && isAdmin && <LogsPanel/>}
-        {loading ? <LoadingState/> : null}
+        {showGlobalLoading ? <LoadingState/> : null}
         {!loading && workspaceLoading ? <div className="workspace-progress" role="status"><span/>Updating {title.toLowerCase()}…</div> : null}
         {!loading && section === "overview" && <OverviewWorkspace stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name ?? "Unassigned"} · ${item.list_name ?? "Unassigned"}` })}/>}
         {!loading && section === "prospects" && <ProspectsWorkspace controller={prospectsController} filters={prospectFilters} sort={prospectSort} direction={prospectDirection} clients={clients} companyScope={companyPeopleScope} onClearCompanyScope={() => setCompanyPeopleScope(null)} onClearSearch={() => setSearch("")} onSeeCompanies={seeCompanies} onFiltersChange={setProspectFilters} onSortChange={(nextSort, nextDirection) => { setProspectSort(nextSort); setProspectDirection(nextDirection); }} onSelect={setSelectedProspect} onImport={() => navigate("imports")}/>}
         {!loading && section === "companies" && <CompaniesWorkspace controller={companiesController} clients={clients} filters={companyFilters} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onClearSearch={() => setSearch("")} onSeePeople={seePeople} onFilters={setCompanyFilters} onImport={() => navigate("imports")}/>}
-        {!loading && section === "clients" && <ClientsPanel
+        {scopedClientSection && loading && clientWorkspace.initialResolutionComplete ? <div className="workspace-progress compact" role="status"><span/>Loading the client directory in the background…</div> : null}
+        {scopedClientSection && clientLoadError ? <div className="inline-error" role="alert">The client directory is unavailable: {clientLoadError}</div> : null}
+        {section === "clients" && requestedClientId && clientWorkspace.clientLoading && !selectedClient ? <LoadingState label="Opening client workspace"/> : null}
+        {section === "clients" && clientWorkspace.loadError?.kind === "client" && !selectedClient ? <section className="panel" role="alert"><h2>Unable to open this client</h2><p>{clientWorkspace.loadError.message}</p><div className="modal-actions"><button className="secondary" onClick={() => requestClientWorkspace(requestedClientId, requestedListId)}>Retry</button><button className="secondary" onClick={closeClientWorkspace}>Back to all clients</button></div></section> : null}
+        {section === "clients" && selectedClient && requestedListId && clientWorkspace.listLoading && !selectedList ? <LoadingState label="Opening client list"/> : null}
+        {section === "clients" && selectedClient && clientWorkspace.loadError?.kind === "list" && requestedListId && !selectedList ? <section className="panel" role="alert"><h2>Unable to open this list</h2><p>{clientWorkspace.loadError.message}</p><div className="modal-actions"><button className="secondary" onClick={() => requestClientWorkspace(selectedClient.id, requestedListId, selectedClient)}>Retry</button><button className="secondary" onClick={closeClientList}>Back to {selectedClient.name}&apos;s lists</button></div></section> : null}
+        {section === "clients" && selectedClient && clientWorkspace.loadError?.kind === "lists" ? <div className="inline-error" role="alert">{clientWorkspace.loadError.message} <button className="secondary" onClick={() => requestClientWorkspace(selectedClient.id, requestedListId, selectedClient, selectedList)}>Retry</button></div> : null}
+        {(!loading || scopedClientReady) && section === "clients" && (!requestedClientId || (selectedClient && (!requestedListId || selectedList))) && <ClientsPanel
           clients={clients}
           clientLoadError={clientLoadError}
           selectedClient={selectedClient}
           selectedList={selectedList}
           lists={lists}
+          listsLoading={clientWorkspace.listsLoading}
+          listsLoadError={clientWorkspace.loadError?.kind === "lists"}
           onOpenClient={(client) => void openClient(client)}
-          onCloseClient={() => setSelectedClient(null)}
-          onOpenList={setSelectedList}
-          onCloseList={() => setSelectedList(null)}
+          onCloseClient={closeClientWorkspace}
+          onOpenList={(list) => requestClientWorkspace(selectedClient?.id ?? "", list.id, selectedClient, list)}
+          onCloseList={closeClientList}
           listPivot={clientListPivot}
           onConsumeListPivot={() => setClientListPivot(null)}
-          onSeeListRecords={(clientId, list, target) => { setClientListPivot({ clientId, listId: list.id, listName: list.name, target }); setSelectedList(null); }}
+          onSeeListRecords={(clientId, list, target) => { setClientListPivot({ clientId, listId: list.id, listName: list.name, target }); closeClientList(); }}
           onSelectProspect={setSelectedProspect}
           onImport={() => navigate("imports")}
           onDeleteClient={(client) => setDeleteRequest({ kind: "client", id: client.id, name: client.name, context: `${client.list_count} lists · ${client.prospect_count} linked prospects` })}

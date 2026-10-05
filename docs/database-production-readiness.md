@@ -211,6 +211,34 @@ Disposable PostgreSQL also exercises import, push, block/unblock, removal and
 company reassignment, plus a 50,051-row capped listing whose keyset export still
 traverses the full client scope.
 
+The client-summary cache now treats directory and single-client misses as two
+different workloads. A valid complete cache still serves either request. A
+directory miss still computes every client and replaces the one complete cache
+row; a single-client miss instead reads the existing inlined
+`client_summaries` view with `WHERE id = p_client_id` and never publishes its
+partial object to that global row. In a bounded same-session production read on
+2026-10-05, the exact all-client count object took 2,206.10 ms, the selected
+client's equal count object took 734.06 ms, and a smaller client's equal object
+took 301.16 ms. A custom canonical aggregate was rejected after it measured
+slower than the existing scoped view. These are warm observations, not p95 or
+cold-cache certification. The existing five-minute cache ceiling, global
+invalidations and commit-visibility limitation remain unchanged. Both client
+GET routes now carry a 35-second application deadline on top of the database's
+30-second statement timeout, distinguish caller cancellation (499) from a
+bounded timeout (504), and expose only fixed directory/single and
+counts/metadata phase labels.
+
+Direct client and list links now restore through ownership-scoped detail reads
+instead of waiting for the complete client directory. The address bar keeps the
+requested client/list ids and any fragment-carried filters while those reads are
+pending; Back/Forward, refresh, archived clients, and lists beyond the first
+directory page use the same guarded path. Each target change aborts the prior
+read and advances a generation guard, so late responses cannot reopen or
+overwrite a newer workspace. The complete dashboard and client directory load
+after the initial scoped restore and remain visibly supplementary; their late
+response does not reset the selected client tab or list. Invalid restoration
+payloads remain fail-closed and issue no scoped client/list request.
+
 ### P4 — production operations
 
 Version journey metrics, alerts and capacity dashboards. Exercise backup

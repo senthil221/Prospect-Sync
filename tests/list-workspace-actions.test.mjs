@@ -35,7 +35,7 @@ test("a list pivot is threaded from DashboardApp through ClientsPanel and consum
   const panel = await read("../app/components/ClientsPanel.tsx");
 
   assert.match(app, /const \[clientListPivot, setClientListPivot\] = useState/);
-  assert.match(app, /onSeeListRecords=\{\(clientId, list, target\) => \{ setClientListPivot\(\{ clientId, listId: list\.id, listName: list\.name, target \}\); setSelectedList\(null\); \}\}/);
+  assert.match(app, /onSeeListRecords=\{\(clientId, list, target\) => \{ setClientListPivot\(\{ clientId, listId: list\.id, listName: list\.name, target \}\); closeClientList\(\); \}\}/);
 
   // Only handed to ClientDetail when it matches the client actually open - a
   // pivot requested for one client must never seed another client's tabs.
