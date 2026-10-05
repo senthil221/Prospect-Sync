@@ -71,6 +71,7 @@ async function installApi(page: Page, held: string[] = [], failOnce: string[] = 
       return client ? delayedJson(key, route, { client }) : delayedJson(key, route, { error: "Client not found." }, 404);
     }
     if (/^\/api\/clients\/[^/]+\/icp$/.test(path)) return json(route, { profiles: [] });
+    if (path === "/api/saved-views") return json(route, { views: [] });
     if (path === "/api/companies") return json(route, {
       companies: [], total: 0, totalCapped: false, covered: 0,
       prospectTotal: 0, hasMore: false, pageSize: 50,
