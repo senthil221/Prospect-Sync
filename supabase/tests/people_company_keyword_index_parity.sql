@@ -19,7 +19,10 @@ insert into public.companies(
 ) values
   ('keyword-index-name', 'Blockchain Atlas', 'blockchain atlas', 'kw-name.test', 'kw-name.test', array['finance'], 'Ordinary profile', 'Mailbox provider'),
   ('keyword-index-description', 'Description Match', 'description match', 'kw-description.test', 'kw-description.test', array['finance'], 'Builds BLOCKCHAIN infrastructure', 'Mailbox provider'),
-  ('keyword-index-tag', 'Tag Match', 'tag match', 'kw-tag.test', 'kw-tag.test', array['Blockchain'], 'Ordinary profile', 'Mailbox provider'),
+  -- Stored tags use the production-normalized lowercase form. The case battery
+  -- below still proves an uppercase user term reaches this tag through
+  -- keyword_tag_variants_v1(original + lower(input)).
+  ('keyword-index-tag', 'Tag Match', 'tag match', 'kw-tag.test', 'kw-tag.test', array['blockchain'], 'Ordinary profile', 'Mailbox provider'),
   ('keyword-index-duplicate', 'Duplicate blockchain', 'duplicate blockchain', 'kw-duplicate.test', 'kw-duplicate.test', array['blockchain'], 'blockchain twice', 'Mailbox provider'),
   -- Production models missing keyword/description data with schema-valid empty
   -- values; both columns are NOT NULL. The companyless person below covers a
