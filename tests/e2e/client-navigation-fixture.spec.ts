@@ -281,7 +281,10 @@ test("client People keeps OFFSET navigation when the server-side cursor flag is 
   await expect(panel.getByText("Cursor Person 1", { exact: true })).toBeVisible();
   await panel.getByRole("button", { name: "Next" }).click();
   await expect(panel.getByText("Cursor Person 51", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Showing 51 to 75 of 75 matching records")).toBeVisible();
   const pageTwo = api.requested.findLast((request) => request.startsWith("/api/prospects?") && request.includes("page=2"));
-  expect(pageTwo).toContain("pagination=offset");
-  expect(pageTwo).not.toContain("cursor=");
+  if (!pageTwo) throw new Error("Client People did not request OFFSET page 2.");
+  const pageTwoParams = new URL(pageTwo, "https://fixture.test").searchParams;
+  expect(pageTwoParams.get("pagination")).not.toBe("cursor");
+  expect(pageTwoParams.has("cursor")).toBe(false);
 });
