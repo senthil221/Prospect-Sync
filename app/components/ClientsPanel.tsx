@@ -492,8 +492,11 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [preparation, setPreparation] = useState<PreparationProgress | null>(null);
   const [preparationError, setPreparationError] = useState('');
-  const [total, setTotal] = useState(client.prospect_count);
+  const [total, setTotal] = useState<number | null>(client.prospect_count);
   const [totalCapped, setTotalCapped] = useState(false);
+  const [countState, setCountState] = useState<"exact" | "capped" | "deferred">("exact");
+  const [hasMore, setHasMore] = useState(false);
+  const [dataVersions, setDataVersions] = useState<Record<string, number> | null>(null);
   const [fields, setFields] = useState<string[]>([]);
   // Seeded, not forced: the Leads and Contactable tabs open pre-filtered, and
   // the filter is then editable and clearable like any other. Each tab passes a
@@ -545,7 +548,7 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
         const cached = totalCache.current.get(countKey);
         setPreparationError('');
         setPreparation(needsCompanyPreparation(companyScope) ? { status: 'checking', message: 'Checking the matching companies…', matchedCompanies: 0 } : null);
-        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; versions?: Record<string, number> | null; fields?: string[]; pagination?: ProspectPagination }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, clientId: client.id, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !cached, knownVersions: cached?.versions ?? null, pagination: canRequestCursor ? "cursor" : "offset", cursor: pageCursor }, { signal: controller.signal }, progress => { if (current) setPreparation(progress); });
+        const data = await fetchProspects<{ prospects: Prospect[]; total: number | null; totalEstimated: boolean; totalCapped?: boolean; countState?: "exact" | "capped" | "deferred"; versions?: Record<string, number> | null; fields?: string[]; pagination?: ProspectPagination }>({ search: debouncedSearch, page, sort, direction, filters: encodedFilters, clientId: client.id, includeFields: !fieldsLoaded.current, companyScope, withTotal: page === 1 && !cached, knownVersions: cached?.versions ?? null, pagination: canRequestCursor ? "cursor" : "offset", cursor: pageCursor }, { signal: controller.signal }, progress => { if (current) setPreparation(progress); });
         if (current) {
           setProspects(data.prospects);
           if (data.pagination?.mode === "cursor") {
@@ -555,17 +558,25 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
               pageCursors.current.delete(page + 1);
             }
           }
+          setHasMore(data.pagination?.mode === "cursor" ? data.pagination.hasMore === true : data.prospects.length === 50);
+          setDataVersions(data.versions ?? null);
           // A client view is never the unfiltered whole database, so its count is
           // always the capped one -- carry the flag through or a bounded number
           // would read here as an exact one.
-          if (data.total !== null) {
+          if (data.countState === "deferred") {
+            setTotal(null);
+            setTotalCapped(false);
+            setCountState("deferred");
+          } else if (data.total !== null) {
             const capped = data.totalCapped === true;
             totalCache.current.set(countKey, { total: data.total, capped, versions: data.versions ?? null });
             setTotal(data.total);
             setTotalCapped(capped);
+            setCountState(capped ? "capped" : "exact");
           } else if (cached) {
             setTotal(cached.total);
             setTotalCapped(cached.capped);
+            setCountState(cached.capped ? "capped" : "exact");
           }
           if (data.fields?.length) { fieldsLoaded.current = true; setFields(data.fields); }
           setError("");
@@ -596,7 +607,7 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to remove this prospect from the client."); }
     finally { setRemoving(false); }
   }, [client.id, pendingRemoval]);
-  return <><SearchPreparation progress={preparation} error={preparationError} onRetry={() => setRefresh(value => value + 1)} onClear={onClearCompanyScope} clearLabel="Clear company scope"/><section hidden={Boolean(preparation || preparationError)} className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT MASTER DB</p><h3>{client.name} prospects</h3><p>Every master prospect connected to this client, across all uploaded lists.</p></div>{allowEntityPivot ? <button className="secondary" title="Safely scope up to 250,000 matching people" onClick={() => onSeeCompanies({ search: deferredSearch.trim(), filters: filterPayload(filters), limit: 250000 })}>See Companies <AppIcon name="arrow" size={14}/></button> : null}<label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label={`Search ${client.name} prospects`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this client database…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client prospects…</div> : null}{loading ? <div className="workspace-loading">Preparing client database…</div> : <ProspectTable prospects={prospects} total={total} totalCapped={totalCapped} fields={fields} filters={filters} page={page} clients={clients} search={deferredSearch} sort={sort} direction={direction} clientId={client.id} companyScope={companyScope} onClearCompanyScope={onClearCompanyScope} onSeeCompanies={onSeeCompanies} onRemoveFromClient={removeFromClient} onSortChange={(nextSort, nextDirection) => { setSort(nextSort); setDirection(nextDirection); setPage(1); }} onFiltersChange={(next) => { setFilters(enforceForcedFilters(next)); setPage(1); }} onPageChange={setPage} onSelect={onSelect} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} active={active} allowEntityPivot={allowEntityPivot} lockedCompanyScope={lockedCompanyScope}/>}{pendingRemoval ? <ConfirmDialog title={`Remove ${pendingRemoval.full_name || "this prospect"} from ${client.name}?`} body="This removes the link between this prospect and this client, along with its list membership for this client." scopeNote="The People database record is preserved. Every other client keeps its own link to this person." confirmLabel="Remove from client" busy={removing} onCancel={() => setPendingRemoval(null)} onConfirm={() => void confirmRemoval()} /> : null}</section></>;
+  return <><SearchPreparation progress={preparation} error={preparationError} onRetry={() => setRefresh(value => value + 1)} onClear={onClearCompanyScope} clearLabel="Clear company scope"/><section hidden={Boolean(preparation || preparationError)} className="client-database-workspace" aria-busy={refreshing}><div className="client-database-heading"><div><p className="eyebrow">CLIENT MASTER DB</p><h3>{client.name} prospects</h3><p>Every master prospect connected to this client, across all uploaded lists.</p></div>{allowEntityPivot ? <button className="secondary" title="Safely scope up to 250,000 matching people" onClick={() => onSeeCompanies({ search: deferredSearch.trim(), filters: filterPayload(filters), limit: 250000 })}>See Companies <AppIcon name="arrow" size={14}/></button> : null}<label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label={`Search ${client.name} prospects`} value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search this client database…"/></label></div>{error ? <div className="inline-error" role="alert">{error}</div> : null}{refreshing && !loading ? <div className="workspace-progress compact" role="status"><span/>Updating client prospects…</div> : null}{loading ? <div className="workspace-loading">Preparing client database…</div> : <ProspectTable prospects={prospects} total={total} totalCapped={totalCapped} countState={countState} hasMore={hasMore} dataVersions={dataVersions} fields={fields} filters={filters} page={page} clients={clients} search={deferredSearch} sort={sort} direction={direction} clientId={client.id} companyScope={companyScope} onClearCompanyScope={onClearCompanyScope} onSeeCompanies={onSeeCompanies} onRemoveFromClient={removeFromClient} onSortChange={(nextSort, nextDirection) => { setSort(nextSort); setDirection(nextDirection); setPage(1); }} onFiltersChange={(next) => { setFilters(enforceForcedFilters(next)); setPage(1); }} onPageChange={setPage} onSelect={onSelect} onImport={onImport} onRefresh={() => setRefresh((value) => value + 1)} active={active} allowEntityPivot={allowEntityPivot} lockedCompanyScope={lockedCompanyScope}/>}{pendingRemoval ? <ConfirmDialog title={`Remove ${pendingRemoval.full_name || "this prospect"} from ${client.name}?`} body="This removes the link between this prospect and this client, along with its list membership for this client." scopeNote="The People database record is preserved. Every other client keeps its own link to this person." confirmLabel="Remove from client" busy={removing} onCancel={() => setPendingRemoval(null)} onConfirm={() => void confirmRemoval()} /> : null}</section></>;
 }
 
 function ClientCompanyDatabase({ client, clients, peopleScope, onClearPeopleScope, onSelectListScope, onSeePeople, onImport, initialFilters = [], forcedFilters = [], allowEntityPivot = true }: { client: ClientRecord; clients: ClientRecord[]; peopleScope: PeopleScope | null; onClearPeopleScope: () => void; onSelectListScope: (listId: string) => void; onSeePeople: (scope: CompanyScope) => void; onImport: () => void; initialFilters?: ProspectFilter[]; forcedFilters?: ProspectFilter[]; allowEntityPivot?: boolean }) {

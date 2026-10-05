@@ -212,10 +212,11 @@ test("client result sets normalize the same completeness partition before hashin
 test("a capped count can be turned into a real one, and is dropped when the question changes", async () => {
   const table = await read("../app/components/ProspectTable.tsx");
 
-  assert.match(table, /const countedExactly = exactTotal && exactTotal\.key === selectionKey \? exactTotal\.count : null;/);
-  assert.match(table, /setExactTotal\(\{ key: selectionKey, count: set\.rowCount \}\);/);
+  assert.match(table, /const countKey = JSON\.stringify\(\{ selectionKey, dataVersions \}\);/);
+  assert.match(table, /const countedExactly = exactTotal && exactTotal\.key === countKey \? exactTotal\.count : null;/);
+  assert.match(table, /setExactTotal\(\{ key: countKey, count: set\.rowCount \}\);/);
   // Offered only where it fixes something: a total that stopped at its cap.
-  assert.match(table, /\{totalCapped && countedExactly === null \? <button className="select-all-matching-button" disabled=\{countingAll\}/);
+  assert.match(table, /\{\(totalCapped \|\| countState === "deferred"\) && countedExactly === null \? <button className="select-all-matching-button" disabled=\{countingAll\}/);
   // And the bulk path goes through the frozen selection.
   assert.match(table, /selectionMode === "all_matching"\s*\n\s*\? \(await runAllMatching\(action, targetClientId, requestId, dateContacted\)\)\.result \?\? \{\}/);
 });
@@ -509,6 +510,7 @@ test("the retired search functions are dropped, and the live search entrypoints 
   const featurePack = await read("../supabase/migrations/20260924205130_client_workspace_feature_pack.sql");
   const cursorMigration = await read("../supabase/migrations/20260926083856_prospect_people_cursor_v1.sql");
   const clientCursorMigration = await read("../supabase/migrations/20261005163609_client_people_cursor_v2.sql");
+  const clientPageMigration = await read("../supabase/migrations/20261005204655_client_people_page_first.sql");
   const code = codeOnly(migration);
 
   // Every drop names a full signature. DROP FUNCTION by bare name is ambiguous
@@ -540,6 +542,7 @@ test("the retired search functions are dropped, and the live search entrypoints 
   }
   assert.match(cursorMigration, /create or replace function public\.search_prospect_workspace_cursor_v1/);
   assert.match(clientCursorMigration, /create or replace function public\.search_prospect_workspace_cursor_v2/);
+  assert.match(clientPageMigration, /create or replace function public\.search_prospect_workspace_page_v1/);
   assert.match(code, /this migration dropped the wrong one/);
 
   // And the report the file exists to clean is checked in the file's own terms.
@@ -558,5 +561,5 @@ test("the retired search functions are dropped, and the live search entrypoints 
   // v1 and v2 share the RPC argument contract; inventory those two explicit
   // allowlisted literals as well as direct rpc("...") calls.
   for (const match of codeOnly(sources[1]).matchAll(/"(search_prospect_workspace_cursor_v[12])"/g)) calls.add(match[1]);
-  assert.deepEqual([...calls].sort(), ["filter_companies_v4", "search_prospect_export_v6", "search_prospect_workspace_cursor_v1", "search_prospect_workspace_cursor_v2", "search_prospect_workspace_v13"]);
+  assert.deepEqual([...calls].sort(), ["filter_companies_v4", "search_prospect_export_v6", "search_prospect_workspace_cursor_v1", "search_prospect_workspace_cursor_v2", "search_prospect_workspace_page_v1", "search_prospect_workspace_v13"]);
 });

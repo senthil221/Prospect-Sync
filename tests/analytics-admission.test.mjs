@@ -94,5 +94,6 @@ test("a database 500 records why, not just that it happened", async () => {
   // The SQLSTATE is usually the whole answer, so it is kept beside the text.
   assert.ok(errors.includes("code: error?.code ?? null"));
   assert.ok(errors.includes("logServerEvent"));
-  assert.ok(prospects.includes('return databaseErrorResponse("The prospect listing", error)'));
+  assert.ok(prospects.includes('boundedDatabaseFailure('));
+  assert.ok(errors.includes('databaseErrorResponse(logSubject, databaseError)'));
 });

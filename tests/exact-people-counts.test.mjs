@@ -144,7 +144,8 @@ test("the Overview counts up once per run, and nowhere else counts at all", asyn
   assert.doesNotMatch(table, /CountUp/);
   assert.doesNotMatch(companies, /CountUp/);
   assert.doesNotMatch(styles, /\.company-summary > div \{ animation/);
-  assert.match(table, /<strong title=\{totalHint\}>\{displayedTotal\} people<\/strong>/);
+  assert.match(table, /<strong title=\{countState === "deferred"/);
+  assert.match(table, /: `\$\{displayedTotal\} people`\}<\/strong>/);
   assert.match(companies, /<strong>\{totalLabel\}<\/strong>/);
   // And the tab badge goes back to accepting only what it needs.
   assert.match(tabs, /count\?: number \| string;/);

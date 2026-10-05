@@ -263,6 +263,6 @@ test("a statement timeout is reported as an actionable 504, not a 500", async ()
 
   for (const source of routes) {
     assert.match(source, /isStatementTimeout/);
-    assert.match(source, /statementTimeoutResponse\(/);
+    assert.match(source, /statementTimeoutResponse\(|boundedDatabaseFailure\(/);
   }
 });

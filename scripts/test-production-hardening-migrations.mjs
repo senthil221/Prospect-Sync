@@ -17,7 +17,7 @@ const migrationDir = new URL("../supabase/migrations/", import.meta.url);
 const migrationNames = (await readdir(migrationDir))
   .filter(name => /^\d+_.+\.sql$/u.test(name) && name > "20260926083856_prospect_people_cursor_v1.sql")
   .sort();
-const expected = "20261005163609_client_people_cursor_v2.sql";
+const expected = "20261005204655_client_people_page_first.sql";
 if (!migrationNames.includes(expected)) throw new Error(`Expected ${expected} in the forward validation chain.`);
 const fixture = await readFile(new URL("../supabase/tests/client_summary_inline_parity.sql", import.meta.url), "utf8");
 const clientCompanyFixture = await readFile(new URL("../supabase/tests/client_company_scope_parity.sql", import.meta.url), "utf8");
@@ -27,6 +27,7 @@ const scopedClientSummaryFixture = await readFile(new URL("../supabase/tests/cli
 const peopleCompanyKeywordFixture = await readFile(new URL("../supabase/tests/people_company_keyword_index_parity.sql", import.meta.url), "utf8");
 const mxRetrySaturationFixture = await readFile(new URL("../supabase/tests/mx_retry_saturated_backlog.sql", import.meta.url), "utf8");
 const clientPeopleCursorFixture = await readFile(new URL("../supabase/tests/client_people_cursor_v2.sql", import.meta.url), "utf8");
+const clientPeoplePageFixture = await readFile(new URL("../supabase/tests/client_people_page_first.sql", import.meta.url), "utf8");
 
 const psqlEnv = {
   PATH: process.env.PATH,
@@ -142,4 +143,5 @@ psql("client-summary scoped cache miss and mutation parity", `begin; set local s
 psql("People company-keyword indexed predicate full-ID parity", `begin; set local statement_timeout='2min';\n${peopleCompanyKeywordFixture}\nrollback;`);
 psql("MX retry selection with a saturated fresh backlog", `begin; set local statement_timeout='2min';\n${mxRetrySaturationFixture}\nrollback;`);
 psql("client People cursor v2 ordered IDs and capped-count parity", `begin; set local statement_timeout='5min';\n${clientPeopleCursorFixture}\nrollback;`);
-process.stdout.write(`Applied ${migrationNames.length} additive migrations and passed client company, scoped-summary, company-keyword, MX retry and client People cursor parity.\n`);
+psql("client People page v1 count-free ordered-ID parity", `begin; set local statement_timeout='2min';\n${clientPeoplePageFixture}\nrollback;`);
+process.stdout.write(`Applied ${migrationNames.length} additive migrations and passed client company, scoped-summary, company-keyword, MX retry, client People cursor and page-first parity.\n`);

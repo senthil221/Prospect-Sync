@@ -38,7 +38,7 @@ function prospectRow(index: number) {
   };
 }
 
-async function installApi(page: Page, held: string[] = [], failOnce: string[] = [], peopleMode: "cursor" | "offset" | null = null) {
+async function installApi(page: Page, held: string[] = [], failOnce: string[] = [], peopleMode: "cursor" | "offset" | "page-first" | null = null, countResult: "ready" | "stale" | "failed" = "ready") {
   const gates = new Map(held.map((key) => [key, deferred()]));
   const failures = new Set(failOnce);
   const requested: string[] = [];
@@ -80,26 +80,33 @@ async function installApi(page: Page, held: string[] = [], failOnce: string[] = 
       if (peopleMode) {
         const pageNumber = Number(url.searchParams.get("page") ?? "1");
         const search = url.searchParams.get("search") ?? "";
-        const start = search ? 201 : (pageNumber - 1) * 50 + 1;
-        const length = search ? 1
+        const singleSearchResult = Boolean(search) && peopleMode !== "page-first";
+        const start = singleSearchResult ? 201 : (pageNumber - 1) * 50 + 1;
+        const length = singleSearchResult ? 1
           : pageNumber === 1 ? 50
-          : pageNumber === 2 ? (peopleMode === "offset" ? 25 : 50)
+          : pageNumber === 2 ? (peopleMode === "cursor" ? 50 : 25)
           : 0;
         const rows = Array.from({ length }, (_, index) => prospectRow(start + index));
-        const cursor = peopleMode === "cursor" && pageNumber < 3 ? `cursor-v2-${pageNumber}` : null;
+        const cursorMode = peopleMode === "cursor" || peopleMode === "page-first";
+        const cursor = cursorMode && (peopleMode === "cursor" ? pageNumber < 3 : pageNumber < 2) ? `cursor-v2-${pageNumber}` : null;
         return json(route, {
           prospects: rows,
-          total: pageNumber === 1 ? (search ? 1 : peopleMode === "cursor" ? 50_000 : 75) : null,
+          total: peopleMode === "page-first" ? null : pageNumber === 1 ? (singleSearchResult ? 1 : peopleMode === "cursor" ? 50_000 : 75) : null,
           totalEstimated: false,
           totalCapped: pageNumber === 1 && peopleMode === "cursor" && !search,
+          countState: peopleMode === "page-first" ? "deferred" : peopleMode === "cursor" ? "capped" : "exact",
           versions: { prospect: 1, company: 1 }, fields: [],
-          pagination: { mode: peopleMode, nextCursor: cursor },
+          pagination: { mode: cursorMode ? "cursor" : "offset", nextCursor: cursor, hasMore: Boolean(cursor) },
         });
       }
       return json(route, {
         prospects: [], total: 0, totalEstimated: false, totalCapped: false,
         versions: null, fields: [], pagination: { mode: "offset", nextCursor: null },
       });
+    }
+    if (path === "/api/result-sets") {
+      if (countResult === "failed") return json(route, { setId: "count-set", status: "failed", rowCount: 0, error: "Count fixture failed." });
+      return delayedJson("result-set", route, { setId: "count-set", status: "ready", rowCount: 75, stale: countResult === "stale" });
     }
     if (path === "/api/lists") {
       const clientId = url.searchParams.get("clientId") ?? "";
@@ -287,4 +294,69 @@ test("client People keeps OFFSET navigation when the server-side cursor flag is 
   const pageTwoParams = new URL(pageTwo, "https://fixture.test").searchParams;
   expect(pageTwoParams.get("pagination")).not.toBe("cursor");
   expect(pageTwoParams.has("cursor")).toBe(false);
+});
+
+test("client page-first renders before a count and pages by hasMore without treating 50 as the total", async ({ page }) => {
+  const api = await installApi(page, [], [], "page-first");
+  await page.goto("/e2e-fixtures/client-navigation?s=clients&client=client-a");
+  await page.getByRole("tab", { name: /People DB/ }).click();
+  const panel = page.locator("#tabpanel-prospects");
+  await panel.getByRole("textbox", { name: "Search Client A prospects" }).fill("cursor");
+  await expect(panel.getByText(/shown · Total not counted/)).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Count all matches" })).toBeVisible();
+  await expect(panel.getByText(/50 people/)).toHaveCount(0);
+  await panel.getByRole("button", { name: "Next" }).click();
+  await expect(panel.getByText("Cursor Person 51", { exact: true })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Next" })).toBeDisabled();
+  await panel.getByRole("button", { name: /Previous/ }).click();
+  await expect(panel.getByText("Cursor Person 1", { exact: true })).toBeVisible();
+  expect(api.requested.some((request) => request.includes("page=2") && request.includes("cursor=cursor-v2-1"))).toBe(true);
+
+  await panel.getByRole("button", { name: "Select all matching records" }).click();
+  await expect(panel.getByText(/All matching records selected/)).toBeVisible();
+  await panel.getByRole("button", { name: /Export selected/ }).click();
+  await expect(page.getByText("All matching records · total not counted")).toBeVisible();
+  await page.getByLabel("All matching prospects").check();
+  await expect(page.getByRole("button", { name: "Export all matching prospects" })).toBeVisible();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+
+  await panel.getByRole("button", { name: "Count all matches" }).click();
+  await expect(panel.getByText("75 matched when counted")).toBeVisible();
+  await expect(panel.getByText(/Page 1$/)).toBeVisible();
+});
+
+test("a stale deferred count stays unknown and asks for a fresh count", async ({ page }) => {
+  await installApi(page, [], [], "page-first", "stale");
+  await page.goto("/e2e-fixtures/client-navigation?s=clients&client=client-a");
+  await page.getByRole("tab", { name: /People DB/ }).click();
+  const panel = page.locator("#tabpanel-prospects");
+  await panel.getByRole("textbox", { name: "Search Client A prospects" }).fill("cursor");
+  await panel.getByRole("button", { name: "Count all matches" }).click();
+  await expect(panel.getByText(/earlier data version/)).toBeVisible();
+  await expect(panel.getByText(/Total not counted/)).toBeVisible();
+});
+
+test("deferred count failures and late completions do not replace the active query", async ({ page }) => {
+  await installApi(page, [], [], "page-first", "failed");
+  await page.goto("/e2e-fixtures/client-navigation?s=clients&client=client-a");
+  await page.getByRole("tab", { name: /People DB/ }).click();
+  let panel = page.locator("#tabpanel-prospects");
+  await panel.getByRole("textbox", { name: "Search Client A prospects" }).fill("cursor");
+  await panel.getByRole("button", { name: "Count all matches" }).click();
+  await expect(panel.getByText("Count fixture failed.")).toBeVisible();
+
+  const api = await installApi(page, ["result-set"], [], "page-first");
+  await page.reload();
+  await page.getByRole("tab", { name: /People DB/ }).click();
+  panel = page.locator("#tabpanel-prospects");
+  const search = panel.getByRole("textbox", { name: "Search Client A prospects" });
+  await search.fill("slow-count");
+  await panel.getByRole("button", { name: "Count all matches" }).click();
+  await expect.poll(() => api.requested.some((request) => request.startsWith("/api/result-sets"))).toBe(true);
+  await search.fill("new-query");
+  await expect(panel.getByText(/Total not counted/)).toBeVisible();
+  api.release("result-set");
+  await expect.poll(() => api.completed.has("result-set")).toBe(true);
+  await expect(panel.getByText("75 matched when counted")).toHaveCount(0);
+  await expect(panel.getByText(/counted in full/)).toHaveCount(0);
 });

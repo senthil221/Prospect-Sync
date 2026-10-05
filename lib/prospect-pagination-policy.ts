@@ -26,3 +26,23 @@ export function prospectCursorShapeSupported(input: {
     && !input.filters.some((filter) => filter.field === "__max_people_per_company"
       || (!input.clientScoped && companyLookupFields.has(filter.field)));
 }
+
+export function clientProspectPageFirstEligible(input: {
+  pageFirstEnabled: boolean;
+  clientCursorEnabled: boolean;
+  requested: boolean;
+  page: number;
+  rawCursor: string;
+  search: string;
+  callerHasFilters: boolean;
+  clientId: string | null;
+  sort: string;
+  direction: string;
+  companyScoped: boolean;
+  filters: FilterField[];
+}) {
+  return input.pageFirstEnabled && input.clientCursorEnabled && Boolean(input.clientId)
+    && input.requested && (Boolean(input.search.trim()) || input.callerHasFilters)
+    && prospectCursorShapeSupported({ ...input, clientScoped: true })
+    && (input.page === 1 ? !input.rawCursor : Boolean(input.rawCursor));
+}

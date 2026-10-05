@@ -62,3 +62,12 @@ export function isProspectCursorEligible(input: {
     && prospectCursorShapeSupported(input)
     && (input.page === 1 ? !input.rawCursor : Boolean(input.rawCursor));
 }
+
+export function prospectRequestSignals(callerSignal?: AbortSignal, timeoutMs = 30_000) {
+  const deadlineSignal = AbortSignal.timeout(timeoutMs);
+  return {
+    callerSignal,
+    deadlineSignal,
+    signal: callerSignal ? AbortSignal.any([callerSignal, deadlineSignal]) : deadlineSignal,
+  };
+}

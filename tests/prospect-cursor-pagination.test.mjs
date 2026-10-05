@@ -9,7 +9,9 @@ import {
   isProspectCursorEligible,
   prospectCursorFeatureEnabled,
   prospectCursorQueryHash,
+  prospectRequestSignals,
 } from "../lib/prospect-pagination.ts";
+import { clientProspectPageFirstEligible } from "../lib/prospect-pagination-policy.ts";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
@@ -79,6 +81,37 @@ test("global and client cursor rollout flags are independent", () => {
   assert.equal(prospectCursorFeatureEnabled({ clientId: null, globalEnabled: true, clientEnabled: false }), true);
 });
 
+test("client page-first eligibility requires both flags and real caller intent", () => {
+  const base = {
+    pageFirstEnabled: true, clientCursorEnabled: true, requested: true,
+    page: 1, rawCursor: "", search: "director", callerHasFilters: false,
+    clientId: "client-1", sort: "created_at", direction: "desc",
+    companyScoped: false, filters: [{ field: "__incomplete_company_profile" }],
+  };
+  assert.equal(clientProspectPageFirstEligible(base), true);
+  assert.equal(clientProspectPageFirstEligible({ ...base, search: "" }), false, "internal profile filters do not establish caller intent");
+  assert.equal(clientProspectPageFirstEligible({ ...base, search: "", callerHasFilters: true }), true);
+  assert.equal(clientProspectPageFirstEligible({ ...base, pageFirstEnabled: false }), false);
+  assert.equal(clientProspectPageFirstEligible({ ...base, clientCursorEnabled: false }), false);
+  assert.equal(clientProspectPageFirstEligible({ ...base, clientId: null }), false);
+  assert.equal(clientProspectPageFirstEligible({ ...base, page: 2, rawCursor: "opaque" }), true);
+  assert.equal(clientProspectPageFirstEligible({ ...base, page: 2, rawCursor: "" }), false);
+  assert.equal(clientProspectPageFirstEligible({ ...base, sort: "name" }), false);
+});
+
+test("People query signal keeps both caller cancellation and the deadline", async () => {
+  const caller = new AbortController();
+  const combined = prospectRequestSignals(caller.signal, 20);
+  caller.abort();
+  assert.equal(combined.signal.aborted, true);
+  assert.equal(combined.callerSignal.aborted, true);
+  assert.equal(combined.deadlineSignal.aborted, false);
+  const timed = prospectRequestSignals(undefined, 1);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(timed.signal.aborted, true);
+  assert.equal(timed.deadlineSignal.aborted, true);
+});
+
 test("People API transport carries cursor mode in GET and preserves page numbers", () => {
   const url = new URL(prospectApiPath({ page: 3, pagination: "cursor", cursor: "opaque" }), "https://example.test");
   assert.equal(url.searchParams.get("page"), "3");
@@ -117,6 +150,20 @@ test("client cursor v2 keeps its boundary inside the client-first candidate and 
   assert.match(sql, /revoke execute on function public\.search_prospect_workspace_cursor_v2[\s\S]*from public, anon, authenticated/);
   assert.match(sql, /grant execute on function public\.search_prospect_workspace_cursor_v2[\s\S]*to service_role/);
   assert.match(sql, /created_at[\s\S]*attnotnull/);
+  assert.doesNotMatch(catalogProof, /from public\.(prospects|client_prospects|companies)\b/);
+});
+
+test("client page-first SQL is count-free, service-role-only and reads one lookahead row", async () => {
+  const sql = await read("../supabase/migrations/20261005204655_client_people_page_first.sql");
+  const catalogProof = sql.slice(sql.indexOf("do $assert_contract$"));
+  assert.match(sql, /search_prospect_workspace_page_v1/);
+  assert.match(sql, /client_rows as materialized[\s\S]*pi\.created_at <= %3\$L::timestamptz/);
+  assert.match(sql, /\(v_limit \+ 1\)::text/);
+  assert.match(sql, /exists\(select 1 from page where page_order > %3\$s\)/);
+  assert.match(sql, /prospect_filters_need_company_lookup_v1/);
+  assert.doesNotMatch(sql.slice(0, sql.indexOf("do $assert_contract$")), /counted as \(/);
+  assert.match(sql, /revoke execute[\s\S]*from public, anon, authenticated/);
+  assert.match(sql, /grant execute[\s\S]*to service_role/);
   assert.doesNotMatch(catalogProof, /from public\.(prospects|client_prospects|companies)\b/);
 });
 
@@ -236,11 +283,14 @@ test("route and both People controllers retain cursor fallback and back-navigati
   ]);
   assert.match(route, /PROSPECT_CURSOR_PAGINATION === "1"/);
   assert.match(route, /CLIENT_PROSPECT_CURSOR_PAGINATION === "1"/);
+  assert.match(route, /CLIENT_PROSPECT_PAGE_FIRST === "1"/);
   assert.match(route, /search_prospect_workspace_cursor_v1/);
   assert.match(route, /search_prospect_workspace_cursor_v2/);
+  assert.match(route, /search_prospect_workspace_page_v1/);
   assert.match(route, /prospectCursorFeatureEnabled\([\s\S]*clientId,[\s\S]*globalEnabled: cursorFeatureEnabled,[\s\S]*clientEnabled: clientCursorFeatureEnabled/);
   assert.match(route, /runProspectWorkspace\(supabase, workspaceQuery\)/, "v13 OFFSET fallback remains wired");
-  assert.match(route, /pagination: cursorEligible \? \{ mode: "cursor", nextCursor \} : \{ mode: "offset", nextCursor: null \}/);
+  assert.match(route, /countState: pageFirstEligible \? "deferred"/);
+  assert.match(route, /pagination: cursorEligible \? \{ mode: "cursor", nextCursor, hasMore \} : \{ mode: "offset", nextCursor: null \}/);
   for (const controller of [master, clients]) {
     assert.match(controller, /prospectCursorShapeSupported/);
     assert.match(controller, /pageCursors = useRef\(new Map<number, string>\(\[\[1, ""\]\]\)\)/);
@@ -251,6 +301,8 @@ test("route and both People controllers retain cursor fallback and back-navigati
   assert.match(clients, /cursorQueryKey[\s\S]*client\.prospect_count/);
   assert.match(clients, /clientScoped: true/);
   assert.match(clients, /cached\.capped/);
+  assert.match(clients, /data\.countState === "deferred"[\s\S]*setTotal\(null\)/);
+  assert.match(await read("../app/components/ProspectTable.tsx"), /Total not counted/);
   assert.match(await read("../app/components/ProspectTable.tsx"), /No records on this page/);
   assert.match(api, /query\.pagination === "cursor"/);
   assert.match(api, /query\.cursor \? \{ cursor: query\.cursor \}/);

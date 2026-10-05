@@ -1,6 +1,6 @@
 import { withInteractiveSlot } from "../../../lib/admission";
 import { authorizeFilterSets } from "../../../lib/filter-sets";
-import { databaseErrorResponse, isClientDisconnect, isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
+import { boundedDatabaseFailure, isClientDisconnect, isStatementTimeout } from "../../../lib/api-errors";
 import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { filterErrorResponse, parseFilters, type ProspectFilter } from "../../../lib/prospect-filters";
 import { createAdminClient } from "../../../lib/supabase/admin";
@@ -9,8 +9,9 @@ import { needsCompanyPreparation } from "../../../lib/prepared-search";
 import { ownerIdentity } from "../../../lib/result-sets";
 import { prepareCompanyScope, preparationResponse } from "../../../lib/prepare-company-scope";
 import { prospectQueryFamily, recordQueryPhase, type QueryPhaseOutcome } from "../../../lib/observability";
-import { decodeProspectCursor, encodeProspectCursor, isProspectCursorEligible, prospectCursorFeatureEnabled, prospectCursorQueryHash, type ProspectCursor } from "../../../lib/prospect-pagination";
-import { rejectClientCompanyScope, withClientWorkspaceCompleteness } from "../../../lib/client-workspace-completeness";
+import { decodeProspectCursor, encodeProspectCursor, isProspectCursorEligible, prospectCursorFeatureEnabled, prospectCursorQueryHash, prospectRequestSignals, type ProspectCursor } from "../../../lib/prospect-pagination";
+import { internalClientFilterFields, rejectClientCompanyScope, withClientWorkspaceCompleteness } from "../../../lib/client-workspace-completeness";
+import { clientProspectPageFirstEligible } from "../../../lib/prospect-pagination-policy";
 
 type WorkspaceQuery = {
   search: string;
@@ -28,6 +29,7 @@ type WorkspaceQuery = {
 
 const cursorFeatureEnabled = process.env.PROSPECT_CURSOR_PAGINATION === "1";
 const clientCursorFeatureEnabled = process.env.CLIENT_PROSPECT_CURSOR_PAGINATION === "1";
+const clientPageFirstFeatureEnabled = process.env.CLIENT_PROSPECT_PAGE_FIRST === "1";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883"]);
 
@@ -76,9 +78,25 @@ async function runProspectCursorWorkspace(
   return { ...workspace, version: `cursor-v${cursor.version}` };
 }
 
+async function runProspectPageWorkspace(
+  supabase: ReturnType<typeof createAdminClient>,
+  query: WorkspaceQuery,
+  cursor: ProspectCursor | null,
+) {
+  const workspace = await supabase.rpc("search_prospect_workspace_page_v1", {
+    p_search: query.search,
+    p_filters: query.filters,
+    p_limit: query.limit,
+    p_client_id: query.clientId,
+    p_after_created_at: cursor?.createdAt ?? null,
+    p_after_id: cursor?.id ?? null,
+  }).abortSignal(query.signal ?? AbortSignal.timeout(30_000));
+  return { ...workspace, version: "page-v1" };
+}
+
 function workspaceSummary(data: unknown) {
   const summary = Array.isArray(data) ? data[0] : data;
-  return summary && typeof summary === "object" ? summary as { result_rows?: unknown; total_count?: unknown; scope_capped?: unknown; total_capped?: unknown; data_versions?: unknown } : {};
+  return summary && typeof summary === "object" ? summary as { result_rows?: unknown; total_count?: unknown; scope_capped?: unknown; total_capped?: unknown; data_versions?: unknown; has_more?: unknown } : {};
 }
 
 function queryPhaseOutcome(error: unknown): QueryPhaseOutcome {
@@ -122,6 +140,10 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   let filters: ProspectFilter[];
   try { filters = parseFilters(url.searchParams.get("filters")); }
   catch (error) { return filterErrorResponse(error, "Invalid Boolean filter."); }
+  // Capture user intent before adding the complete-profile and SEG predicates.
+  // Those server-owned filters appear even on an otherwise unfiltered client
+  // workspace and must not opt a large default view into page-first mode.
+  const callerHasFilters = filters.some((filter) => !internalClientFilterFields.has(filter.field));
   try {
     rejectClientCompanyScope(filters);
     filters = withClientWorkspaceCompleteness(filters, clientId);
@@ -147,6 +169,20 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
     clientScoped: Boolean(clientId),
     filters,
   });
+  const pageFirstEligible = clientProspectPageFirstEligible({
+    pageFirstEnabled: clientPageFirstFeatureEnabled,
+    clientCursorEnabled: clientCursorFeatureEnabled,
+    requested: requestedCursorMode,
+    page,
+    rawCursor,
+    search,
+    callerHasFilters,
+    clientId,
+    sort,
+    direction,
+    companyScoped: companyScope !== null,
+    filters,
+  });
   // A numeric deep link has no predecessor boundary. Eligibility keeps it on
   // OFFSET; only an in-session next page carries a cursor.
   const queryHash = prospectCursorQueryHash({ search, filters, sort, direction, clientId });
@@ -156,6 +192,13 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   }
   const queryFamily = prospectQueryFamily({ search, filters, clientId, companyScope });
   const supabase = createAdminClient();
+  const querySignals = prospectRequestSignals(signal);
+  const querySignal = querySignals.signal;
+  const boundedFailure = (error: unknown, logSubject = "The prospect listing") => boundedDatabaseFailure(
+    querySignals, error, "This filter combination",
+    "Narrow it - fewer filters, or a search term alongside them - or export the full set instead.",
+    logSubject,
+  );
 
   // A set id is not authorization: re-check ownership on every use, before the
   // query that would read the set runs (section 4.1).
@@ -180,12 +223,12 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
     const preparationStarted = performance.now();
     let prepared: Awaited<ReturnType<typeof prepareCompanyScope>>;
     try {
-      prepared = await prepareCompanyScope(supabase, owner, companyScope, signal);
+      prepared = await prepareCompanyScope(supabase, owner, companyScope, querySignal);
       recordQueryPhase(queryFamily, "preparation", queryPhaseResponseOutcome(prepared.response),
         performance.now() - preparationStarted);
     } catch (error) {
       recordQueryPhase(queryFamily, "preparation", queryPhaseOutcome(error), performance.now() - preparationStarted);
-      throw error;
+      return boundedFailure(error, "The prospect company-scope preparation");
     }
     if (prepared.response) return prepared.response;
     resolvedScope = prepared.scope ?? companyScope;
@@ -205,11 +248,13 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
         companyScope: resolvedScope,
         withTotal,
         knownVersions,
-        signal,
+        signal: querySignal,
       };
-      const result = cursor
-        ? await runProspectCursorWorkspace(supabase, workspaceQuery, cursor)
-        : await runProspectWorkspace(supabase, workspaceQuery);
+      const result = pageFirstEligible
+        ? await runProspectPageWorkspace(supabase, workspaceQuery, cursor)
+        : cursor
+          ? await runProspectCursorWorkspace(supabase, workspaceQuery, cursor)
+          : await runProspectWorkspace(supabase, workspaceQuery);
       const rows = workspaceSummary(result.data).result_rows;
       recordQueryPhase(queryFamily, "workspace", queryPhaseOutcome(result.error), performance.now() - started,
         Array.isArray(rows) ? rows.length : undefined);
@@ -223,7 +268,7 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
     const started = performance.now();
     if (!includeFields) return { data: [] as Array<{ field_name: string }>, error: null };
     try {
-      const result = await supabase.from("prospect_fields").select("field_name").order("field_name").limit(500);
+      const result = await supabase.from("prospect_fields").select("field_name").order("field_name").limit(500).abortSignal(querySignal);
       recordQueryPhase(queryFamily, "metadata", queryPhaseOutcome(result.error), performance.now() - started,
         result.data?.length);
       return result;
@@ -232,7 +277,13 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
       throw error;
     }
   })();
-  const [workspace, fields] = await Promise.all([workspaceRequest, fieldsRequest]);
+  let workspace: Awaited<typeof workspaceRequest>;
+  let fields: Awaited<typeof fieldsRequest>;
+  try {
+    [workspace, fields] = await Promise.all([workspaceRequest, fieldsRequest]);
+  } catch (error) {
+    return boundedFailure(error);
+  }
   if (isMissingFunction(workspace.error)) {
     return Response.json({ error: "Apply the latest database migration to enable the new prospect filters." }, { status: 503 });
   }
@@ -240,18 +291,16 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   if (resolvedScope?._prepared_set_id && (error?.code === '40001' || error?.code === 'P0002')) {
     return preparationResponse('refreshing', 0);
   }
-  if (isStatementTimeout(error)) {
-    return statementTimeoutResponse("This filter combination", "Narrow it - fewer filters, or a search term alongside them - or export the full set instead.");
-  }
-  if (error) return databaseErrorResponse("The prospect listing", error);
+  if (error) return boundedFailure(error);
   const summary = workspaceSummary(workspace.data);
   const prospects = Array.isArray(summary.result_rows) ? summary.result_rows : [];
-  const nextCursor = cursorEligible && prospects.length === limit
+  const hasMore = pageFirstEligible ? summary.has_more === true : prospects.length === limit;
+  const nextCursor = cursorEligible && hasMore && prospects.length
     ? encodeProspectCursor(prospects[prospects.length - 1], queryHash, cursorVersion)
     : null;
   return Response.json({
     prospects,
-    total: summary.total_count === null || summary.total_count === undefined ? null : Number(summary.total_count),
+    total: pageFirstEligible || summary.total_count === null || summary.total_count === undefined ? null : Number(summary.total_count),
     // Every People count is now an exact one, the unscoped whole-database total
     // included: 20260902000260 replaced pg_class.reltuples with count(*) after
     // measuring it at 175-234 ms. The field stays on the wire because the grid
@@ -270,7 +319,8 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
     versions: summary.data_versions ?? null,
     page,
     limit,
-    pagination: cursorEligible ? { mode: "cursor", nextCursor } : { mode: "offset", nextCursor: null },
+    countState: pageFirstEligible ? "deferred" : summary.total_capped === true ? "capped" : "exact",
+    pagination: cursorEligible ? { mode: "cursor", nextCursor, hasMore } : { mode: "offset", nextCursor: null },
     fields: (fields.data ?? []).map((item) => item.field_name),
   });
 }
