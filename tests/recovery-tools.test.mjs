@@ -65,8 +65,12 @@ test("isolated restore is separately bounded, scheduler-suppressed and cleans on
   assert.match(drill, /actual.*com\.clearroad\.restore-drill/s);
   assert.match(drill, /write_backup_stage restore_drill verified/);
   assert.match(drill, /restore_failure_category/);
-  assert.match(drill, /category=%s decompressor_status=%s pg_restore_status=%s elapsed_seconds=%s oom=%s/);
+  assert.match(drill, /category=%s decompressor_status=%s pg_restore_status=%s elapsed_seconds=%s oom=%s toc_entry=%s/);
   assert.match(drill, /Raw restore output was suppressed/);
+  assert.match(drill, /restore_failure_toc_entry/);
+  assert.match(drill, /from\[\[:space:\]\]\+TOC\[\[:space:\]\]\+entry/);
+  assert.match(drill, /decompressor_status != 0 && decompressor_status != 141/);
+  assert.match(drill, /if \(\( pg_restore_status != 0 \)\); then exit "\$pg_restore_status"/);
   assert.doesNotMatch(drill, /cat "\$restore_log"|tail [^\n]*"\$restore_log"/);
   assert.doesNotMatch(drill, /docker compose|prospect-db|\$POSTGRES_PASSWORD|\$\{POSTGRES_PASSWORD/);
   assert.match(verify, /restored public tables without RLS/);

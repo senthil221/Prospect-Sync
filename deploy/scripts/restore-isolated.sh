@@ -91,15 +91,28 @@ bounded_deadline() {
 restore_failure_category() {
   local log_file="$1" decompressor_status="$2" pg_restore_status="$3" oom_state="$4"
   if [[ "$oom_state" == "true" ]]; then printf 'out_of_memory\n'
-  elif (( decompressor_status != 0 )); then printf 'archive\n'
   elif (( pg_restore_status == 124 || pg_restore_status == 137 )); then printf 'deadline\n'
   elif grep -Eqi '(^|[^0-9A-Z])57014([^0-9A-Z]|$)|statement timeout|canceling statement due to statement timeout' "$log_file"; then printf 'statement_timeout\n'
   elif grep -Eqi '(^|[^0-9A-Z])42501([^0-9A-Z]|$)|permission denied|must be owner|not permitted' "$log_file"; then printf 'permission_denied\n'
   elif grep -Eqi '(^|[^0-9A-Z])(23505|23P01)([^0-9A-Z]|$)|duplicate key|violates .* constraint|could not create unique index' "$log_file"; then printf 'constraint_violation\n'
   elif grep -Eqi '(^|[^0-9A-Z])(42704|58P01)([^0-9A-Z]|$)|does not exist|could not open extension control file|extension .* is not available|no such file' "$log_file"; then printf 'missing_dependency\n'
   elif grep -Eqi 'input file is too short|did not find magic string|unsupported version|could not read from input file|invalid archive' "$log_file"; then printf 'archive\n'
+  # pg_restore can stop reading as soon as it finds an error. The resulting
+  # upstream SIGPIPE is secondary evidence, not proof that the archive is bad.
+  elif (( decompressor_status != 0 && decompressor_status != 141 )); then printf 'archive\n'
   else printf 'unknown\n'
   fi
+}
+
+restore_failure_toc_entry() {
+  local log_file="$1" line
+  while IFS= read -r line; do
+    if [[ "$line" =~ from[[:space:]]+TOC[[:space:]]+entry[[:space:]]+([0-9]+)\; ]]; then
+      printf '%s\n' "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  done <"$log_file"
+  printf 'unknown\n'
 }
 
 write_backup_attempt running "$DRILL_PHASE" "$STAMP" "$STAMP" restore_drill
@@ -238,11 +251,12 @@ if (( decompressor_status != 0 || pg_restore_status != 0 )); then
   oom_state="$(timeout 10 docker inspect --format '{{.State.OOMKilled}}' "$CONTAINER" 2>/dev/null || true)"
   [[ "$oom_state" == "true" || "$oom_state" == "false" ]] || oom_state="unknown"
   failure_category="$(restore_failure_category "$restore_log" "$decompressor_status" "$pg_restore_status" "$oom_state")"
+  failure_toc_entry="$(restore_failure_toc_entry "$restore_log")"
   restore_elapsed="$(( $(date +%s) - restore_started_epoch ))"
-  printf 'Isolated database restore failed: category=%s decompressor_status=%s pg_restore_status=%s elapsed_seconds=%s oom=%s. Raw restore output was suppressed.\n' \
-    "$failure_category" "$decompressor_status" "$pg_restore_status" "$restore_elapsed" "$oom_state" >&2
+  printf 'Isolated database restore failed: category=%s decompressor_status=%s pg_restore_status=%s elapsed_seconds=%s oom=%s toc_entry=%s. Raw restore output was suppressed.\n' \
+    "$failure_category" "$decompressor_status" "$pg_restore_status" "$restore_elapsed" "$oom_state" "$failure_toc_entry" >&2
   rm -f -- "$restore_log"
-  if (( decompressor_status != 0 )); then exit "$decompressor_status"; else exit "$pg_restore_status"; fi
+  if (( pg_restore_status != 0 )); then exit "$pg_restore_status"; else exit "$decompressor_status"; fi
 fi
 rm -f -- "$restore_log"
 

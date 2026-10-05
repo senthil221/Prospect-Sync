@@ -21,7 +21,19 @@ cat >"$fixture_root/mock-bin/zstd" <<'EOF'
 set -euo pipefail
 case " $* " in
   *" -t "*) exit 0 ;;
-  *" -dc "*) cat "${@: -1}" ;;
+  *" -dc "*)
+    if [[ "${@: -1}" == *database.dump.zst && "${MOCK_MODE:-}" == restore_*_sigpipe ]]; then
+      count_file="$MOCK_STATE/zstd-database.count"
+      count=0; [[ ! -f "$count_file" ]] || count="$(cat "$count_file")"
+      count="$(( count + 1 ))"; printf '%s' "$count" >"$count_file"
+      # The first stream is the bounded pg_restore --list validation. Simulate
+      # SIGPIPE only for the second stream, the actual database restore.
+      if (( count >= 2 )); then
+        printf 'partial archive bytes\n' || true
+        exit 141
+      fi
+    fi
+    cat "${@: -1}" ;;
   *) exit 2 ;;
 esac
 EOF
@@ -134,12 +146,14 @@ case "$command_name" in
     if [[ "$joined" == *" pg_isready "* ]]; then exit 0; fi
     if [[ "$joined" == *" du -sb /var/lib/postgresql/data "* ]]; then echo '1048576 /var/lib/postgresql/data'; exit 0; fi
     if [[ "$joined" == *" pg_restore "* ]]; then
-      cat >/dev/null
-      if [[ "${MOCK_MODE:-}" == restore_secret_failure ]]; then
+      if [[ "${MOCK_MODE:-}" == restore_secret_sigpipe ]]; then
         printf '%s\n' 'pg_restore: error: ERROR: 42501: permission denied for table private_customer_rows' >&2
+        printf '%s\n' 'pg_restore: error: from TOC entry 1234; 1259 99999 TABLE private_customer_rows postgres' >&2
         printf '%s\n' "Command was: INSERT INTO private_customer_rows VALUES ('person@example.test', 'password=super-secret');" >&2
         exit 1
       fi
+      if [[ "${MOCK_MODE:-}" == restore_timeout_sigpipe ]]; then exit 124; fi
+      cat >/dev/null
       exit 0
     fi
     if [[ "$joined" == *" psql "* ]]; then
@@ -201,6 +215,15 @@ run_failure() {
   [[ "$(jq -r .state "$BACKUP_DIR/.status/restore_drill-attempt.json")" == failed ]]
 }
 
+assert_sanitized_diagnostic() {
+  local expected="$1" log_file="$2"
+  if ! grep -Eq "$expected" "$log_file"; then
+    echo "unexpected sanitized restore diagnostic:" >&2
+    grep -E '^Isolated database restore failed:' "$log_file" >&2 || true
+    return 1
+  fi
+}
+
 reset_case
 MOCK_MODE=success bash "$fixture_root/deploy/scripts/restore-isolated.sh" "$backup" >/dev/null
 [[ "$(jq -r .state "$BACKUP_DIR/.status/restore_drill.json")" == verified ]]
@@ -236,14 +259,22 @@ unset MOCK_TIMEOUT_MATCH
 reset_case
 diagnostic_log="$fixture_root/restore-diagnostic.log"
 diagnostic_status=0
-MOCK_MODE=restore_secret_failure bash "$fixture_root/deploy/scripts/restore-isolated.sh" "$backup" >"$diagnostic_log" 2>&1 || diagnostic_status=$?
+MOCK_MODE=restore_secret_sigpipe bash "$fixture_root/deploy/scripts/restore-isolated.sh" "$backup" >"$diagnostic_log" 2>&1 || diagnostic_status=$?
 [[ "$diagnostic_status" == 1 ]]
-grep -Eq '^Isolated database restore failed: category=permission_denied decompressor_status=0 pg_restore_status=1 elapsed_seconds=[0-9]+ oom=false\. Raw restore output was suppressed\.$' "$diagnostic_log"
+assert_sanitized_diagnostic '^Isolated database restore failed: category=permission_denied decompressor_status=141 pg_restore_status=1 elapsed_seconds=[0-9]+ oom=false toc_entry=1234\. Raw restore output was suppressed\.$' "$diagnostic_log"
 if grep -Eqi 'private_customer_rows|person@example\.test|super-secret|INSERT INTO|password=' "$diagnostic_log"; then
   echo "restore diagnostics exposed raw SQL, PII or a secret" >&2
   exit 1
 fi
 [[ ! -e "$MOCK_STATE/container.name" && ! -e "$MOCK_STATE/volume.name" ]]
 [[ "$(jq -r .state "$BACKUP_DIR/.status/restore_drill-attempt.json")" == failed ]]
+
+reset_case
+timeout_diagnostic_log="$fixture_root/restore-timeout-diagnostic.log"
+timeout_diagnostic_status=0
+MOCK_MODE=restore_timeout_sigpipe bash "$fixture_root/deploy/scripts/restore-isolated.sh" "$backup" >"$timeout_diagnostic_log" 2>&1 || timeout_diagnostic_status=$?
+[[ "$timeout_diagnostic_status" == 124 ]]
+assert_sanitized_diagnostic '^Isolated database restore failed: category=deadline decompressor_status=141 pg_restore_status=124 elapsed_seconds=[0-9]+ oom=false toc_entry=unknown\. Raw restore output was suppressed\.$' "$timeout_diagnostic_log"
+[[ ! -e "$MOCK_STATE/container.name" && ! -e "$MOCK_STATE/volume.name" ]]
 
 printf 'PASS: isolated restore succeeds and fails closed across start, cleanup, signal and timeout paths\n'
