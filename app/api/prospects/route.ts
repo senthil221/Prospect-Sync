@@ -9,7 +9,7 @@ import { needsCompanyPreparation } from "../../../lib/prepared-search";
 import { ownerIdentity } from "../../../lib/result-sets";
 import { prepareCompanyScope, preparationResponse } from "../../../lib/prepare-company-scope";
 import { prospectQueryFamily, recordQueryPhase, type QueryPhaseOutcome } from "../../../lib/observability";
-import { decodeProspectCursor, encodeProspectCursor, isProspectCursorEligible, prospectCursorQueryHash, type ProspectCursor } from "../../../lib/prospect-pagination";
+import { decodeProspectCursor, encodeProspectCursor, isProspectCursorEligible, prospectCursorFeatureEnabled, prospectCursorQueryHash, type ProspectCursor } from "../../../lib/prospect-pagination";
 import { rejectClientCompanyScope, withClientWorkspaceCompleteness } from "../../../lib/client-workspace-completeness";
 
 type WorkspaceQuery = {
@@ -27,6 +27,7 @@ type WorkspaceQuery = {
 };
 
 const cursorFeatureEnabled = process.env.PROSPECT_CURSOR_PAGINATION === "1";
+const clientCursorFeatureEnabled = process.env.CLIENT_PROSPECT_CURSOR_PAGINATION === "1";
 
 const missingFunctionCodes = new Set(["PGRST202", "42883"]);
 
@@ -59,7 +60,10 @@ async function runProspectCursorWorkspace(
   query: WorkspaceQuery,
   cursor: ProspectCursor,
 ) {
-  const workspace = await supabase.rpc("search_prospect_workspace_cursor_v1", {
+  const functionName = cursor.version === 2
+    ? "search_prospect_workspace_cursor_v2"
+    : "search_prospect_workspace_cursor_v1";
+  const workspace = await supabase.rpc(functionName, {
     p_search: query.search,
     p_filters: query.filters,
     p_limit: query.limit,
@@ -69,7 +73,7 @@ async function runProspectCursorWorkspace(
     p_with_total: query.withTotal,
     p_known_versions: query.knownVersions,
   }).abortSignal(query.signal ?? AbortSignal.timeout(30_000));
-  return { ...workspace, version: "cursor-v1" };
+  return { ...workspace, version: `cursor-v${cursor.version}` };
 }
 
 function workspaceSummary(data: unknown) {
@@ -127,20 +131,26 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   }
   const requestedCursorMode = url.searchParams.get("pagination") === "cursor";
   const rawCursor = (url.searchParams.get("cursor") ?? "").trim();
+  const cursorVersion: 1 | 2 = clientId ? 2 : 1;
   const cursorEligible = isProspectCursorEligible({
-    featureEnabled: cursorFeatureEnabled,
+    featureEnabled: prospectCursorFeatureEnabled({
+      clientId,
+      globalEnabled: cursorFeatureEnabled,
+      clientEnabled: clientCursorFeatureEnabled,
+    }),
     requested: requestedCursorMode,
     page,
     rawCursor,
     sort,
     direction,
     companyScoped: companyScope !== null,
+    clientScoped: Boolean(clientId),
     filters,
   });
   // A numeric deep link has no predecessor boundary. Eligibility keeps it on
   // OFFSET; only an in-session next page carries a cursor.
   const queryHash = prospectCursorQueryHash({ search, filters, sort, direction, clientId });
-  const cursor = cursorEligible && rawCursor ? decodeProspectCursor(rawCursor, queryHash) : null;
+  const cursor = cursorEligible && rawCursor ? decodeProspectCursor(rawCursor, queryHash, cursorVersion) : null;
   if (cursorEligible && rawCursor && !cursor) {
     return Response.json({ error: "This People page cursor is invalid or belongs to a different query. Return to page 1 and try again." }, { status: 400 });
   }
@@ -237,7 +247,7 @@ async function respondToProspectQuery(params: URLSearchParams, signal?: AbortSig
   const summary = workspaceSummary(workspace.data);
   const prospects = Array.isArray(summary.result_rows) ? summary.result_rows : [];
   const nextCursor = cursorEligible && prospects.length === limit
-    ? encodeProspectCursor(prospects[prospects.length - 1], queryHash)
+    ? encodeProspectCursor(prospects[prospects.length - 1], queryHash, cursorVersion)
     : null;
   return Response.json({
     prospects,

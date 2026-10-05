@@ -521,13 +521,13 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
   const cursorQueryRef = useRef("");
   // Total plus the version vector it was counted at; the server recounts when
   // the vector it is given no longer matches the live one.
-  const totalCache = useRef(new Map<string, { total: number; versions: Record<string, number> | null }>());
+  const totalCache = useRef(new Map<string, { total: number; capped: boolean; versions: Record<string, number> | null }>());
   const deferredSearch = useDeferredValue(search);
   const debouncedSearch = useDebouncedValue(deferredSearch, 300);
   const encodedFilters = useMemo(() => encodeFilters(filters), [filters]);
   const countKey = useMemo(() => JSON.stringify([client.id, debouncedSearch.trim(), encodedFilters, companyScope, refresh, client.prospect_count]), [client.id, client.prospect_count, companyScope, debouncedSearch, encodedFilters, refresh]);
   const cursorQueryKey = useMemo(() => JSON.stringify([client.id, debouncedSearch.trim(), encodedFilters, sort, direction, companyScope, refresh, client.prospect_count]), [client.id, client.prospect_count, companyScope, debouncedSearch, direction, encodedFilters, refresh, sort]);
-  const cursorShapeSupported = useMemo(() => prospectCursorShapeSupported({ sort, direction, companyScoped: companyScope !== null, filters: JSON.parse(encodedFilters) }), [companyScope, direction, encodedFilters, sort]);
+  const cursorShapeSupported = useMemo(() => prospectCursorShapeSupported({ sort, direction, companyScoped: companyScope !== null, clientScoped: true, filters: JSON.parse(encodedFilters) }), [companyScope, direction, encodedFilters, sort]);
   useEffect(() => {
     let current = true;
     const controller = new AbortController();
@@ -549,15 +549,24 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
         if (current) {
           setProspects(data.prospects);
           if (data.pagination?.mode === "cursor") {
-            if (data.pagination.nextCursor) pageCursors.current.set(page + 1, data.pagination.nextCursor);
-            else pageCursors.current.delete(page + 1);
+            if (data.pagination.nextCursor) {
+              pageCursors.current.set(page + 1, data.pagination.nextCursor);
+            } else {
+              pageCursors.current.delete(page + 1);
+            }
           }
           // A client view is never the unfiltered whole database, so its count is
           // always the capped one -- carry the flag through or a bounded number
           // would read here as an exact one.
-          setTotalCapped(data.totalCapped === true);
-          if (data.total !== null) { totalCache.current.set(countKey, { total: data.total, versions: data.versions ?? null }); setTotal(data.total); }
-          else if (cached) setTotal(cached.total);
+          if (data.total !== null) {
+            const capped = data.totalCapped === true;
+            totalCache.current.set(countKey, { total: data.total, capped, versions: data.versions ?? null });
+            setTotal(data.total);
+            setTotalCapped(capped);
+          } else if (cached) {
+            setTotal(cached.total);
+            setTotalCapped(cached.capped);
+          }
           if (data.fields?.length) { fieldsLoaded.current = true; setFields(data.fields); }
           setError("");
         }

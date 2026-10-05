@@ -19,9 +19,10 @@ export function prospectCursorShapeSupported(input: {
   sort: string;
   direction: string;
   companyScoped: boolean;
+  clientScoped?: boolean;
   filters: FilterField[];
 }) {
   return input.sort === "created_at" && input.direction === "desc" && !input.companyScoped
     && !input.filters.some((filter) => filter.field === "__max_people_per_company"
-      || companyLookupFields.has(filter.field));
+      || (!input.clientScoped && companyLookupFields.has(filter.field)));
 }

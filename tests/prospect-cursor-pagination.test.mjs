@@ -7,6 +7,7 @@ import {
   decodeProspectCursor,
   encodeProspectCursor,
   isProspectCursorEligible,
+  prospectCursorFeatureEnabled,
   prospectCursorQueryHash,
 } from "../lib/prospect-pagination.ts";
 
@@ -30,6 +31,14 @@ test("People cursors are opaque, query-bound, and reject malformed boundaries", 
     id: "prospect-b",
   });
   assert.equal(decodeProspectCursor(encoded, prospectCursorQueryHash({ ...identity, search: "vp" })), null);
+  const clientEncoded = encodeProspectCursor({ id: "prospect-b", created_at: "2026-09-26T08:00:00.000Z" }, hash, 2);
+  assert.equal(decodeProspectCursor(clientEncoded, hash), null, "global v1 refuses a client v2 token");
+  assert.deepEqual(decodeProspectCursor(clientEncoded, hash, 2), {
+    version: 2,
+    queryHash: hash,
+    createdAt: "2026-09-26T08:00:00.000Z",
+    id: "prospect-b",
+  });
   assert.equal(decodeProspectCursor("not-json", hash), null);
   assert.equal(encodeProspectCursor({ id: "prospect-b", created_at: "not-a-date" }, hash), null);
 });
@@ -59,7 +68,15 @@ test("cursor eligibility is additive and keeps unsupported/deep-link cases on OF
     "__incomplete_company_profile",
   ]) {
     assert.equal(isProspectCursorEligible({ ...base, filters: [{ field }] }), false, `${field} must retain v12 count/version semantics`);
+    assert.equal(isProspectCursorEligible({ ...base, clientScoped: true, filters: [{ field }] }), true, `${field} is supported by client cursor v2`);
   }
+});
+
+test("global and client cursor rollout flags are independent", () => {
+  assert.equal(prospectCursorFeatureEnabled({ clientId: "client-1", globalEnabled: false, clientEnabled: true }), true);
+  assert.equal(prospectCursorFeatureEnabled({ clientId: null, globalEnabled: false, clientEnabled: true }), false);
+  assert.equal(prospectCursorFeatureEnabled({ clientId: "client-1", globalEnabled: true, clientEnabled: false }), false);
+  assert.equal(prospectCursorFeatureEnabled({ clientId: null, globalEnabled: true, clientEnabled: false }), true);
 });
 
 test("People API transport carries cursor mode in GET and preserves page numbers", () => {
@@ -86,6 +103,21 @@ test("cursor SQL preserves the mixed created_at DESC/id ASC boundary and service
   assert.doesNotMatch(sql, /\$assert_pages\$/);
   assert.doesNotMatch(sql, /group by client_id[\s\S]*having count\(\*\) between 51 and 50000/);
   assert.doesNotMatch(sql, /group by lm\.list_id[\s\S]*having count\(\*\) > 50/);
+});
+
+test("client cursor v2 keeps its boundary inside the client-first candidate and mirrors v12 contracts", async () => {
+  const sql = await read("../supabase/migrations/20261005163609_client_people_cursor_v2.sql");
+  const catalogProof = sql.slice(sql.indexOf("do $assert_contract$"), sql.indexOf("do $assert_ties$"));
+  assert.match(sql, /search_prospect_workspace_cursor_v2/);
+  assert.match(sql, /client_rows as materialized[\s\S]*pi\.created_at <= %3\$L::timestamptz[\s\S]*pi\.created_at < %3\$L::timestamptz/);
+  assert.match(sql, /prospect_filters_need_company_lookup_v1\(v_filters\)/);
+  assert.match(sql, /limit 50001[\s\S]*least\(\(select counted\.matched_rows from counted\), 50000\)/);
+  assert.match(sql, /data_versions_v1[\s\S]*array\['prospect', 'company'\]/);
+  assert.match(sql, /set statement_timeout = '10s'/);
+  assert.match(sql, /revoke execute on function public\.search_prospect_workspace_cursor_v2[\s\S]*from public, anon, authenticated/);
+  assert.match(sql, /grant execute on function public\.search_prospect_workspace_cursor_v2[\s\S]*to service_role/);
+  assert.match(sql, /created_at[\s\S]*attnotnull/);
+  assert.doesNotMatch(catalogProof, /from public\.(prospects|client_prospects|companies)\b/);
 });
 
 test("disposable PostgreSQL schema upgrade is release-gating and fail-closed", async () => {
@@ -203,7 +235,10 @@ test("route and both People controllers retain cursor fallback and back-navigati
     read("../lib/dashboard-api.ts"),
   ]);
   assert.match(route, /PROSPECT_CURSOR_PAGINATION === "1"/);
+  assert.match(route, /CLIENT_PROSPECT_CURSOR_PAGINATION === "1"/);
   assert.match(route, /search_prospect_workspace_cursor_v1/);
+  assert.match(route, /search_prospect_workspace_cursor_v2/);
+  assert.match(route, /prospectCursorFeatureEnabled\([\s\S]*clientId,[\s\S]*globalEnabled: cursorFeatureEnabled,[\s\S]*clientEnabled: clientCursorFeatureEnabled/);
   assert.match(route, /runProspectWorkspace\(supabase, workspaceQuery\)/, "v13 OFFSET fallback remains wired");
   assert.match(route, /pagination: cursorEligible \? \{ mode: "cursor", nextCursor \} : \{ mode: "offset", nextCursor: null \}/);
   for (const controller of [master, clients]) {
@@ -214,6 +249,9 @@ test("route and both People controllers retain cursor fallback and back-navigati
   }
   assert.match(master, /cursorQueryKey[\s\S]*statsProspects/);
   assert.match(clients, /cursorQueryKey[\s\S]*client\.prospect_count/);
+  assert.match(clients, /clientScoped: true/);
+  assert.match(clients, /cached\.capped/);
+  assert.match(await read("../app/components/ProspectTable.tsx"), /No records on this page/);
   assert.match(api, /query\.pagination === "cursor"/);
   assert.match(api, /query\.cursor \? \{ cursor: query\.cursor \}/);
 });
