@@ -38,6 +38,12 @@ function prospectRow(index: number) {
   };
 }
 
+function issuedProspectCursor(mode: "cursor" | "offset" | "page-first", page: number) {
+  return (mode === "cursor" && page < 3) || (mode === "page-first" && page < 2)
+    ? `cursor-v2-${page}`
+    : null;
+}
+
 async function installApi(page: Page, held: string[] = [], failOnce: string[] = [], peopleMode: "cursor" | "offset" | "page-first" | null = null, countResult: "ready" | "stale" | "failed" = "ready") {
   const gates = new Map(held.map((key) => [key, deferred()]));
   const failures = new Set(failOnce);
@@ -88,8 +94,8 @@ async function installApi(page: Page, held: string[] = [], failOnce: string[] = 
           : 0;
         const rows = Array.from({ length }, (_, index) => prospectRow(start + index));
         const cursorMode = peopleMode === "cursor" || peopleMode === "page-first";
-        const cursor = cursorMode && (peopleMode === "cursor" ? pageNumber < 3 : pageNumber < 2) ? `cursor-v2-${pageNumber}` : null;
-        return json(route, {
+        const cursor = issuedProspectCursor(peopleMode, pageNumber);
+        return delayedJson(`prospects:${search}:${pageNumber}`, route, {
           prospects: rows,
           total: peopleMode === "page-first" ? null : pageNumber === 1 ? (singleSearchResult ? 1 : peopleMode === "cursor" ? 50_000 : 75) : null,
           totalEstimated: false,
@@ -302,6 +308,14 @@ test("client page-first renders before a count and pages by hasMore without trea
   await page.getByRole("tab", { name: /People DB/ }).click();
   const panel = page.locator("#tabpanel-prospects");
   await panel.getByRole("textbox", { name: "Search Client A prospects" }).fill("cursor");
+  await expect.poll(() => api.completed.has("prospects:cursor:1")).toBe(true);
+  const searchedPageOne = api.requested.findLast((request) => {
+    if (!request.startsWith("/api/prospects?")) return false;
+    const params = new URL(request, "https://fixture.test").searchParams;
+    return params.get("page") === "1" && params.get("search") === "cursor";
+  });
+  expect(searchedPageOne).toBeDefined();
+  await expect(panel.locator(".client-database-workspace")).toHaveAttribute("aria-busy", "false");
   await expect(panel.locator(".results-count > strong")).toHaveText("50 shown · Total not counted");
   await expect(panel.getByRole("button", { name: "Count all matches" })).toBeVisible();
   await expect(panel.getByText(/50 people/)).toHaveCount(0);
@@ -310,7 +324,13 @@ test("client page-first renders before a count and pages by hasMore without trea
   await expect(panel.getByRole("button", { name: "Next" })).toBeDisabled();
   await panel.getByRole("button", { name: /Previous/ }).click();
   await expect(panel.getByText("Cursor Person 1", { exact: true })).toBeVisible();
-  expect(api.requested.some((request) => request.includes("page=2") && request.includes("cursor=cursor-v2-1"))).toBe(true);
+  const pageTwoRequest = api.requested.findLast((request) => request.startsWith("/api/prospects?")
+    && new URL(request, "https://fixture.test").searchParams.get("page") === "2");
+  if (!pageTwoRequest) throw new Error("Client page-first did not request page 2.");
+  const pageTwoParams = new URL(pageTwoRequest, "https://fixture.test").searchParams;
+  expect(pageTwoParams.get("search")).toBe("cursor");
+  expect(pageTwoParams.get("pagination")).toBe("cursor");
+  expect(pageTwoParams.get("cursor")).toBe(issuedProspectCursor("page-first", 1));
 
   await panel.getByRole("button", { name: "Select all matching records" }).click();
   await expect(panel.getByText(/All matching records selected/)).toBeVisible();
