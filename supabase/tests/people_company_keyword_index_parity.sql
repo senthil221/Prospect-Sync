@@ -41,8 +41,15 @@ select 'keyword-index-client', id, 'active'
 from public.prospects where id like 'keyword-person-%';
 insert into public.lists(id, client_id, name)
 values ('keyword-index-list', 'keyword-index-client', 'Keyword Fixture');
-insert into public.list_memberships(list_id, prospect_id)
-select 'keyword-index-list', id from public.prospects
+insert into public.imports(
+  id, client_id, list_id, file_name, status, total_rows, processed_rows,
+  unique_added, duplicates_linked, completed_at
+) values (
+  'keyword-index-import', 'keyword-index-client', 'keyword-index-list',
+  'keyword-index-fixture.csv', 'completed', 4, 4, 4, 0, now()
+);
+insert into public.list_memberships(list_id, prospect_id, import_id)
+select 'keyword-index-list', id, 'keyword-index-import' from public.prospects
 where id in ('keyword-person-name', 'keyword-person-description', 'keyword-person-tag', 'keyword-person-seg');
 
 select public.reindex_prospects(array_agg(id order by id))
