@@ -125,13 +125,23 @@ case "$command_name" in
     count=0; [[ ! -f "$MOCK_STATE/inspect.count" ]] || count="$(cat "$MOCK_STATE/inspect.count")"
     count="$((count + 1))"; printf '%s' "$count" >"$MOCK_STATE/inspect.count"
     [[ "${MOCK_MODE:-}" == monitor_fail && "$count" == 1 ]] && exit 1
-    if [[ " $* " == *" --format "* ]]; then cat "$MOCK_STATE/container.label"; fi
+    if [[ " $* " == *".State.OOMKilled"* ]]; then echo false
+    elif [[ " $* " == *" --format "* ]]; then cat "$MOCK_STATE/container.label"
+    fi
     exit 0 ;;
   exec)
     joined=" $* "
     if [[ "$joined" == *" pg_isready "* ]]; then exit 0; fi
     if [[ "$joined" == *" du -sb /var/lib/postgresql/data "* ]]; then echo '1048576 /var/lib/postgresql/data'; exit 0; fi
-    if [[ "$joined" == *" pg_restore "* ]]; then cat >/dev/null; exit 0; fi
+    if [[ "$joined" == *" pg_restore "* ]]; then
+      cat >/dev/null
+      if [[ "${MOCK_MODE:-}" == restore_secret_failure ]]; then
+        printf '%s\n' 'pg_restore: error: ERROR: 42501: permission denied for table private_customer_rows' >&2
+        printf '%s\n' "Command was: INSERT INTO private_customer_rows VALUES ('person@example.test', 'password=super-secret');" >&2
+        exit 1
+      fi
+      exit 0
+    fi
     if [[ "$joined" == *" psql "* ]]; then
       cat >/dev/null || true
       [[ "$joined" == *" -XAtq "* ]] && printf 'off|restore_drill|restore_drill_disabled\n'
@@ -222,5 +232,18 @@ reset_case
 export MOCK_TIMEOUT_MATCH=' psql -XAtq '
 run_failure timeout 124
 unset MOCK_TIMEOUT_MATCH
+
+reset_case
+diagnostic_log="$fixture_root/restore-diagnostic.log"
+diagnostic_status=0
+MOCK_MODE=restore_secret_failure bash "$fixture_root/deploy/scripts/restore-isolated.sh" "$backup" >"$diagnostic_log" 2>&1 || diagnostic_status=$?
+[[ "$diagnostic_status" == 1 ]]
+grep -Eq '^Isolated database restore failed: category=permission_denied decompressor_status=0 pg_restore_status=1 elapsed_seconds=[0-9]+ oom=false\. Raw restore output was suppressed\.$' "$diagnostic_log"
+if grep -Eqi 'private_customer_rows|person@example\.test|super-secret|INSERT INTO|password=' "$diagnostic_log"; then
+  echo "restore diagnostics exposed raw SQL, PII or a secret" >&2
+  exit 1
+fi
+[[ ! -e "$MOCK_STATE/container.name" && ! -e "$MOCK_STATE/volume.name" ]]
+[[ "$(jq -r .state "$BACKUP_DIR/.status/restore_drill-attempt.json")" == failed ]]
 
 printf 'PASS: isolated restore succeeds and fails closed across start, cleanup, signal and timeout paths\n'
