@@ -109,3 +109,19 @@ export function databaseErrorResponse(subject: string, error: DatabaseError): Re
   });
   return Response.json({ error: message }, { status: 500 });
 }
+
+// The whole answer for a failed bounded database call: 499 when the caller
+// left, 504 when the deadline or statement_timeout hit, otherwise a logged 500.
+// One call instead of the abort check followed by the error fallback at every
+// await.
+export function boundedDatabaseFailure(
+  signals: { callerSignal?: AbortSignal; deadlineSignal: AbortSignal },
+  error: unknown,
+  subject: string,
+  alternative: string,
+  logSubject = subject,
+): Response {
+  const databaseError = error as DatabaseError;
+  return boundedDatabaseAbortResponse({ ...signals, error: databaseError, subject, alternative })
+    ?? databaseErrorResponse(logSubject, databaseError);
+}

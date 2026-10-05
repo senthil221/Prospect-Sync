@@ -1,5 +1,5 @@
 import { authorizeApi } from "../../../../lib/auth";
-import { boundedDatabaseAbortResponse, databaseErrorResponse } from "../../../../lib/api-errors.ts";
+import { boundedDatabaseFailure } from "../../../../lib/api-errors.ts";
 import { clientSummarySignals, observeClientSummaryQuery } from "../../../../lib/client-summary-query.ts";
 import { deleteAndReindex, queuedNotice } from "../../../../lib/delete-cleanup.ts";
 import { createAdminClient } from "../../../../lib/supabase/admin";
@@ -27,6 +27,9 @@ async function getClientDetail(
   const { id } = await context.params;
   const supabase = dependencies.admin();
   const { callerSignal, deadlineSignal, signal } = dependencies.signals(request.signal);
+  const fail = (error: unknown, logSubject = "The client summary") => boundedDatabaseFailure(
+    { callerSignal, deadlineSignal }, error, "This client summary",
+    "Return to the Clients directory, then retry this client.", logSubject);
   let summary;
   let setting;
   let folder;
@@ -43,24 +46,10 @@ async function getClientDetail(
         callerSignal, deadlineSignal),
     ]);
   } catch (error) {
-    const bounded = boundedDatabaseAbortResponse({
-      callerSignal, deadlineSignal, error: error as { code?: string; message?: string },
-      subject: "This client summary",
-      alternative: "Return to the Clients directory, then retry this client.",
-    });
-    return bounded ?? databaseErrorResponse("The client summary", error as { code?: string; message?: string });
+    return fail(error);
   }
   const error = summary.error ?? setting.error ?? folder.error;
-  if (error) {
-    const bounded = boundedDatabaseAbortResponse({
-      callerSignal,
-      deadlineSignal,
-      error,
-      subject: "This client summary",
-      alternative: "Return to the Clients directory, then retry this client.",
-    });
-    return bounded ?? databaseErrorResponse("The client summary", error);
-  }
+  if (error) return fail(error);
   const client = ((summary.data ?? []) as Array<{ id: string; folder_id: string | null }>)[0];
   if (!client) return Response.json({ error: "Client not found." }, { status: 404 });
   const folderId = folder.data?.folder_id ?? client.folder_id ?? null;
@@ -72,23 +61,9 @@ async function getClientDetail(
         callerSignal, deadlineSignal)
       : null;
   } catch (error) {
-    const bounded = boundedDatabaseAbortResponse({
-      callerSignal, deadlineSignal, error: error as { code?: string; message?: string },
-      subject: "This client summary",
-      alternative: "Return to the Clients directory, then retry this client.",
-    });
-    return bounded ?? databaseErrorResponse("The client folder metadata", error as { code?: string; message?: string });
+    return fail(error, "The client folder metadata");
   }
-  if (folderName?.error) {
-    const bounded = boundedDatabaseAbortResponse({
-      callerSignal,
-      deadlineSignal,
-      error: folderName.error,
-      subject: "This client summary",
-      alternative: "Return to the Clients directory, then retry this client.",
-    });
-    return bounded ?? databaseErrorResponse("The client folder metadata", folderName.error);
-  }
+  if (folderName?.error) return fail(folderName.error, "The client folder metadata");
   return Response.json({
     client: {
       ...client,

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 import typescript from "typescript";
-import { boundedDatabaseAbortResponse, databaseErrorResponse } from "../lib/api-errors.ts";
+import { boundedDatabaseAbortResponse, boundedDatabaseFailure, databaseErrorResponse } from "../lib/api-errors.ts";
 import {
   clientSummaryPhaseOutcome,
   clientSummarySignals,
@@ -51,7 +51,7 @@ function routeMocks(prefix) {
   const observed = { observed: (_route, handler) => handler };
   return {
     [`${prefix}/auth`]: { authorizeApi: async () => null },
-    [`${prefix}/api-errors.ts`]: { boundedDatabaseAbortResponse, databaseErrorResponse },
+    [`${prefix}/api-errors.ts`]: { boundedDatabaseAbortResponse, boundedDatabaseFailure, databaseErrorResponse },
     [`${prefix}/client-summary-query.ts`]: { clientSummarySignals, observeClientSummaryQuery },
     [`${prefix}/supabase/admin`]: { createAdminClient: () => ({}) },
     [`${prefix}/observability`]: observed,
@@ -160,8 +160,8 @@ test("both client GET routes apply the same deadline, error and redacted timing 
     assert.match(route, /dependencies\.signals\(request\.signal\)/);
     assert.match(route, /observeClientSummaryQuery\(/);
     assert.match(route, /\.abortSignal\(signal\)/);
-    assert.match(route, /boundedDatabaseAbortResponse\(/);
-    assert.match(route, /databaseErrorResponse\(/);
+    // One helper answers 499 / 504 / logged 500 (lib/api-errors.ts).
+    assert.match(route, /boundedDatabaseFailure\(/);
   }
   assert.match(directory, /observeClientSummaryQuery\("directory", "counts"/);
   assert.match(detail, /observeClientSummaryQuery\("single", "counts"/);

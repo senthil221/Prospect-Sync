@@ -159,19 +159,6 @@ export async function reindexCompanyImport(
   return { reindexed, queued, remaining, degraded };
 }
 
-export async function reindexProspectsOfLists(supabase: Admin, listIds: Array<string | null | undefined>) {
-  return reindexScope(supabase, { listIds });
-}
-
-export async function reindexProspectsOfCompanies(supabase: Admin, companyIds: Array<string | null | undefined>) {
-  return reindexScope(supabase, { companyIds });
-}
-
-export async function reindexAll(supabase: Admin) {
-  const { error } = await supabase.rpc("reindex_all", {});
-  return isBenign(error) ? null : error;
-}
-
 // A response field for writes whose index update did not fully land, so the UI
 // can say so instead of showing stale rows and looking broken.
 export function indexNotice(outcome: ReindexOutcome) {

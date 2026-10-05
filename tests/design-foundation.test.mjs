@@ -33,7 +33,8 @@ test("every search box shows focus, since its input suppresses its own ring", as
   // These containers hold an input with `outline: 0`, so the container is the
   // only thing that can show focus. .workspace-search had no rule at all, so
   // tabbing into it showed nothing.
-  for (const container of [".search", ".workspace-search", ".multi-value-control", ".token-input", ".filter-panel-search"]) {
+  // (.multi-value-control went with the old filter builder, 2026-10-05.)
+  for (const container of [".search", ".workspace-search", ".token-input", ".filter-panel-search"]) {
     assert.ok(styles.includes(`${container}:focus-within`),
       `${container} suppresses its input's outline and must show focus itself`);
   }
@@ -60,7 +61,7 @@ test("controls use the two height tokens and nothing else", async () => {
   const exempt = [
     // The bordered box is the control; this is the text field inside it, which
     // sits on one line among the chips and must stay smaller than its parent.
-    ".multi-value-control input", ".token-input input",
+    ".token-input input",
     // Icon above label, vertical: a different component, not a 32/40 control.
     ".sidebar nav button",
     // Visually hidden file input, sized to 1px on purpose.
@@ -115,7 +116,7 @@ test("an action button is not shaped like a status chip", async () => {
   // button/input/select/textarea - never saw it, and its flex parent stretched
   // it to full width as a lozenge.
   const styles = await read("../app/workspace.css");
-  const controls = [".company-filter-import", ".company-filter-clear", ".company-bulk-clear", ".icp-toggle", ".bulk-domain-actions button"];
+  const controls = [".company-filter-import", ".company-bulk-clear", ".bulk-domain-actions button"];
   for (const selector of controls) {
     const rule = styles.split("\n").find((line) => line.startsWith(`${selector} {`));
     assert.ok(rule, `${selector} should still exist`);

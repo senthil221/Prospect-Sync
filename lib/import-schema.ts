@@ -95,13 +95,6 @@ export function suggestedCompanyImportField(header: string) {
 // (from the mapped fields, the preserved raw all_data, and the field catalog).
 export const skipImportField = "Skip column";
 
-export function isPersonImportField(value: unknown): value is (typeof personImportFields)[number] {
-  return typeof value === "string" && (personImportFields as readonly string[]).includes(value);
-}
-
-export function isCompanyImportField(value: unknown): value is (typeof companyImportFields)[number] {
-  return typeof value === "string" && (companyImportFields as readonly string[]).includes(value);
-}
 
 /** Resolve one source header only when it maps onto the fixed import contract. */
 export function resolvedImportField(

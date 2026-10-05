@@ -77,9 +77,16 @@ test("companies filter by ESP like people do, from one picker", async () => {
 test("the ICP worker scans MX records continuously and never marks a DNS outage as results", async () => {
   const worker = await read("../worker/icp-worker.mjs");
   assert.match(worker, /const mxScanner = mxScanLoop\(\);/);
-  assert.match(worker, /public\.claim_mx_scan_batch_v1\(\$1\)/);
+  assert.match(worker, /public\.claim_mx_scan_batch_v2\(\$1\)/);
   assert.match(worker, /public\.apply_email_provider_scan_v2\(\$1::jsonb\)/);
-  assert.match(worker, /if \(failed > rows\.length \/ 2\) \{/);
+  // The outage guard judges first-time lookups only, so retries of domains
+  // that already failed can never stall the loop.
+  assert.match(worker, /if \(fresh\.length && freshFailed > fresh\.length \/ 2\) \{/);
+  const retry = await read("../supabase/migrations/20261005120000_retry_failed_mx_lookups.sql");
+  assert.match(retry, /c\.mx_checked_at < now\(\) - interval '7 days'/);
+  assert.match(retry, /limit greatest\(0, least\(coalesce\(p_limit, 100\), 500\) - \(select count\(\*\) from fresh\)\)/);
+  assert.match(retry, /grant execute on function public\.claim_mx_scan_batch_v2\(integer\) to prospect_icp_validator/);
+  assert.match(retry, /MX retry proof passed and was rolled back/);
   const migration = await read(segMigration);
   assert.match(migration, /where c\.normalized_domain <> '' and c\.mx_checked_at is null/);
   assert.match(migration, /grant execute on function public\.claim_mx_scan_batch_v1\(integer\) to prospect_icp_validator/);

@@ -98,6 +98,5 @@ export async function withAnalyticsSlot(request: Request, work: () => Promise<Re
 }
 
 export const admissionState = queue.state;
-export const analyticsState = analytics.state;
 // Streaming exports acquire one slot per database call, not per slow download.
 export const acquireSlot = queue.acquire;

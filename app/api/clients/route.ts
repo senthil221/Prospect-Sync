@@ -1,5 +1,5 @@
 import { authorizeApi } from "../../../lib/auth";
-import { boundedDatabaseAbortResponse, databaseErrorResponse } from "../../../lib/api-errors.ts";
+import { boundedDatabaseFailure } from "../../../lib/api-errors.ts";
 import { clientSummarySignals, observeClientSummaryQuery } from "../../../lib/client-summary-query.ts";
 import { normalizeText } from "../../../db/normalize";
 import { createAdminClient } from "../../../lib/supabase/admin";
@@ -42,24 +42,10 @@ async function getClientDirectory(
         callerSignal, deadlineSignal),
     ]);
   } catch (error) {
-    const bounded = boundedDatabaseAbortResponse({
-      callerSignal, deadlineSignal, error: error as { code?: string; message?: string },
-      subject: "The client directory",
-      alternative: "Open a specific client instead.",
-    });
-    return bounded ?? databaseErrorResponse("The client directory", error as { code?: string; message?: string });
+    return boundedDatabaseFailure({ callerSignal, deadlineSignal }, error, "The client directory", "Open a specific client instead.");
   }
   const error = summaries.error ?? settings.error ?? folders.error;
-  if (error) {
-    const bounded = boundedDatabaseAbortResponse({
-      callerSignal,
-      deadlineSignal,
-      error,
-      subject: "The client directory",
-      alternative: "Open a specific client instead.",
-    });
-    return bounded ?? databaseErrorResponse("The client directory", error);
-  }
+  if (error) return boundedDatabaseFailure({ callerSignal, deadlineSignal }, error, "The client directory", "Open a specific client instead.");
   const settingsByClient = new Map((settings.data ?? []).map((setting) => [setting.client_id, setting]));
   const folderNames = new Map((folders.data ?? []).map((folder) => [folder.id, folder.name]));
   return Response.json({

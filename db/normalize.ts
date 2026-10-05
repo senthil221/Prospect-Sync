@@ -243,11 +243,3 @@ export function mapProspect(headers: string[], values: string[]): CanonicalProsp
   };
 }
 
-export function mergeRaw(existing: string | null, incoming: Record<string, string>) {
-  let current: Record<string, string> = {};
-  try { current = JSON.parse(existing || "{}"); } catch { current = {}; }
-  for (const [field, value] of Object.entries(incoming)) {
-    if ((!current[field] || !String(current[field]).trim()) && value) current[field] = value;
-  }
-  return current;
-}

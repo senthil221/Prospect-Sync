@@ -1,6 +1,6 @@
 import { acquireSlot, withInteractiveSlot } from "../../../lib/admission";
 import { authorizeFilterSets } from "../../../lib/filter-sets";
-import { boundedDatabaseAbortResponse, databaseErrorResponse, isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
+import { boundedDatabaseAbortResponse, boundedDatabaseFailure, databaseErrorResponse, isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
 import { clientCompanyHasMore, clientCompanyPageRequest } from "../../../lib/client-company-pagination";
 import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { availableCompanyExportFieldIds, buildCompanyExportColumns, companyExportRowKeys } from "../../../lib/company-export";
@@ -338,14 +338,8 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
       data = result.data;
       error = result.error;
     } catch (caught) {
-      const abortResponse = boundedDatabaseAbortResponse({
-        callerSignal: signal, deadlineSignal: deadline,
-        error: caught as { code?: string; message?: string },
-        subject: "This client company view",
-        alternative: "Try a narrower search or fewer filters, then retry.",
-      });
-      if (abortResponse) return abortResponse;
-      return databaseErrorResponse("The client company view", caught as { code?: string; message?: string });
+      return boundedDatabaseFailure({ callerSignal: signal, deadlineSignal: deadline }, caught,
+        "This client company view", "Try a narrower search or fewer filters, then retry.", "The client company view");
     }
     const abortResponse = boundedDatabaseAbortResponse({
       callerSignal: signal, deadlineSignal: deadline, error,
@@ -360,14 +354,8 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
     let companies;
     try { companies = await withClientIcpValidation(supabase, resultRows.slice(0, pageSize), clientId, querySignal); }
     catch (caught) {
-      const icpAbortResponse = boundedDatabaseAbortResponse({
-        callerSignal: signal, deadlineSignal: deadline,
-        error: caught as { code?: string; message?: string },
-        subject: "This client company view",
-        alternative: "Try a narrower search or fewer filters, then retry.",
-      });
-      if (icpAbortResponse) return icpAbortResponse;
-      return databaseErrorResponse("Company ICP verification", caught as { message?: string; code?: string });
+      return boundedDatabaseFailure({ callerSignal: signal, deadlineSignal: deadline }, caught,
+        "This client company view", "Try a narrower search or fewer filters, then retry.", "Company ICP verification");
     }
     return Response.json({
       companies,

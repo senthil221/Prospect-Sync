@@ -160,16 +160,22 @@ async function mxScanLoop() {
   while (!stopping) {
     let pause = 60_000;
     try {
-      const { rows } = await query('select id, domain from public.claim_mx_scan_batch_v1($1)', [mxBatchSize], 3);
+      // Never-scanned companies first; the rest of the batch re-checks lookups
+      // that failed more than a week ago (claim_mx_scan_batch_v2).
+      const { rows } = await query('select id, domain, retry from public.claim_mx_scan_batch_v2($1)', [mxBatchSize], 3);
       if (rows.length) {
         const scanned = await mapWithConcurrency(rows, mxConcurrency, async (row) =>
-          ({ id: row.id, detection: await lookupEmailProvider(row.domain, { resolveMx }) }));
+          ({ id: row.id, retry: row.retry === true, detection: await lookupEmailProvider(row.domain, { resolveMx }) }));
         const failed = scanned.filter((item) => item.detection.status === 'lookup_failed').length;
-        // A scan is written once and not retried, so a batch where DNS itself
-        // is failing (most lookups failed) is not written at all: wait and try
-        // the same companies again rather than mark them all "Lookup failed".
-        if (failed > rows.length / 2) {
-          log({ event: 'mx_scan_dns_unhealthy', companies: rows.length, failed });
+        // A batch where DNS itself is failing (most first-time lookups failed)
+        // is not written at all: wait and try the same companies again rather
+        // than mark them all "Lookup failed". Only first-time lookups count -
+        // retries are domains that already failed, so they failing again says
+        // nothing about DNS, and counting them would stall the loop on them.
+        const fresh = scanned.filter((item) => !item.retry);
+        const freshFailed = fresh.filter((item) => item.detection.status === 'lookup_failed').length;
+        if (fresh.length && freshFailed > fresh.length / 2) {
+          log({ event: 'mx_scan_dns_unhealthy', companies: rows.length, failed: freshFailed });
           pause = 300_000;
         } else {
           const checkedAt = new Date().toISOString();
@@ -179,8 +185,8 @@ async function mxScanLoop() {
               mx_status: detection.status, mx_checked_at: checkedAt,
             })))], 3);
           const result = applied[0]?.result ?? {};
-          log({ event: 'mx_scan', companies: rows.length, updated: result.updated ?? 0, people: result.people ?? 0,
-            segs: scanned.filter((item) => item.detection.category === 'SEG').length, failed });
+          log({ event: 'mx_scan', companies: rows.length, retried: rows.length - fresh.length, updated: result.updated ?? 0,
+            people: result.people ?? 0, segs: scanned.filter((item) => item.detection.category === 'SEG').length, failed });
           pause = rows.length === mxBatchSize ? 1_000 : 60_000;
         }
       }

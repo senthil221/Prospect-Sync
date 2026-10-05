@@ -80,4 +80,3 @@ export async function verifyWithMtn(email, { apiKey, fetchImpl = fetch, timeoutM
   return classification;
 }
 
-export const MTN_ENDPOINT = endpoint;
