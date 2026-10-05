@@ -117,7 +117,7 @@ gate; it is not implied by a passing build.
 | --- | --- | --- | --- | --- | --- |
 | Global People | Present: People route and v13/cursor RPCs | Present: filter, cursor and failure-mode tests | Present for selected compiler/cursor contracts; full catalogue required | Required: fresh multi-filter, paging, count, pivot | Historical aggregate only; no current p95 |
 | Global Companies | Present: Companies route and v4/prepared paths | Present: company filters, pivot and export tests | Present for selected filter/pivot fixtures; full catalogue required | Required: filters, paging, People pivot | No workflow run in this package |
-| Client People / Companies | Present: client scope plus membership RPCs | Present: client operations, legacy-filter UI and Incomplete Info tests | Package: listing/stream/frozen/selection parity plus enrichment and SEG transitions | Required: authenticated normal/incomplete journey | Read-only coverage defect quantified; post-release parity check pending |
+| Client People / Companies | Present: client scope plus membership RPCs | Present: client operations, legacy-filter UI, cap paging and Incomplete Info tests | Package: listing/stream/frozen/selection parity, stored-count write authority, >50k paging/export, enrichment and SEG transitions | Required: authenticated normal/incomplete journey | Stored-count parity proved on all 17,025 rows of one live client; warm replacement shape measured, cold-storage timeout still open |
 | Company → People | Present: normalized `companyScope` carried by listing/export/result set | Present: scope/auth/result-set/identity tests | Package: actual People listing, export and frozen builder with max-people cap | Required: authenticated page/export/all-matching parity | Read-only source counts only; no write journey |
 | People → Companies | Present for interactive listing; durable membership unsupported | Present: pivot honesty tests | Gap: complete frozen-set equivalence | Required: listing plus bounded export behavior | Not certified |
 | Exact count / all matching | Package: client completeness and Company origin normalized before authorize/hash/store | Package: behavioral normalization, contradictory scope, idempotency, identity and guard-order checks | Package fixture compares interactive, explicit/all-matching and frozen IDs/counts; exact-head CI pending | Required: normal and Incomplete Info all-matching actions | No writes performed |
@@ -195,6 +195,21 @@ once. The worker renews on an independent bounded connection and checks the
 authoritative cursor after an ambiguous batch. CI uses synthetic rows and a
 fake local Storage server. It does not establish production throughput, and a
 live import/restart drill remains a separate release gate.
+
+The client Company DB count path now reads the exact `client_companies.prospect_count`
+maintained by the existing `prospect_index` statement trigger instead of
+aggregating or laterally recounting the projection during every page request.
+On 2026-10-05 a read-only production comparison found zero drift across all
+17,025 client/company memberships for the measured client. In one paired warm,
+read-only session with identical rows and all five summary fields, the complete
+13,111-company view changed from 924.00 ms to 303.46 ms and the 3,914-company
+Incomplete Info view from 164.17 ms to 72.85 ms. This is not a p95 or a
+cold-cache certification: a first cold complete read still exceeded five
+seconds, so storage warmth and broader client-summary timeouts remain explicit
+P2/P4 work rather than being hidden by this change.
+Disposable PostgreSQL also exercises import, push, block/unblock, removal and
+company reassignment, plus a 50,051-row capped listing whose keyset export still
+traverses the full client scope.
 
 ### P4 — production operations
 

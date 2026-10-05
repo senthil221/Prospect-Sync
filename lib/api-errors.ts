@@ -27,6 +27,32 @@ export function statementTimeoutResponse(subject: string, alternative: string): 
   }, { status: 504, headers: { "Cache-Control": "no-store" } });
 }
 
+// A bounded database request has two independent cancellation owners.  A user
+// leaving the page is a 499; the server's own deadline is a 504.  supabase-js
+// can surface either one as an error without a PostgreSQL SQLSTATE, so checking
+// only 57014 turns both into misleading 500s.
+export function boundedDatabaseAbortResponse({
+  callerSignal,
+  deadlineSignal,
+  error,
+  subject,
+  alternative,
+}: {
+  callerSignal?: AbortSignal;
+  deadlineSignal: AbortSignal;
+  error?: DatabaseError;
+  subject: string;
+  alternative: string;
+}): Response | null {
+  if (callerSignal?.aborted) {
+    return Response.json({ error: "The request was cancelled." }, { status: 499 });
+  }
+  if (deadlineSignal.aborted || isStatementTimeout(error)) {
+    return statementTimeoutResponse(subject, alternative);
+  }
+  return null;
+}
+
 // A browser that navigates away mid-request is not a server failure.
 //
 // Next.js raises ResponseAborted when the client goes; supabase-js hands it

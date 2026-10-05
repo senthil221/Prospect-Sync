@@ -1,6 +1,7 @@
 import { acquireSlot, withInteractiveSlot } from "../../../lib/admission";
 import { authorizeFilterSets } from "../../../lib/filter-sets";
-import { databaseErrorResponse, isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
+import { boundedDatabaseAbortResponse, databaseErrorResponse, isStatementTimeout, statementTimeoutResponse } from "../../../lib/api-errors";
+import { clientCompanyHasMore, clientCompanyPageRequest } from "../../../lib/client-company-pagination";
 import { authorizeApi, getAuthorizedUser } from "../../../lib/auth";
 import { availableCompanyExportFieldIds, buildCompanyExportColumns, companyExportRowKeys } from "../../../lib/company-export";
 import { csvHeaderLine, csvRowsBody, type ProspectRow } from "../../../lib/prospect-export";
@@ -47,14 +48,16 @@ async function withClientIcpValidation(
   supabase: ReturnType<typeof createAdminClient>,
   rows: Array<Record<string, unknown>>,
   clientId: string,
+  signal?: AbortSignal,
 ) {
   if (!clientId || !rows.length) return rows;
   const ids = rows.map((company) => String(company.id ?? "")).filter(Boolean);
-  const result = await supabase
+  const query = supabase
     .from("client_company_icp_validations")
     .select("company_id")
     .eq("client_id", clientId)
     .in("company_id", ids);
+  const result = signal ? await query.abortSignal(signal) : await query;
   if (result.error) {
     if (result.error.code && missingCompanyValidationCodes.has(result.error.code)) {
       return rows.map((company) => ({ ...company, icp_validated: false }));
@@ -310,20 +313,72 @@ async function respondToCompanyQuery(params: URLSearchParams, signal?: AbortSign
   const supabase = createAdminClient();
 
   if (clientId) {
-    const { data, error } = await supabase.rpc("client_company_workspace_v2", {
-      p_client_id: clientId,
-      p_search: search,
-      p_filters: filters,
-      p_people_scope: peopleScope,
-      p_limit: pageSize,
-      p_offset: from,
+    // Read one look-ahead row so a capped result does not manufacture a false
+    // last page at 50,000.  The caller's disconnect and our route deadline both
+    // cancel the PostgREST request; using one as a fallback for the other left
+    // client-abandoned queries running until PostgreSQL's statement timeout.
+    const deadline = AbortSignal.timeout(35_000);
+    const querySignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+    // The RPC accepts at most 100 rows.  At page size 100 there is no room for
+    // a look-ahead row, so omit hasMore and let the exact total (or capped full-
+    // page fallback) decide.  Reporting false there would strand every capped
+    // 100-row page even when rows remain.
+    const { canLookAhead, rpcLimit } = clientCompanyPageRequest(pageSize);
+    let data: unknown;
+    let error: { code?: string; message?: string } | null;
+    try {
+      const result = await supabase.rpc("client_company_workspace_v2", {
+        p_client_id: clientId,
+        p_search: search,
+        p_filters: filters,
+        p_people_scope: peopleScope,
+        p_limit: rpcLimit,
+        p_offset: from,
+      }).abortSignal(querySignal);
+      data = result.data;
+      error = result.error;
+    } catch (caught) {
+      const abortResponse = boundedDatabaseAbortResponse({
+        callerSignal: signal, deadlineSignal: deadline,
+        error: caught as { code?: string; message?: string },
+        subject: "This client company view",
+        alternative: "Try a narrower search or fewer filters, then retry.",
+      });
+      if (abortResponse) return abortResponse;
+      return databaseErrorResponse("The client company view", caught as { code?: string; message?: string });
+    }
+    const abortResponse = boundedDatabaseAbortResponse({
+      callerSignal: signal, deadlineSignal: deadline, error,
+      subject: "This client company view",
+      alternative: "Try a narrower search or fewer filters, then retry.",
     });
+    if (abortResponse) return abortResponse;
     if (error) return Response.json({ error: error.code === "PGRST202" || error.code === "42883" ? "Apply the latest database migration to enable client company memberships." : error.message }, { status: error.code === "PGRST202" || error.code === "42883" ? 503 : 500 });
-    const summary = Array.isArray(data) ? data[0] : data;
+    const summary = Array.isArray(data) ? data[0] : data as Record<string, unknown> | null;
+    const resultRows = Array.isArray(summary?.result_rows) ? summary.result_rows : [];
+    const hasMore = clientCompanyHasMore(resultRows.length, pageSize, canLookAhead);
     let companies;
-    try { companies = await withClientIcpValidation(supabase, summary?.result_rows ?? [], clientId); }
-    catch (error) { return databaseErrorResponse("Company ICP verification", error as { message?: string; code?: string }); }
-    return Response.json({ companies, total: Number(summary?.total_count ?? 0), totalCapped: Boolean(summary?.total_capped), covered: Number(summary?.covered_count ?? 0), prospectTotal: Number(summary?.prospect_count ?? 0), page, pageSize });
+    try { companies = await withClientIcpValidation(supabase, resultRows.slice(0, pageSize), clientId, querySignal); }
+    catch (caught) {
+      const icpAbortResponse = boundedDatabaseAbortResponse({
+        callerSignal: signal, deadlineSignal: deadline,
+        error: caught as { code?: string; message?: string },
+        subject: "This client company view",
+        alternative: "Try a narrower search or fewer filters, then retry.",
+      });
+      if (icpAbortResponse) return icpAbortResponse;
+      return databaseErrorResponse("Company ICP verification", caught as { message?: string; code?: string });
+    }
+    return Response.json({
+      companies,
+      total: Number(summary?.total_count ?? 0),
+      totalCapped: Boolean(summary?.total_capped),
+      covered: Number(summary?.covered_count ?? 0),
+      prospectTotal: Number(summary?.prospect_count ?? 0),
+      ...(hasMore === undefined ? {} : { hasMore }),
+      page,
+      pageSize,
+    });
   }
 
   // Company-column filters (and the People-DB pivot scope) run through

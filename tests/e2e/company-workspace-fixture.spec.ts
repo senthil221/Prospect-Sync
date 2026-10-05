@@ -22,3 +22,23 @@ test("Company DB keeps one clear verification selector and exposes removable leg
   await expect(company).not.toBeChecked();
   await expect(page.getByText("1 selected across pages")).toHaveCount(0);
 });
+
+test("capped 100-row company pages keep honest forward and backward navigation", async ({ page }) => {
+  await page.goto("/e2e-fixtures/company-workspace");
+  await page.getByRole("button", { name: "Show capped 100-row page" }).click();
+
+  const pagination = page.locator(".company-pagination");
+  await expect(pagination).toContainText("Page 500 · 50,000+ matches");
+  await expect(pagination.getByRole("button", { name: "Next" })).toBeEnabled();
+  await pagination.getByRole("button", { name: "Next" }).click();
+
+  await expect(pagination).toContainText("Page 501 · 50,051+ matches");
+  await expect(pagination.getByRole("button", { name: "Next" })).toBeDisabled();
+  await pagination.getByRole("button", { name: "Previous" }).click();
+  await expect(pagination).toContainText("Page 500 · 50,000+ matches");
+
+  await page.getByRole("button", { name: "Show empty page after cap" }).click();
+  await expect(pagination).toContainText("Page 502 · 50,000+ matches");
+  await expect(pagination.getByRole("button", { name: "Previous" })).toBeEnabled();
+  await expect(pagination.getByRole("button", { name: "Next" })).toBeDisabled();
+});
