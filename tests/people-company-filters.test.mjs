@@ -12,6 +12,7 @@ const codeOnly = (source) => source.split("\n").filter((line) => !line.trimStart
 
 const migration = () => read("../supabase/migrations/20260916090000_people_filters_reach_the_company_profile.sql");
 const qualityMigration = () => read("../supabase/migrations/20260916100000_data_quality_counts_the_company_profile.sql");
+const keywordIndexMigration = () => read("../supabase/migrations/20261005120100_people_company_keyword_text_uses_indexes.sql");
 
 // The six company-profile fields, spelled the way the People export already
 // spells them. Filtering and exporting naming the same field differently is how
@@ -273,4 +274,25 @@ test("the People keyword filter opens on keywords only; the Companies one keeps 
   // them the opposite of what its tick boxes do.
   assert.match(people, /defaultScopes\.includes\("description"\)/);
   assert.match(people, /Tick Company description for wider coverage/);
+  assert.match(people, /Searches company keywords by default\. Tick company name or description to widen the search\./);
+});
+
+test("ordinary scoped company-keyword terms expose indexed company fields", async () => {
+  const code = codeOnly(await keywordIndexMigration());
+  assert.match(code, /operator_key in \(''contains'', ''not_contains''\)/);
+  assert.match(code, /cardinality\(raw_values\) between 1 and bulk_or_threshold/);
+  for (const guard of ["length(ordinary.value) < 3", "position(''%'' in ordinary.value)", "position(''_'' in ordinary.value)", "position(''|'' in ordinary.value)", "position(chr(92) in ordinary.value)"]) {
+    assert.ok(code.includes(guard), guard);
+  }
+  assert.match(code, /format\(''co\.name ilike %L''/);
+  assert.match(code, /format\(''co\.short_description ilike %L''/);
+  assert.match(code, /keyword_tag_variants_v1\(raw_values\)/);
+  assert.match(code, /end loop;\s*if public\.company_keyword_scopes_v1[\s\S]*keyword_tag_variants_v1\(raw_values\)/,
+    "the fast path appends one overlap predicate after the text-term loop");
+  assert.match(code, /unsupported company-keyword term escaped compatibility path/);
+  assert.doesNotMatch(code, /prospect_index_matches_v1/);
+
+  const runner = await read("../scripts/test-production-hardening-migrations.mjs");
+  assert.match(runner, /people_company_keyword_index_parity\.sql/);
+  assert.match(runner, /mx_retry_saturated_backlog\.sql/);
 });

@@ -104,7 +104,7 @@ const companyFilters: FilterDefinition[] = [
   // X" was two filters that could not be OR-ed. It is not deleted - it still
   // compiles and still matches, so a saved view built on it keeps working. Same
   // treatment the retired export columns got.
-  { id: "__company_keywords", label: "Company Keywords", kind: "company_keywords", valuesEndpoint: COMPANY_VALUES_ENDPOINT, description: "Searches company names, keywords and descriptions together. Untick description to narrow it." },
+  { id: "__company_keywords", label: "Company Keywords", kind: "company_keywords", valuesEndpoint: COMPANY_VALUES_ENDPOINT, description: "Searches company keywords by default. Tick company name or description to widen the search." },
   { id: "__employee_count", label: "# Employees", kind: "employee" },
   // Suggestions for this one come from the PEOPLE endpoint on purpose: the
   // predicate reads the company location carried on prospect_index, so the list

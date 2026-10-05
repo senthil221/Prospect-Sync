@@ -250,6 +250,31 @@ after the initial scoped restore and remain visibly supplementary; their late
 response does not reset the selected client tab or list. Invalid restoration
 payloads remain fail-closed and issue no scoped client/list request.
 
+Ordinary bounded Company Keywords substring filters now expose each selected
+text field directly to the existing company name and description trigram
+indexes, while keyword tags retain their existing array-overlap predicate.
+Keywords-only searches, OR lists over 40 values, terms shorter than three
+characters, wildcard characters, backslashes and the `|` separator keep the
+previous compatibility expression. The row matcher is unchanged. In one
+bounded read-only production session on 2026-10-05, description+keywords for
+the selective term `blockchain` changed from 4,679 ms to 98 ms with exact
+company-ID parity; all three fields for broad `software` changed from 2,858 ms
+to 651 ms with exact company-ID parity. The real People predicate changed from
+3,463 ms to 2,168 ms for broad Master contains, from 678 ms to 110 ms for a
+selective client contains, and from a 5-second timeout to 1,027 ms for broad
+Master not-contains. One name+keywords old-shape parity arm also reached the
+five-second ceiling, so the disposable full-ID fixture—not a latency claim—
+carries the comprehensive semantic gate. These single-session paired
+observations are not a p95, concurrency, warm/cold-cache, or plan certification;
+no cache flush or `EXPLAIN (ANALYZE, BUFFERS)` capture was performed.
+
+MX retry selection also has a disposable saturated-backlog fixture: 500 fresh
+rows fill a 500-row claim before a stale retry, and the retry appears once
+fresh capacity is released. The already-applied `20261005120000` migration's
+inline proof assumes the database has fewer than 500 pre-existing fresh rows;
+the later fixture documents and tests that limitation but cannot repair replay
+of that immutable historical migration on an arbitrarily saturated database.
+
 ### P4 — production operations
 
 Version journey metrics, alerts and capacity dashboards. Exercise backup

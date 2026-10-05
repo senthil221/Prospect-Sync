@@ -17,13 +17,15 @@ const migrationDir = new URL("../supabase/migrations/", import.meta.url);
 const migrationNames = (await readdir(migrationDir))
   .filter(name => /^\d+_.+\.sql$/u.test(name) && name > "20260926083856_prospect_people_cursor_v1.sql")
   .sort();
-const expected = "20261005091753_invalidate_client_summaries_on_seg_boundary.sql";
+const expected = "20261005120100_people_company_keyword_text_uses_indexes.sql";
 if (!migrationNames.includes(expected)) throw new Error(`Expected ${expected} in the forward validation chain.`);
 const fixture = await readFile(new URL("../supabase/tests/client_summary_inline_parity.sql", import.meta.url), "utf8");
 const clientCompanyFixture = await readFile(new URL("../supabase/tests/client_company_scope_parity.sql", import.meta.url), "utf8");
 const storedCountAuthorityFixture = await readFile(new URL("../supabase/tests/client_company_stored_count_authority.sql", import.meta.url), "utf8");
 const cappedCompanyFixture = await readFile(new URL("../supabase/tests/client_company_capped_pagination.sql", import.meta.url), "utf8");
 const scopedClientSummaryFixture = await readFile(new URL("../supabase/tests/client_summary_scoped_cache.sql", import.meta.url), "utf8");
+const peopleCompanyKeywordFixture = await readFile(new URL("../supabase/tests/people_company_keyword_index_parity.sql", import.meta.url), "utf8");
+const mxRetrySaturationFixture = await readFile(new URL("../supabase/tests/mx_retry_saturated_backlog.sql", import.meta.url), "utf8");
 
 const psqlEnv = {
   PATH: process.env.PATH,
@@ -136,4 +138,6 @@ psql("client company stored-count write-path authority", `begin; set local state
 psql("client company capped pagination and complete export", `begin; set local statement_timeout='5min';\n${cappedCompanyFixture}\nrollback;`, 330_000);
 psql("client-summary SEG, incomplete and transition parity", `begin; set local statement_timeout='2min';\n${fixture}\nrollback;`);
 psql("client-summary scoped cache miss and mutation parity", `begin; set local statement_timeout='2min';\n${scopedClientSummaryFixture}\nrollback;`);
-process.stdout.write(`Applied ${migrationNames.length} additive migrations and passed client company count authority, cap, export and scoped-summary parity.\n`);
+psql("People company-keyword indexed predicate full-ID parity", `begin; set local statement_timeout='2min';\n${peopleCompanyKeywordFixture}\nrollback;`);
+psql("MX retry selection with a saturated fresh backlog", `begin; set local statement_timeout='2min';\n${mxRetrySaturationFixture}\nrollback;`);
+process.stdout.write(`Applied ${migrationNames.length} additive migrations and passed client company, scoped-summary, company-keyword and MX retry parity.\n`);

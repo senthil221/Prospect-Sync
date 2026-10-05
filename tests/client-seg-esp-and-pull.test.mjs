@@ -87,6 +87,10 @@ test("the ICP worker scans MX records continuously and never marks a DNS outage 
   assert.match(retry, /limit greatest\(0, least\(coalesce\(p_limit, 100\), 500\) - \(select count\(\*\) from fresh\)\)/);
   assert.match(retry, /grant execute on function public\.claim_mx_scan_batch_v2\(integer\) to prospect_icp_validator/);
   assert.match(retry, /MX retry proof passed and was rolled back/);
+  const saturation = await read("../supabase/tests/mx_retry_saturated_backlog.sql");
+  assert.match(saturation, /generate_series\(1, 500\)/);
+  assert.match(saturation, /fresh backlog must fill the batch before retries/);
+  assert.match(saturation, /cannot retroactively make that historical proof replay-safe/);
   const migration = await read(segMigration);
   assert.match(migration, /where c\.normalized_domain <> '' and c\.mx_checked_at is null/);
   assert.match(migration, /grant execute on function public\.claim_mx_scan_batch_v1\(integer\) to prospect_icp_validator/);
