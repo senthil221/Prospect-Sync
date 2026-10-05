@@ -44,7 +44,7 @@ function issuedProspectCursor(mode: "cursor" | "offset" | "page-first", page: nu
     : null;
 }
 
-async function installApi(page: Page, held: string[] = [], failOnce: string[] = [], peopleMode: "cursor" | "offset" | "page-first" | null = null, countResult: "ready" | "stale" | "failed" = "ready") {
+async function installApi(page: Page, held: string[] = [], failOnce: string[] = [], peopleMode: "cursor" | "offset" | "page-first" | null = null, countResult: "ready" | "stale" | "failed" = "ready", offsetCounts = false) {
   const gates = new Map(held.map((key) => [key, deferred()]));
   const failures = new Set(failOnce);
   const requested: string[] = [];
@@ -83,6 +83,15 @@ async function installApi(page: Page, held: string[] = [], failOnce: string[] = 
       prospectTotal: 0, hasMore: false, pageSize: 50,
     });
     if (path === "/api/prospects") {
+      // The classic (non-cursor) reader still counts: what a page-first view
+      // asks right behind its first page when offsetCounts is on.
+      if (peopleMode === "page-first" && offsetCounts && url.searchParams.get("pagination") !== "cursor") {
+        const search = url.searchParams.get("search") ?? "";
+        return delayedJson(`count:${search}`, route, {
+          prospects: [], total: 75, totalEstimated: false, totalCapped: false, countState: "exact",
+          versions: { prospect: 1, company: 1 }, fields: [], pagination: { mode: "offset", nextCursor: null },
+        });
+      }
       if (peopleMode) {
         const pageNumber = Number(url.searchParams.get("page") ?? "1");
         const search = url.searchParams.get("search") ?? "";
@@ -343,6 +352,31 @@ test("client page-first renders before a count and pages by hasMore without trea
   await panel.getByRole("button", { name: "Count all matches" }).click();
   await expect(panel.locator(".results-count > strong")).toHaveText("75 matched when counted");
   await expect(panel.getByText(/Page 1$/)).toBeVisible();
+});
+
+test("a page-first client view shows its page first, then fills in the exact count", async ({ page }) => {
+  const api = await installApi(page, ["count:cursor"], [], "page-first", "ready", true);
+  await page.goto("/e2e-fixtures/client-navigation?s=clients&client=client-a");
+  await page.getByRole("tab", { name: /People DB/ }).click();
+  const panel = page.locator("#tabpanel-prospects");
+  await panel.getByRole("textbox", { name: "Search Client A prospects" }).fill("cursor");
+  // The page is on screen while its count is still being worked out.
+  await expect(panel.getByText("Cursor Person 1", { exact: true })).toBeVisible();
+  await expect(panel.locator(".results-count > strong")).toHaveText("50 shown · Total not counted");
+  api.release("count:cursor");
+  await expect(panel.locator(".results-count > strong")).toHaveText("75 people");
+  await expect(panel.getByRole("button", { name: "Count all matches" })).toHaveCount(0);
+  // One light count request: the classic reader, no field list, no cursor.
+  const counts = api.requested.filter((request) => {
+    if (!request.startsWith("/api/prospects?")) return false;
+    const params = new URL(request, "https://fixture.test").searchParams;
+    return params.get("search") === "cursor" && params.get("pagination") === null;
+  });
+  expect(counts).toHaveLength(1);
+  const params = new URL(counts[0], "https://fixture.test").searchParams;
+  expect(params.get("withTotal")).toBe("1");
+  expect(params.get("includeFields")).toBe("0");
+  expect(params.has("cursor")).toBe(false);
 });
 
 test("a stale deferred count stays unknown and asks for a fresh count", async ({ page }) => {

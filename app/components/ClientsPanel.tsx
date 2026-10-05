@@ -564,9 +564,30 @@ function ClientMasterDatabase({ client, clients, active, companyScope, onClearCo
           // always the capped one -- carry the flag through or a bounded number
           // would read here as an exact one.
           if (data.countState === "deferred") {
-            setTotal(null);
-            setTotalCapped(false);
-            setCountState("deferred");
+            // The page arrived without a count (page-first). A count this view
+            // already has is shown at once; otherwise the page is shown now and
+            // the classic reader counts it right behind - client counts are
+            // version-cached and cheap, and the number drives decisions here.
+            if (cached) {
+              setTotal(cached.total);
+              setTotalCapped(cached.capped);
+              setCountState(cached.capped ? "capped" : "exact");
+            } else {
+              setTotal(null);
+              setTotalCapped(false);
+              setCountState("deferred");
+              void fetchProspects<{ total: number | null; totalCapped?: boolean; versions?: Record<string, number> | null }>(
+                { search: debouncedSearch, page: 1, sort, direction, filters: encodedFilters, clientId: client.id, includeFields: false, companyScope, withTotal: true, pagination: "offset" },
+                { signal: controller.signal },
+              ).then((counted) => {
+                if (!current || counted.total === null) return;
+                const capped = counted.totalCapped === true;
+                totalCache.current.set(countKey, { total: counted.total, capped, versions: counted.versions ?? null });
+                setTotal(counted.total);
+                setTotalCapped(capped);
+                setCountState(capped ? "capped" : "exact");
+              }).catch(() => { /* The "Count all matches" button stays available. */ });
+            }
           } else if (data.total !== null) {
             const capped = data.totalCapped === true;
             totalCache.current.set(countKey, { total: data.total, capped, versions: data.versions ?? null });
