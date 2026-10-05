@@ -22,7 +22,23 @@ function deferred() {
   return { promise, release };
 }
 
-async function installApi(page: Page, held: string[] = [], failOnce: string[] = []) {
+function prospectRow(index: number) {
+  const id = `cursor-person-${String(index).padStart(3, "0")}`;
+  return {
+    id, first_name: "Cursor", last_name: `Person ${index}`, full_name: `Cursor Person ${index}`,
+    work_email: `${id}@example.test`, personal_email: "", mobile_number: "", linkedin_url: "",
+    title: "Engineer", seniority: "Individual Contributor", department: "Engineering",
+    city: "", state: "", country: "", company_id: "company-a", company_name: "Example Co",
+    company_domain: "example.test", all_data: {}, created_at: new Date(Date.UTC(2026, 0, 2, 0, 0, 200 - index)).toISOString(),
+    updated_at: "2026-01-03T00:00:00.000Z", list_count: 1, client_count: 1,
+    list_names: ["List A"], client_names: ["Client A"], list_ids: ["list-a"], client_ids: ["client-a"],
+    list_memberships: [], esp: "", email_provider_type: "Unknown", mx_records: [], keywords: [],
+    company_location: "", tags: [], tag_text: "", search_text: `cursor person ${index}`,
+    icp_verified_client_ids: [], blocked_client_ids: [], client_date_contacted: null, client_date_added: null,
+  };
+}
+
+async function installApi(page: Page, held: string[] = [], failOnce: string[] = [], peopleMode: "cursor" | "offset" | null = null) {
   const gates = new Map(held.map((key) => [key, deferred()]));
   const failures = new Set(failOnce);
   const requested: string[] = [];
@@ -59,10 +75,31 @@ async function installApi(page: Page, held: string[] = [], failOnce: string[] = 
       companies: [], total: 0, totalCapped: false, covered: 0,
       prospectTotal: 0, hasMore: false, pageSize: 50,
     });
-    if (path === "/api/prospects") return json(route, {
-      prospects: [], total: 0, totalEstimated: false, totalCapped: false,
-      versions: null, fields: [], pagination: { mode: "offset", nextCursor: null },
-    });
+    if (path === "/api/prospects") {
+      if (peopleMode) {
+        const pageNumber = Number(url.searchParams.get("page") ?? "1");
+        const search = url.searchParams.get("search") ?? "";
+        const start = search ? 201 : (pageNumber - 1) * 50 + 1;
+        const length = search ? 1
+          : pageNumber === 1 ? 50
+          : pageNumber === 2 ? (peopleMode === "offset" ? 25 : 50)
+          : 0;
+        const rows = Array.from({ length }, (_, index) => prospectRow(start + index));
+        const cursor = peopleMode === "cursor" && pageNumber < 3 ? `cursor-v2-${pageNumber}` : null;
+        return json(route, {
+          prospects: rows,
+          total: pageNumber === 1 ? (search ? 1 : peopleMode === "cursor" ? 50_000 : 75) : null,
+          totalEstimated: false,
+          totalCapped: pageNumber === 1 && peopleMode === "cursor" && !search,
+          versions: { prospect: 1, company: 1 }, fields: [],
+          pagination: { mode: peopleMode, nextCursor: cursor },
+        });
+      }
+      return json(route, {
+        prospects: [], total: 0, totalEstimated: false, totalCapped: false,
+        versions: null, fields: [], pagination: { mode: "offset", nextCursor: null },
+      });
+    }
     if (path === "/api/lists") {
       const clientId = url.searchParams.get("clientId") ?? "";
       const result = clientId === clients.a.id ? [lists.a, lists.a2] : clientId === clients.b.id ? [lists.b] : [];
@@ -207,4 +244,43 @@ test("malformed restoration never starts a client or list request", async ({ pag
   await page.goto("/e2e-fixtures/client-navigation?s=clients&client=client-a&list=list-a&pf=%7B");
   await expect(page.getByRole("heading", { name: "This search link needs attention" })).toBeVisible();
   expect(api.requested.some((path) => path === "/api/clients/client-a" || path.startsWith("/api/lists?clientId=client-a") || path.startsWith("/api/lists/list-a"))).toBe(false);
+});
+
+test("client People cursor defensively preserves a capped total while it traverses, resets, and recovers from an empty page", async ({ page }) => {
+  const api = await installApi(page, [], [], "cursor");
+  await page.goto("/e2e-fixtures/client-navigation?s=clients&client=client-a");
+  await page.getByRole("tab", { name: /People DB/ }).click();
+  const panel = page.locator("#tabpanel-prospects");
+  await expect(panel.getByText("Cursor Person 1", { exact: true })).toBeVisible();
+  expect(api.requested.some((request) => request.startsWith("/api/prospects?")
+    && request.includes("page=1") && request.includes("pagination=cursor") && !request.includes("cursor="))).toBe(true);
+
+  await panel.getByRole("button", { name: "Next" }).click();
+  await expect(panel.getByText("Cursor Person 51", { exact: true })).toBeVisible();
+  expect(api.requested.some((request) => request.includes("page=2") && request.includes("cursor=cursor-v2-1"))).toBe(true);
+  await expect(panel.getByText(/50,000\+ people/)).toBeVisible();
+
+  await panel.getByRole("button", { name: "Next" }).click();
+  await expect(panel.getByText("No records on this page.")).toBeVisible();
+  await panel.getByRole("button", { name: "Previous" }).click();
+  await expect(panel.getByText("Cursor Person 51", { exact: true })).toBeVisible();
+
+  await panel.getByRole("textbox", { name: "Search Client A prospects" }).fill("reset");
+  await expect(panel.getByText("Cursor Person 201", { exact: true })).toBeVisible();
+  const resetRequest = api.requested.findLast((request) => request.startsWith("/api/prospects?") && request.includes("search=reset"));
+  expect(resetRequest).toContain("page=1");
+  expect(resetRequest).not.toContain("cursor=");
+});
+
+test("client People keeps OFFSET navigation when the server-side cursor flag is disabled", async ({ page }) => {
+  const api = await installApi(page, [], [], "offset");
+  await page.goto("/e2e-fixtures/client-navigation?s=clients&client=client-a");
+  await page.getByRole("tab", { name: /People DB/ }).click();
+  const panel = page.locator("#tabpanel-prospects");
+  await expect(panel.getByText("Cursor Person 1", { exact: true })).toBeVisible();
+  await panel.getByRole("button", { name: "Next" }).click();
+  await expect(panel.getByText("Cursor Person 51", { exact: true })).toBeVisible();
+  const pageTwo = api.requested.findLast((request) => request.startsWith("/api/prospects?") && request.includes("page=2"));
+  expect(pageTwo).toContain("pagination=offset");
+  expect(pageTwo).not.toContain("cursor=");
 });

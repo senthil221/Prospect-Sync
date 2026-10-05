@@ -508,6 +508,7 @@ test("the retired search functions are dropped, and the live search entrypoints 
   const migration = await read("../supabase/migrations/20260916130000_drop_the_superseded_search_functions.sql");
   const featurePack = await read("../supabase/migrations/20260924205130_client_workspace_feature_pack.sql");
   const cursorMigration = await read("../supabase/migrations/20260926083856_prospect_people_cursor_v1.sql");
+  const clientCursorMigration = await read("../supabase/migrations/20261005163609_client_people_cursor_v2.sql");
   const code = codeOnly(migration);
 
   // Every drop names a full signature. DROP FUNCTION by bare name is ambiguous
@@ -538,6 +539,7 @@ test("the retired search functions are dropped, and the live search entrypoints 
     assert.match(featurePack, new RegExp(`create or replace function public\\.${live}`));
   }
   assert.match(cursorMigration, /create or replace function public\.search_prospect_workspace_cursor_v1/);
+  assert.match(clientCursorMigration, /create or replace function public\.search_prospect_workspace_cursor_v2/);
   assert.match(code, /this migration dropped the wrong one/);
 
   // And the report the file exists to clean is checked in the file's own terms.
@@ -552,5 +554,9 @@ test("the retired search functions are dropped, and the live search entrypoints 
   ]);
   const calls = new Set(sources.flatMap((source) =>
     [...codeOnly(source).matchAll(/rpc\("(search_prospect_[a-z_0-9]+|filter_companies[a-z_0-9]*)"/g)].map((match) => match[1])));
-  assert.deepEqual([...calls].sort(), ["filter_companies_v4", "search_prospect_export_v6", "search_prospect_workspace_cursor_v1", "search_prospect_workspace_v13"]);
+  // Cursor dispatch is intentionally selected through one typed variable so
+  // v1 and v2 share the RPC argument contract; inventory those two explicit
+  // allowlisted literals as well as direct rpc("...") calls.
+  for (const match of codeOnly(sources[1]).matchAll(/"(search_prospect_workspace_cursor_v[12])"/g)) calls.add(match[1]);
+  assert.deepEqual([...calls].sort(), ["filter_companies_v4", "search_prospect_export_v6", "search_prospect_workspace_cursor_v1", "search_prospect_workspace_cursor_v2", "search_prospect_workspace_v13"]);
 });

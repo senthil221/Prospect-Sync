@@ -200,6 +200,7 @@ begin
      and attribute_row.attnum = any(constraint_row.conkey)
     where constraint_row.conrelid = 'public.prospect_index'::regclass
       and constraint_row.contype = 'p'
+      and cardinality(constraint_row.conkey) = 1
       and attribute_row.attname = 'id'
   ) into v_id_is_primary;
   if position('security definer' in lower(v_def)) = 0

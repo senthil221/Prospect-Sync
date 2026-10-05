@@ -1,6 +1,6 @@
 # Database production-readiness programme
 
-Status: active engineering programme, updated 2026-10-04. This is a dependency
+Status: active engineering programme, updated 2026-10-06. This is a dependency
 map and release backlog. It is not a claim that
 the whole application has been audited, load tested, or certified for a future
 record count.
@@ -117,7 +117,7 @@ gate; it is not implied by a passing build.
 | --- | --- | --- | --- | --- | --- |
 | Global People | Present: People route and v13/cursor RPCs | Present: filter, cursor and failure-mode tests | Present for selected compiler/cursor contracts; full catalogue required | Required: fresh multi-filter, paging, count, pivot | Historical aggregate only; no current p95 |
 | Global Companies | Present: Companies route and v4/prepared paths | Present: company filters, pivot and export tests | Present for selected filter/pivot fixtures; full catalogue required | Required: filters, paging, People pivot | No workflow run in this package |
-| Client People / Companies | Present: client scope plus membership RPCs | Present: client operations, legacy-filter UI, cap paging and Incomplete Info tests | Package: listing/stream/frozen/selection parity, stored-count write authority, >50k paging/export, enrichment and SEG transitions | Required: authenticated normal/incomplete journey | Stored-count parity proved on all 17,025 rows of one live client; warm replacement shape measured, cold-storage timeout still open |
+| Client People / Companies | Present: client scope plus membership RPCs; client People adjacent pages have an independently gated cursor v2 | Present: client operations, legacy-filter UI, cursor bootstrap/next/previous/reset/fallback, cap paging and Incomplete Info tests | Package: listing/stream/frozen/selection parity, client cursor full ordered IDs/version/cap/grant checks, stored-count write authority, >50k paging/export, enrichment and SEG transitions | Required: authenticated normal/incomplete cursor canary after deployment | Stored-count parity proved on all 17,025 rows of one live client; bounded cursor comparisons are single-session observations, not deployed-RPC or p95 evidence |
 | Company → People | Present: normalized `companyScope` carried by listing/export/result set | Present: scope/auth/result-set/identity tests | Package: actual People listing, export and frozen builder with max-people cap | Required: authenticated page/export/all-matching parity | Read-only source counts only; no write journey |
 | People → Companies | Present for interactive listing; durable membership unsupported | Present: pivot honesty tests | Gap: complete frozen-set equivalence | Required: listing plus bounded export behavior | Not certified |
 | Exact count / all matching | Package: client completeness and Company origin normalized before authorize/hash/store | Package: behavioral normalization, contradictory scope, idempotency, identity and guard-order checks | Package fixture compares interactive, explicit/all-matching and frozen IDs/counts; exact-head CI pending | Required: normal and Incomplete Info all-matching actions | No writes performed |
@@ -274,6 +274,32 @@ fresh capacity is released. The already-applied `20261005120000` migration's
 inline proof assumes the database has fewer than 500 pre-existing fresh rows;
 the later fixture documents and tests that limitation but cannot repair replay
 of that immutable historical migration on an arbitrarily saturated database.
+
+Client People adjacent pages now have a separate, default-off
+`CLIENT_PROSPECT_CURSOR_PAGINATION` rollout. Page one still comes from v13;
+only an in-session next page carrying a query- and client-bound v2 token uses
+the new RPC. Master People remains controlled by the older, independent global
+flag. Alternate sorts, Company → People pivots, max-people-per-company queries
+and numeric deep links remain on OFFSET. The v2 RPC keeps the effective v12
+membership, completeness, SEG, company-filter dependency-vector and bounded
+count contracts, with a 10-second database deadline. A cursor is navigation,
+not a snapshot: concurrent writes can move the boundary between requests.
+
+The production evidence is deliberately narrow. In one bounded read-only
+session on 2026-10-05, a plain complete-client predicate at depth 10,000 changed
+from 181.948 ms / 66,903 shared buffer hits with OFFSET to 1.606 ms / 572 hits
+with a boundary; an incomplete predicate at depth 2,222 changed from 149.312 ms
+/ 43,136 hits to 1.118 ms / 384 hits. Those two comparisons did not reproduce
+the materialized RPC candidate shape. A broad mixed company-keyword case did:
+the client-first materialized OFFSET candidate took 684.977 ms / 213,266 hits,
+while the same candidate with its boundary inside the materialized CTE took
+300.402 ms / 108,182 hits. Each compared next 50 IDs exactly. A naive global
+B-tree mixed-filter probe reached the five-second ceiling and was rejected as
+the implementation shape. These are single-session paired observations, not a
+controlled warm/cold comparison, load test, p95, first-page guarantee or live
+v2 RPC canary. Disposable PostgreSQL remains the semantic gate for tied
+timestamps, full ordered traversal, exact multiples, dependency invalidation,
+service-role-only grants and the >50,000 capped-count contract.
 
 ### P4 — production operations
 
