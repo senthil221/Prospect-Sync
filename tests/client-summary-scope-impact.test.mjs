@@ -40,7 +40,10 @@ function query(result) {
     eq() { return this; },
     maybeSingle() { return this; },
     order() { return this; },
-    abortSignal() { return result instanceof Error ? Promise.reject(result) : Promise.resolve(result); },
+    abortSignal() { return this; },
+    then(resolve, reject) {
+      return (result instanceof Error ? Promise.reject(result) : Promise.resolve(result)).then(resolve, reject);
+    },
   };
 }
 
@@ -133,6 +136,18 @@ test("the migration scopes only single-client misses and never publishes a parti
   assert.match(migration, /lower\(pg_get_functiondef/);
   assert.match(migration, /revoke execute on function public\.client_summaries_v1\(text\) from public, anon, authenticated;/);
   assert.match(migration, /grant execute on function public\.client_summaries_v1\(text\) to service_role;/);
+});
+
+test("SEG boundary changes use the existing restricted client-count invalidator", async () => {
+  const migration = await read("../supabase/migrations/20261005091753_invalidate_client_summaries_on_seg_boundary.sql");
+  assert.match(migration, /set local lock_timeout = '5s';/);
+  assert.match(migration, /after update of email_provider_type on public\.companies/i);
+  assert.match(migration, /for each row\s+when \(\(old\.email_provider_type = 'SEG'\) is distinct from \(new\.email_provider_type = 'SEG'\)\)/i);
+  assert.match(migration, /execute function public\.bump_data_version_client_counts\(\);/);
+  assert.match(migration, /v_trigger\.tgenabled <> 'O'/);
+  assert.match(migration, /cardinality\(v_trigger\.tgattr::smallint\[\]\) <> 1/);
+  assert.match(migration, /v_trigger\.tgfoid <> 'public\.bump_data_version_client_counts\(\)'::regprocedure/);
+  assert.doesNotMatch(migration, /create or replace function public\.bump_data_version_client_counts/);
 });
 
 test("both client GET routes apply the same deadline, error and redacted timing contract", async () => {

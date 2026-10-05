@@ -17,7 +17,7 @@ const migrationDir = new URL("../supabase/migrations/", import.meta.url);
 const migrationNames = (await readdir(migrationDir))
   .filter(name => /^\d+_.+\.sql$/u.test(name) && name > "20260926083856_prospect_people_cursor_v1.sql")
   .sort();
-const expected = "20261005073357_scope_single_client_summary_cache_miss.sql";
+const expected = "20261005091753_invalidate_client_summaries_on_seg_boundary.sql";
 if (!migrationNames.includes(expected)) throw new Error(`Expected ${expected} in the forward validation chain.`);
 const fixture = await readFile(new URL("../supabase/tests/client_summary_inline_parity.sql", import.meta.url), "utf8");
 const clientCompanyFixture = await readFile(new URL("../supabase/tests/client_company_scope_parity.sql", import.meta.url), "utf8");

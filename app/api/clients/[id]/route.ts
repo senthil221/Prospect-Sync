@@ -36,10 +36,10 @@ async function getClientDetail(
         supabase.rpc("client_summaries_v1", { p_client_id: id }).abortSignal(signal),
         callerSignal, deadlineSignal),
       observeClientSummaryQuery("single", "metadata",
-        supabase.from("client_settings").select("cooldown_days,seg_emails").eq("client_id", id).maybeSingle().abortSignal(signal),
+        supabase.from("client_settings").select("cooldown_days,seg_emails").eq("client_id", id).abortSignal(signal).maybeSingle(),
         callerSignal, deadlineSignal),
       observeClientSummaryQuery("single", "metadata",
-        supabase.from("clients").select("folder_id").eq("id", id).maybeSingle().abortSignal(signal),
+        supabase.from("clients").select("folder_id").eq("id", id).abortSignal(signal).maybeSingle(),
         callerSignal, deadlineSignal),
     ]);
   } catch (error) {
@@ -68,7 +68,7 @@ async function getClientDetail(
   try {
     folderName = folderId
       ? await observeClientSummaryQuery("single", "metadata",
-        supabase.from("client_folders").select("name").eq("id", folderId).maybeSingle().abortSignal(signal),
+        supabase.from("client_folders").select("name").eq("id", folderId).abortSignal(signal).maybeSingle(),
         callerSignal, deadlineSignal)
       : null;
   } catch (error) {

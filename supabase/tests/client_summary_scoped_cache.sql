@@ -56,6 +56,8 @@ declare
   v_global jsonb;
   v_cache_before jsonb;
   v_cache_after jsonb;
+  v_version_before bigint;
+  v_version_after bigint;
 begin
   delete from public.client_summary_cache;
 
@@ -208,7 +210,12 @@ begin
   perform public.client_summaries_v1(null);
   select to_jsonb(cache_row) into v_cache_before
     from public.client_summary_cache cache_row where id;
+  v_version_before := coalesce(pg_sequence_last_value('public.data_version_client_counts'::regclass), 0);
   update public.companies set email_provider_type = 'Unknown' where id = 'summary-scope-seg';
+  v_version_after := coalesce(pg_sequence_last_value('public.data_version_client_counts'::regclass), 0);
+  if v_version_after <= v_version_before then
+    raise exception 'SEG-to-non-SEG transition did not advance the client-count version';
+  end if;
   v_row := public.client_summaries_v1('summary-scope-a')->0;
   if (v_row->>'prospect_count')::integer <> 4
      or (v_row->>'company_count')::integer <> 4 then
@@ -218,6 +225,97 @@ begin
     from public.client_summary_cache cache_row where id;
   if v_cache_after is distinct from v_cache_before then
     raise exception 'A scoped provider-classification miss rewrote the global cache';
+  end if;
+
+  -- A directory refresh publishes the new counts. The reverse boundary also
+  -- invalidates, while its scoped read continues to leave that global row
+  -- untouched.
+  v_global := public.client_summaries_v1(null);
+  select value into v_row from jsonb_array_elements(v_global)
+   where value->>'id' = 'summary-scope-a';
+  if (v_row->>'prospect_count')::integer <> 4
+     or (v_row->>'company_count')::integer <> 4 then
+    raise exception 'Directory refresh after leaving SEG was stale: %', v_row;
+  end if;
+  select to_jsonb(cache_row) into v_cache_before
+    from public.client_summary_cache cache_row where id;
+  v_version_before := coalesce(pg_sequence_last_value('public.data_version_client_counts'::regclass), 0);
+  update public.companies set email_provider_type = 'SEG' where id = 'summary-scope-seg';
+  v_version_after := coalesce(pg_sequence_last_value('public.data_version_client_counts'::regclass), 0);
+  if v_version_after <= v_version_before then
+    raise exception 'Non-SEG-to-SEG transition did not advance the client-count version';
+  end if;
+  v_row := public.client_summaries_v1('summary-scope-a')->0;
+  if (v_row->>'prospect_count')::integer <> 2
+     or (v_row->>'company_count')::integer <> 3 then
+    raise exception 'Reverse provider reclassification transition mismatch: %', v_row;
+  end if;
+  select to_jsonb(cache_row) into v_cache_after
+    from public.client_summary_cache cache_row where id;
+  if v_cache_after is distinct from v_cache_before then
+    raise exception 'A reverse scoped provider-classification miss rewrote the global cache';
+  end if;
+
+  -- One statement may contain both semantic and non-semantic provider changes.
+  -- Any SEG boundary crossing advances the epoch; exact increments are not a
+  -- contract because the row trigger and MX scan can both conservatively bump.
+  perform public.client_summaries_v1(null);
+  select to_jsonb(cache_row) into v_cache_before
+    from public.client_summary_cache cache_row where id;
+  v_version_before := coalesce(pg_sequence_last_value('public.data_version_client_counts'::regclass), 0);
+  update public.companies
+     set email_provider_type = case id
+       when 'summary-scope-normal' then 'SEG'
+       when 'summary-scope-provider' then 'Mailbox provider'
+       else email_provider_type end
+   where id in ('summary-scope-normal', 'summary-scope-provider');
+  v_version_after := coalesce(pg_sequence_last_value('public.data_version_client_counts'::regclass), 0);
+  if v_version_after <= v_version_before then
+    raise exception 'Mixed provider update did not advance the client-count version';
+  end if;
+  v_row := public.client_summaries_v1('summary-scope-a')->0;
+  if (v_row->>'prospect_count')::integer <> 2
+     or (v_row->>'company_count')::integer <> 2 then
+    raise exception 'Mixed provider transition mismatch: %', v_row;
+  end if;
+  select to_jsonb(cache_row) into v_cache_after
+    from public.client_summary_cache cache_row where id;
+  if v_cache_after is distinct from v_cache_before then
+    raise exception 'A mixed scoped provider-classification miss rewrote the global cache';
+  end if;
+
+  v_global := public.client_summaries_v1(null);
+  select value into v_row from jsonb_array_elements(v_global)
+   where value->>'id' = 'summary-scope-a';
+  if (v_row->>'prospect_count')::integer <> 2
+     or (v_row->>'company_count')::integer <> 2 then
+    raise exception 'Directory refresh after mixed provider update was stale: %', v_row;
+  end if;
+
+  -- Updates that stay on one side of the boundary do not invalidate. This
+  -- statement includes SEG-to-SEG and non-SEG-to-other-non-SEG rows.
+  select to_jsonb(cache_row) into v_cache_before
+    from public.client_summary_cache cache_row where id;
+  v_version_before := coalesce(pg_sequence_last_value('public.data_version_client_counts'::regclass), 0);
+  update public.companies
+     set email_provider_type = case id
+       when 'summary-scope-normal' then 'SEG'
+       when 'summary-scope-provider' then 'Email relay'
+       else email_provider_type end
+   where id in ('summary-scope-normal', 'summary-scope-provider');
+  v_version_after := coalesce(pg_sequence_last_value('public.data_version_client_counts'::regclass), 0);
+  if v_version_after <> v_version_before then
+    raise exception 'A same-side provider update unexpectedly advanced the client-count version';
+  end if;
+  v_row := public.client_summaries_v1('summary-scope-a')->0;
+  if (v_row->>'prospect_count')::integer <> 2
+     or (v_row->>'company_count')::integer <> 2 then
+    raise exception 'Same-side provider update changed scoped counts: %', v_row;
+  end if;
+  select to_jsonb(cache_row) into v_cache_after
+    from public.client_summary_cache cache_row where id;
+  if v_cache_after is distinct from v_cache_before then
+    raise exception 'A same-side provider update rewrote a valid global cache';
   end if;
 
   -- A new client makes the old global object incomplete. Its scoped miss still

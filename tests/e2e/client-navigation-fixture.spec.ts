@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 test.skip(process.env.E2E_FIXTURE_SUITE !== "1", "local deterministic fixture only");
+test.beforeEach(async ({ page }) => { page.setDefaultTimeout(15_000); });
 
 const clients = {
   a: { id: "client-a", name: "Client A", list_count: 2, prospect_count: 8, company_count: 3, cooldown_days: 90, icp_verified_count: 2, blocked_count: 0, folder_id: "folder-a", folder_name: "North", archived_at: null },
@@ -54,6 +55,14 @@ async function installApi(page: Page, held: string[] = [], failOnce: string[] = 
       return client ? delayedJson(key, route, { client }) : delayedJson(key, route, { error: "Client not found." }, 404);
     }
     if (/^\/api\/clients\/[^/]+\/icp$/.test(path)) return json(route, { profiles: [] });
+    if (path === "/api/companies") return json(route, {
+      companies: [], total: 0, totalCapped: false, covered: 0,
+      prospectTotal: 0, hasMore: false, pageSize: 50,
+    });
+    if (path === "/api/prospects") return json(route, {
+      prospects: [], total: 0, totalEstimated: false, totalCapped: false,
+      versions: null, fields: [], pagination: { mode: "offset", nextCursor: null },
+    });
     if (path === "/api/lists") {
       const clientId = url.searchParams.get("clientId") ?? "";
       const result = clientId === clients.a.id ? [lists.a, lists.a2] : clientId === clients.b.id ? [lists.b] : [];

@@ -228,6 +228,17 @@ GET routes now carry a 35-second application deadline on top of the database's
 bounded timeout (504), and expose only fixed directory/single and
 counts/metadata phase labels.
 
+Client-summary invalidation now covers every writer that moves a company into
+or out of the `SEG` provider class, not only the MX scan function. A narrow
+`AFTER UPDATE OF email_provider_type` row trigger advances the existing count
+epoch only when the row crosses the SEG/non-SEG boundary; provider changes that
+stay on the same side do not invalidate the cache. The scan function keeps its
+existing conservative bump, so a scan transition can advance the epoch twice;
+cache validity compares epoch equality and does not depend on exact increments.
+The pre-existing visibility race also remains: PostgreSQL sequence advances are
+non-transactional and visible before the company update commits, so the
+five-minute cache ceiling continues to bound a read that lands in that window.
+
 Direct client and list links now restore through ownership-scoped detail reads
 instead of waiting for the complete client directory. The address bar keeps the
 requested client/list ids and any fragment-carried filters while those reads are
