@@ -302,7 +302,7 @@ test("client page-first renders before a count and pages by hasMore without trea
   await page.getByRole("tab", { name: /People DB/ }).click();
   const panel = page.locator("#tabpanel-prospects");
   await panel.getByRole("textbox", { name: "Search Client A prospects" }).fill("cursor");
-  await expect(panel.getByText(/shown · Total not counted/)).toBeVisible();
+  await expect(panel.locator(".results-count > strong")).toHaveText("50 shown · Total not counted");
   await expect(panel.getByRole("button", { name: "Count all matches" })).toBeVisible();
   await expect(panel.getByText(/50 people/)).toHaveCount(0);
   await panel.getByRole("button", { name: "Next" }).click();
@@ -333,7 +333,7 @@ test("a stale deferred count stays unknown and asks for a fresh count", async ({
   await panel.getByRole("textbox", { name: "Search Client A prospects" }).fill("cursor");
   await panel.getByRole("button", { name: "Count all matches" }).click();
   await expect(panel.getByText(/earlier data version/)).toBeVisible();
-  await expect(panel.getByText(/Total not counted/)).toBeVisible();
+  await expect(panel.locator(".results-count > strong")).toHaveText("50 shown · Total not counted");
 });
 
 test("deferred count failures and late completions do not replace the active query", async ({ page }) => {
@@ -354,7 +354,8 @@ test("deferred count failures and late completions do not replace the active que
   await panel.getByRole("button", { name: "Count all matches" }).click();
   await expect.poll(() => api.requested.some((request) => request.startsWith("/api/result-sets"))).toBe(true);
   await search.fill("new-query");
-  await expect(panel.getByText(/Total not counted/)).toBeVisible();
+  await expect.poll(() => api.requested.some((request) => request.startsWith("/api/prospects?") && request.includes("search=new-query"))).toBe(true);
+  await expect(panel.locator(".table-footer > span")).toHaveText("50 shown · Total not counted");
   api.release("result-set");
   await expect.poll(() => api.completed.has("result-set")).toBe(true);
   await expect(panel.getByText("75 matched when counted")).toHaveCount(0);

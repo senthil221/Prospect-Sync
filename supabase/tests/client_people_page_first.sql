@@ -35,6 +35,10 @@ begin
     v_offset_value := v_offset_value + cardinality(v_ids);
   end loop;
 
+  if cardinality(v_expected) = 0 then
+    raise exception '% positive control matched no rows', p_label;
+  end if;
+
   loop
     v_guard := v_guard + 1;
     if v_guard > 20 then raise exception '% page reader did not terminate', p_label; end if;
@@ -67,7 +71,7 @@ $assert$;
 do $parity$
 begin
   perform pg_temp.assert_client_page_v1(
-    'name search', 'cursor-client-a', 'Cursor Fixture',
+    'name search', 'cursor-client-a', 'Person',
     '[{"field":"__incomplete_company_profile","operator":"equals","values":["false"]}]'::jsonb);
   perform pg_temp.assert_client_page_v1(
     'list filter', 'cursor-client-a', '',
@@ -95,7 +99,7 @@ declare
   v_second_ids text[];
 begin
   select * into strict v_first from public.search_prospect_workspace_page_v1(
-    'Cursor Fixture',
+    'Person',
     '[{"field":"__incomplete_company_profile","operator":"equals","values":["false"]}]'::jsonb,
     50, 'cursor-client-a', null, null);
   if v_first.has_more is distinct from true then
@@ -109,14 +113,14 @@ begin
   v_before_versions := v_first.data_versions;
 
   insert into public.prospects(id, full_name, work_email, company_id, all_data, created_at, updated_at)
-  values ('page-first-concurrent', 'Cursor Fixture Concurrent', 'page-first-concurrent@example.test',
+  values ('page-first-concurrent', 'Person Concurrent', 'page-first-concurrent@example.test',
     'cursor-company-complete', '{"fixture":"page-first"}'::jsonb, now(), now());
   insert into public.client_prospects(client_id, prospect_id, added_via)
   values ('cursor-client-a', 'page-first-concurrent', 'manual');
   perform public.reindex_prospects(array['page-first-concurrent']::text[]);
 
   select * into strict v_second from public.search_prospect_workspace_page_v1(
-    'Cursor Fixture',
+    'Person',
     '[{"field":"__incomplete_company_profile","operator":"equals","values":["false"]}]'::jsonb,
     50, 'cursor-client-a', v_boundary_created_at, v_boundary_id);
   select coalesce(array_agg(value->>'id' order by ordinal), '{}'::text[])
