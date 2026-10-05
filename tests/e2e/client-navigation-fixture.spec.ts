@@ -136,6 +136,11 @@ test("archived clients restore while same-id retry, unknown clients and wrong-cl
 test("slow client A cannot overwrite fast client B and leaving a pending list cannot reopen it", async ({ page }) => {
   const api = await installApi(page, ["global", "client:client-a", "lists:client-a", "list:list-a2"]);
   await page.goto("/e2e-fixtures/client-navigation?s=clients&client=client-a");
+  await expect(page.getByText("Opening client workspace")).toBeVisible();
+  await expect.poll(() => ({
+    client: api.requested.includes("/api/clients/client-a"),
+    lists: api.requested.includes("/api/lists?clientId=client-a"),
+  })).toEqual({ client: true, lists: true });
   await popTo(page, "/e2e-fixtures/client-navigation?s=clients&client=client-b");
   await expect(page.getByRole("heading", { name: "Client B", level: 2 })).toBeVisible();
   api.release("client:client-a"); api.release("lists:client-a");
