@@ -280,11 +280,29 @@ and clear a stale repository lock. Deploying application code with `update.sh`
 does not install or change systemd units, so rerun `sudo ./scripts/install-timers.sh`
 after this timer changes.
 
+If a local dump succeeded but its upload failed, retry that exact archive
+without creating another dump or pruning anything:
+
+```bash
+./scripts/backup-upload-existing.sh /var/backups/prospect/<timestamp>
+```
+
 The credential-free files under `${BACKUP_DIR}/.status/` separate the latest
 attempt from the last verified local/offsite success. They are operational
-receipts, not restore proof. Only a successful isolated `restore.sh
---verify-only` drill validates the full archive, ownership, grants and data
-checks; a production restore remains a deliberate operator action.
+receipts, not restore proof. `restore.sh --verify-only` uses a scratch database
+inside the production PostgreSQL cluster. It is useful, but it is not an
+isolated restore. The separate-cluster drill is:
+
+```bash
+./scripts/restore-isolated.sh /var/backups/prospect/<timestamp>
+```
+
+It uses a labelled disposable container and volume, no network or production
+mount, one CPU, 2 GB RAM and one restore job. It suppresses restored pg_cron and
+pg_net work before loading data, enforces time/disk guards, validates ownership,
+ACLs and data invariants, and deletes only resources carrying its invocation
+label. It still shares host disk I/O with production, so run it in an approved
+quiet window. A production restore remains a deliberate operator action.
 
 ---
 
@@ -298,7 +316,9 @@ checks; a production restore remains a deliberate operator action.
 | Apply migrations | `./scripts/migrate.sh` (`--dry-run` first) |
 | Add a user | `./scripts/create-user.sh <email>` |
 | Back up now | `./scripts/backup.sh` |
-| **Restore drill** | `./scripts/restore.sh --verify-only` |
+| Same-cluster restore check | `./scripts/restore.sh --verify-only` |
+| **Isolated restore drill** | `./scripts/restore-isolated.sh <backup-dir>` |
+| Retry existing offsite upload | `./scripts/backup-upload-existing.sh <backup-dir>` |
 | Real restore | `./scripts/restore.sh --into-production <dir>` |
 | Health / capacity | `./scripts/status.sh` and `./scripts/maintenance.sh` |
 | Logs | `prospect logs app` |
@@ -306,9 +326,10 @@ checks; a production restore remains a deliberate operator action.
 
 ### The monthly ten minutes
 
-1. `./scripts/restore.sh --verify-only` - restores the latest backup into a
-   scratch database and validates data, object ownership and grants. Production
-   is untouched. **Do this.** An untested backup is a hypothesis.
+1. `./scripts/restore-isolated.sh <backup-dir>` - restores the chosen backup in
+   a disposable PostgreSQL container and validates data, object ownership and
+   grants. The production database is never connected or mounted. **Do this in
+   an approved quiet window.** An untested backup is a hypothesis.
 2. `./scripts/maintenance.sh` - read the disk line and the slow-query list.
 3. `sudo apt update && sudo apt list --upgradable` - security patches apply
    automatically, but kernel updates need a reboot you choose.

@@ -7,7 +7,7 @@ test('backup verification drains the archive and preserves both pipeline failure
   assert.match(source, /set -euo pipefail/);
   assert.match(source, /pg pg_restore --list[^\n]*\|\| manifest_status=\$\?/);
   assert.match(source, /cat >\/dev\/null\s+exit "\$manifest_status"/);
-  assert.ok(source.indexOf('exit "$manifest_status"') < source.indexOf('restic backup'));
+  assert.ok(source.indexOf('exit "$manifest_status"') < source.indexOf('upload_backup_offsite'));
 });
 test('synthetic backup pipeline regression executes under Linux CI', { skip: process.platform === 'win32' }, () => {
   const result = spawnSync('bash', ['scripts/test-backup-pipeline.sh'], { encoding: 'utf8', timeout: 10000 });
@@ -30,8 +30,9 @@ test('synthetic backup pipeline regression executes under Linux CI', { skip: pro
 // that lock, so the unit exited 1 and a good backup reported failure for eight
 // nights. `restic unlock` removes only locks whose process is gone.
 test('offsite upload is verified separately from serialized weekly retention', async () => {
-  const [source, retention] = await Promise.all([
+  const [source, offsite, retention] = await Promise.all([
     readFile(new URL('../deploy/scripts/backup.sh', import.meta.url), 'utf8'),
+    readFile(new URL('../deploy/scripts/backup-offsite.sh', import.meta.url), 'utf8'),
     readFile(new URL('../deploy/scripts/backup-retention.sh', import.meta.url), 'utf8'),
   ]);
   const retentionCode = retention.split(/\r?\n/).filter(line => !line.trimStart().startsWith('#')).join('\n');
@@ -39,9 +40,9 @@ test('offsite upload is verified separately from serialized weekly retention', a
   assert.doesNotMatch(source, /restic forget/);
   assert.doesNotMatch(source, /restic unlock/);
   assert.doesNotMatch(source, /write_backup_stage offsite uploaded/);
-  assert.match(source, /restic snapshots --tag prospect-db --host prospect-vps --path "\$DEST" --latest 1/);
-  assert.match(source, /write_backup_stage offsite verified/);
-  assert.match(source, /select_offsite_snapshot_id/);
+  assert.match(offsite, /restic snapshots --tag prospect-db --host prospect-vps --path "\$dest" --latest 1/);
+  assert.match(offsite, /write_backup_stage offsite verified/);
+  assert.match(offsite, /select_offsite_snapshot_id/);
   assert.doesNotMatch(source, /Pushing to \$\{RESTIC_REPOSITORY\}/);
 
   assert.match(retention, /restic forget --tag prospect-db --group-by host,tags/);
@@ -62,7 +63,7 @@ test('offsite upload is verified separately from serialized weekly retention', a
 // taking the upload down with it. Two nights with a healthy local archive and
 // nothing offsite, from a line written for first-run convenience.
 test('a failed repository probe never destroys the upload, and the remote is paced', async () => {
-  const source = await readFile(new URL('../deploy/scripts/backup.sh', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../deploy/scripts/backup-offsite.sh', import.meta.url), 'utf8');
   // Comment lines stripped: the change is explained in prose that quotes the
   // exact line being removed, which an absence check would otherwise trip over.
   const code = source.split(/\r?\n/).filter((line) => !line.trimStart().startsWith('#')).join('\n');
@@ -72,14 +73,10 @@ test('a failed repository probe never destroys the upload, and the remote is pac
 
   // `cat config` is the probe: one small object, not a full listing, so it is
   // cheaper and less likely to be what trips a quota.
-  assert.match(source, /restic cat config >\/dev\/null 2>&1/);
-
-  // And an init that reports the repository already exists is treated as
-  // success, because it means the probe was wrong rather than the repo missing.
-  assert.match(source, /grep -q 'config file already exists'/);
-  // Any other init failure is still fatal - this must not become "ignore
-  // everything init says".
-  assert.match(source, /echo "\$init_output" >&2\s*\n\s*exit 1/);
+  assert.match(source, /restic cat config/);
+  assert.match(source, /repository does not exist\|unable to open config file/);
+  assert.match(source, /it was not initialized or unlocked/);
+  assert.doesNotMatch(source, /config file already exists/);
 
   // Drive's per-minute quota is the binding constraint: 140 rejections over
   // five nights. restic runs rclone as a subprocess, so RCLONE_* env is the

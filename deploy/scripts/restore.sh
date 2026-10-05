@@ -6,8 +6,9 @@
 #   ./scripts/restore.sh --into-production <backup-dir>  # real recovery
 #
 # --verify-only restores into a scratch database inside the same PostgreSQL
-# container, counts rows in the core tables, and drops it again. Production is
-# untouched. This is the drill; do it monthly.
+# cluster, counts rows in the core tables, and drops it again. Production rows
+# are untouched, but this is not an isolated-cluster drill; restore-isolated.sh
+# supplies that stronger proof.
 set -eEuo pipefail
 
 cd "$(dirname "$0")/.."
@@ -148,7 +149,7 @@ if [[ "$MODE" == "verify" ]]; then
   }
   trap scratch_cleanup EXIT
 
-  echo "Restoring into isolated scratch database ${SCRATCH} (template0)."
+  echo "Restoring into same-cluster scratch database ${SCRATCH} (template0)."
   psql_admin -d postgres -q -c "create database ${SCRATCH} with template template0;"
 
   # This is intentionally a full archive restore: ownership and ACLs are part
@@ -169,7 +170,7 @@ if [[ "$MODE" == "verify" ]]; then
   SCRATCH=""
 
   echo
-  echo "Restore drill passed. Full archive, ownership, ACLs, data checks, and scratch cleanup verified."
+  echo "Same-cluster restore check passed. Full archive, ownership, ACLs, data checks, and scratch cleanup verified."
   exit 0
 fi
 

@@ -227,7 +227,9 @@ jobs:
         run: npm run test:unit
 
       - name: Backup receipt behavior
-        run: bash scripts/test-backup-snapshot-json.sh
+        run: |
+          bash scripts/test-backup-snapshot-json.sh
+          bash scripts/test-recovery-tools.sh
 
   deterministic-browser-contract:
     name: Deterministic responsive browser contract

@@ -5,7 +5,7 @@
 write_backup_stage() {
   local stage="$1" state="$2" stamp="$3" backup_name="${4:-}" objects="${5:-0}" bytes="${6:-0}" snapshot_id="${7:-}"
   local status_dir="${BACKUP_DIR}/.status" target temp
-  [[ "$stage" =~ ^(local|offsite|retention)$ ]] || return 2
+  [[ "$stage" =~ ^(local|offsite|retention|restore_drill)$ ]] || return 2
   [[ "$state" =~ ^[a-z_]+$ ]] || return 2
   [[ "$backup_name" =~ ^[A-Za-z0-9._-]*$ ]] || return 2
   [[ "$objects" =~ ^[0-9]+$ ]] || return 2
@@ -27,7 +27,7 @@ write_backup_attempt() {
   [[ "$state" =~ ^(running|failed|complete)$ ]] || return 2
   [[ "$phase" =~ ^[a-z_]+$ ]] || return 2
   [[ "$backup_name" =~ ^[A-Za-z0-9._-]*$ ]] || return 2
-  [[ "$operation" =~ ^(backup|retention)$ ]] || return 2
+  [[ "$operation" =~ ^(backup|retention|offsite_retry|restore_drill)$ ]] || return 2
   mkdir -p "$status_dir"
   chmod 700 "$status_dir"
   if [[ "$operation" == "backup" ]]; then

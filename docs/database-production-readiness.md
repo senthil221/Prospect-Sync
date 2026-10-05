@@ -39,9 +39,10 @@ The following is a read-only production sample, not a benchmark:
   that client-relative `Without prospects` view. The single warm aggregate
   completed in 93.489 ms; that is defect evidence, not a latency benchmark or
   load-test result.
-- On 2026-10-04 a local database dump completed at about 1.07 GB, but its
-  offsite upload failed with an HTTP 500/quota response. A separate read-only
-  snapshot probe throttled to one request per second still returned HTTP 403.
+- The latest local receipt (`20261005T032631Z`) records a roughly 1.07 GB dump
+  with 1,953 objects, but its offsite phase failed. A bounded 2026-10-06 journal
+  classification found 48 quota responses and 12 HTTP 500 responses, with no
+  authentication or timeout pattern.
   There is no verified offsite receipt, so no remote-copy or restore claim can
   be made. A successful offsite verification plus an isolated restore proof is
   still a critical production-readiness gate; this query package does not alter
@@ -58,7 +59,7 @@ worker restart or restore was used for this snapshot.
 | Memberships | `public.client_prospects`, `public.client_companies`, `public.lists`, `public.list_memberships`, company import memberships | Client, company, list and import membership are distinct facts. Imports, pushes, removals and recently-added batches depend on them. |
 | Search projections | `public.prospect_index`, `public.company_summaries`, reindex functions and backlog | Listings and filters may read projections; canonical writes must publish/invalidate projection state before a completed mutation is reported as fresh. |
 | Query input | `lib/prospect-filters.ts`, `lib/workspace-scopes.ts`, `lib/filter-sets.ts`, `lib/client-workspace-completeness.ts` | Bounded parsing, stored-set ownership, client completeness and parent pivots are server contracts. UI payloads do not grant scope. |
-| Interactive People | `app/api/prospects/route.ts` → `search_prospect_workspace_v13` or the guarded cursor RPC | Master/client listing, counts, sorting and Company → People navigation. Client views inject the complete/incomplete partition on the server. |
+| Interactive People | `app/api/prospects/route.ts` → `search_prospect_workspace_v13`, guarded cursor RPCs, or the independently guarded client page RPC | Master/client listing, deferred/exact counts, sorting and Company → People navigation. Client views inject the complete/incomplete partition on the server. |
 | Interactive Companies | `app/api/companies/route.ts` → `client_company_workspace_v2`, `filter_companies_v4` or prepared company listing | Master/client listing and People → Companies navigation. Client company membership must remain explicit rather than inferred from any linked person. |
 | Durable membership | `app/api/result-sets/route.ts`, `lib/result-sets.ts`, `prospect_results.result_sets`, operations worker | Exact count and all-matching actions freeze authorized IDs. The final server-applied question must be authorized, hashed and stored consistently. |
 | Exports | `app/api/prospects/export/route.ts`, `app/api/companies/route.ts`, `app/api/exports/route.ts`, `lib/export-runner.ts` | Streaming and background exports must enumerate the same membership as the screen and keep memory bounded. |
@@ -117,7 +118,7 @@ gate; it is not implied by a passing build.
 | --- | --- | --- | --- | --- | --- |
 | Global People | Present: People route and v13/cursor RPCs | Present: filter, cursor and failure-mode tests | Present for selected compiler/cursor contracts; full catalogue required | Required: fresh multi-filter, paging, count, pivot | Historical aggregate only; no current p95 |
 | Global Companies | Present: Companies route and v4/prepared paths | Present: company filters, pivot and export tests | Present for selected filter/pivot fixtures; full catalogue required | Required: filters, paging, People pivot | No workflow run in this package |
-| Client People / Companies | Present: client scope plus membership RPCs; client People adjacent pages have an independently gated cursor v2 | Present: client operations, legacy-filter UI, cursor bootstrap/next/previous/reset/fallback, cap paging and Incomplete Info tests | Package: listing/stream/frozen/selection parity, client cursor full ordered IDs/version/cap/grant checks, stored-count write authority, >50k paging/export, enrichment and SEG transitions | Required: authenticated normal/incomplete cursor canary after deployment | Stored-count parity proved on all 17,025 rows of one live client; bounded cursor comparisons are single-session observations, not deployed-RPC or p95 evidence |
+| Client People / Companies | Present: client scope plus membership RPCs; client People adjacent pages have cursor v2 and explicitly filtered first pages have an independent count-free rollout | Present: client operations, deferred-count/selection/export wording, cursor bootstrap/next/previous/reset/fallback, cap paging and Incomplete Info tests | Package: listing/stream/frozen/selection parity, client cursor/page full ordered IDs/version/grant checks, write-between-pages, stored-count authority, >50k paging/export, enrichment and SEG transitions | Required: authenticated normal/incomplete canary after each guarded enablement | Stored-count parity proved on all 17,025 rows of one live client; bounded cursor comparisons are single-session observations, not deployed-RPC or p95 evidence |
 | Company → People | Present: normalized `companyScope` carried by listing/export/result set | Present: scope/auth/result-set/identity tests | Package: actual People listing, export and frozen builder with max-people cap | Required: authenticated page/export/all-matching parity | Read-only source counts only; no write journey |
 | People → Companies | Present for interactive listing; durable membership unsupported | Present: pivot honesty tests | Gap: complete frozen-set equivalence | Required: listing plus bounded export behavior | Not certified |
 | Exact count / all matching | Package: client completeness and Company origin normalized before authorize/hash/store | Package: behavioral normalization, contradictory scope, idempotency, identity and guard-order checks | Package fixture compares interactive, explicit/all-matching and frozen IDs/counts; exact-head CI pending | Required: normal and Incomplete Info all-matching actions | No writes performed |
@@ -126,7 +127,7 @@ gate; it is not implied by a passing build.
 | Blocklist | Present: scoped bulk/share/reply paths | Present: blocklist and Smartlead tests | Present for selected migrations; account/retry recovery required | Required: add/update/delete/export/share/reply sync | Addon, not a core-query certification |
 | Email verification | Present: frozen selection and dedicated worker | Present: provider, worker and bounded-run tests | Present for selected run/reconcile fixtures | Required: create/pause/resume/reuse/result labels | Addon, not a core-query certification |
 | ICP | Present: selected company queues and worker | Present: ICP route/model/clear tests | Present for selected queue and selection fixtures | Required: selected run, review and retry | Addon, not a core-query certification |
-| Health / backup / restore | Present: health route and deployment scripts | Present: failure visibility and backup script tests | Restore SQL exists | Required: operator-facing degraded states | **Red:** the 2026-10-04 local dump succeeded, but offsite upload returned HTTP 500/quota and the read-only snapshot probe returned HTTP 403; offsite-copy verification and an isolated restore remain open |
+| Health / backup / restore | Present: health route, upload-existing retry, same-cluster verification and a resource-bounded separate-cluster drill | Present: failure classification, unsafe-path/archive, receipts and cleanup contracts | Restore SQL exists | Required: operator-facing degraded states | **Red:** the latest local dump exists, but a verified offsite receipt and successful isolated restore receipt remain absent; tooling is not recovery proof |
 
 ## Ranked implementation backlog and release gates
 
@@ -300,6 +301,48 @@ controlled warm/cold comparison, load test, p95, first-page guarantee or live
 v2 RPC canary. Disposable PostgreSQL remains the semantic gate for tied
 timestamps, full ordered traversal, exact multiples, dependency invalidation,
 service-role-only grants and the >50,000 capped-count contract.
+
+Explicitly searched or user-filtered client People views have a second,
+independent default-off rollout: `CLIENT_PROSPECT_PAGE_FIRST`. It requires the
+client cursor capability and keeps unfiltered, alternate-sort, pivot,
+max-people and numeric-deep-link requests on their established readers. The
+page RPC uses the same client membership, completeness, SEG and compiler
+contracts as cursor v2, but deliberately has no count CTE: it reads 51 rows,
+returns 50 plus `has_more`, and publishes the dependency vector. The interface
+says “50 shown · Total not counted”; Previous/Next use page boundaries. “Count
+all matches” builds the existing authorized frozen result set. Until that
+finishes, all-matching selections and exports remain full-set operations with
+unknown size—never a 50-row operation—and unknown exports take the background
+path. A stale frozen count is refused and must be rebuilt. The page traversal
+is not a snapshot; concurrent writes can change later membership, while the
+issued mixed-direction boundary prevents a newly inserted earlier row from
+being spliced into page two. The database deadline remains 10 seconds and the
+route composes it with caller cancellation (504 versus 499).
+
+One bounded read-only production observation on 2026-10-06 compared an existing
+v13 company-keyword + complete-profile + SEG request (page plus count) with the
+draft materialized page-only shape in the same session. v13 returned in
+4,595.683 ms; the page-only shape returned in 95.389 ms, with all 50 ordered IDs
+identical and 106 total matches in the counted reference. This sequential sample
+is warm-cache-influenced manual-shape evidence—not an actual deployed RPC,
+cold-cache result, p95, concurrency test, or a general speedup claim. The
+default-off flag still requires disposable PostgreSQL parity, Linux CI and a
+post-deployment RPC canary before enablement.
+
+Backup recovery now separates three facts. The nightly job creates and verifies
+a local archive. `backup-upload-existing.sh` retries only that archive's
+offsite stage under the shared lock, with bounded transient retries; it never
+dumps, initializes/unlocks a repository, prunes, or removes local files. Auth
+and quota failures stop finitely. `restore.sh --verify-only` remains a
+same-cluster scratch-database check and therefore is not isolation proof.
+`restore-isolated.sh` uses the archive's exact reviewed PostgreSQL image in a
+labelled disposable container and volume with no network, port or production
+mount, one CPU, 2 GB RAM, one restore job, overall time/free-space/data limits,
+and pg_cron/pg_net execution suppressed before data restore. It validates the
+full archive, ownership, ACL and invariants, and removes only resources whose
+labels prove this invocation created them. It still shares host disk I/O with
+production. Recovery stays RED until an approved real existing backup receives
+both a verified offsite receipt and a successful isolated-drill receipt.
 
 ### P4 — production operations
 
