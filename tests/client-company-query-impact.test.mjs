@@ -58,18 +58,21 @@ test("bounded database cancellation distinguishes caller, route deadline, and Po
   const deadline = new AbortController();
   caller.abort();
   let response = boundedDatabaseAbortResponse({ callerSignal: caller.signal, deadlineSignal: deadline.signal, subject: "View", alternative: "Narrow it." });
-  assert.equal(response?.status, 499);
-  assert.deepEqual(await response?.json(), { error: "The request was cancelled." });
+  assert.ok(response);
+  assert.equal(response.status, 499);
+  assert.deepEqual(await response.json(), { error: "The request was cancelled." });
 
   const openCaller = new AbortController();
   deadline.abort();
   response = boundedDatabaseAbortResponse({ callerSignal: openCaller.signal, deadlineSignal: deadline.signal, subject: "View", alternative: "Narrow it." });
-  assert.equal(response?.status, 504);
-  assert.equal((await response?.json()).code, "statement_timeout");
+  assert.ok(response);
+  assert.equal(response.status, 504);
+  assert.equal((await response.json()).code, "statement_timeout");
 
   const openDeadline = new AbortController();
   response = boundedDatabaseAbortResponse({ callerSignal: openCaller.signal, deadlineSignal: openDeadline.signal, error: { code: "57014" }, subject: "View", alternative: "Narrow it." });
-  assert.equal(response?.status, 504);
+  assert.ok(response);
+  assert.equal(response.status, 504);
   assert.equal(boundedDatabaseAbortResponse({ callerSignal: openCaller.signal, deadlineSignal: openDeadline.signal, error: { code: "XX000" }, subject: "View", alternative: "Narrow it." }), null);
 });
 

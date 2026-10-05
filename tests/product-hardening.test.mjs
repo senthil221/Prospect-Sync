@@ -153,5 +153,6 @@ test("company listing counts are bounded, but only when a filter narrows the set
   // number. It must never be capped.
   assert.match(migration, /v_count_cap := case when v_match_clause = 'true' and p_people_scope is null then 'all'/);
   // And a bounded total has to read as a floor, not as an exact count.
-  assert.match(workspace, /totalCapped \? `\$\{formatNumber\(total\)\}\+`/);
+  assert.match(workspace, /const displayedTotal = totalCapped \? Math\.max\(total, resultEnd\) : total/);
+  assert.match(workspace, /const totalLabel = totalCapped \? `\$\{formatNumber\(displayedTotal\)\}\+`/);
 });
