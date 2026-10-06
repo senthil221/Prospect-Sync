@@ -29,7 +29,7 @@ test("both ICP Unverified switches write the new filter, and old links still rea
     const source = await read(path);
     assert.ok(source.includes('const unverifiedField = status === "no_domain" ? "__icp_no_domain_unverified" : "__icp_unverified";'), path);
     assert.ok(source.includes('id: unverifiedField,\n      field: unverifiedField,\n      operator: "equals",'), path);
-    assert.ok(source.includes('onClick={() => setIcpStatus("no_domain")}>No domain unverified</button>'), path);
+    assert.ok(source.includes('onClick={() => setIcpStatus("no_domain")}>No domain not fit</button>'), path);
     assert.ok(source.includes(`filter.field !== "${verifiedField}" && filter.field !== "__icp_unverified" && filter.field !== "__icp_no_domain_unverified"`), path);
     assert.ok(source.includes('icpFilter.field === "__icp_no_domain_unverified" ? "no_domain" : icpFilter.field === "__icp_unverified" || icpFilter.operator !== "contains" ? "unverified" : "verified"'), path);
   }
