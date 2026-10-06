@@ -529,5 +529,30 @@ fi
 
 docker image prune -f --filter "until=168h" >/dev/null 2>&1 || true
 
+# Old application images. `docker image prune` removes only untagged images,
+# and every deploy pulls a tagged one, so none ever qualified: 268 had piled up
+# by 2026-10-06, 21 GB of the 96 GB disk, growing ~60 MB a deploy. Keep the
+# newest ten for rollback, plus every image a container (running or stopped)
+# uses, the recorded previous image and the last known-good import worker.
+prune_old_app_images() {
+  local repo="${NEW_IMAGE%:*}" keep=10 image
+  local -A protected=()
+  for image in "$NEW_IMAGE" "${PREVIOUS_IMAGE:-}" \
+      "$(tr -d '[:space:]' < "$LAST_IMAGE_FILE" 2>/dev/null || true)" \
+      "$(tr -d '[:space:]' < "$FENCED_IMPORT_WORKER_IMAGE_FILE" 2>/dev/null || true)"; do
+    [[ -n "$image" ]] && protected["$image"]=1
+  done
+  while IFS= read -r image; do
+    [[ -n "$image" ]] && protected["$image"]=1
+  done < <(docker ps -a --format '{{.Image}}')
+  docker images "$repo" --format '{{.CreatedAt}}|{{.Repository}}:{{.Tag}}' | sort -r \
+    | awk -F'|' -v keep="$keep" 'NR > keep { print $2 }' \
+    | while IFS= read -r image; do
+        [[ -n "$image" && "$image" != *":<none>" && -z "${protected[$image]:-}" ]] || continue
+        docker image rm "$image" >/dev/null 2>&1 || true
+      done
+}
+prune_old_app_images || echo "WARNING: old application images could not be pruned." >&2
+
 echo
 echo "Deployed ${NEW_IMAGE} to ${CANDIDATE_SLOT} with no application interruption."

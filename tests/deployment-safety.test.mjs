@@ -300,3 +300,20 @@ test("migration guard scopes the failed incomplete-info correction to its exact 
   assert.match(guard, /migrationPath === "supabase\/migrations\/20260925212546_incomplete_company_people_single_pass\.sql"/);
   assert.match(guard, /status === "M"/);
 });
+
+// docker image prune removes only untagged images; every deploy pulls a tagged
+// one, so 268 application images (21 GB) had accumulated by 2026-10-06.
+test("a deploy prunes old tagged application images but keeps every rollback target", async () => {
+  const update = await readFile(new URL("../deploy/scripts/update.sh", import.meta.url), "utf8");
+  const prune = update.slice(update.indexOf("prune_old_app_images() {"));
+  assert.match(prune, /local repo="\$\{NEW_IMAGE%:\*\}" keep=10/);
+  for (const kept of ['"$NEW_IMAGE"', '"${PREVIOUS_IMAGE:-}"', '"$LAST_IMAGE_FILE"', '"$FENCED_IMPORT_WORKER_IMAGE_FILE"']) {
+    assert.ok(prune.includes(kept), kept);
+  }
+  assert.match(prune, /docker ps -a --format '\{\{\.Image\}\}'/);
+  assert.match(prune, /awk -F'\|' -v keep="\$keep" 'NR > keep/);
+  assert.match(prune, /-z "\$\{protected\[\$image\]:-\}"/);
+  // Only after the switch, and never able to fail the deploy.
+  assert.ok(update.indexOf("prune_old_app_images ||") > update.indexOf('echo "==> Atomically switching new traffic'));
+  assert.match(update, /prune_old_app_images \|\| echo "WARNING: old application images could not be pruned\." >&2/);
+});
