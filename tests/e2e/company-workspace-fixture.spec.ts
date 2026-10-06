@@ -6,7 +6,7 @@ test("Company DB keeps one clear verification selector and exposes removable leg
   await page.goto("/e2e-fixtures/company-workspace");
 
   const verification = page.getByRole("group", { name: "Filter companies by ICP verification" });
-  await expect(verification.getByRole("button")).toHaveText(["All", "ICP Verified", "ICP Unverified"]);
+  await expect(verification.getByRole("button")).toHaveText(["All", "ICP Verified", "ICP Unverified", "No domain unverified"]);
   await expect(page.getByRole("button", { name: "Any ICP check" })).toHaveCount(0);
 
   const legacy = page.getByRole("button", { name: /Exclude saved ICP results/ });

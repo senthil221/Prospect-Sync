@@ -20,6 +20,7 @@ export function contactDateChip(operator: string, values: string[]) {
 export function filterChipValue(field: string, value: string) {
   if (field === "__icp_verified" || field === "__company_icp_verified") return "Verified";
   if (field === "__icp_unverified") return "Unverified, not NON_FIT";
+  if (field === "__icp_no_domain_unverified") return "No domain, NON_FIT";
   // "<client id>|FIT" - the chip shows the result, not the id.
   if (field === "__company_icp_check") {
     const state = value.split("|")[1] ?? "";

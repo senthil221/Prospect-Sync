@@ -157,7 +157,7 @@ function activeCount(filters: ProspectFilter[]) {
 
 export function filterLabel(field: string, customFields: ProspectFieldDefinition[] = []) {
   if (field === "__incomplete_company_profile") return "Company profile incomplete";
-  if (field === "__icp_verified" || field === "__company_icp_verified" || field === "__icp_unverified") return "ICP verification";
+  if (field === "__icp_verified" || field === "__company_icp_verified" || field === "__icp_unverified" || field === "__icp_no_domain_unverified") return "ICP verification";
   if (field === "__company_icp_check") return "ICP check";
   if (field === "__client_ids" || field === "__company_client_ids") return "Client";
   // A set of company ids, applied by a button rather than typed. The values are

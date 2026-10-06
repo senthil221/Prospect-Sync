@@ -166,19 +166,22 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     onPageChange(1); clearSelection();
   }
   // ICP Unverified is __icp_unverified: not verified and the person's company
-  // not NON_FIT by the client's ICP check (20261006090000).
-  const icpFilter = clientId ? filters.find((filter) => (filter.field === "__icp_verified" || filter.field === "__icp_unverified") && filter.values.includes(clientId)) : undefined;
-  const icpStatus = !icpFilter ? "all" : icpFilter.field === "__icp_unverified" || icpFilter.operator !== "contains" ? "unverified" : "verified";
-  function setIcpStatus(status: "all" | "verified" | "unverified") {
-    const remaining = filters.filter((filter) => filter.field !== "__icp_verified" && filter.field !== "__icp_unverified");
+  // not NON_FIT by the client's ICP check (20261006090000). No domain
+  // unverified is __icp_no_domain_unverified: the company is NON_FIT with no
+  // domain for the blocklist to hold (20261006100000).
+  const icpFilter = clientId ? filters.find((filter) => (filter.field === "__icp_verified" || filter.field === "__icp_unverified" || filter.field === "__icp_no_domain_unverified") && filter.values.includes(clientId)) : undefined;
+  const icpStatus = !icpFilter ? "all" : icpFilter.field === "__icp_no_domain_unverified" ? "no_domain" : icpFilter.field === "__icp_unverified" || icpFilter.operator !== "contains" ? "unverified" : "verified";
+  function setIcpStatus(status: "all" | "verified" | "unverified" | "no_domain") {
+    const remaining = filters.filter((filter) => filter.field !== "__icp_verified" && filter.field !== "__icp_unverified" && filter.field !== "__icp_no_domain_unverified");
+    const unverifiedField = status === "no_domain" ? "__icp_no_domain_unverified" : "__icp_unverified";
     onFiltersChange(status === "all" ? remaining : status === "verified" ? [...remaining, {
       id: "__icp_verified:verified",
       field: "__icp_verified",
       operator: "contains",
       values: [clientId],
     }] : [...remaining, {
-      id: "__icp_unverified",
-      field: "__icp_unverified",
+      id: unverifiedField,
+      field: unverifiedField,
       operator: "equals",
       values: [clientId],
     }]);
@@ -688,7 +691,7 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
   }
 
   return <section className="people-workspace">
-    {clientId ? <div className="icp-quick-filters" role="group" aria-label="Filter people by ICP verification"><button className={icpStatus === "all" ? "active" : ""} aria-pressed={icpStatus === "all"} onClick={() => setIcpStatus("all")}>All</button><button className={icpStatus === "verified" ? "active" : ""} aria-pressed={icpStatus === "verified"} onClick={() => setIcpStatus("verified")}>ICP Verified</button><button className={icpStatus === "unverified" ? "active" : ""} aria-pressed={icpStatus === "unverified"} onClick={() => setIcpStatus("unverified")}>ICP Unverified</button></div> : null}
+    {clientId ? <div className="icp-quick-filters" role="group" aria-label="Filter people by ICP verification"><button className={icpStatus === "all" ? "active" : ""} aria-pressed={icpStatus === "all"} onClick={() => setIcpStatus("all")}>All</button><button className={icpStatus === "verified" ? "active" : ""} aria-pressed={icpStatus === "verified"} onClick={() => setIcpStatus("verified")}>ICP Verified</button><button className={icpStatus === "unverified" ? "active" : ""} aria-pressed={icpStatus === "unverified"} onClick={() => setIcpStatus("unverified")}>ICP Unverified</button><button className={icpStatus === "no_domain" ? "active" : ""} aria-pressed={icpStatus === "no_domain"} title="Company is not-fit by the ICP check, with no domain to blocklist" onClick={() => setIcpStatus("no_domain")}>No domain unverified</button></div> : null}
     {clientId ? <div className="icp-quick-filters status-quick-filters" role="group" aria-label="Choose a client people view"><button className={clientView === "all" ? "active" : ""} aria-pressed={clientView === "all"} onClick={() => setClientView("all")}>All</button><button className={clientView === "leads" ? "active" : ""} aria-pressed={clientView === "leads"} onClick={() => setClientView("leads")}><AppIcon name="star" size={14}/> Leads</button><button className={clientView === "contactable" ? "active" : ""} aria-pressed={clientView === "contactable"} onClick={() => setClientView("contactable")} title="Past this client's contact cooldown, or never contacted"><AppIcon name="check" size={14}/> Contactable</button></div> : null}
     <div className="people-heading">
       <div><p className="eyebrow">PROSPECTS</p><h2>Find people</h2><p>Search and filter every prospect saved in your people database.</p></div>

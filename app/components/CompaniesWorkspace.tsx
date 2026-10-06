@@ -139,9 +139,11 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   const activeFilterCount = displayFilters.reduce((count, filter) => count + (filter.operator === "empty" || filter.operator === "not_empty" ? 1 : filter.values.length), 0);
   // ICP Unverified is __icp_unverified: not verified and not NON_FIT by the
   // client's ICP check (20261006090000). An older link may still carry the
-  // plain "not verified" form, which reads as Unverified too.
-  const icpFilter = clientId ? filters.find((filter) => (filter.field === "__company_icp_verified" || filter.field === "__icp_unverified") && filter.values.includes(clientId)) : undefined;
-  const icpStatus = !icpFilter ? "all" : icpFilter.field === "__icp_unverified" || icpFilter.operator !== "contains" ? "unverified" : "verified";
+  // plain "not verified" form, which reads as Unverified too. No domain
+  // unverified is __icp_no_domain_unverified: NON_FIT with no domain for the
+  // blocklist to hold (20261006100000).
+  const icpFilter = clientId ? filters.find((filter) => (filter.field === "__company_icp_verified" || filter.field === "__icp_unverified" || filter.field === "__icp_no_domain_unverified") && filter.values.includes(clientId)) : undefined;
+  const icpStatus = !icpFilter ? "all" : icpFilter.field === "__icp_no_domain_unverified" ? "no_domain" : icpFilter.field === "__icp_unverified" || icpFilter.operator !== "contains" ? "unverified" : "verified";
   // Old saved links can still carry the former FIT/NON_FIT/Not checked filter.
   // Keep it visible and removable even though the redundant quick selector is
   // gone; silently retaining it would make the grid look incorrectly empty.
@@ -171,17 +173,18 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   const showSelection = canDelete || Boolean(clientId);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState<"explicit" | "all_matching">("explicit");
-  function setIcpStatus(status: "all" | "verified" | "unverified") {
+  function setIcpStatus(status: "all" | "verified" | "unverified" | "no_domain") {
     if (!onFilters) return;
-    const remaining = filters.filter((filter) => filter.field !== "__company_icp_verified" && filter.field !== "__icp_unverified");
+    const remaining = filters.filter((filter) => filter.field !== "__company_icp_verified" && filter.field !== "__icp_unverified" && filter.field !== "__icp_no_domain_unverified");
+    const unverifiedField = status === "no_domain" ? "__icp_no_domain_unverified" : "__icp_unverified";
     onFilters(status === "all" ? remaining : status === "verified" ? [...remaining, {
       id: "__company_icp_verified:verified",
       field: "__company_icp_verified",
       operator: "contains",
       values: [clientId],
     }] : [...remaining, {
-      id: "__icp_unverified",
-      field: "__icp_unverified",
+      id: unverifiedField,
+      field: unverifiedField,
       operator: "equals",
       values: [clientId],
     }]);
@@ -656,7 +659,7 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   return <section className="companies-workspace">
     <div className="company-quick-filter-row">
       {onFilters ? <div className="icp-quick-filters" role="group" aria-label={clientId ? "Filter companies by this client's prospect coverage" : "Filter companies by prospect coverage"}><button className={coverageStatus === "all" ? "active" : ""} aria-pressed={coverageStatus === "all"} onClick={() => setCoverageStatus("all")}>All</button><button className={coverageStatus === "with" ? "active" : ""} aria-pressed={coverageStatus === "with"} onClick={() => setCoverageStatus("with")}>With prospects</button><button className={coverageStatus === "without" ? "active" : ""} aria-pressed={coverageStatus === "without"} onClick={() => setCoverageStatus("without")}>Without prospects</button></div> : null}
-      {clientId ? <div className="icp-quick-filters" role="group" aria-label="Filter companies by ICP verification"><button className={icpStatus === "all" ? "active" : ""} aria-pressed={icpStatus === "all"} onClick={() => setIcpStatus("all")}>All</button><button className={icpStatus === "verified" ? "active" : ""} aria-pressed={icpStatus === "verified"} onClick={() => setIcpStatus("verified")}>ICP Verified</button><button className={icpStatus === "unverified" ? "active" : ""} aria-pressed={icpStatus === "unverified"} onClick={() => setIcpStatus("unverified")}>ICP Unverified</button></div> : null}
+      {clientId ? <div className="icp-quick-filters" role="group" aria-label="Filter companies by ICP verification"><button className={icpStatus === "all" ? "active" : ""} aria-pressed={icpStatus === "all"} onClick={() => setIcpStatus("all")}>All</button><button className={icpStatus === "verified" ? "active" : ""} aria-pressed={icpStatus === "verified"} onClick={() => setIcpStatus("verified")}>ICP Verified</button><button className={icpStatus === "unverified" ? "active" : ""} aria-pressed={icpStatus === "unverified"} onClick={() => setIcpStatus("unverified")}>ICP Unverified</button><button className={icpStatus === "no_domain" ? "active" : ""} aria-pressed={icpStatus === "no_domain"} title="Not-fit by the ICP check, with no domain to blocklist" onClick={() => setIcpStatus("no_domain")}>No domain unverified</button></div> : null}
     </div>
     <div className="section-intro company-intro"><div><p className="eyebrow">COMPANIES</p><h2>Companies already in your database.</h2><p>Open a company to see its prospects in a separate panel.</p></div><div className="company-intro-actions">{onFilters ? <button className={`outline-button filter-toggle ${filtersOpen ? "active" : ""}`} aria-pressed={filtersOpen} onClick={() => setFiltersOpen((open) => !open)}><AppIcon name="filter" size={14}/> Filters {activeFilterCount ? <span>{activeFilterCount}</span> : null}</button> : null}<MenuButton label="Actions" icon="grid" panelLabel="Company actions" align="end">{onFilters ? <button className="ds-menu-item" aria-pressed={bulkOpen} onClick={() => setBulkOpen((open) => !open)}><AppIcon name="search" size={14}/> Bulk domains{domainFilterCount ? ` (${domainFilterCount})` : ""}</button> : null}{clientId ? <button className="ds-menu-item" aria-pressed={bulkSelectOpen} onClick={() => setBulkSelectOpen((open) => !open)}><AppIcon name="check" size={14}/> Bulk select</button> : null}<button className="ds-menu-item" disabled={exportingCompanies} title={clientId ? "Choose the company columns to export for this client, across every page" : "Choose the company columns to export across every page"} onClick={() => void openExportDialog()}><AppIcon name="download" size={14}/> {exportingCompanies ? "Exporting…" : "Export CSV"}</button>{clientId ? <button className="ds-menu-item" disabled={exportingCompanies} title="Download Company Name, Website, Industry, Keywords and Short Description for the companies shown" onClick={() => void exportIcpValidation()}><AppIcon name="download" size={14}/> {exportingCompanies ? "Exporting…" : "Export for ICP validation"}</button> : null}{allowEntityPivot ? <button className="ds-menu-item" title="Safely scope up to 250,000 matching companies" onClick={() => onSeePeople({ search: search.trim(), filters, limit: 250000 })}><AppIcon name="arrow" size={14}/> See these people</button> : null}</MenuButton><button className="primary" onClick={onImport}><AppIcon name="plus" size={15}/> Add from CSV</button></div></div>
     {legacyIcpCheckFilters.length > 0 && onFilters ? <div className="active-filter-strip" aria-label="Applied legacy ICP result filters">{legacyIcpCheckFilters.map((filter) => {
