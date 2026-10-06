@@ -137,8 +137,11 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   const [bulkSelecting, setBulkSelecting] = useState(false);
   const displayFilters = filters.filter((filter) => !internalClientFilterFields.has(filter.field));
   const activeFilterCount = displayFilters.reduce((count, filter) => count + (filter.operator === "empty" || filter.operator === "not_empty" ? 1 : filter.values.length), 0);
-  const icpFilter = clientId ? filters.find((filter) => filter.field === "__company_icp_verified" && filter.values.includes(clientId)) : undefined;
-  const icpStatus = !icpFilter ? "all" : icpFilter.operator === "contains" ? "verified" : "unverified";
+  // ICP Unverified is __icp_unverified: not verified and not NON_FIT by the
+  // client's ICP check (20261006090000). An older link may still carry the
+  // plain "not verified" form, which reads as Unverified too.
+  const icpFilter = clientId ? filters.find((filter) => (filter.field === "__company_icp_verified" || filter.field === "__icp_unverified") && filter.values.includes(clientId)) : undefined;
+  const icpStatus = !icpFilter ? "all" : icpFilter.field === "__icp_unverified" || icpFilter.operator !== "contains" ? "unverified" : "verified";
   // Old saved links can still carry the former FIT/NON_FIT/Not checked filter.
   // Keep it visible and removable even though the redundant quick selector is
   // gone; silently retaining it would make the grid look incorrectly empty.
@@ -170,11 +173,16 @@ export function CompanyTable({ companies, clients = [], total, totalCapped = fal
   const [selectionMode, setSelectionMode] = useState<"explicit" | "all_matching">("explicit");
   function setIcpStatus(status: "all" | "verified" | "unverified") {
     if (!onFilters) return;
-    const remaining = filters.filter((filter) => filter.field !== "__company_icp_verified");
-    onFilters(status === "all" ? remaining : [...remaining, {
-      id: `__company_icp_verified:${status}`,
+    const remaining = filters.filter((filter) => filter.field !== "__company_icp_verified" && filter.field !== "__icp_unverified");
+    onFilters(status === "all" ? remaining : status === "verified" ? [...remaining, {
+      id: "__company_icp_verified:verified",
       field: "__company_icp_verified",
-      operator: status === "verified" ? "contains" : "not_contains",
+      operator: "contains",
+      values: [clientId],
+    }] : [...remaining, {
+      id: "__icp_unverified",
+      field: "__icp_unverified",
+      operator: "equals",
       values: [clientId],
     }]);
     onPageChange(1); setSelectionMode("explicit"); setSelectedIds(new Set());

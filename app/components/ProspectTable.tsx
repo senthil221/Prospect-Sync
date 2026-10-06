@@ -165,14 +165,21 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
     onFiltersChange(value ? [...remaining, { id: "__max_people_per_company", field: "__max_people_per_company", operator: "equals", values: [String(value)] }] : remaining);
     onPageChange(1); clearSelection();
   }
-  const icpFilter = clientId ? filters.find((filter) => filter.field === "__icp_verified" && filter.values.includes(clientId)) : undefined;
-  const icpStatus = !icpFilter ? "all" : icpFilter.operator === "contains" ? "verified" : "unverified";
+  // ICP Unverified is __icp_unverified: not verified and the person's company
+  // not NON_FIT by the client's ICP check (20261006090000).
+  const icpFilter = clientId ? filters.find((filter) => (filter.field === "__icp_verified" || filter.field === "__icp_unverified") && filter.values.includes(clientId)) : undefined;
+  const icpStatus = !icpFilter ? "all" : icpFilter.field === "__icp_unverified" || icpFilter.operator !== "contains" ? "unverified" : "verified";
   function setIcpStatus(status: "all" | "verified" | "unverified") {
-    const remaining = filters.filter((filter) => filter.field !== "__icp_verified");
-    onFiltersChange(status === "all" ? remaining : [...remaining, {
-      id: `__icp_verified:${status}`,
+    const remaining = filters.filter((filter) => filter.field !== "__icp_verified" && filter.field !== "__icp_unverified");
+    onFiltersChange(status === "all" ? remaining : status === "verified" ? [...remaining, {
+      id: "__icp_verified:verified",
       field: "__icp_verified",
-      operator: status === "verified" ? "contains" : "not_contains",
+      operator: "contains",
+      values: [clientId],
+    }] : [...remaining, {
+      id: "__icp_unverified",
+      field: "__icp_unverified",
+      operator: "equals",
       values: [clientId],
     }]);
     onPageChange(1);
