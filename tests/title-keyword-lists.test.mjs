@@ -40,7 +40,7 @@ test("uploads are checked by the database first and never delete keywords", asyn
   const panel = await read("../app/components/TitleClassifierPanel.tsx");
   assert.match(panel, /postKeywords\(kind, rows, false\)/);
   assert.match(panel, /saved = await postKeywords\(upload\.kind, upload\.rows, true\);/);
-  assert.match(panel, /await reclassify\(\);\n  \}/);
+  assert.match(panel, /await reclassify\(\);\n {2}\}/);
   const script = await read("../scripts/sync-title-keywords.mjs");
   assert.match(script, /const stale = prune \?/);
 });
