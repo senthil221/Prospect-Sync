@@ -7,6 +7,8 @@
 // behind. This upserts every row in the files; it deletes keywords missing from
 // them only with --prune, which would otherwise wipe keywords added in the app.
 // Download the current lists from the Job titles tab before pruning.
+// data/top_management_include.csv and data/top_management_exclude.csv are not
+// synced here: they seeded 20261008110000 and are kept in the app only.
 //
 // Every write bumps title_classifier_state.keywords_updated_at (a table trigger),
 // which is what marks already-classified prospects as stale. Re-classify them with
