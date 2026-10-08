@@ -1706,3 +1706,6 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 .keyword-check p, .keyword-check ul { margin: 0; }
 .keyword-check ul { padding-left: var(--space-4); color: var(--text-secondary); max-height: 220px; overflow: auto; }
 .keyword-problems, .keyword-problem-count { color: var(--danger); }
+.keyword-list-grid { display: grid; gap: var(--space-2); }
+.keyword-list-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.keyword-list-row > span { min-width: 190px; font-size: var(--text-2xs); font-weight: var(--weight-semibold); color: var(--text-primary); }

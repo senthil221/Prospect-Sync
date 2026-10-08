@@ -15,7 +15,7 @@ import { ESP_OUTCOMES, ESP_PROVIDERS } from "../worker/email-provider-core.mjs";
 export type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 
 type FilterDefinition = ProspectFieldDefinition & {
-  kind?: "text" | "employee" | "tiers" | "departments" | "year" | "funding" | "company_keywords" | "verification_status" | "verification_date" | "contact_date" | "esp";
+  kind?: "text" | "employee" | "tiers" | "top_management" | "departments" | "year" | "funding" | "company_keywords" | "verification_status" | "verification_date" | "contact_date" | "esp";
   advanced?: boolean;
   description?: string;
   /** Which value endpoint autocompletes this field. Company fields ask the company one. */
@@ -55,6 +55,7 @@ const mainFilters: FilterDefinition[] = [
 // the only place it makes sense to read.
 const classifierFilters: FilterDefinition[] = [
   { id: "__title_seniority_tier", label: "Management Level", kind: "tiers", description: "The seniority the classifier read from the job title." },
+  { id: "__title_top_management", label: "Top Management", kind: "top_management", description: "People whose job title says they can take company-wide decisions: founders, owners, CEOs, managing directors, chairmen, partners. Read from the job title with the top management keyword lists (Job titles tab)." },
   { id: "__title_department", label: "Departments & Job Function", kind: "departments", description: "The department the classifier read from the job title. Expand one to narrow it further." },
 ];
 
@@ -165,6 +166,7 @@ export function filterLabel(field: string, customFields: ProspectFieldDefinition
   if (field === "__company_ids") return "Selected companies";
   if (field === "__client_tags" || field === "__company_tags") return "Client ICP";
   if (field === "__list_ids") return "Lists";
+  if (field === "__title_top_management") return "Top management";
   if (field === "__lead") return "Lead";
   if (field === "__contactable") return "Contactable";
   if (field === "__client_date_contacted") return "Date Contacted";
@@ -250,6 +252,8 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
         {definition.description ? <p className="apollo-filter-description">{definition.description}</p> : null}
         {definition.kind === "tiers"
           ? <ManagementLevelFilter filters={fieldFilters} taxonomy={taxonomy} onChange={(next) => replaceField(definition.id, next)} />
+          : definition.kind === "top_management"
+          ? <TopManagementFilter filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "departments"
           ? <DepartmentFunctionFilter filters={filters} taxonomy={taxonomy} onChange={onChange} />
           : definition.kind === "employee"
@@ -446,6 +450,19 @@ const espGroups: Array<{ title: string; options: Array<{ value: string; label: s
     ...ESP_OUTCOMES.map((outcome) => ({ value: outcome, label: outcome })),
   ] },
 ];
+
+// Top management or not, from the job title (20261008110000). One value, so a
+// choice of three rather than checkboxes; choosing Any removes the filter.
+export function TopManagementFilter({ filters, onChange }: {
+  filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void;
+}) {
+  const current = filters[0]?.values[0] === "yes" || filters[0]?.values[0] === "no" ? filters[0].values[0] : "any";
+  const options = [["any", "Any"], ["yes", "Top management"], ["no", "Not top management"]] as const;
+  return <div className="esp-filter-sides" role="radiogroup" aria-label="Top management">
+    {options.map(([value, label]) => <button key={value} type="button" role="radio" aria-checked={current === value} className={current === value ? "active" : ""}
+      onClick={() => onChange(value === "any" ? [] : [{ id: filterId("__title_top_management", "equals"), field: "__title_top_management", operator: "equals", values: [value] }])}>{label}</button>)}
+  </div>;
+}
 
 export function EspFilter({ filters, onChange }: {
   filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void;

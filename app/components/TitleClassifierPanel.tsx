@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { formatNumber, readImportTable } from "../../lib/dashboard-helpers";
-import { keywordRowsFromTable, type KeywordKind, type KeywordRow } from "../../lib/title-keywords";
+import { keywordKindLabels, keywordKinds, keywordRowsFromTable, type KeywordKind, type KeywordRow } from "../../lib/title-keywords";
 
 // The maintenance surface for the deterministic job title classifier.
 //
@@ -166,7 +166,7 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
     }
     setUpload(null);
     setUploading(false);
-    setCopied(`Saved ${formatNumber(saved.added.length)} new and ${formatNumber(saved.changed.length)} changed ${upload.kind} keywords.`);
+    setCopied(`Saved ${formatNumber(saved.added.length)} new and ${formatNumber(saved.changed.length)} changed keywords in the ${keywordKindLabels[upload.kind].toLowerCase()} list.`);
     await reclassify();
   }
 
@@ -196,15 +196,17 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
 
     <div className="keyword-lists">
       <strong>Keyword lists</strong>
-      <span>Download a list, add rows in the same columns, and upload it. Keywords you leave out are kept: an upload only adds or updates.</span>
-      <div className="classifier-actions">
-        <a className="outline-button" href="/api/prospects/title-keywords?kind=seniority" download>⤓ Seniority list</a>
-        <a className="outline-button" href="/api/prospects/title-keywords?kind=department" download>⤓ Department list</a>
-        {(["seniority", "department"] as const).map((kind) => <label key={kind} className={`outline-button keyword-upload ${uploading || running ? "disabled" : ""}`}><input type="file" accept=".csv,.xlsx,text/csv" disabled={uploading || running} onChange={(event) => void pickKeywordFile(kind, event.currentTarget)}/>⤒ Upload {kind} list</label>)}
+      <span>Download a list, add rows in the same columns, and upload it. Keywords you leave out are kept: an upload only adds or updates. Top management uses both of its lists: a title with an include keyword is top management unless a longer exclude phrase covers it.</span>
+      <div className="keyword-list-grid">
+        {keywordKinds.map((kind) => <div key={kind} className="keyword-list-row">
+          <span>{keywordKindLabels[kind]}</span>
+          <a className="outline-button" href={`/api/prospects/title-keywords?kind=${kind}`} download>⤓ Download</a>
+          <label className={`outline-button keyword-upload ${uploading || running ? "disabled" : ""}`}><input type="file" accept=".csv,.xlsx,text/csv" aria-label={`Upload the ${keywordKindLabels[kind].toLowerCase()} list`} disabled={uploading || running} onChange={(event) => void pickKeywordFile(kind, event.currentTarget)}/>⤒ Upload</label>
+        </div>)}
       </div>
       {uploading && !upload ? <p className="source-selected-note" role="status">Checking the keyword list…</p> : null}
       {upload ? <div className="keyword-check" role="region" aria-label="Keyword list check">
-        <p><strong>{upload.fileName}</strong> ({upload.kind} list): {formatNumber(upload.check.added.length)} new, {formatNumber(upload.check.changed.length)} changed, {formatNumber(upload.check.unchanged)} unchanged{upload.check.problems.length ? <>, <span className="keyword-problem-count">{formatNumber(upload.check.problems.length)} rows skipped</span></> : null}.</p>
+        <p><strong>{upload.fileName}</strong> ({keywordKindLabels[upload.kind].toLowerCase()} list): {formatNumber(upload.check.added.length)} new, {formatNumber(upload.check.changed.length)} changed, {formatNumber(upload.check.unchanged)} unchanged{upload.check.problems.length ? <>, <span className="keyword-problem-count">{formatNumber(upload.check.problems.length)} rows skipped</span></> : null}.</p>
         {upload.check.changed.length ? <ul>{upload.check.changed.slice(0, 20).map((row) => <li key={row.keyword}><code>{row.keyword}</code>: {row.was} → {row.value}</li>)}{upload.check.changed.length > 20 ? <li>…and {formatNumber(upload.check.changed.length - 20)} more changes</li> : null}</ul> : null}
         {upload.check.problems.length ? <ul className="keyword-problems">{upload.check.problems.slice(0, 20).map((row) => <li key={row.line}>Row {row.line}: {row.problem}</li>)}{upload.check.problems.length > 20 ? <li>…and {formatNumber(upload.check.problems.length - 20)} more</li> : null}</ul> : null}
         <div className="classifier-actions">
