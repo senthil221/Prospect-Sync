@@ -126,6 +126,8 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
         <label><span className="sr-only">Which side is missing</span><select value={missing} disabled={running} onChange={(event) => { setLoading(true); setMissing(event.target.value as MissingOption); }}>{missingOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <button className="outline-button" disabled={loading || running} onClick={reload}>↻ Refresh</button>
         <button className="outline-button" disabled={!gaps.length || running} onClick={() => void copyTitles()}>⧉ Copy titles</button>
+        {/* Every unresolved title for the chosen filter, not just the 200 shown. */}
+        <a className="outline-button" href={`/api/prospects/classify/export?missing=${missing}`} download aria-disabled={running} onClick={(event) => { if (running) event.preventDefault(); }}>⤓ Export all</a>
         <button className="primary" disabled={running} onClick={() => void reclassify()}>{running ? "Re-classifying…" : "Re-run classifier"}</button>
       </div>
     </div>
