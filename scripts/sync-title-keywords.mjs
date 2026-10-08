@@ -96,7 +96,7 @@ function normalizeKeyword(value) {
 const departments = new Set([
   "Sales", "Marketing", "Engineering", "IT", "Product", "Design", "Data & Analytics",
   "HR", "Finance", "Legal", "Operations", "Supply Chain", "Manufacturing", "Quality",
-  "Support", "Admin", "Strategy", "R&D",
+  "Support", "Admin", "Strategy", "R&D", "Education", "Healthcare",
 ]);
 const tiers = new Set(["owner", "c_suite", "vp", "director", "manager", "senior_ic", "entry", "none"]);
 

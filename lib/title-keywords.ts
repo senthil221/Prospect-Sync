@@ -26,7 +26,7 @@ export const keywordFileNames: Record<KeywordKind, string> = {
 };
 
 export const seniorityTiers = ["owner", "c_suite", "vp", "director", "manager", "senior_ic", "entry", "none"];
-export const keywordDepartments = ["Sales", "Marketing", "Engineering", "IT", "Product", "Design", "Data & Analytics", "HR", "Finance", "Legal", "Operations", "Supply Chain", "Manufacturing", "Quality", "Support", "Admin", "Strategy", "R&D"];
+export const keywordDepartments = ["Sales", "Marketing", "Engineering", "IT", "Product", "Design", "Data & Analytics", "HR", "Finance", "Legal", "Operations", "Supply Chain", "Manufacturing", "Quality", "Support", "Admin", "Strategy", "R&D", "Education", "Healthcare"];
 
 const columns: Record<KeywordKind, string[]> = {
   seniority: ["keyword", "tier", "notes"],

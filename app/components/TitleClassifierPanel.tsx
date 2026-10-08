@@ -176,7 +176,7 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
     <div className="classifier-head">
       <div>
         <strong>Undefined job titles</strong>
-        <p>Titles the keyword lists could not fully resolve, biggest first. Download the seniority or department list below, add keywords for these titles, and upload it; the classifier re-runs after you save. Plenty of real titles name only one side - a “Director” or “Founder” has a seniority and no department - so <strong>Missing both</strong> is the list actually worth working through.</p>
+        <p>Titles the keyword lists could not fully resolve, biggest first. Download the seniority or department list below, add keywords for these titles, and upload it; the classifier re-runs after you save. A title only counts as missing a department when a keyword could give it one. Top management (Founder, Director, CEO), titles that are only a rank (Manager, Assistant Manager, VP, AGM) and things that are not titles (Pvt Ltd, Contact) are left out: they name no department.</p>
       </div>
       <div className="classifier-actions">
         <label><span className="sr-only">Which side is missing</span><select value={missing} disabled={running} onChange={(event) => { setLoading(true); setMissing(event.target.value as MissingOption); }}>{missingOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>

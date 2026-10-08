@@ -1,0 +1,133 @@
+keyword,department,sub_department,notes
+chief operating officer,Operations,,CXO
+chief business officer,Sales,,CXO
+chief information officer,IT,,CXO
+chief investment officer,Finance,,CXO
+chief medical officer,Healthcare,,CXO
+chief scientific officer,R&D,,CXO
+chief science officer,R&D,,CXO
+chief customer officer,Support,,CXO
+chief revenue officer,Sales,,CXO
+chief commercial officer,Sales,,CXO
+chief people officer,HR,,CXO
+chief growth officer,Marketing,,CXO
+chief digital officer,IT,,CXO
+chief data officer,Data & Analytics,,CXO
+chief risk officer,Finance,,CXO
+chief compliance officer,Legal,,CXO
+chief strategy officer,Strategy,,CXO
+chief product officer,Product,,CXO
+chief procurement officer,Supply Chain,,CXO
+chief supply chain officer,Supply Chain,,CXO
+chief administrative officer,Admin,,CXO
+chief learning officer,HR,,CXO
+chief academic officer,Education,,CXO
+operation,Operations,,singular of operations
+operation head,Operations,,
+projects,Operations,,plural of project
+relationship,Sales,,relationship manager / RM
+relationships,Sales,,
+client relationship,Sales,,
+client partner,Sales,,
+client servicing,Support,,
+client service,Support,,
+client services,Support,,
+key account,Sales,,
+store,Sales,,store manager / incharge
+stores,Supply Chain,,stores in manufacturing = inventory
+retail,Sales,,
+showroom,Sales,,
+outlet,Sales,,
+leasing,Sales,,
+real estate,Sales,,
+exports,Sales,,
+export,Sales,,
+category manager,Supply Chain,,
+category head,Supply Chain,,
+category management,Supply Chain,,
+merchandising,Supply Chain,,
+merchandiser,Supply Chain,,
+service manager,Support,,after-sales service
+service head,Support,,
+service incharge,Support,,
+service delivery,Operations,,
+banking,Finance,,
+bank,Finance,,
+wealth,Finance,,
+portfolio manager,Finance,,
+fund manager,Finance,,
+asset management,Finance,,
+investments,Finance,,
+investment,Finance,,
+insurance,Finance,,
+underwriting,Finance,,
+underwriter,Finance,,
+claims,Operations,,
+loan,Finance,,
+loans,Finance,,
+collection,Finance,,
+collections,Finance,,
+credit,Finance,,
+construction,Engineering,,
+civil,Engineering,,
+site engineer,Engineering,,
+site manager,Engineering,,
+site incharge,Engineering,,
+mep,Engineering,,
+instrumentation,Engineering,,
+automation,Engineering,,
+structural,Engineering,,
+art director,Design,,
+interior,Design,,
+studio,Design,,
+learning,HR,,learning and development
+trainer,HR,,
+training,HR,,
+talent acquisition,HR,,
+placement,HR,,campus placement
+crm,Marketing,,
+campaign,Marketing,,
+outreach,Marketing,,
+communication,Marketing,,
+communications,Marketing,,
+implementation,IT,,
+erp,IT,,
+sap,IT,,
+lab,R&D,,
+laboratory,R&D,,
+scientist,R&D,,
+advisory,Strategy,,
+professor,Education,,
+assistant professor,Education,,
+associate professor,Education,,
+lecturer,Education,,
+teacher,Education,,
+faculty,Education,,
+academic,Education,,
+academics,Education,,
+education,Education,,
+school,Education,,
+prt,Education,,primary teacher
+tgt,Education,,trained graduate teacher
+pgt,Education,,post graduate teacher
+admissions,Education,,
+tutor,Education,,
+educator,Education,,
+doctor,Healthcare,,
+physician,Healthcare,,
+surgeon,Healthcare,,
+nurse,Healthcare,,
+nursing,Healthcare,,
+dentist,Healthcare,,
+pharmacist,Healthcare,,
+clinical,Healthcare,,
+clinic,Healthcare,,
+hospital,Healthcare,,
+healthcare,Healthcare,,
+patient,Healthcare,,
+medical officer,Healthcare,,
+consultant physician,Healthcare,,
+radiologist,Healthcare,,
+physiotherapist,Healthcare,,
+dietitian,Healthcare,,
+nutritionist,Healthcare,,
