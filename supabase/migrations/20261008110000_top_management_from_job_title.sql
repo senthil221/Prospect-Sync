@@ -1916,6 +1916,12 @@ begin
 end;
 $$;
 
+-- Same privileges as 20260826050000 gave them.
+revoke execute on function public.prospects_classify_title() from public, anon, authenticated;
+revoke execute on function public.prospect_index_fill_title_class() from public, anon, authenticated;
+revoke execute on function public.reclassify_prospect_titles_v1(integer) from public, anon, authenticated;
+grant execute on function public.reclassify_prospect_titles_v1(integer) to service_role;
+
 -- 5. The filter: __title_top_management, 'yes' or 'no'.
 do $patch$
 declare
