@@ -2,10 +2,11 @@
 // Push data/seniority_map.csv and data/department_map.csv into the classifier's
 // keyword tables.
 //
-// The CSVs are the source of truth. This reconciles the tables to match them
-// exactly -- upsert every row in the file, delete every row that is no longer in
-// it -- so running it twice is the same as running it once, and a keyword deleted
-// from the file actually stops firing.
+// Since 20261008100000 the tables are the source of truth: keywords are added
+// from the Job titles tab (download, extend, upload), so the files here can lag
+// behind. This upserts every row in the files; it deletes keywords missing from
+// them only with --prune, which would otherwise wipe keywords added in the app.
+// Download the current lists from the Job titles tab before pruning.
 //
 // Every write bumps title_classifier_state.keywords_updated_at (a table trigger),
 // which is what marks already-classified prospects as stale. Re-classify them with
@@ -14,6 +15,7 @@
 // Usage:
 //   node scripts/sync-title-keywords.mjs           # apply
 //   node scripts/sync-title-keywords.mjs --dry-run # report the diff only
+//   node scripts/sync-title-keywords.mjs --prune   # also delete keywords not in the files
 //
 // Reads NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY from .env.local.
 
@@ -24,6 +26,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dryRun = process.argv.includes("--dry-run");
+const prune = process.argv.includes("--prune");
 const maxKeywordTokens = 8;
 
 function loadEnv() {
@@ -121,7 +124,7 @@ async function reconcile(supabase, table, rows, keyColumn) {
   const existing = await supabase.from(table).select(keyColumn);
   if (existing.error) throw new Error(`${table}: ${existing.error.message}`);
   const wanted = new Set(rows.map((row) => row[keyColumn]));
-  const stale = (existing.data ?? []).map((row) => row[keyColumn]).filter((key) => !wanted.has(key));
+  const stale = prune ? (existing.data ?? []).map((row) => row[keyColumn]).filter((key) => !wanted.has(key)) : [];
 
   if (dryRun) return { upserted: rows.length, deleted: stale.length };
 

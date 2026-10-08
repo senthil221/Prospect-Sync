@@ -1,14 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { formatNumber } from "../../lib/dashboard-helpers";
+import { formatNumber, readImportTable } from "../../lib/dashboard-helpers";
+import { keywordRowsFromTable, type KeywordKind, type KeywordRow } from "../../lib/title-keywords";
 
 // The maintenance surface for the deterministic job title classifier.
 //
 // Two jobs, and they are the same loop: see which titles the keyword lists could
-// not resolve (ranked by how many people each fix would cover, so the next edit to
-// data/seniority_map.csv or data/department_map.csv is always the one that buys the
-// most), then re-run the classifier over the backlog once those lists have changed.
+// not resolve (ranked by how many people each fix would cover, so the next keyword
+// added is always the one that buys the most), then re-run the classifier over the
+// backlog once those lists have changed. The lists themselves are downloaded,
+// extended and uploaded here (20261008100000); an upload is checked first and only
+// adds or updates keywords.
 //
 // Classification happens automatically on every write, so re-running is only needed
 // after a keyword list changes or for rows imported before the classifier existed.
@@ -30,6 +33,22 @@ const missingOptions = [
 
 type MissingOption = (typeof missingOptions)[number][0];
 
+type KeywordCheck = {
+  added: Array<{ keyword: string; value: string }>;
+  changed: Array<{ keyword: string; value: string; was: string }>;
+  unchanged: number;
+  problems: Array<{ line: number; problem: string }>;
+};
+
+type PendingUpload = { kind: KeywordKind; fileName: string; rows: KeywordRow[]; check: KeywordCheck };
+
+async function postKeywords(kind: KeywordKind, rows: KeywordRow[], apply: boolean) {
+  const response = await fetch("/api/prospects/title-keywords", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, rows, apply }) });
+  const data = await response.json() as KeywordCheck & { error?: string };
+  if (!response.ok) throw new Error(data.error || "The keyword list could not be checked.");
+  return data;
+}
+
 // Each POST commits one checkpoint and reports whether more is waiting; keep
 // re-posting so a backlog of any size finishes from one click.
 const maxReruns = 5000;
@@ -47,6 +66,8 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState("");
   const [copied, setCopied] = useState("");
+  const [upload, setUpload] = useState<PendingUpload | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   // Reloads are requested by bumping `reloadKey`, and whoever bumps it turns
   // `loading` on. The fetch itself stays inside the effect so nothing writes state
@@ -114,13 +135,48 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
     }
   }
 
+  async function pickKeywordFile(kind: KeywordKind, input: HTMLInputElement) {
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    setUploading(true); setError(""); setProgress(""); setUpload(null);
+    try {
+      const table = await readImportTable(file);
+      const rows = keywordRowsFromTable(kind, table.headers, table.rows);
+      if (!rows.length) throw new Error("The file has no keyword rows.");
+      setUpload({ kind, fileName: file.name, rows, check: await postKeywords(kind, rows, false) });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The keyword list could not be read.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  // Saves the checked upload, then re-runs the classifier so people pick it up.
+  async function applyUpload() {
+    if (!upload) return;
+    setUploading(true); setError("");
+    let saved: KeywordCheck;
+    try {
+      saved = await postKeywords(upload.kind, upload.rows, true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The keyword list could not be saved.");
+      setUploading(false);
+      return;
+    }
+    setUpload(null);
+    setUploading(false);
+    setCopied(`Saved ${formatNumber(saved.added.length)} new and ${formatNumber(saved.changed.length)} changed ${upload.kind} keywords.`);
+    await reclassify();
+  }
+
   const covered = gaps.reduce((sum, gap) => sum + gap.occurrences, 0);
 
   return <article className="panel title-classifier">
     <div className="classifier-head">
       <div>
         <strong>Undefined job titles</strong>
-        <p>Titles the keyword lists could not fully resolve, biggest first. Add the missing words to <code>data/seniority_map.csv</code> or <code>data/department_map.csv</code>, then re-run. Plenty of real titles name only one side - a “Director” or “Founder” has a seniority and no department - so <strong>Missing both</strong> is the list actually worth working through.</p>
+        <p>Titles the keyword lists could not fully resolve, biggest first. Download the seniority or department list below, add keywords for these titles, and upload it; the classifier re-runs after you save. Plenty of real titles name only one side - a “Director” or “Founder” has a seniority and no department - so <strong>Missing both</strong> is the list actually worth working through.</p>
       </div>
       <div className="classifier-actions">
         <label><span className="sr-only">Which side is missing</span><select value={missing} disabled={running} onChange={(event) => { setLoading(true); setMissing(event.target.value as MissingOption); }}>{missingOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -136,6 +192,26 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
       <div><strong>{formatNumber(gaps.length)}</strong><span>Distinct titles unresolved</span></div>
       <div><strong>{formatNumber(covered)}</strong><span>People they cover</span></div>
       <div><strong>{gaps.length ? formatNumber(gaps[0].occurrences) : "-"}</strong><span>People the top fix covers</span></div>
+    </div>
+
+    <div className="keyword-lists">
+      <strong>Keyword lists</strong>
+      <span>Download a list, add rows in the same columns, and upload it. Keywords you leave out are kept: an upload only adds or updates.</span>
+      <div className="classifier-actions">
+        <a className="outline-button" href="/api/prospects/title-keywords?kind=seniority" download>⤓ Seniority list</a>
+        <a className="outline-button" href="/api/prospects/title-keywords?kind=department" download>⤓ Department list</a>
+        {(["seniority", "department"] as const).map((kind) => <label key={kind} className={`outline-button keyword-upload ${uploading || running ? "disabled" : ""}`}><input type="file" accept=".csv,.xlsx,text/csv" disabled={uploading || running} onChange={(event) => void pickKeywordFile(kind, event.currentTarget)}/>⤒ Upload {kind} list</label>)}
+      </div>
+      {uploading && !upload ? <p className="source-selected-note" role="status">Checking the keyword list…</p> : null}
+      {upload ? <div className="keyword-check" role="region" aria-label="Keyword list check">
+        <p><strong>{upload.fileName}</strong> ({upload.kind} list): {formatNumber(upload.check.added.length)} new, {formatNumber(upload.check.changed.length)} changed, {formatNumber(upload.check.unchanged)} unchanged{upload.check.problems.length ? <>, <span className="keyword-problem-count">{formatNumber(upload.check.problems.length)} rows skipped</span></> : null}.</p>
+        {upload.check.changed.length ? <ul>{upload.check.changed.slice(0, 20).map((row) => <li key={row.keyword}><code>{row.keyword}</code>: {row.was} → {row.value}</li>)}{upload.check.changed.length > 20 ? <li>…and {formatNumber(upload.check.changed.length - 20)} more changes</li> : null}</ul> : null}
+        {upload.check.problems.length ? <ul className="keyword-problems">{upload.check.problems.slice(0, 20).map((row) => <li key={row.line}>Row {row.line}: {row.problem}</li>)}{upload.check.problems.length > 20 ? <li>…and {formatNumber(upload.check.problems.length - 20)} more</li> : null}</ul> : null}
+        <div className="classifier-actions">
+          <button className="primary" disabled={uploading || running || !(upload.check.added.length + upload.check.changed.length)} onClick={() => void applyUpload()}>{uploading ? "Saving…" : `Save ${formatNumber(upload.check.added.length + upload.check.changed.length)} keywords and re-run`}</button>
+          <button className="outline-button" disabled={uploading} onClick={() => setUpload(null)}>Cancel</button>
+        </div>
+      </div> : null}
     </div>
 
     {progress ? <p className="source-selected-note" role="status">{progress}</p> : null}
