@@ -40,3 +40,18 @@ test("the People filter offers Top Management", async () => {
   assert.equal(filterChipValue("__title_top_management", "yes"), "Top management");
   assert.equal(filterChipValue("__title_top_management", "no"), "Not top management");
 });
+
+test("the People table and export carry a Top Management column", async () => {
+  const { standardExportColumns, exportRowKeys } = await import("../lib/prospect-export.ts");
+  const { prospectFieldValue } = await import("../lib/dashboard-helpers.ts");
+  const column = standardExportColumns.find((item) => item.id === "__title_top_management");
+  assert.equal(column.header, "Top Management");
+  assert.equal(column.value({ title_top_management: true }), "Yes");
+  assert.equal(column.value({ title_top_management: false }), "No");
+  assert.ok(exportRowKeys([], ["__title_top_management"]).includes("title_top_management"));
+  const fields = await import("../lib/prospect-field-definitions.ts");
+  assert.ok(fields.defaultProspectColumns.includes("__title_top_management"));
+  assert.ok(fields.defaultProspectExportFields.includes("__title_top_management"));
+  assert.deepEqual(fields.introducedProspectColumns, ["__title_top_management"]);
+  assert.equal(prospectFieldValue({ title_top_management: true, all_data: {} }, "__title_top_management"), "Yes");
+});

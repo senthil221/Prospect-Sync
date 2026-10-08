@@ -143,6 +143,7 @@ export function prospectFieldValue(prospect: Prospect, field: string) {
   if (field === "__department") return String(prospect.department || "");
   // Classifier outputs. Blank means the keyword lists could not resolve that half of
   // the title; it shows up in the gaps report rather than being guessed at.
+  if (field === "__title_top_management") return prospect.title_top_management === true ? "Yes" : prospect.title_top_management === false ? "No" : "";
   if (field === "__title_seniority_tier") return String(prospect.title_seniority || "");
   if (field === "__title_department") return String(prospect.title_department || "");
   if (field === "__title_sub_department") return String(prospect.title_sub_department || "");

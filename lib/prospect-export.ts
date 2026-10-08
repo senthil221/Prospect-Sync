@@ -52,6 +52,8 @@ export const standardExportColumns: Array<{ id: string; header: string; value: (
   // Title sits here rather than after the emails so the eight fields the picker
   // offers come out in the order the picker lists them.
   { id: "__title", header: "Title", value: (row) => row.title },
+  // From the job title (20261008110000). Blank only for a row read before the column existed.
+  { id: "__title_top_management", header: "Top Management", value: (row) => row.title_top_management === true ? "Yes" : row.title_top_management === false ? "No" : "" },
   { id: "__work_email", header: "Work Email", value: (row) => row.work_email },
   { id: "__work_email_status", header: "Work Email Status", value: (row) => {
     const workEmail = row.work_email;

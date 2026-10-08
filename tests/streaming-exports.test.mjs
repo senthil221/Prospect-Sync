@@ -411,7 +411,7 @@ test("both export pickers offer a fixed set, ticked by default, in the order the
   ]);
 
   assert.deepEqual(prospectExportPickerFields.map((field) => field.label),
-    ["First Name", "Last Name", "Job Title", "Email", "Work Email Status", "Last Verified", "Mobile Number",
+    ["First Name", "Last Name", "Job Title", "Top Management", "Email", "Work Email Status", "Last Verified", "Mobile Number",
      "Personal LinkedIn URL", "Company Name", "Website",
      "# Employees", "Company City", "Company State", "Company Country",
      "Company Industry", "Company Keywords", "Company Description",
@@ -432,7 +432,7 @@ test("both export pickers offer a fixed set, ticked by default, in the order the
     companyExportColumns.map((column) => column.header));
   const peopleHeaders = standardExportColumns.filter((column) => peopleDefaults.includes(column.id)).map((column) => column.header);
   assert.deepEqual(peopleHeaders,
-    ["First Name", "Last Name", "Title", "Work Email", "Work Email Status", "Last Verified", "Mobile Number", "LinkedIn", "Company", "Website",
+    ["First Name", "Last Name", "Title", "Top Management", "Work Email", "Work Email Status", "Last Verified", "Mobile Number", "LinkedIn", "Company", "Website",
      "# Employees", "Company City", "Company State", "Company Country",
      "Company Industry", "Company Keywords", "Company Description",
      "Company Founded Year", "Company Technologies", "Company Total Funding"]);

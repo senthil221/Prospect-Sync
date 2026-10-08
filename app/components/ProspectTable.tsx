@@ -9,7 +9,7 @@ import { api, filterPayload } from "../../lib/dashboard-api";
 import { emptyWorkspaceState } from "../../lib/workspace-states";
 import { buildResultSet, runFrozenAction } from "../../lib/background-operation";
 import { contactDateChip, filterChipValue, formatNumber } from "../../lib/dashboard-helpers";
-import { defaultProspectColumns, defaultProspectExportFields, prospectExportPickerFields, standardProspectFields } from "../../lib/prospect-field-definitions";
+import { defaultProspectColumns, defaultProspectExportFields, introducedProspectColumns, prospectExportPickerFields, standardProspectFields } from "../../lib/prospect-field-definitions";
 import type { ClientRecord, Prospect, ProspectFilter, SavedView } from "../../lib/types";
 import { intentKey, requestIdFor, settleIntent } from "../../lib/request-intent";
 import { capSelectedRows } from "../../lib/prospect-cap";
@@ -105,7 +105,18 @@ export default function ProspectTable({ prospects, total, totalEstimated = false
           // (e.g. previously-saved ESP/Lists/Tags) while keeping uploaded custom fields.
           const allowed = new Set(standardProspectFields.map((field) => field.id));
           const filtered = saved.filter((id) => allowed.has(id) || id.startsWith("custom:"));
-          const next = filtered.length ? filtered : defaultProspectColumns;
+          let next = filtered.length ? filtered : defaultProspectColumns;
+          // A default column added after the columns were saved appears once,
+          // beside Job Title; hiding it afterwards sticks.
+          const introduced = new Set(JSON.parse(localStorage.getItem("prospecthub-introduced-columns") || "[]") as string[]);
+          for (const id of introducedProspectColumns) {
+            if (introduced.has(id)) continue;
+            introduced.add(id);
+            if (next.includes(id)) continue;
+            const after = next.indexOf("__title");
+            next = after < 0 ? [...next, id] : [...next.slice(0, after + 1), id, ...next.slice(after + 1)];
+          }
+          localStorage.setItem("prospecthub-introduced-columns", JSON.stringify([...introduced]));
           setVisibleColumns(next);
           localStorage.setItem("prospecthub-visible-columns", JSON.stringify(next));
         }
