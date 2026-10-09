@@ -192,6 +192,12 @@ export function parseFilters(value: string | null, options: { compileBoolean?: b
       }
       if (days.length === 2 && days[1] < days[0]) throw new Error('Date Contacted "through" date must be on or after the "from" date.');
     }
+    // [client id, N]: fewer than N uses for that client (20261010100000).
+    if (field === "__client_use_count") {
+      if (operator !== "equals" || values.length !== 2 || !/^[0-9]{1,4}$/.test(values[1]) || Number(values[1]) < 1) {
+        throw new Error("Number of Uses needs the client and a whole number of uses.");
+      }
+    }
     if (!["empty", "not_empty", "never"].includes(operator) && !values.length) return [];
     if (operator === "boolean") {
       if (values.length !== 1) throw new Error('A Boolean filter must contain exactly one expression.');

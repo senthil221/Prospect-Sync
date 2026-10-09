@@ -6,6 +6,12 @@ export function formatNumber(value: unknown) {
   return new Intl.NumberFormat("en-IN").format(Number(value ?? 0));
 }
 
+// One chip for a Number of Uses filter ([client id, N]): "Fewer than 3 uses".
+export function usesChip(values: string[]) {
+  const below = Number(values[1] ?? 0);
+  return below <= 1 ? "Never used" : `Fewer than ${below} uses`;
+}
+
 // One chip for a whole Date Contacted filter: "1 Sep 2026 – 30 Sep 2026".
 export function contactDateChip(operator: string, values: string[]) {
   const day = (value?: string) => value ? new Date(`${value}T00:00:00Z`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "";

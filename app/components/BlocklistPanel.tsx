@@ -7,10 +7,11 @@ import { BLOCKLIST_REQUEST_VALUES, MAX_BLOCKLIST_PASTE_VALUES, partitionBlocklis
 import type { BlocklistEntry, ClientRecord } from "../../lib/types";
 import { ConfirmDialog, EmptyCompact } from "./DashboardUi";
 import { AppIcon } from "./DashboardUi";
+import IcpInvalidRecheckDialog from "./IcpInvalidRecheckDialog";
 
 const blocklistReasons = ["Client Provided", "ICP Invalid", "Campaign Reply"] as const;
 type BlocklistShare = { id: string; label: string; created_at: string; expires_at: string | null; revoked_at: string | null; last_submitted_at: string | null };
-type BlocklistSelection = { ids?: string[]; allMatching?: boolean; search?: string; kind?: string; dateFrom?: string; dateTo?: string; excludedIds?: string[]; selectedBefore?: string };
+type BlocklistSelection = { ids?: string[]; allMatching?: boolean; search?: string; kind?: string; reasonFilter?: string; dateFrom?: string; dateTo?: string; excludedIds?: string[]; selectedBefore?: string };
 
 // The blocklist is per client. Matching memberships are retained internally for
 // audit/restore, but disappear from the client's People and Company databases.
@@ -23,6 +24,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
   const [reason, setReason] = useState("");
   const [bulkReason, setBulkReason] = useState<(typeof blocklistReasons)[number]>("Client Provided");
   const [kind, setKind] = useState("");
+  const [reasonFilter, setReasonFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(true);
@@ -42,6 +44,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
   const [removeRequest, setRemoveRequest] = useState<{ count: number; payload: BlocklistSelection } | null>(null);
   const [deleteShareRequest, setDeleteShareRequest] = useState<BlocklistShare | null>(null);
   const [activeTool, setActiveTool] = useState<"add" | "links" | null>(null);
+  const [recheckOpen, setRecheckOpen] = useState(false);
 
   const parsedPending = useMemo(() => partitionBlocklistValues(text), [text]);
   const pending = parsedPending.submitted;
@@ -55,6 +58,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
       const params = new URLSearchParams();
       if (search.trim()) params.set("search", search.trim());
       if (kind) params.set("kind", kind);
+      if (reasonFilter) params.set("reasonFilter", reasonFilter);
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
       params.set("page", String(requestedPage));
@@ -63,12 +67,12 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
       setEntries(data.entries); setTotal(data.total); setError("");
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to load the blocklist."); }
     finally { setLoading(false); }
-  }, [client.id, page, search, kind, dateFrom, dateTo]);
+  }, [client.id, page, search, kind, reasonFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, search ? 300 : 0);
     return () => window.clearTimeout(timer);
-  }, [load, search, kind, dateFrom, dateTo]);
+  }, [load, search, kind, reasonFilter, dateFrom, dateTo]);
 
   const loadShares = useCallback(async () => {
     try {
@@ -186,7 +190,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
 
   function selectionPayload(): BlocklistSelection {
     return allMatching
-      ? { allMatching: true, search: search.trim(), kind, dateFrom, dateTo, excludedIds: [...selected], selectedBefore }
+      ? { allMatching: true, search: search.trim(), kind, reasonFilter, dateFrom, dateTo, excludedIds: [...selected], selectedBefore }
       : { ids: [...selected] };
   }
 
@@ -212,7 +216,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
     try {
       const selection = hasSelection
         ? selectionPayload()
-        : { allMatching: true, search: search.trim(), kind, dateFrom, dateTo, excludedIds: [], selectedBefore: new Date().toISOString() };
+        : { allMatching: true, search: search.trim(), kind, reasonFilter, dateFrom, dateTo, excludedIds: [], selectedBefore: new Date().toISOString() };
       const response = await fetch(`/api/clients/${encodeURIComponent(client.id)}/blocklist`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "export", ...selection }),
       });
@@ -264,6 +268,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
   }
 
   return <section className="client-database-workspace">
+    {recheckOpen ? <IcpInvalidRecheckDialog clientId={client.id} clientName={client.name} onClose={() => setRecheckOpen(false)} onStarted={(message) => { setRecheckOpen(false); setNotice(message); }}/> : null}
     <div className="client-database-heading blocklist-heading">
       <div><p className="eyebrow">CLIENT BLOCKLIST</p><h3>Blocked for {client.name}</h3><p>Blocked domains and emails are excluded from this client&apos;s People and Company databases.</p></div>
       <label className="workspace-search"><span><AppIcon name="search" size={14}/></span><input aria-label="Search the blocklist" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); setSelected(new Set()); setAllMatching(false); }} placeholder="Search blocked domains and emails…"/></label>
@@ -271,10 +276,12 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
     <div className="blocklist-toolbar">
       <div className="blocklist-filters">
       <select aria-label="Filter blocklist type" value={kind} onChange={(event) => { setKind(event.target.value); setPage(1); setSelected(new Set()); setAllMatching(false); }}><option value="">All types</option><option value="domain">Domains</option><option value="email">Emails</option></select>
+      <select aria-label="Filter blocklist reason" value={reasonFilter} onChange={(event) => { setReasonFilter(event.target.value); setPage(1); setSelected(new Set()); setAllMatching(false); }}><option value="">All reasons</option>{blocklistReasons.map((value) => <option key={value} value={value}>{value}</option>)}<option value="(none)">No reason</option></select>
       <label>Date added from <input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setPage(1); setSelected(new Set()); setAllMatching(false); }}/></label>
       <label>Date added to <input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setPage(1); setSelected(new Set()); setAllMatching(false); }}/></label>
       </div><div className="blocklist-toolbar-actions">
       <button className="secondary" disabled={busy || total === 0 || (hasSelection && selectedCount === 0)} onClick={() => void exportEntries()}>{hasSelection ? `Export ${formatNumber(selectedCount)} selected` : "Export CSV"}</button>
+      <button className="secondary" disabled={busy} title="Run an ICP check again on the companies blocked as ICP Invalid; the ones that fit come off the blocklist and get the ICP tag" onClick={() => setRecheckOpen(true)}>Re-check ICP Invalid</button>
       <button className="secondary" aria-expanded={activeTool === "links"} aria-controls="client-blocklist-links" disabled={busy} onClick={() => setActiveTool(activeTool === "links" ? null : "links")}>Client links{shares.filter((share) => !share.revoked_at).length ? ` (${shares.filter((share) => !share.revoked_at).length})` : ""}</button>
       <button className="primary" aria-expanded={activeTool === "add"} aria-controls="client-blocklist-add" disabled={busy} onClick={() => setActiveTool(activeTool === "add" ? null : "add")}><AppIcon name="plus" size={14}/> Add entries</button>
       </div>

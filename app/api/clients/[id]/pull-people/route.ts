@@ -10,7 +10,7 @@ import { createAdminClient } from "../../../../../lib/supabase/admin";
 // (pull_master_people_v1, 20261003110000). "preview" counts, "pull" adds.
 
 const missingCodes = new Set(["PGRST202", "42883", "42703"]);
-const pullFields = new Set(["__title", "__title_seniority", "__title_seniority_tier", "__title_department", "__title_sub_department"]);
+const pullFields = new Set(["__title", "__title_seniority", "__title_seniority_tier", "__title_department", "__title_sub_department", "__title_top_management"]);
 
 function failure(error: { code?: string; message: string }) {
   const missing = Boolean(error.code && missingCodes.has(error.code));

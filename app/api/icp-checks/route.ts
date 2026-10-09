@@ -26,7 +26,8 @@ const missingCodes = new Set(["PGRST202", "PGRST205", "42883", "42P01"]);
 const pageSize = 100;
 const csvLimit = 100_000;
 const filters = new Set(["all", "fit", "non_fit", "pending", "split", "reviewed"]);
-const scopes = new Set(["all", "unverified", "selection"]);
+// blocklisted: the client's ICP Invalid blocklist, re-checked (20261010120000).
+const scopes = new Set(["all", "unverified", "selection", "blocklisted"]);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function failure(error: { code?: string; message: string }) {
@@ -127,6 +128,16 @@ async function handleGET(request: Request) {
   }
 
   if (!clientId) return bad("Which client?");
+
+  // How many ICP Invalid companies a blocklist re-check would send to the models.
+  if (view === "blocklisted") {
+    const [{ data, error }, perCompany] = await Promise.all([
+      supabase.rpc("icp_blocklisted_scope_count_v1", { p_client_id: clientId }),
+      costPerCompany(),
+    ]);
+    if (error) return failure(error);
+    return Response.json({ companies: Number(data ?? 0), costPerCompany: perCompany }, { headers: noStore });
+  }
 
   if (view === "scope") {
     const icpId = (url.searchParams.get("icp") ?? "").trim();

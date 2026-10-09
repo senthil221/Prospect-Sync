@@ -23,16 +23,23 @@ function validDate(value: string) {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value);
 }
 
+// The Reason filter: one of the three reasons, or "(none)" for entries saved
+// without one (older pastes).
+function readReasonFilter(value: unknown) {
+  const reason = String(value ?? "").trim();
+  return reasons.has(reason) || reason === "(none)" ? reason : "";
+}
+
 function readFilters(url: URL) {
   const search = (url.searchParams.get("search") ?? "").trim().slice(0, 200);
   const rawKind = url.searchParams.get("kind") ?? "";
   const kind = rawKind === "domain" || rawKind === "email" ? rawKind : "";
   const rawFrom = url.searchParams.get("dateFrom") ?? "";
   const rawTo = url.searchParams.get("dateTo") ?? "";
-  return { search, kind, dateFrom: validDate(rawFrom) ? rawFrom : "", dateTo: validDate(rawTo) ? rawTo : "" };
+  return { search, kind, reasonFilter: readReasonFilter(url.searchParams.get("reasonFilter")), dateFrom: validDate(rawFrom) ? rawFrom : "", dateTo: validDate(rawTo) ? rawTo : "" };
 }
 
-type SelectionPayload = { ids?: unknown; allMatching?: unknown; search?: unknown; kind?: unknown; dateFrom?: unknown; dateTo?: unknown; excludedIds?: unknown; selectedBefore?: unknown; reason?: unknown };
+type SelectionPayload = { ids?: unknown; allMatching?: unknown; search?: unknown; kind?: unknown; reasonFilter?: unknown; dateFrom?: unknown; dateTo?: unknown; excludedIds?: unknown; selectedBefore?: unknown; reason?: unknown };
 
 function selectionArgs(payload: SelectionPayload) {
   const ids = Array.isArray(payload.ids) ? [...new Set(payload.ids.map((value) => String(value ?? "").trim()).filter(Boolean))] : [];
@@ -42,7 +49,9 @@ function selectionArgs(payload: SelectionPayload) {
   const selectedBeforeDate = new Date(selectedBeforeText);
   const selectedBefore = selectedBeforeText && !Number.isNaN(selectedBeforeDate.getTime()) && selectedBeforeDate.getTime() <= Date.now() + 60_000
     ? selectedBeforeDate.toISOString() : null;
-  return { p_ids: ids, p_all_matching: payload.allMatching === true, p_search: String(payload.search ?? "").trim().slice(0, 200), p_kind: kind, p_date_from: validDate(String(payload.dateFrom ?? "")) ? String(payload.dateFrom) : null, p_date_to: validDate(String(payload.dateTo ?? "")) ? String(payload.dateTo) : null, p_excluded_ids: excluded, p_selected_before: selectedBefore };
+  // The reason rides in p_kind after a bar (client_blocklist_selection_v1, 20261010090000).
+  const reasonFilter = readReasonFilter(payload.reasonFilter);
+  return { p_ids: ids, p_all_matching: payload.allMatching === true, p_search: String(payload.search ?? "").trim().slice(0, 200), p_kind: reasonFilter ? `${kind}|${reasonFilter}` : kind, p_date_from: validDate(String(payload.dateFrom ?? "")) ? String(payload.dateFrom) : null, p_date_to: validDate(String(payload.dateTo ?? "")) ? String(payload.dateTo) : null, p_excluded_ids: excluded, p_selected_before: selectedBefore };
 }
 
 function invalidSelectionSize(payload: SelectionPayload) {
@@ -113,6 +122,7 @@ async function handleGET(request: Request, context: { params: Promise<{ id: stri
     .eq("client_id", id).order("created_at", { ascending: false }).order("id", { ascending: true });
   if (filters.search) query = query.ilike("value", `%${filters.search}%`);
   if (filters.kind) query = query.eq("kind", filters.kind);
+  if (filters.reasonFilter) query = query.eq("reason", filters.reasonFilter === "(none)" ? "" : filters.reasonFilter);
   if (filters.dateFrom) query = query.gte("created_at", `${filters.dateFrom}T00:00:00.000Z`);
   if (filters.dateTo) { const exclusive = new Date(`${filters.dateTo}T00:00:00.000Z`); exclusive.setUTCDate(exclusive.getUTCDate() + 1); query = query.lt("created_at", exclusive.toISOString()); }
   const { data, error, count } = await query.range(offset, offset + pageSize - 1);

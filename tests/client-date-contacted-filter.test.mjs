@@ -45,7 +45,8 @@ test("the builder and the row matcher both learn the field, from client_prospect
 
 test("the filter appears only inside a client, under Contact history", async () => {
   const panel = await read("../app/ApolloFilterPanel.tsx");
-  assert.match(panel, /\{clientId && "date contacted cooldown"\.includes\(normalizedSearch\) \? <div className="apollo-filter-group">\s+<small>Contact history<\/small>\{renderDefinition\(contactDateFilter\)\}/);
+  // Number of Uses (20261010100000) shares the section.
+  assert.match(panel, /\{clientId && \("date contacted cooldown"\.includes\(normalizedSearch\) \|\| "number of uses"\.includes\(normalizedSearch\)\) \? <div className="apollo-filter-group">\s+<small>Contact history<\/small>\{renderDefinition\(contactDateFilter\)\}\{renderDefinition\(useCountFilter\)\}/);
   assert.match(panel, /const values = operator === "never" \? \[clientId\] : operator === "between" \? \[clientId, start, end\] : \[clientId, start\];/);
   const table = await read("../app/components/ProspectTable.tsx");
   assert.match(table, /if \(filter\.field === "__client_date_contacted"\) return \[<button key=\{filter\.id\}/);

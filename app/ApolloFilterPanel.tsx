@@ -15,7 +15,7 @@ import { ESP_OUTCOMES, ESP_PROVIDERS } from "../worker/email-provider-core.mjs";
 export type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 
 type FilterDefinition = ProspectFieldDefinition & {
-  kind?: "text" | "employee" | "tiers" | "top_management" | "departments" | "year" | "funding" | "company_keywords" | "verification_status" | "verification_date" | "contact_date" | "esp";
+  kind?: "text" | "employee" | "tiers" | "top_management" | "departments" | "year" | "funding" | "company_keywords" | "verification_status" | "verification_date" | "contact_date" | "use_count" | "esp";
   advanced?: boolean;
   description?: string;
   /** Which value endpoint autocompletes this field. Company fields ask the company one. */
@@ -83,6 +83,11 @@ const optionalFilters: FilterDefinition[] = [
 // Date Contacted (the cooldown clock) is per client.
 const contactDateFilter: FilterDefinition = { id: "__client_date_contacted", label: "Date Contacted", kind: "contact_date",
   description: "When this client last contacted the person - the date the cooldown counts from." };
+
+// How many times this client has contacted the person: each change of Date
+// Contacted is one use (client_prospects.use_count, 20261010100000).
+const useCountFilter: FilterDefinition = { id: "__client_use_count", label: "Number of Uses", kind: "use_count",
+  description: "How many times this client has contacted the person. Every change of Date Contacted counts as one use; a person with no Date Contacted has none." };
 
 // The company profile, filterable from the People database.
 //
@@ -153,7 +158,7 @@ export function filterId(field: string, operator: ProspectFilterOperator) {
 }
 
 function activeCount(filters: ProspectFilter[]) {
-  return filters.reduce((count, filter) => count + (["empty", "not_empty", "never"].includes(filter.operator) || filter.field === "__client_date_contacted" ? 1 : filter.values.length), 0);
+  return filters.reduce((count, filter) => count + (["empty", "not_empty", "never"].includes(filter.operator) || filter.field === "__client_date_contacted" || filter.field === "__client_use_count" ? 1 : filter.values.length), 0);
 }
 
 export function filterLabel(field: string, customFields: ProspectFieldDefinition[] = []) {
@@ -170,6 +175,7 @@ export function filterLabel(field: string, customFields: ProspectFieldDefinition
   if (field === "__lead") return "Lead";
   if (field === "__contactable") return "Contactable";
   if (field === "__client_date_contacted") return "Date Contacted";
+  if (field === "__client_use_count") return "Number of Uses";
   return [...mainFilters, ...classifierFilters, ...companyFilters, ...optionalFilters, ...customFields].find((definition) => definition.id === field)?.label ?? field;
 }
 
@@ -268,6 +274,8 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
           ? <EspFilter filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "verification_status"
           ? <EmailVerificationStatusFilter filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
+          : definition.kind === "use_count" && clientId
+          ? <UseCountFilter clientId={clientId} filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "contact_date" && clientId
           ? <ContactDateFilter key={fieldFilters.map((filter) => `${filter.id}:${filter.operator}:${filter.values.join("|")}`).join(";") || "empty"} clientId={clientId} filters={fieldFilters} onChange={(next) => replaceField(definition.id, next)} />
           : definition.kind === "verification_date"
@@ -306,8 +314,8 @@ export default function ApolloFilterPanel({ filters, customFields, clientId, cli
           expanded={expanded === "__client_ids"} onToggle={() => setExpanded(expanded === "__client_ids" ? "" : "__client_ids")}
           onChange={onChange}/>
       </div> : null}
-      {clientId && "date contacted cooldown".includes(normalizedSearch) ? <div className="apollo-filter-group">
-        <small>Contact history</small>{renderDefinition(contactDateFilter)}
+      {clientId && ("date contacted cooldown".includes(normalizedSearch) || "number of uses".includes(normalizedSearch)) ? <div className="apollo-filter-group">
+        <small>Contact history</small>{renderDefinition(contactDateFilter)}{renderDefinition(useCountFilter)}
       </div> : null}
       {clientId && icps.length && "client icp".includes(normalizedSearch) ? <div className="apollo-filter-group">
         <small>Client ICP</small>
@@ -450,6 +458,17 @@ const espGroups: Array<{ title: string; options: Array<{ value: string; label: s
     ...ESP_OUTCOMES.map((outcome) => ({ value: outcome, label: outcome })),
   ] },
 ];
+
+// Number of Uses: fewer than N for this client. One choice at a time.
+export function UseCountFilter({ clientId, filters, onChange }: {
+  clientId: string; filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void;
+}) {
+  const current = filters[0]?.values[1] ?? "";
+  const options = [["", "Any"], ["1", "Never used (0)"], ["2", "Fewer than 2 uses"], ["3", "Fewer than 3 uses"], ["4", "Fewer than 4 uses"], ["5", "Fewer than 5 uses"], ["10", "Fewer than 10 uses"]] as const;
+  return <select aria-label="Number of uses" value={current} onChange={(event) => onChange(event.target.value
+    ? [{ id: filterId("__client_use_count", "equals"), field: "__client_use_count", operator: "equals", values: [clientId, event.target.value] }]
+    : [])}>{options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>;
+}
 
 // Top management or not, from the job title (20261008110000). One value, so a
 // choice of three rather than checkboxes; choosing Any removes the filter.

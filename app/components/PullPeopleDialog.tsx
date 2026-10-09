@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DepartmentFunctionFilter, IncludeExcludeFilter, ManagementLevelFilter } from "../ApolloFilterPanel";
+import { DepartmentFunctionFilter, IncludeExcludeFilter, ManagementLevelFilter, TopManagementFilter } from "../ApolloFilterPanel";
 import { api } from "../../lib/dashboard-api";
 import { formatNumber } from "../../lib/dashboard-helpers";
 import { emptyTaxonomy, type TitleTaxonomy } from "../../lib/title-taxonomy";
@@ -12,6 +12,7 @@ type Pulled = Preview & { added?: number; queued?: number };
 
 const titleFields = new Set(["__title"]);
 const levelFields = new Set(["__title_seniority_tier"]);
+const topManagementFields = new Set(["__title_top_management"]);
 const departmentFields = new Set(["__title_department", "__title_sub_department"]);
 
 // Pull people from the Master People DB at companies this client already has,
@@ -106,6 +107,9 @@ export default function PullPeopleDialog({ clientId, clientName, selectedCount, 
         </div>
         <div className="pull-people-field"><span className="include-exclude-label-heading">Management level</span>
           <ManagementLevelFilter filters={all.filter((filter) => levelFields.has(filter.field))} taxonomy={taxonomy} onChange={(next) => setGroup(levelFields, next)}/>
+        </div>
+        <div className="pull-people-field"><span className="include-exclude-label-heading">Top management</span>
+          <TopManagementFilter filters={all.filter((filter) => topManagementFields.has(filter.field))} onChange={(next) => setGroup(topManagementFields, next)}/>
         </div>
         <div className="pull-people-field"><span className="include-exclude-label-heading">Department &amp; job function</span>
           <DepartmentFunctionFilter filters={all.filter((filter) => departmentFields.has(filter.field))} taxonomy={taxonomy} onChange={(next) => setGroup(departmentFields, next)}/>
