@@ -895,7 +895,7 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
 .form-field .ui-select .listbox-picker-trigger, .import-source-fields .ui-select .listbox-picker-trigger,
 .mapping-grid .ui-select .listbox-picker-trigger, .company-import-mapping .ui-select .listbox-picker-trigger,
 .reply-blocklist-mapper .ui-select .listbox-picker-trigger, .icpx-icp-select .ui-select .listbox-picker-trigger { min-height: var(--control-standard); max-width: none; }
-.workspace-actions .ui-select .listbox-picker-trigger { min-height: var(--control-standard); max-width: 180px; }
+.workspace-actions .ui-select .listbox-picker-trigger { min-height: 32px; max-width: 180px; }
 .bulk-bar .ui-select .listbox-picker-trigger { max-width: 200px; }
 .bulk-action-group > .ui-select .listbox-picker-trigger { border-color: transparent; background: transparent; box-shadow: none; }
 .icc-select.ui-select .listbox-picker-trigger, .icpv-client-picker .ui-select .listbox-picker-trigger { min-height: var(--control-standard); min-width: 220px; }
@@ -911,3 +911,5 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
 .bulk-bar .ds-menu-panel .ds-menu-item { width: 100%; justify-content: flex-start; text-align: left; border: 0; background: transparent; }
 .bulk-bar .ds-menu-panel .ds-menu-item:hover:not(:disabled) { background: var(--surface-hover); }
 .bulk-bar .ds-menu-panel .ds-menu-item.ds-menu-danger:hover:not(:disabled) { background: var(--danger-soft); }
+/* Toolbar rules size bare spans; the label follows its trigger instead. */
+.ui-select .listbox-picker-trigger .listbox-picker-text, .listbox-picker .listbox-picker-trigger .listbox-picker-text { font-size: inherit; }
