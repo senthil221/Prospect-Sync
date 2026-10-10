@@ -36,8 +36,9 @@ function ProspectTableRow({ prospect, visibleDefinitions, selected, includeClien
   const blocked = Boolean(clientId && prospect.blocked_client_ids?.includes(clientId));
   const idleAge = clientId ? clientIdleAge(prospect.client_date_contacted, clientCooldownDays) : null;
   const dateAddedTooltip = prospect.client_date_contacted
-    ? `Contacted for this client on ${formatClientDate(prospect.client_date_contacted)}; next eligible ${idleAge?.nextEligibleDate ?? "unknown"}`
-    : "No contact date for this client; eligible now";
+    ? `Last contacted for this client on ${formatClientDate(prospect.client_date_contacted)}.
+${idleAge?.eligible ? `Cooldown over since ${formatClientDate(idleAge.nextEligibleDate)} - can be contacted again.` : `In cooldown - can be contacted again from ${formatClientDate(idleAge?.nextEligibleDate)}.`}`
+    : "No contact date for this client - never contacted, can be contacted now.";
   return <tr className={`${selected ? "selected" : ""} ${blocked ? "row-blocked" : ""}`.trim()} onClick={() => onSelect(prospect)}>
     <td className="select-column" onClick={(event) => event.stopPropagation()}><input aria-label={`Select ${prospect.full_name || "prospect"}`} type="checkbox" checked={selected} onChange={() => onToggleSelected(prospect.id)}/></td>
     {visibleDefinitions.map((field) => {

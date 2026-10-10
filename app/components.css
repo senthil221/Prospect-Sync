@@ -866,3 +866,6 @@ select:has(option[value=""]:checked) { color: var(--text-tertiary); }
 .esp-filter-sides button.active { background: var(--accent-soft); color: var(--accent-text); }
 .esp-filter-sides b { min-width: 16px; padding: 0 4px; border: 1px solid var(--accent-line); border-radius: 8px; background: var(--surface); color: var(--accent-text); font-size: 10px; line-height: 14px; text-align: center; }
 .esp-filter-group { margin: 0 0 2px; color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: .04em; }
+/* The tooltip drawn in a portal (Tooltip in DashboardUi.tsx): fixed to the
+   viewport so no table row or scroll container can cover or clip it. */
+.ds-tooltip.ds-tooltip-floating { position: fixed; bottom: auto; z-index: 1000; }

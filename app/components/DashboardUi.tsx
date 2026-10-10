@@ -103,23 +103,43 @@ export function TabPanel({ id, active, keepMounted = false, className, children 
  * (possibly truncated) text.
  */
 export function Tooltip({ content, children }: { content?: string; children: ReactElement }) {
-  const [visible, setVisible] = useState(false);
+  // Where to draw it, in viewport pixels, or null when hidden. Drawn in a
+  // portal with position: fixed: inside a table an absolutely placed tooltip
+  // is painted under the neighbouring row and only a sliver shows.
+  const [place, setPlace] = useState<{ left: number; top: number; below: boolean } | null>(null);
+  const anchor = useRef<HTMLSpanElement>(null);
   const id = useId();
+  useEffect(() => {
+    if (!place) return;
+    const hide = () => setPlace(null);
+    window.addEventListener("scroll", hide, true);
+    window.addEventListener("resize", hide);
+    return () => { window.removeEventListener("scroll", hide, true); window.removeEventListener("resize", hide); };
+  }, [place]);
   if (!content) return children;
   const trigger = isValidElement(children) ? cloneElement(children, { "aria-describedby": id } as Record<string, unknown>) : children;
+  function show() {
+    const rect = anchor.current?.getBoundingClientRect();
+    if (!rect) return;
+    // Below the anchor when there is no room above it.
+    const below = rect.top < 48;
+    setPlace({ left: Math.max(8, Math.min(rect.left, window.innerWidth - 328)), top: below ? rect.bottom + 4 : rect.top - 4, below });
+  }
   // The anchor itself is not a control - it only watches for hover/focus on
   // whatever interactive or focusable element it wraps, via bubbling.
   // eslint-disable-next-line jsx-a11y/no-static-element-interactions
   return <span
+    ref={anchor}
     className="ds-tooltip-anchor"
-    onMouseEnter={() => setVisible(true)}
-    onMouseLeave={() => setVisible(false)}
-    onFocus={() => setVisible(true)}
-    onBlur={() => setVisible(false)}
-    onKeyDown={(event) => { if (event.key === "Escape") setVisible(false); }}
+    onMouseEnter={show}
+    onMouseLeave={() => setPlace(null)}
+    onFocus={show}
+    onBlur={() => setPlace(null)}
+    onKeyDown={(event) => { if (event.key === "Escape") setPlace(null); }}
   >
     {trigger}
-    {visible ? <span role="tooltip" id={id} className="ds-tooltip">{content}</span> : null}
+    {place ? createPortal(<span role="tooltip" id={id} className="ds-tooltip ds-tooltip-floating"
+      style={{ left: place.left, top: place.top, transform: place.below ? undefined : "translateY(-100%)" }}>{content}</span>, document.body) : null}
   </span>;
 }
 
