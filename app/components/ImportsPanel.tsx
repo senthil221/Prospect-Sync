@@ -20,6 +20,7 @@ import type { BackgroundImport, ClientRecord, FileAudit, ImportResumeDetail, Int
 import { AppIcon, ProgressBar, StatusMessage } from "./DashboardUi";
 import { ImportStepper, StepFooter, focusProblem } from "./ImportStepper";
 import Tabs from "./Tabs";
+import { useClientIcps } from "./use-client-icps";
 
 export type ImportDestination =
   | { kind: "prospects"; clientId: string; listId: string; listName: string }
@@ -138,7 +139,7 @@ export default function ImportsPanel({ clients, onComplete, onChanged }: { clien
     </div>}
     {kind === "prospects"
       ? <ProspectImportView key="prospects" clients={clients} dataSource={activeDataSource} step={step} onStep={goToStep} resumeImport={resumeImport?.kind === "prospects" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onComplete={onComplete}/>
-      : <CompanyImportView key="companies" dataSource={activeDataSource} step={step} onStep={goToStep} resumeImport={resumeImport?.kind === "companies" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onActiveImportChange={setActiveImportId} onComplete={onComplete}/>}
+      : <CompanyImportView key="companies" clients={clients} dataSource={activeDataSource} step={step} onStep={goToStep} resumeImport={resumeImport?.kind === "companies" ? resumeImport : null} onCancelResume={() => setResumeImport(null)} onResumed={finishResume} onActiveImportChange={setActiveImportId} onComplete={onComplete}/>}
     {cancelImport ? <div className="modal-backdrop" role="presentation"><section className="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-import-title"><span className="warning-mark">!</span><p className="eyebrow">PERMANENT ACTION</p><h2 id="cancel-import-title">Cancel unfinished import?</h2><p>The unfinished session and any client-list links it created will be removed. Records already added to the People or Company database stay in place.</p><div className="delete-target"><strong>{cancelImport.fileName}</strong><span>{cancelImport.totalRows === null ? `${formatNumber(cancelImport.committedRowOffset)} rows committed` : `${formatNumber(cancelImport.committedRowOffset)} of ${formatNumber(cancelImport.totalRows)} rows committed`}</span></div>{cancelError ? <p className="form-error" role="alert">{cancelError}</p> : null}<div className="modal-actions"><button className="secondary" disabled={cancelBusy} onClick={() => setCancelImport(null)}>Keep import</button><button className="danger-button solid" disabled={cancelBusy} onClick={() => void confirmCancelImport()}>{cancelBusy ? "Cancelling…" : "Cancel import"}</button></div></section></div> : null}
   </section>;
 }
@@ -163,7 +164,7 @@ function RequiredFieldList({ title, fields }: { title: string; fields: readonly 
   return <div className="required-field-list"><strong>{title}</strong><div>{fields.map((field) => <span key={field}><AppIcon name="check" size={14}/> {field}</span>)}</div></div>;
 }
 
-function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport, onCancelResume, onResumed, onActiveImportChange }: { dataSource: string; step: ImportStepId; onStep: (step: ImportStepId) => void; onComplete: (destination?: ImportDestination) => Promise<void>; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void; onActiveImportChange: (id: string) => void }) {
+function CompanyImportView({ clients, dataSource, step, onStep, onComplete, resumeImport, onCancelResume, onResumed, onActiveImportChange }: { clients: ClientRecord[]; dataSource: string; step: ImportStepId; onStep: (step: ImportStepId) => void; onComplete: (destination?: ImportDestination) => Promise<void>; resumeImport: InterruptedImport | null; onCancelResume: () => void; onResumed: (id: string) => void; onActiveImportChange: (id: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   // A paste has no File behind it, so the import needs a name of its own for the
   // audit trail. Everything downstream -- mapping, merge mode, chunked upload,
@@ -181,6 +182,11 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
   // What to do when an uploaded row matches a company already in the Company DB.
   // A resumed import keeps whatever mode it started under -- see the note in the route.
   const [mergeMode, setMergeMode] = useState<CompanyMergeMode>(defaultCompanyMergeMode);
+  // Optional: add the companies to a client, tagged with one of its ICPs
+  // (20261010140000). Applied after the rows are in, by /api/company-imports/assign.
+  const [importClientId, setImportClientId] = useState("");
+  const [importTagId, setImportTagId] = useState("");
+  const importIcps = useClientIcps(importClientId || undefined);
   const mappedFields = parsed ? resolvedImportFields(parsed.headers, fieldMap, suggestedCompanyImportField) : [];
   const missingFields = missingCompanyImportFields(mappedFields);
   const unmappedDetails = parsed ? unmappedCompanyDetailFields(mappedFields) : [];
@@ -264,15 +270,25 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
       setProgress(Math.round(((index + rows.length) / table.rows.length) * 100));
     }
     const completed = await api<{ summary: { processed_rows: number; added_count: number; updated_count: number; skipped_count: number } }>("/api/company-imports/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId }) });
+    // The client and ICP tag chosen at the start (kept on the import, so a
+    // resumed import gets them too). Nothing to do when none was chosen.
+    let assigned = { processed: 0, added: 0, tagged: 0 };
+    for (let page = 0; page < 200; page += 1) {
+      const result = await api<{ done: boolean; processed: number; added: number; tagged: number; remaining: number }>("/api/company-imports/assign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ importId }) });
+      assigned = { processed: assigned.processed + result.processed, added: assigned.added + result.added, tagged: assigned.tagged + result.tagged };
+      if (result.done) break;
+      setMessage(`Adding companies to the client… ${formatNumber(result.remaining)} to go`);
+    }
     setSummary(completed.summary); setPhase("done");
     setCompletedDestination({ kind: "companies", importId, listName: sourceName || resumeImport?.fileName || "Imported companies" });
-    setMessage(`Company import complete. Companies already in the database were handled with “${companyMergeModeLabels[mergeMode].label}”.`);
+    const clientName = clients.find((client) => client.id === importClientId)?.name;
+    setMessage(`Company import complete. Companies already in the database were handled with “${companyMergeModeLabels[mergeMode].label}”.${assigned.processed ? ` ${formatNumber(assigned.added)} new to ${clientName ?? "the client"}${assigned.tagged ? `, ${formatNumber(assigned.tagged)} tagged ${importIcps.find((icp) => icp.id === importTagId)?.name ?? "with the ICP"}` : ""}.` : ""}`);
   }
 
   async function startCompanyImport() {
     if (!parsed || !canSubmit) return;
     try {
-      const started = await api<{ importId: string }>("/api/company-imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: sourceName, totalRows: parsed.rows.length, dataSource, headers: parsed.headers, fieldMap, mergeMode }) });
+      const started = await api<{ importId: string }>("/api/company-imports/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: sourceName, totalRows: parsed.rows.length, dataSource, headers: parsed.headers, fieldMap, mergeMode, clientId: importClientId || undefined, clientTagId: importClientId && importTagId ? importTagId : undefined }) });
       onActiveImportChange(started.importId);
       await uploadCompanyRows(started.importId, parsed, fieldMap, 0);
     } catch (caught) { onActiveImportChange(""); setMessage(caught instanceof Error ? caught.message : "Company import failed."); setPhase("idle"); }
@@ -359,6 +375,10 @@ function CompanyImportView({ dataSource, step, onStep, onComplete, resumeImport,
         <MergeModeChooser kind="company" legend="When a company is already in the database"
           hint="Matched by website first, then by company name when either side has no website."
           labels={companyMergeModeLabels} mode={mergeMode} disabled={phase !== "idle"} onChange={setMergeMode}/>
+        <div className="form-grid company-import-client">
+          <div className="form-field"><label htmlFor="company-import-client">Add to client (optional)</label><select id="company-import-client" value={importClientId} disabled={phase !== "idle"} onChange={(event) => { setImportClientId(event.target.value); setImportTagId(""); }}><option value="">No client - Company DB only</option>{clients.filter((client) => client.id !== unassignedClientId && !client.archived_at).map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select><small>The imported companies are added to this client once the rows are in. Its blocklist still applies.</small></div>
+          {importClientId ? <div className="form-field"><label htmlFor="company-import-icp">ICP tag (optional)</label><select id="company-import-icp" value={importTagId} disabled={phase !== "idle"} onChange={(event) => setImportTagId(event.target.value)}><option value="">No ICP tag</option>{importIcps.map((icp) => <option key={icp.id} value={icp.id}>{icp.name}</option>)}</select><small>Tags the companies, and the client&apos;s people at them, with this ICP.</small></div> : null}
+        </div>
         {/* IMPORT-05: a known total, so the bar carries valuenow/valuemax and
             reads as progress rather than as decoration. */}
         {phase === "uploading" ? <ProgressBar label={message} value={progress} total={100}/> : null}

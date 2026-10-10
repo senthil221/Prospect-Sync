@@ -9,7 +9,7 @@ import { observed } from "../../../../lib/observability";
 async function handlePOST(request: Request) {
   const unauthorized = await authorizeApi();
   if (unauthorized) return unauthorized;
-  const payload = await request.json().catch(() => null) as { fileName?: unknown; totalRows?: unknown; dataSource?: unknown; headers?: unknown; fieldMap?: unknown; mergeMode?: unknown } | null;
+  const payload = await request.json().catch(() => null) as { fileName?: unknown; totalRows?: unknown; dataSource?: unknown; headers?: unknown; fieldMap?: unknown; mergeMode?: unknown; clientId?: unknown; clientTagId?: unknown } | null;
   if (!payload) return Response.json({ error: "Invalid company import." }, { status: 400 });
   const dataSource = normalizeDataSource(payload.dataSource);
   if (!dataSource) return Response.json({ error: "Choose a data source before importing." }, { status: 400 });
@@ -25,8 +25,21 @@ async function handlePOST(request: Request) {
   if (!mergeMode) return Response.json({ error: "Choose how duplicate companies should be handled." }, { status: 400 });
   const totalRows = Math.max(0, Math.min(100_000, Math.round(Number(payload.totalRows ?? 0))));
   if (!totalRows) return Response.json({ error: "The company CSV has no rows." }, { status: 400 });
+  // Optional: the client the companies go to, and one of its ICP tags
+  // (20261010140000). Applied once the rows are in, by /api/company-imports/assign.
+  const clientId = String(payload.clientId ?? "").trim() || null;
+  const clientTagId = clientId ? String(payload.clientTagId ?? "").trim() || null : null;
+  const admin = createAdminClient();
+  if (clientId) {
+    const { data: client } = await admin.from("clients").select("id").eq("id", clientId).is("archived_at", null).maybeSingle();
+    if (!client) return Response.json({ error: "That client was not found or is archived." }, { status: 400 });
+  }
+  if (clientTagId) {
+    const { data: profile } = await admin.from("client_icp_profiles").select("id").eq("client_id", clientId).eq("tag_id", clientTagId).maybeSingle();
+    if (!profile) return Response.json({ error: "That ICP tag does not belong to this client." }, { status: 400 });
+  }
   const id = crypto.randomUUID();
-  const { error } = await createAdminClient().from("company_imports").insert({
+  const { error } = await admin.from("company_imports").insert({
     id,
     file_name: String(payload.fileName ?? "").trim().slice(0, 240),
     data_source: dataSource,
@@ -35,6 +48,8 @@ async function handlePOST(request: Request) {
     field_map: fixedFieldMap,
     header_signature: importHeaderSignature(headers),
     merge_mode: mergeMode,
+    client_id: clientId,
+    client_tag_id: clientTagId,
   });
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ importId: id }, { status: 201 });
