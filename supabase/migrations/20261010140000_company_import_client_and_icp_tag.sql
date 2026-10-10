@@ -63,7 +63,7 @@ begin
 
   if cardinality(v_ids) > 0 then
     v_push := public.push_companies_to_client_v2(v_import.client_id, v_ids, '', '[]'::jsonb, null, null,
-      coalesce(nullif(p_actor, ''), 'company import'), null, p_import_id || ':' || v_ids[1]);
+      coalesce(nullif(p_actor, ''), 'company import'), null, format('%s:%s', p_import_id, v_ids[1]));
 
     if v_import.client_tag_id is not null then
       with added as (
