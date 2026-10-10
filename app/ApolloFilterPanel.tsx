@@ -87,7 +87,7 @@ const contactDateFilter: FilterDefinition = { id: "__client_date_contacted", lab
 // How many times this client has contacted the person: each change of Date
 // Contacted is one use (client_prospects.use_count, 20261010100000).
 const useCountFilter: FilterDefinition = { id: "__client_use_count", label: "Number of Uses", kind: "use_count",
-  description: "How many times this client has contacted the person. Every change of Date Contacted counts as one use; a person with no Date Contacted has none." };
+  description: "How many times this client has used (contacted) the person. Each new Date Contacted counts as one use; never contacted is 0." };
 
 // The company profile, filterable from the People database.
 //
@@ -459,15 +459,17 @@ const espGroups: Array<{ title: string; options: Array<{ value: string; label: s
   ] },
 ];
 
-// Number of Uses: fewer than N for this client. One choice at a time.
+// Number of Uses: fewer than N for this client, shown as the range it keeps
+// ("0-2 times" is fewer than 3). One choice at a time; Any removes it.
 export function UseCountFilter({ clientId, filters, onChange }: {
   clientId: string; filters: ProspectFilter[]; onChange: (filters: ProspectFilter[]) => void;
 }) {
   const current = filters[0]?.values[1] ?? "";
-  const options = [["", "Any"], ["1", "Never used (0)"], ["2", "Fewer than 2 uses"], ["3", "Fewer than 3 uses"], ["4", "Fewer than 4 uses"], ["5", "Fewer than 5 uses"], ["10", "Fewer than 10 uses"]] as const;
-  return <select aria-label="Number of uses" value={current} onChange={(event) => onChange(event.target.value
-    ? [{ id: filterId("__client_use_count", "equals"), field: "__client_use_count", operator: "equals", values: [clientId, event.target.value] }]
-    : [])}>{options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>;
+  const options = [["", "Any"], ["1", "Never used"], ["2", "0–1 times"], ["3", "0–2 times"], ["4", "0–3 times"], ["5", "0–4 times"], ["10", "0–9 times"]] as const;
+  return <div className="esp-filter-sides use-count-options" role="radiogroup" aria-label="Number of uses">
+    {options.map(([value, label]) => <button key={value} type="button" role="radio" aria-checked={current === value} className={current === value ? "active" : ""}
+      onClick={() => onChange(value ? [{ id: filterId("__client_use_count", "equals"), field: "__client_use_count", operator: "equals", values: [clientId, value] }] : [])}>{label}</button>)}
+  </div>;
 }
 
 // Top management or not, from the job title (20261008110000). One value, so a

@@ -20,7 +20,7 @@ test("1. The blocklist filters by reason through the shared selection function",
   const route = await read("../app/api/clients/[id]/blocklist/route.ts");
   assert.match(route, /p_kind: reasonFilter \? `\$\{kind\}\|\$\{reasonFilter\}` : kind/);
   assert.match(route, /query = query\.eq\("reason", filters\.reasonFilter === "\(none\)" \? "" : filters\.reasonFilter\)/);
-  assert.match(await read("../app/components/BlocklistPanel.tsx"), /aria-label="Filter blocklist reason"/);
+  assert.match(await read("../app/components/BlocklistPanel.tsx"), /<ListboxPicker label="Filter blocklist reason"/);
 });
 
 test("5. Contactable requires a work email in both filter paths", async () => {
@@ -40,8 +40,9 @@ test("4. Number of Uses counts Date Contacted changes, filters and shows per cli
     [{ field: "__client_use_count", operator: "equals", values: ["c1", "3"] }]);
   assert.throws(() => parseFilters(JSON.stringify([{ field: "__client_use_count", operator: "equals", values: ["c1", "x"] }])), /Number of Uses/);
   assert.equal(usesChip(["c1", "1"]), "Never used");
-  assert.equal(usesChip(["c1", "3"]), "Fewer than 3 uses");
-  assert.match(await read("../app/components/ProspectTableRow.tsx"), /\{Number\(prospect\.client_use_count \?\? 0\)\}/);
+  assert.equal(usesChip(["c1", "2"]), "Used 0–1 times");
+  assert.equal(usesChip(["c1", "3"]), "Used 0–2 times");
+  assert.match(await read("../app/components/ProspectTableRow.tsx"), /const uses = Number\(prospect\.client_use_count \?\? 0\)/);
 });
 
 test("6. A blocked domain blocks its email domain everywhere, never for free mail", async () => {

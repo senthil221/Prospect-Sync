@@ -1631,24 +1631,47 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
   display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
 }
 .client-tab-row .ds-tabs { flex: 1 1 auto; min-width: 0; }
-/* A button + role="listbox" popup, not a <select> (see IcpPicker's own
-   comment in ClientsPanel.tsx): a native select's open list is browser
-   chrome, and no CSS reaches its padding, radius, hover colour or font. */
-.client-icp-picker { flex: none; }
-.client-icp-trigger {
+/* ListboxPicker: a button + role="listbox" popup, not a <select> - a native
+   select's open list is browser chrome, and no CSS reaches its padding,
+   radius, hover colour or font. Used by the ICP picker and the blocklist
+   filters. */
+.listbox-picker { flex: none; display: inline-flex; align-items: center; position: relative; }
+.listbox-picker-trigger {
   display: inline-flex; align-items: center; gap: var(--space-2);
   min-height: var(--control-dense);
   padding: 0 var(--space-3);
   border: 1px solid var(--ph-border-strong); border-radius: var(--radius-full);
   background: var(--surface); color: var(--ph-muted);
   font-size: var(--text-sm); font-weight: var(--weight-bold); cursor: pointer;
+  max-width: 280px;
 }
-.client-icp-trigger:hover { border-color: var(--border-strong); }
-.client-icp-trigger > span:last-child { color: var(--text-tertiary); }
-.client-icp-picker.is-active .client-icp-trigger { border-color: var(--ph-brand); background: var(--accent-soft); color: var(--accent-text); }
-.client-icp-picker.is-active .client-icp-trigger > span:last-child { color: var(--accent-text); }
-.client-icp-picker:focus-within .client-icp-trigger { box-shadow: 0 0 0 3px var(--accent-soft); }
-.client-icp-panel { min-width: 200px; }
+.listbox-picker-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.listbox-picker-text small { margin-right: var(--space-1); font-size: var(--text-2xs); font-weight: var(--weight-bold); text-transform: uppercase; letter-spacing: .04em; opacity: .75; }
+.listbox-picker-trigger:hover { border-color: var(--border-strong); }
+.listbox-picker-trigger > svg:last-child { color: var(--text-tertiary); flex: none; }
+.listbox-picker.is-active .listbox-picker-trigger { border-color: var(--ph-brand); background: var(--accent-soft); color: var(--accent-text); }
+.listbox-picker.is-active .listbox-picker-trigger > svg:last-child { color: var(--accent-text); }
+.listbox-picker:focus-within .listbox-picker-trigger { box-shadow: 0 0 0 3px var(--accent-soft); }
+/* With a clear button the pill splits in two: label | ×. */
+.listbox-picker.is-active:has(.listbox-picker-clear) .listbox-picker-trigger { border-top-right-radius: 0; border-bottom-right-radius: 0; border-right-width: 0; }
+.listbox-picker-clear {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: var(--control-dense); padding: 0 var(--space-2);
+  border: 1px solid var(--ph-brand); border-radius: 0 var(--radius-full) var(--radius-full) 0;
+  background: var(--accent-soft); color: var(--accent-text); cursor: pointer;
+}
+.listbox-picker-clear:hover { background: var(--surface); }
+.listbox-picker-panel { min-width: 220px; max-height: 320px; overflow-y: auto; }
+.listbox-picker-panel .ds-menu-item { display: flex; align-items: center; gap: var(--space-2); width: 100%; text-align: left; }
+.listbox-picker-panel .ds-menu-item > span { flex: 1 1 auto; }
+.listbox-picker-panel .ds-menu-item > small { color: var(--text-tertiary); font-size: var(--text-2xs); font-weight: normal; }
+.listbox-picker-panel .ds-menu-item[aria-selected="true"] { color: var(--accent-text); font-weight: var(--weight-bold); }
+.listbox-picker-divided { margin-top: var(--space-1); padding-top: var(--space-1); border-top: 1px solid var(--border-default); }
+/* The blocklist filters sit among square inputs, so square corners there. */
+.blocklist-filters .listbox-picker-trigger { border-radius: var(--radius-md); font-weight: normal; color: var(--text-primary); border-color: var(--border-default); }
+.blocklist-filters .listbox-picker.is-active:has(.listbox-picker-clear) .listbox-picker-trigger { border-radius: var(--radius-md) 0 0 var(--radius-md); }
+.blocklist-filters .listbox-picker-clear { border-radius: 0 var(--radius-md) var(--radius-md) 0; }
+
 /* The sentence above the pre-filtered grid, saying which ICP is being shown -
    the picker alone cannot say "none of the five". */
 .client-icp-scope { margin: 0 0 var(--space-3); color: var(--ph-muted); font-size: var(--text-xs); }
@@ -1712,3 +1735,12 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 .icp-recheck-dialog { max-width: 560px; }
 .icp-recheck-icps { margin: var(--space-3) 0; padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); border: 1px solid var(--ph-border-strong); border-radius: var(--radius-md); }
 .icp-recheck-icps legend { padding: 0 var(--space-1); font-size: var(--text-2xs); font-weight: var(--weight-semibold); color: var(--text-secondary); }
+
+/* Number of Uses: chips that wrap in the narrow filter panel, and a compact
+   count in the table ("3×", a dash for never used). */
+.esp-filter-sides.use-count-options { display: flex; flex-wrap: wrap; gap: var(--space-1); border: 0; overflow: visible; }
+.esp-filter-sides.use-count-options button { border: 1px solid var(--border-strong); border-radius: var(--radius-full); }
+.esp-filter-sides.use-count-options button + button { border-left: 1px solid var(--border-strong); }
+.esp-filter-sides.use-count-options button.active { border-color: var(--ph-brand); }
+.use-count { display: inline-block; min-width: 28px; padding: 1px var(--space-2); border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent-text); font-weight: var(--weight-bold); font-size: var(--text-xs); text-align: center; }
+.use-count.unused { background: transparent; color: var(--text-tertiary); font-weight: normal; }

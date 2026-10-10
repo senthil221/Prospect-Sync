@@ -9,7 +9,7 @@ export function formatNumber(value: unknown) {
 // One chip for a Number of Uses filter ([client id, N]): "Fewer than 3 uses".
 export function usesChip(values: string[]) {
   const below = Number(values[1] ?? 0);
-  return below <= 1 ? "Never used" : `Fewer than ${below} uses`;
+  return below <= 1 ? "Never used" : below === 2 ? "Used 0–1 times" : `Used 0–${below - 1} times`;
 }
 
 // One chip for a whole Date Contacted filter: "1 Sep 2026 – 30 Sep 2026".

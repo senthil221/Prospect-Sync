@@ -6,6 +6,7 @@ import { formatNumber } from "../../lib/dashboard-helpers";
 import { BLOCKLIST_REQUEST_VALUES, MAX_BLOCKLIST_PASTE_VALUES, partitionBlocklistValues } from "../../lib/bulk-values.ts";
 import type { BlocklistEntry, ClientRecord } from "../../lib/types";
 import { ConfirmDialog, EmptyCompact } from "./DashboardUi";
+import ListboxPicker from "./ListboxPicker";
 import { AppIcon } from "./DashboardUi";
 import IcpInvalidRecheckDialog from "./IcpInvalidRecheckDialog";
 
@@ -275,8 +276,8 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
     </div>
     <div className="blocklist-toolbar">
       <div className="blocklist-filters">
-      <select aria-label="Filter blocklist type" value={kind} onChange={(event) => { setKind(event.target.value); setPage(1); setSelected(new Set()); setAllMatching(false); }}><option value="">All types</option><option value="domain">Domains</option><option value="email">Emails</option></select>
-      <select aria-label="Filter blocklist reason" value={reasonFilter} onChange={(event) => { setReasonFilter(event.target.value); setPage(1); setSelected(new Set()); setAllMatching(false); }}><option value="">All reasons</option>{blocklistReasons.map((value) => <option key={value} value={value}>{value}</option>)}<option value="(none)">No reason</option></select>
+      <ListboxPicker label="Filter blocklist type" placeholder="All types" prefix="Type" clearable value={kind} onChange={(next) => { setKind(next); setPage(1); setSelected(new Set()); setAllMatching(false); }} options={[{ value: "", label: "All types" }, { value: "domain", label: "Domains", hint: "Websites and email domains" }, { value: "email", label: "Emails", hint: "Single addresses" }]}/>
+      <ListboxPicker label="Filter blocklist reason" placeholder="All reasons" prefix="Reason" clearable value={reasonFilter} onChange={(next) => { setReasonFilter(next); setPage(1); setSelected(new Set()); setAllMatching(false); }} options={[{ value: "", label: "All reasons" }, ...blocklistReasons.map((value) => ({ value, label: value })), { value: "(none)", label: "No reason given", divider: true }]}/>
       <label>Date added from <input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setPage(1); setSelected(new Set()); setAllMatching(false); }}/></label>
       <label>Date added to <input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setPage(1); setSelected(new Set()); setAllMatching(false); }}/></label>
       </div><div className="blocklist-toolbar-actions">
