@@ -23,7 +23,8 @@ test("an authenticated user can upload and complete a prospect CSV import", asyn
     await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
 
     await page.getByRole("button", { name: "Import CSV" }).click();
-    await page.getByLabel("Data source").selectOption("Apollo");
+    await page.getByLabel("Data source").click();
+    await page.getByRole("option", { name: "Apollo" }).click();
     await page.getByLabel("New client name").fill(clientName);
     await page.getByLabel("Date Contacted").fill(dateContacted);
     const csv = [

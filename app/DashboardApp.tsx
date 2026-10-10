@@ -68,15 +68,22 @@ const baseNavGroups: Array<{ label: string; items: Array<{ id: Section; label: s
       { id: "clients", label: "Clients & lists", mark: "clients" },
     ],
   },
+  // Grouped by what the work is: bringing data in and enriching it, then
+  // checking it. Six tools under one "Data tools" label read as equal weight.
   {
-    label: "Data tools",
+    label: "Import & enrich",
     items: [
-      { id: "coverage", label: "Coverage checker", mark: "coverage" },
-      { id: "quality", label: "Data quality", mark: "quality" },
       { id: "imports", label: "Import CSV", mark: "upload" },
       { id: "verification", label: "Email verification", mark: "check" },
       { id: "icp-validator", label: "ICP validator", mark: "target" },
-      { id: "reply-blocklist", label: "Reply blocklist", mark: "quality" },
+    ],
+  },
+  {
+    label: "Checks",
+    items: [
+      { id: "coverage", label: "Coverage checker", mark: "coverage" },
+      { id: "quality", label: "Data quality", mark: "quality" },
+      { id: "reply-blocklist", label: "Reply blocklist", mark: "alert" },
     ],
   },
 ];
@@ -421,7 +428,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
     }}>Skip to main content</a>
     <aside className="sidebar"><div className="brand"><span className="brand-mark"><AppIcon name="database" size={17}/></span><span>Prospect <span>Sync</span></span></div><div className="workspace"><span className="workspace-avatar">PA</span><div><strong>Prospect Agency</strong><small>Internal workspace</small></div><span className="chevron"><AppIcon name="chevron" size={14}/></span></div><nav aria-label="Primary navigation">{navGroups.map((group) => <div className="nav-group" key={group.label}><span className="nav-group-label">{group.label}</span>{group.items.map((item) => <button key={item.id} aria-current={section === item.id ? "page" : undefined} className={section === item.id ? "active" : ""} onMouseEnter={() => prefetchSection(item.id)} onFocus={() => prefetchSection(item.id)} onClick={() => navigate(item.id)}><span aria-hidden="true"><AppIcon name={item.mark} size={17}/></span>{item.label}</button>)}</div>)}</nav><ThemeToggle/><a className="profile" href="/auth/signout"><span className="profile-avatar">{initials(currentUserEmail)}</span><div><strong>{currentUserEmail}</strong><small>Sign out</small></div></a></aside>
     <MobileNav section={section} items={navItems} onNavigate={(id) => navigate(id as Section)} currentUserEmail={currentUserEmail}/>
-    <main id="main-content"><header className="topbar"><div><p className="eyebrow">DATABASE WORKSPACE</p><h1>{selectedClient ? selectedClient.name : title}</h1></div><div className="top-actions">{(section === "prospects" || section === "companies") && <label className="search"><span><AppIcon name="search" size={16}/></span><input aria-label="Search" value={search} onChange={(event) => { setSearch(event.target.value); if (section === "prospects") setProspectPage(1); if (section === "companies") setCompanyPage(1); }} placeholder={`Search ${section}...`}/></label>}{section !== "reply-blocklist" && <button className="primary" onClick={() => navigate("imports")}><AppIcon name="plus" size={15}/> Import list</button>}</div></header>
+    <main id="main-content"><header className="topbar"><div><h1>{selectedClient ? selectedClient.name : title}</h1></div><div className="top-actions">{(section === "prospects" || section === "companies") && <label className="search"><span><AppIcon name="search" size={16}/></span><input aria-label="Search" value={search} onChange={(event) => { setSearch(event.target.value); if (section === "prospects") setProspectPage(1); if (section === "companies") setCompanyPage(1); }} placeholder={`Search ${section}...`}/></label>}{section !== "reply-blocklist" && <button className="primary" onClick={() => navigate("imports")}><AppIcon name="plus" size={15}/> Import list</button>}</div></header>
       {error && <div className="alert"><span>!</span><p>{error}</p>{canResetQuery ? <button className="alert-reset" onClick={resetQuery}>Clear filters and start over</button> : null}<button aria-label="Dismiss" onClick={() => setError("")}><AppIcon name="close" size={14}/></button></div>}
       <section className="content" aria-busy={showGlobalLoading || workspaceLoading || clientWorkspace.clientLoading || clientWorkspace.listLoading}>
         {!loading && section === "reply-blocklist" && <ReplyBlocklistPanel/>}
@@ -430,7 +437,7 @@ function DashboardWorkspace({ currentUserEmail, isAdmin }: { currentUserEmail: s
         {!loading && section === "logs" && isAdmin && <LogsPanel/>}
         {showGlobalLoading ? <LoadingState/> : null}
         {!loading && workspaceLoading ? <div className="workspace-progress" role="status"><span/>Updating {title.toLowerCase()}…</div> : null}
-        {!loading && section === "overview" && <OverviewWorkspace stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onViewMaster={() => navigate("prospects")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name ?? "Unassigned"} · ${item.list_name ?? "Unassigned"}` })}/>}
+        {!loading && section === "overview" && <OverviewWorkspace stats={stats} recentImports={recentImports} clients={clients} onImport={() => navigate("imports")} onDeleteImport={(item) => setDeleteRequest({ kind: "import", id: item.id, name: item.file_name, context: `${item.client_name ?? "Unassigned"} · ${item.list_name ?? "Unassigned"}` })}/>}
         {!loading && section === "prospects" && <ProspectsWorkspace controller={prospectsController} filters={prospectFilters} sort={prospectSort} direction={prospectDirection} clients={clients} companyScope={companyPeopleScope} onClearCompanyScope={() => setCompanyPeopleScope(null)} onClearSearch={() => setSearch("")} onSeeCompanies={seeCompanies} onFiltersChange={setProspectFilters} onSortChange={(nextSort, nextDirection) => { setProspectSort(nextSort); setProspectDirection(nextDirection); }} onSelect={setSelectedProspect} onImport={() => navigate("imports")}/>}
         {!loading && section === "companies" && <CompaniesWorkspace controller={companiesController} clients={clients} filters={companyFilters} peopleScope={peopleCompanyScope} onClearPeopleScope={() => setPeopleCompanyScope(null)} onClearSearch={() => setSearch("")} onSeePeople={seePeople} onFilters={setCompanyFilters} onImport={() => navigate("imports")}/>}
         {scopedClientSection && loading && clientWorkspace.initialResolutionComplete ? <div className="workspace-progress compact" role="status"><span/>Loading the client directory in the background…</div> : null}

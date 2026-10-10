@@ -8,6 +8,7 @@ import type { ClientIcpProfile, ClientRecord } from "../../lib/types";
 import { ICP_MODELS, REASONING_EFFORTS } from "../../worker/icp-validator-core.mjs";
 import { AppIcon, ConfirmDialog } from "./DashboardUi";
 import { ModelPicker, estimateModels, modelName, useIcpModelCatalog } from "./IcpCheck";
+import { Select } from "./ListboxPicker";
 import {
   KpiStrip, ModelScoreboard, ResultsTable, RunTimeline, Segmented, Switch, WorkerBadge, money,
   type ResultRow, type RunStatus, type ValidatorRun, type ValidatorSource, type WorkerState,
@@ -144,12 +145,12 @@ export default function IcpValidatorPanel({ client }: { client: ClientRecord }) 
         {overview ? <WorkerBadge worker={overview.worker}/> : null}
         {usable.length ? <label className="icpx-icp-select">
           <span>Checking against</span>
-          <select value={icpId} onChange={(event) => { setChosenIcp(event.target.value); setNotice(""); }}>
+          <Select value={icpId} onChange={(event) => { setChosenIcp(event.target.value); setNotice(""); }}>
             {profiles.map((item) => {
               const empty = !item.description.trim();
               return <option key={item.id} value={item.id} disabled={empty}>{(item.name.trim() || "Untitled ICP") + (empty ? " - no brief yet" : "")}</option>;
             })}
-          </select>
+          </Select>
         </label> : null}
       </div>
     </header>

@@ -8,6 +8,7 @@ import { sourceLabel } from "../../worker/icp-validator-core.mjs";
 import { AppIcon, ConfirmDialog } from "./DashboardUi";
 import { StrategyPicker, estimateStrategy, hasObservedCost, strategies, strategyLabel, type CostPerCompany, type StrategyId } from "./IcpStrategyPicker";
 import { ProgressRing, Segmented, WorkerBadge, durationText, money, relativeTime, type RunStatus, type WorkerState } from "./IcpValidatorViews";
+import { Select } from "./ListboxPicker";
 
 // ICP checks: label a client's companies FIT / NON_FIT with one of three
 // voting setups (Strict, Balanced, Lenient). Each check is two or three model
@@ -207,15 +208,15 @@ function NewCheck({ clients, fixedClient, onStarted }: { clients: ClientRecord[]
     {!usableClients.length ? <div className="icpx-empty is-quiet"><AppIcon name="clients" size={18}/><div><strong>No clients</strong><p>Create a client and give it an ICP brief first.</p></div></div> : <>
       <div className={`icc-row${fixedClient ? " is-single" : ""}`}>
         {fixedClient ? null : <label className="icpx-field"><span className="icpx-label">Client</span>
-          <select className="icc-select" value={client?.id ?? ""} onChange={(event) => { setClientId(event.target.value); setIcpId(""); setError(""); }}>
+          <Select className="icc-select" value={client?.id ?? ""} onChange={(event) => { setClientId(event.target.value); setIcpId(""); setError(""); }}>
             {usableClients.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select>
+          </Select>
         </label>}
         <label className="icpx-field"><span className="icpx-label">ICP</span>
-          <select className="icc-select" value={icp?.id ?? ""} disabled={!usable.length} onChange={(event) => setIcpId(event.target.value)}>
+          <Select className="icc-select" value={icp?.id ?? ""} disabled={!usable.length} onChange={(event) => setIcpId(event.target.value)}>
             {!loadedProfiles ? <option>Loading…</option> : !usable.length ? <option>No ICP with a brief</option>
               : usable.map((profile) => <option key={profile.id} value={profile.id}>{profile.name.trim() || "Untitled ICP"}</option>)}
-          </select>
+          </Select>
         </label>
       </div>
       {loadedProfiles && !usable.length ? <p className="icpx-help">None of {client?.name}&apos;s ICPs has a brief yet. Add one on the client&apos;s ICPs tab.</p> : null}

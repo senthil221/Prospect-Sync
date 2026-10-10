@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { ClientRecord } from "../../lib/types";
 import { AppIcon } from "./DashboardUi";
 import IcpValidatorPanel from "./IcpValidatorPanel";
+import { Select } from "./ListboxPicker";
 
 // The ICP Validator as a Data tool: the bench for comparing models on a
 // client's ICP (any OpenRouter model, side by side). Everyday checks run from
@@ -19,9 +20,9 @@ export default function IcpValidatorWorkspace({ clients }: { clients: ClientReco
   return <div className="icpv-workspace">
     <label className="icpv-client-picker">
       <span>Client</span>
-      <select value={client.id} onChange={(event) => setClientId(event.target.value)}>
+      <Select value={client.id} onChange={(event) => setClientId(event.target.value)}>
         {usable.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-      </select>
+      </Select>
     </label>
     <IcpValidatorPanel key={client.id} client={client}/>
   </div>;

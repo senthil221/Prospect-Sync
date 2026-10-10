@@ -10,6 +10,7 @@ import {
 } from "../../lib/coverage-file";
 import type { CoverageRow, ProspectFilter } from "../../lib/types";
 import { AppIcon, ProgressBar, StatusMessage } from "./DashboardUi";
+import { Select } from "./ListboxPicker";
 
 type CoverageSummary = { total: number; known: number; new: number; covered: number; existingProspects: number };
 type ParsedTable = { headers: string[]; rows: string[][] };
@@ -151,16 +152,16 @@ export default function CoveragePanel({ onViewCompanies }: { onViewCompanies?: (
       {notice ? <StatusMessage>{notice}</StatusMessage> : null}
       <div className="mapping-grid">
         <label>Company name
-          <select value={nameField} onChange={(event) => setNameField(event.target.value)}>
+          <Select value={nameField} onChange={(event) => setNameField(event.target.value)}>
             <option value="">Not mapped</option>
             {table.headers.map((header) => <option key={header}>{header}</option>)}
-          </select>
+          </Select>
         </label>
         <label>Website or domain
-          <select value={domainField} onChange={(event) => setDomainField(event.target.value)}>
+          <Select value={domainField} onChange={(event) => setDomainField(event.target.value)}>
             <option value="">Not mapped</option>
             {table.headers.map((header) => <option key={header}>{header}</option>)}
-          </select>
+          </Select>
         </label>
       </div>
       {mappingHint ? <StatusMessage>{problemText(mappingHint)}</StatusMessage> : null}

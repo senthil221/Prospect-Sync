@@ -98,7 +98,7 @@ main { min-width: 0; grid-column: 2; }
 .search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
 .search span { display: grid; place-items: center; color: var(--text-tertiary); }
 .search input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--ph-text); font-size: var(--text-sm); }
-.content { width: 100%; max-width: 1700px; margin: 0 auto; padding: var(--space-6) var(--space-8) var(--space-12); }
+.content { width: 100%; max-width: none; margin: 0 auto; padding: var(--space-5) var(--space-6) var(--space-10); }
 .alert { margin: var(--space-4) var(--space-8) 0; padding: var(--space-3) var(--space-3); display: flex; align-items: center; gap: var(--space-2); border: 1px solid var(--danger); border-radius: var(--radius-lg); background: var(--danger-soft); color: var(--danger); font-size: var(--text-sm); }
 .alert > span { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: var(--danger-solid); color: var(--on-danger); font-size: var(--text-2xs); font-weight: var(--weight-bold); }
 .alert button { margin-left: auto; border: 0; background: transparent; color: inherit; font-size: var(--text-lg); }
@@ -1252,7 +1252,6 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 }
 .list-detail-page { max-width: none; }
 @media (min-width: 1900px) {
-  .content:has(.client-tab-row), .content:has(.client-folder-workspace) { max-width: 2100px; }
 }
 .list-detail-intro { min-width: 0; align-items: flex-start; }
 .list-detail-intro > div:first-child { min-width: 0; flex: 1; }
@@ -1744,3 +1743,27 @@ tr.row-blocked td:not(.select-column):not(.date-added-column):not(.icp-column) {
 .esp-filter-sides.use-count-options button.active { border-color: var(--ph-brand); }
 .use-count { display: inline-block; min-width: 28px; padding: 1px var(--space-2); border-radius: var(--radius-full); background: var(--accent-soft); color: var(--accent-text); font-weight: var(--weight-bold); font-size: var(--text-xs); text-align: center; }
 .use-count.unused { background: transparent; color: var(--text-tertiary); font-weight: normal; }
+
+/* One bar above a table: the view switches on the left, the search and the
+   actions on the right. Replaced a heading band ("CLIENT MASTER DB ..."), a
+   second pill row and a "Find people" heading, which put the first row of
+   data halfway down a laptop screen. */
+.view-bar, .company-quick-filter-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+.view-bar .icp-quick-filters, .company-quick-filter-row .icp-quick-filters { margin: 0; }
+.view-bar-extra { margin-left: auto; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.view-bar-extra .workspace-search { width: 260px; }
+.view-bar-extra .company-intro-actions { display: contents; }
+.people-tabs-row { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.people-tabs-row .ds-tabs { flex: 1 1 auto; min-width: 0; }
+.people-tabs-row .entity-pivot-actions { padding-bottom: var(--space-2); }
+/* The company counts, as one line in the table's own header instead of three cards. */
+.company-stat-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
+.company-stat-line strong { color: var(--text-primary); font-size: var(--text-md); }
+.company-stat-line span { color: var(--text-secondary); font-size: var(--text-xs); }
+.company-stat-line .company-stat-range { color: var(--text-tertiary); }
+@media (max-width: 900px) {
+  .view-bar-extra { margin-left: 0; width: 100%; }
+  .view-bar-extra .workspace-search { flex: 1 1 100%; width: auto; }
+}
+/* A page header with nothing to say beyond its actions: the topbar already names the page. */
+.section-intro.actions-only { justify-content: flex-end; padding-bottom: var(--space-3); }

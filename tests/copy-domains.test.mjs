@@ -45,14 +45,13 @@ test("Copy Domains resolves through the same selection resolver as push/tag/remo
 test("Copy Domains is available in both the master and a client's Company DB", async () => {
   const source = await read("../app/components/CompaniesWorkspace.tsx");
 
-  // Placed in the bulk-action-group next to See People, outside the
-  // canDelete-only branch that Push to Client and the master Delete button
-  // live in - so it renders for both scopes, not just the unscoped one.
+  // Both scopes: beside See People in the master bulk bar, and under More in
+  // a client's, where the bar keeps only the frequent actions up front.
   const bulkBarStart = source.indexOf('<div className="bulk-bar company-bulk-bar">');
-  const canDeleteBranchStart = source.indexOf("{canDelete ? <div", bulkBarStart);
-  const copyButton = source.indexOf("Copy Domains", bulkBarStart);
-  assert.ok(bulkBarStart > -1 && canDeleteBranchStart > -1 && copyButton > -1, "expected markers not found");
-  assert.ok(copyButton < canDeleteBranchStart, "Copy Domains must render before the canDelete-only branch, not inside it");
+  const bar = source.slice(bulkBarStart, source.indexOf('className="bulk-clear"', bulkBarStart));
+  assert.ok(bulkBarStart > -1, "expected the bulk bar");
+  assert.match(bar, /\{canDelete \? <div className="bulk-action-group">\s+<button[^\n]*See People<\/button>\s+<button[^\n]*Copy Domains/);
+  assert.match(bar, /<MenuButton label="More"[\s\S]*?className="ds-menu-item"[^\n]*copyDomains\(\)[^\n]*Copy Domains/);
 
   // Resolved server-side rather than from whatever rows happen to be loaded on
   // screen, so a selection spanning several pages, or "select all matching",

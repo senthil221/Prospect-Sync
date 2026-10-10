@@ -106,5 +106,5 @@ test("the summary tiles stop advertising a cap", async () => {
   assert.doesNotMatch(source, /Counting stopped at 50,000/);
   assert.doesNotMatch(source, /of the first 50,000/);
   // Coverage is now a real percentage of a real total in every case.
-  assert.match(source, /total \? `\$\{Math\.round\(\(covered \/ total\) \* 100\)\}% of companies`/);
+  assert.match(source, /total \? ` \(\$\{Math\.round\(\(covered \/ total\) \* 100\)\}%\)`/);
 });

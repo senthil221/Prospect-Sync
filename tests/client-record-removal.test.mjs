@@ -128,7 +128,8 @@ test("removing from a client is never presented as deleting", async () => {
   ]);
 
   // People: the client workspace gets Remove, and never the master Delete.
-  assert.match(people, /clientId \? <div className="bulk-action-group bulk-action-group-danger">/);
+  // Under More, styled as a danger item and worded as a removal.
+  assert.match(people, /className="ds-menu-item ds-menu-danger"[^\n]*Remove from client<\/button>/);
   assert.match(people, /const canDeleteMaster = !clientId;/);
   assert.match(people, /The People database records are preserved/);
   assert.match(people, /The People database records are unchanged/);

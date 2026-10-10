@@ -83,7 +83,9 @@ test("Last Verified restores saved dates and preserves Never Verified in the mat
   const dateFilter = page.locator("#verification-date-fixture");
   await expect(dateFilter.getByLabel("From")).toHaveValue("2026-09-02");
   await expect(dateFilter.getByLabel("Through")).toHaveValue("2026-09-04");
-  await dateFilter.getByLabel("Condition").selectOption("never");
+  // A styled listbox, not a native select: open it, then choose the option.
+  await dateFilter.getByRole("button", { name: /^Condition|currently/ }).first().click();
+  await page.getByRole("option", { name: "Never verified" }).click();
   await dateFilter.getByRole("button", { name: "Apply date" }).click();
   const selected = await page.evaluate(() => (globalThis as typeof globalThis & { __verificationDateFilters?: Array<Record<string, unknown>> }).__verificationDateFilters ?? []);
   expect(selected).toEqual([expect.objectContaining({ field: "__work_email_verified_at", operator: "never", values: [] })]);

@@ -343,6 +343,8 @@ test("client page-first renders before a count and pages by hasMore without trea
 
   await panel.getByRole("button", { name: "Select all matching records" }).click();
   await expect(panel.getByRole("button", { name: "All matching records selected", exact: true })).toBeVisible();
+  // Inside a client, exporting a selection lives under More.
+  await panel.getByRole("button", { name: "More" }).click();
   await panel.getByRole("button", { name: /Export selected/ }).click();
   await expect(page.getByText("All matching records · total not counted")).toBeVisible();
   await page.getByLabel("All matching prospects").check();

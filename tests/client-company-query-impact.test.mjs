@@ -88,7 +88,7 @@ test("client company UI preserves cap state and pages beyond its lower bound hon
   assert.match(companies, /const displayedTotal = totalCapped \? Math\.max\(total, resultEnd\) : total/);
   assert.match(companies, /const canGoNext = canAdvanceClientCompanyPage/);
   assert.match(companies, /disabled=\{!canGoNext\}/);
-  assert.match(companies, /Lower bound from the counted matches/);
+  assert.match(companies, /at least this many match/);
 });
 
 test("disposable PostgreSQL gate proves write authority, cap and complete export", async () => {

@@ -5,6 +5,7 @@ import { api } from "../../lib/dashboard-api";
 import { formatNumber } from "../../lib/dashboard-helpers";
 import type { LogEntry, LogLevel } from "../../lib/types";
 import { AppIcon, LoadingState, StatusMessage } from "./DashboardUi";
+import { Select } from "./ListboxPicker";
 
 const pageSize = 50;
 const levelLabel: Record<LogLevel, string> = { error: "Error", warn: "Warning", info: "Info" };
@@ -60,12 +61,12 @@ export default function LogsPanel() {
     <article className="panel logs-toolbar-panel">
       <div className="logs-toolbar">
         <label>Level
-          <select value={level} onChange={(event) => { setLevel(event.target.value); setPage(1); }}>
+          <Select value={level} onChange={(event) => { setLevel(event.target.value); setPage(1); }}>
             <option value="">All</option>
             <option value="error">Error</option>
             <option value="warn">Warning</option>
             <option value="info">Info</option>
-          </select>
+          </Select>
         </label>
         <label>Source
           <input value={source} onChange={(event) => { setSource(event.target.value); setPage(1); }} placeholder="api, health, imports…"/>

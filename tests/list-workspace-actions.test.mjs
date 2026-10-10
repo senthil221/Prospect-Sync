@@ -76,5 +76,5 @@ test("Lists is offered as a persistent filter in both the client People DB and t
   // one-shot "See Companies" action uses, so a list and a live People DB
   // search are interchangeable as far as the Company DB is concerned.
   assert.match(clientsPanel, /onSelectListScope: \(listId: string\) => void/);
-  assert.match(clientsPanel, /<select aria-label="Filter companies by list"/);
+  assert.match(clientsPanel, /<Select aria-label="Filter companies by list"/);
 });

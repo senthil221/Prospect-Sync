@@ -6,7 +6,7 @@ import { formatNumber } from "../../lib/dashboard-helpers";
 import { BLOCKLIST_REQUEST_VALUES, MAX_BLOCKLIST_PASTE_VALUES, partitionBlocklistValues } from "../../lib/bulk-values.ts";
 import type { BlocklistEntry, ClientRecord } from "../../lib/types";
 import { ConfirmDialog, EmptyCompact } from "./DashboardUi";
-import ListboxPicker from "./ListboxPicker";
+import ListboxPicker, { Select } from "./ListboxPicker";
 import { AppIcon } from "./DashboardUi";
 import IcpInvalidRecheckDialog from "./IcpInvalidRecheckDialog";
 
@@ -302,7 +302,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
         placeholder={"acme.com\nhttps://www.competitor.co.uk/about\nno-contact@bigco.com\n\nOne per line, or comma-separated."}
       />
       <div className="blocklist-add-actions">
-        <select aria-label="Blocklist reason" value={reason} onChange={(event) => setReason(event.target.value)} required><option value="">Choose a reason…</option>{blocklistReasons.map((option) => <option key={option} value={option}>{option}</option>)}</select>
+        <Select aria-label="Blocklist reason" value={reason} onChange={(event) => setReason(event.target.value)} required><option value="">Choose a reason…</option>{blocklistReasons.map((option) => <option key={option} value={option}>{option}</option>)}</Select>
         <button className="primary" disabled={busy || !reason || !pending || !validPending || pasteTooLarge} onClick={() => void addEntries()}>
           {busy ? `Blocking… ${formatNumber(progress?.records ?? 0)} records` : `Block ${pending ? formatNumber(pending) : ""}`}
         </button>
@@ -321,7 +321,7 @@ export default function BlocklistPanel({ client, onChanged }: { client: ClientRe
     <article className="panel table-panel blocklist-entries-panel">
       <div className="panel-head">
         <div><h3>Blocked entries</h3><p>{formatNumber(total)} total{client.blocked_count ? ` · ${formatNumber(client.blocked_count)} client records currently removed` : ""}</p></div>
-        {selectedCount ? <div className="blocklist-add-actions"><select aria-label="New reason for selected entries" value={bulkReason} onChange={(event) => setBulkReason(event.target.value as (typeof blocklistReasons)[number])}>{blocklistReasons.map((option) => <option key={option} value={option}>{option}</option>)}</select><button disabled={busy} onClick={() => void updateSelectedReason()}>Update reason</button><button className="row-danger" disabled={busy} onClick={() => setRemoveRequest({ count: selectedCount, payload: selectionPayload() })}>Remove {formatNumber(selectedCount)} selected</button></div> : null}
+        {selectedCount ? <div className="blocklist-add-actions"><Select aria-label="New reason for selected entries" value={bulkReason} onChange={(event) => setBulkReason(event.target.value as (typeof blocklistReasons)[number])}>{blocklistReasons.map((option) => <option key={option} value={option}>{option}</option>)}</Select><button disabled={busy} onClick={() => void updateSelectedReason()}>Update reason</button><button className="row-danger" disabled={busy} onClick={() => setRemoveRequest({ count: selectedCount, payload: selectionPayload() })}>Remove {formatNumber(selectedCount)} selected</button></div> : null}
       </div>
       {!allMatching && selected.size > 0 && selected.size < total ? <div className="selection-scope"><span>{formatNumber(selected.size)} on this page selected.</span><button onClick={() => { setAllMatching(true); setSelectedBefore(new Date().toISOString()); setSelected(new Set()); }}>Select all {formatNumber(total)} matching entries</button></div> : null}
       {allMatching ? <div className="selection-scope"><span>All {formatNumber(total)} matching entries selected{selected.size ? ` except ${formatNumber(selected.size)}` : ""}.</span><button onClick={() => { setAllMatching(false); setSelected(new Set()); }}>Clear selection</button></div> : null}

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { formatNumber, readImportTable } from "../../lib/dashboard-helpers";
 import { keywordKindLabels, keywordKinds, keywordRowsFromTable, type KeywordKind, type KeywordRow } from "../../lib/title-keywords";
+import { Select } from "./ListboxPicker";
 
 // The maintenance surface for the deterministic job title classifier.
 //
@@ -179,7 +180,7 @@ export default function TitleClassifierPanel({ onGapCount }: { onGapCount?: (cou
         <p>Titles the keyword lists could not fully resolve, biggest first. Download the seniority or department list below, add keywords for these titles, and upload it; the classifier re-runs after you save. A title only counts as missing a department when a keyword could give it one. Top management (Founder, Director, CEO), titles that are only a rank (Manager, Assistant Manager, VP, AGM) and things that are not titles (Pvt Ltd, Contact) are left out: they name no department.</p>
       </div>
       <div className="classifier-actions">
-        <label><span className="sr-only">Which side is missing</span><select value={missing} disabled={running} onChange={(event) => { setLoading(true); setMissing(event.target.value as MissingOption); }}>{missingOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label><span className="sr-only">Which side is missing</span><Select value={missing} disabled={running} onChange={(event) => { setLoading(true); setMissing(event.target.value as MissingOption); }}>{missingOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
         <button className="outline-button" disabled={loading || running} onClick={reload}>↻ Refresh</button>
         <button className="outline-button" disabled={!gaps.length || running} onClick={() => void copyTitles()}>⧉ Copy titles</button>
         {/* Every unresolved title for the chosen filter, not just the 200 shown. */}

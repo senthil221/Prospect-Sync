@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AppIcon } from './DashboardUi';
 import { readIntegrationStatus, type IntegrationStatus } from './integration-status';
 import ReplyBlocksSummary from './ReplyBlocksSummary';
+import { Select } from "./ListboxPicker";
 
 type InboxAction = 'connect' | 'check' | 'disconnect' | 'validate_inbox' | 'enable_inbox' | 'disable_inbox' | 'sync_inbox' | 'map_inbox' | 'unmap_inbox';
 
@@ -205,7 +206,7 @@ export default function ReplyBlocklistPanel() {
             <p>Exact client names at the start of a campaign match automatically. Add a prefix only when a campaign is unmatched.</p>
             <form onSubmit={event => { event.preventDefault(); void act('map_inbox', { prefix: prefix.trim(), clientId }); }}>
               <label htmlFor="reply-prefix">Campaign prefix</label><input id="reply-prefix" ref={prefixInput} value={prefix} onChange={e => setPrefix(e.target.value)} maxLength={200} required disabled={!!busy} placeholder="e.g. Acme |"/>
-              <label htmlFor="reply-client">Route to client</label><select id="reply-client" value={clientId} onChange={e => setClientId(e.target.value)} required disabled={!!busy}><option value="">Select a client</option>{status.clients?.map(client => <option value={client.id} key={client.id}>{client.name}</option>)}</select>
+              <label htmlFor="reply-client">Route to client</label><Select id="reply-client" value={clientId} onChange={e => setClientId(e.target.value)} required disabled={!!busy}><option value="">Select a client</option>{status.clients?.map(client => <option value={client.id} key={client.id}>{client.name}</option>)}</Select>
               <button type="submit" className="primary" disabled={!!busy || !prefix.trim() || !clientId}>{busy === 'map_inbox' ? 'Saving…' : 'Save mapping'}</button>
             </form>
             <p className="reply-blocklist-form-note">Saving a mapping queues a fresh reconciliation. No campaign is changed in Smartlead.</p>

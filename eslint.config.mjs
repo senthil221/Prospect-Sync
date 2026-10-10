@@ -41,6 +41,11 @@ const eslintConfig = defineConfig([
         version: "detect",
       },
     },
+    rules: {
+      // Select (app/components/ListboxPicker.tsx) stands in for <select>, so a
+      // <label> wrapping one is labelling a control.
+      "jsx-a11y/label-has-associated-control": ["error", { controlComponents: ["Select"], depth: 3 }],
+    },
   },
 ]);
 

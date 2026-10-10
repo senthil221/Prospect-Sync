@@ -11,6 +11,7 @@ import { emptyTaxonomy, orderedDepartments, orderedTiers, tierLabel, type TitleT
 import { useClientIcps } from "./components/use-client-icps";
 import { useClientLists } from "./components/use-client-lists";
 import { ESP_OUTCOMES, ESP_PROVIDERS } from "../worker/email-provider-core.mjs";
+import { Select } from "./components/ListboxPicker";
 
 export type { ProspectFilter, ProspectFilterOperator } from "../lib/types";
 
@@ -561,9 +562,9 @@ export function ContactDateFilter({ clientId, filters, onChange }: {
     onChange([{ id: current?.id ?? filterId("__client_date_contacted", operator), field: "__client_date_contacted", operator, values }]);
   }
   return <div className="verification-date-filter">
-    <label><span>Condition</span><select value={operator} onChange={(event) => setOperator(event.target.value as Operator)}>
+    <label><span>Condition</span><Select value={operator} onChange={(event) => setOperator(event.target.value as Operator)}>
       <option value="between">Between dates</option><option value="on">On date</option><option value="before">Before date</option>
-      <option value="after">On or after date</option><option value="never">Never contacted</option></select></label>
+      <option value="after">On or after date</option><option value="never">Never contacted</option></Select></label>
     {operator !== "never" ? <label><span>{operator === "between" ? "From" : "Date"}</span><input type="date" value={start} onChange={(event) => setStart(event.target.value)}/></label> : null}
     {operator === "between" ? <label><span>Through</span><input type="date" min={start} value={end} onChange={(event) => setEnd(event.target.value)}/></label> : null}
     <button type="button" disabled={invalid} onClick={apply}>Apply date</button>
@@ -593,7 +594,7 @@ export function EmailVerificationDateFilter({ filters, onChange }: {
     if (values.every(Boolean)) onChange([{ id: current?.id ?? filterId("__work_email_verified_at", operator), field: "__work_email_verified_at", operator, values }]);
   }
   return <div className="verification-date-filter">
-    <label><span>Condition</span><select value={operator} onChange={(event) => setOperator(event.target.value as typeof operator)}><option value="never">Never verified</option><option value="before">Before date</option><option value="on">On date</option><option value="after">On or after date</option><option value="between">Between dates</option></select></label>
+    <label><span>Condition</span><Select value={operator} onChange={(event) => setOperator(event.target.value as typeof operator)}><option value="never">Never verified</option><option value="before">Before date</option><option value="on">On date</option><option value="after">On or after date</option><option value="between">Between dates</option></Select></label>
     {operator !== "never" ? <label><span>{operator === "between" ? "From" : "Date"}</span><input type="date" value={start} onChange={(event) => setStart(event.target.value)}/></label> : null}
     {operator === "between" ? <label><span>Through</span><input type="date" min={start} value={end} onChange={(event) => setEnd(event.target.value)}/></label> : null}
     <button type="button" disabled={operator !== "never" && (!start || (operator === "between" && (!end || end < start)))} onClick={apply}>Apply date</button>

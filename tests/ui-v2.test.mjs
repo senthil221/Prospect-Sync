@@ -19,7 +19,8 @@ test("ships the readable Prospect Sync UI v2 system", async () => {
   assert.match(dashboard, /function CompanyDrawer/);
   assert.match(dashboard, /company-drawer/);
   assert.match(dashboard, /const navGroups/);
-  assert.match(dashboard, /Data tools/);
+  assert.match(dashboard, /label: "Import & enrich"/);
+  assert.match(dashboard, /label: "Checks"/);
   assert.doesNotMatch(dashboard, /className="sync-visual"/);
   assert.doesNotMatch(dashboard, /className="sidebar-note"/);
   assert.match(dashboard, /Load \$\{Math\.min\(50, total - prospects\.length\)\} more prospects/);

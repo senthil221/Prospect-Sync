@@ -10,6 +10,7 @@ import { ICP_MODELS, MAX_MODELS_PER_CHECK, REASONING_EFFORTS, estimateRunCost, s
 import { Tooltip } from "./DashboardUi";
 import { StrategyPicker, strategyLabel, type StrategyId } from "./IcpStrategyPicker";
 import { Segmented } from "./IcpValidatorViews";
+import { Select } from "./ListboxPicker";
 
 // The ICP validator inside the client Company DB: the verdicts on each row,
 // "Validate ICP" for the current selection, and the model picker the ICP
@@ -293,9 +294,9 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
         : <>
           <div className="form-field">
             <label htmlFor="icpv-dialog-icp">ICP</label>
-            <select id="icpv-dialog-icp" value={chosen?.id ?? ""} onChange={(event) => setIcpId(event.target.value)}>
+            <Select id="icpv-dialog-icp" value={chosen?.id ?? ""} onChange={(event) => setIcpId(event.target.value)}>
               {usable.map((profile) => <option key={profile.id} value={profile.id}>{profile.name.trim() || "Untitled ICP"}</option>)}
-            </select>
+            </Select>
           </div>
           <Segmented label="How to check" value={method} onChange={setMethod} options={[
             { value: "strategy", label: "Method", hint: "Strict, Balanced or Lenient - the production setups" },
@@ -307,9 +308,9 @@ export function IcpValidateDialog({ clientId, clientName, selectedCount, selecti
             <ModelPicker catalog={catalog} selected={models} onChange={setModels} idPrefix="icpv-dialog" defaults={modelCatalog.defaults} onSaveDefaults={modelCatalog.saveDefaults}/>
             <div className="form-field">
               <label htmlFor="icpv-dialog-effort">Reasoning effort</label>
-              <select id="icpv-dialog-effort" value={effort} onChange={(event) => setEffort(event.target.value)}>
+              <Select id="icpv-dialog-effort" value={effort} onChange={(event) => setEffort(event.target.value)}>
                 {REASONING_EFFORTS.map((value: string) => <option key={value} value={value}>{value}</option>)}
-              </select>
+              </Select>
             </div>
             <label className="icpv-check"><input type="checkbox" checked={reuse} onChange={(event) => setReuse(event.target.checked)}/> Reuse earlier verdicts from the same model for this exact brief</label>
             <p className="icpv-estimate" role="status">{models.length ? `≈ ${estimate.toFixed(estimate < 1 ? 3 : 2)} (estimate)` : "Choose at least one model."}</p>
